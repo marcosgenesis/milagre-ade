@@ -19,7 +19,8 @@ function pending() {
   const events = [];
   const answers = [];
   const permissions = new PendingPermissions((event) => events.push(event));
-  const ask = (requestId) => permissions.add({ requestId, kind: "other", tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }));
+  const ask = (requestId) =>
+    permissions.add({ requestId, kind: "other", tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }));
   return { permissions, events, answers, ask };
 }
 
@@ -43,8 +44,14 @@ test("cancelAll answers every waiting request as cancelled", () => {
   ask("a");
   ask("b");
   permissions.cancelAll();
-  assert.deepEqual(answers.map((answer) => answer.decision), ["cancelled", "cancelled"]);
-  assert.deepEqual(events.filter((event) => event.type === "permission-resolved").map((event) => event.requestId), ["a", "b"]);
+  assert.deepEqual(
+    answers.map((answer) => answer.decision),
+    ["cancelled", "cancelled"],
+  );
+  assert.deepEqual(
+    events.filter((event) => event.type === "permission-resolved").map((event) => event.requestId),
+    ["a", "b"],
+  );
   assert.equal(permissions.size, 0);
 });
 
@@ -54,27 +61,43 @@ test("always allowing in this chat can't exceed what the request offered", () =>
   permissions.add({ requestId: "b", kind: "other", tool: "T", title: "Allow?", allowForChat: true }, (decision) => answers.push({ requestId: "b", decision }));
   permissions.resolve("a", "allow-for-chat");
   permissions.resolve("b", "allow-for-chat");
-  assert.deepEqual(answers, [{ requestId: "a", decision: "allow" }, { requestId: "b", decision: "allow-for-chat" }]);
-  assert.deepEqual(events.filter((event) => event.type === "permission-resolved").map((event) => event.decision), ["allow", "allow-for-chat"]);
+  assert.deepEqual(answers, [
+    { requestId: "a", decision: "allow" },
+    { requestId: "b", decision: "allow-for-chat" },
+  ]);
+  assert.deepEqual(
+    events.filter((event) => event.type === "permission-resolved").map((event) => event.decision),
+    ["allow", "allow-for-chat"],
+  );
 });
 
 test("switching to Auto answers waiting edits inside the worktree; Full answers everything", () => {
   const { permissions, events, answers } = pending();
-  const add = (requestId, kind, inWorkspace) => permissions.add({ requestId, kind, tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }), { inWorkspace });
+  const add = (requestId, kind, inWorkspace) =>
+    permissions.add({ requestId, kind, tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }), { inWorkspace });
   add("edit", "edit", true);
   add("outside", "edit", false);
   add("command", "command", true);
   permissions.setMode("auto");
   assert.deepEqual(answers, [{ requestId: "edit", decision: "allow" }]);
   permissions.setMode("full");
-  assert.deepEqual(answers.map((answer) => answer.requestId), ["edit", "outside", "command"]);
-  assert.deepEqual(events.filter((event) => event.type === "permission-resolved").map((event) => event.requestId), ["edit", "outside", "command"]);
+  assert.deepEqual(
+    answers.map((answer) => answer.requestId),
+    ["edit", "outside", "command"],
+  );
+  assert.deepEqual(
+    events.filter((event) => event.type === "permission-resolved").map((event) => event.requestId),
+    ["edit", "outside", "command"],
+  );
   assert.equal(permissions.size, 0);
 });
 
 test("in Full a request is answered without a card; in Auto the agent's own rules still ask", () => {
   const { permissions, events, answers } = pending();
-  const add = (requestId, kind) => permissions.add({ requestId, kind, tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }), { inWorkspace: true });
+  const add = (requestId, kind) =>
+    permissions.add({ requestId, kind, tool: "T", title: "Allow?", allowForChat: false }, (decision) => answers.push({ requestId, decision }), {
+      inWorkspace: true,
+    });
   permissions.setMode("full");
   add("command", "command");
   assert.deepEqual(answers, [{ requestId: "command", decision: "allow" }]);
@@ -101,17 +124,47 @@ test("forget drops a withdrawn request without answering it", () => {
 });
 
 test("Claude: a shell command shows the command", () => {
-  const request = claudeRequest("Bash", { command: "npm test", description: "Run tests" }, { requestId: "r1", toolUseID: "t1", suggestions: [{ type: "addRules" }] });
-  assert.deepEqual(request, { requestId: "r1", kind: "command", tool: "Bash", title: "Run this command?", command: "npm test", allowForChat: true, stepId: "t1" });
+  const request = claudeRequest(
+    "Bash",
+    { command: "npm test", description: "Run tests" },
+    { requestId: "r1", toolUseID: "t1", suggestions: [{ type: "addRules" }] },
+  );
+  assert.deepEqual(request, {
+    requestId: "r1",
+    kind: "command",
+    tool: "Bash",
+    title: "Run this command?",
+    command: "npm test",
+    allowForChat: true,
+    stepId: "t1",
+  });
 });
 
 test("Claude: edits show the file and a diff", () => {
   const write = claudeRequest("Write", { file_path: "/repo/hello.txt", content: "hi\nthere" }, { requestId: "r1" });
-  assert.deepEqual(write, { requestId: "r1", kind: "edit", tool: "Write", title: "Write hello.txt?", files: ["/repo/hello.txt"], diff: "+hi\n+there", allowForChat: false });
+  assert.deepEqual(write, {
+    requestId: "r1",
+    kind: "edit",
+    tool: "Write",
+    title: "Write hello.txt?",
+    files: ["/repo/hello.txt"],
+    diff: "+hi\n+there",
+    allowForChat: false,
+  });
   const edit = claudeRequest("Edit", { file_path: "/repo/a.ts", old_string: "let a", new_string: "const a" }, { requestId: "r2" });
   assert.equal(edit.title, "Edit a.ts?");
   assert.equal(edit.diff, "-let a\n+const a");
-  const multi = claudeRequest("MultiEdit", { file_path: "/repo/a.ts", edits: [{ old_string: "a", new_string: "b" }, { old_string: "c", new_string: "d" }] }, { requestId: "r3" });
+  const multi = claudeRequest(
+    "MultiEdit",
+    {
+      file_path: "/repo/a.ts",
+      edits: [
+        { old_string: "a", new_string: "b" },
+        { old_string: "c", new_string: "d" },
+      ],
+    },
+    { requestId: "r3" },
+  );
   assert.equal(multi.diff, "-a\n+b\n@@\n-c\n+d");
 });
 
@@ -120,7 +173,17 @@ test("Claude: other tools show their input, and the SDK's own wording wins", () 
   assert.equal(fetch.kind, "other");
   assert.equal(fetch.title, "Use WebFetch?");
   assert.equal(fetch.detail, JSON.stringify({ url: "https://example.com" }, null, 2));
-  const worded = claudeRequest("Read", { file_path: "/etc/hosts" }, { requestId: "r2", title: "Claude wants to read hosts", displayName: "Read file", description: "Outside the project", decisionReason: "Not in the allow list" });
+  const worded = claudeRequest(
+    "Read",
+    { file_path: "/etc/hosts" },
+    {
+      requestId: "r2",
+      title: "Claude wants to read hosts",
+      displayName: "Read file",
+      description: "Outside the project",
+      decisionReason: "Not in the allow list",
+    },
+  );
   assert.equal(worded.title, "Claude wants to read hosts");
   assert.equal(worded.tool, "Read file");
   assert.equal(worded.description, "Outside the project");
@@ -167,20 +230,48 @@ test("Codex: the shell wrapper is removed from commands", () => {
 
 test("Codex: command requests", () => {
   assert.deepEqual(codexCommandRequest("srv-1", { itemId: "c", command: "/bin/zsh -lc 'rm -rf build'", cwd: "/repo", reason: "Clean the build" }), {
-    requestId: "srv-1", kind: "command", tool: "Shell", title: "Run this command?", command: "rm -rf build", cwd: "/repo", reason: "Clean the build", allowForChat: true, stepId: "c",
+    requestId: "srv-1",
+    kind: "command",
+    tool: "Shell",
+    title: "Run this command?",
+    command: "rm -rf build",
+    cwd: "/repo",
+    reason: "Clean the build",
+    allowForChat: true,
+    stepId: "c",
   });
   assert.deepEqual(codexCommandRequest(7, { command: "curl x", reason: null, networkApprovalContext: { host: "example.com", protocol: "https" } }), {
-    requestId: "7", kind: "command", tool: "Shell", title: "Allow network access to example.com?", command: "curl x", allowForChat: true,
+    requestId: "7",
+    kind: "command",
+    tool: "Shell",
+    title: "Allow network access to example.com?",
+    command: "curl x",
+    allowForChat: true,
   });
 });
 
 test("Codex: file requests show the changes Codex reported when the edit started", () => {
   const changes = [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }];
   assert.deepEqual(codexFileRequest("srv-2", { itemId: "p", reason: "Write notes" }, changes), {
-    requestId: "srv-2", kind: "edit", tool: "Edit files", title: "Edit notes.txt?", files: ["/repo/notes.txt"], diff: "--- /repo/notes.txt\n+hello\n", reason: "Write notes", allowForChat: true, stepId: "p",
+    requestId: "srv-2",
+    kind: "edit",
+    tool: "Edit files",
+    title: "Edit notes.txt?",
+    files: ["/repo/notes.txt"],
+    diff: "--- /repo/notes.txt\n+hello\n",
+    reason: "Write notes",
+    allowForChat: true,
+    stepId: "p",
   });
   assert.equal(codexFileRequest("s", {}, [changes[0], { path: "/repo/b", diff: "" }]).title, "Edit 2 files?");
-  assert.deepEqual(codexFileRequest("s", { grantRoot: "/tmp/out" }, undefined), { requestId: "s", kind: "edit", tool: "Edit files", title: "Allow writing to /tmp/out?", files: [], allowForChat: true });
+  assert.deepEqual(codexFileRequest("s", { grantRoot: "/tmp/out" }, undefined), {
+    requestId: "s",
+    kind: "edit",
+    tool: "Edit files",
+    title: "Allow writing to /tmp/out?",
+    files: [],
+    allowForChat: true,
+  });
 });
 
 test("Codex: added and deleted files get +/- markers, real diffs are left alone", () => {
@@ -198,11 +289,14 @@ test("Codex: added and deleted files get +/- markers, real diffs are left alone"
 });
 
 test("Codex: new and deleted files are whole contents; updates are already diffs", () => {
-  assert.equal(codexChangesDiff([
-    { path: "/repo/new.txt", kind: { type: "add" }, diff: "one\ntwo\n" },
-    { path: "/repo/old.txt", kind: { type: "delete" }, diff: "gone\n" },
-    { path: "/repo/app.js", kind: { type: "update", move_path: null }, diff: "@@ -1 +1 @@\n-Hello\n+Hi\n" },
-  ]), "--- /repo/new.txt\n+one\n+two\n\n--- /repo/old.txt\n-gone\n\n--- /repo/app.js\n@@ -1 +1 @@\n-Hello\n+Hi\n");
+  assert.equal(
+    codexChangesDiff([
+      { path: "/repo/new.txt", kind: { type: "add" }, diff: "one\ntwo\n" },
+      { path: "/repo/old.txt", kind: { type: "delete" }, diff: "gone\n" },
+      { path: "/repo/app.js", kind: { type: "update", move_path: null }, diff: "@@ -1 +1 @@\n-Hello\n+Hi\n" },
+    ]),
+    "--- /repo/new.txt\n+one\n+two\n\n--- /repo/old.txt\n-gone\n\n--- /repo/app.js\n@@ -1 +1 @@\n-Hello\n+Hi\n",
+  );
 });
 
 test("Codex: decisions", () => {

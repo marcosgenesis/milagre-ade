@@ -6,7 +6,10 @@ import { patchSession, renameWorktree, withDiffStats } from "./project-edits.mjs
 const state = (): CoordinatorState => ({
   next_id: 4,
   projects: {},
-  worktrees: { "1": { id: 1, project_id: 1, path: "/work/app", name: "main" }, "2": { id: 2, project_id: 1, path: "/work/wt", name: "milagre/fix-the-thing-ab12" } },
+  worktrees: {
+    "1": { id: 1, project_id: 1, path: "/work/app", name: "main" },
+    "2": { id: 2, project_id: 1, path: "/work/wt", name: "milagre/fix-the-thing-ab12" },
+  },
   sessions: {
     "1": { id: 1, worktree_id: 1, agent_name: "main", status: "Created" },
     "2": { id: 2, worktree_id: 2, agent_name: "milagre/fix-the-thing-ab12", status: "Created" },
@@ -45,7 +48,10 @@ const session: AgentSession = { id: 1, worktree_id: 1, agent_name: "main", statu
 const chatState = (): CoordinatorState => ({
   next_id: 3,
   projects: {},
-  worktrees: { "1": { id: 1, project_id: 1, path: "/work/app", name: "main" }, "2": { id: 2, project_id: 1, path: "/work/wt", name: "milagre/x", diff: { added: 3, removed: 1 } } },
+  worktrees: {
+    "1": { id: 1, project_id: 1, path: "/work/app", name: "main" },
+    "2": { id: 2, project_id: 1, path: "/work/wt", name: "milagre/x", diff: { added: 3, removed: 1 } },
+  },
   sessions: { "1": session },
   connections: {},
   events: [],
@@ -65,6 +71,14 @@ test("patchSession sets and clears fields, and keeps an unchanged state", () => 
   assert.deepEqual(cleared.sessions[1], session);
   assert.equal(patchSession(initial, 1, { unread: false }), initial);
   assert.equal(patchSession(initial, 99, { archived: true }), initial);
+});
+
+test("patchSession pins with an order, unpins, and ignores an order that isn't a number", () => {
+  const pinned = patchSession(chatState(), 1, { pinned: true, pin_order: 0 });
+  assert.deepEqual(pinned.sessions[1], { ...session, pinned: true, pin_order: 0 });
+  assert.equal(patchSession(pinned, 1, { pin_order: Number.NaN }), pinned);
+  assert.equal(patchSession(pinned, 1, { pin_order: "2" as never }), pinned);
+  assert.deepEqual(patchSession(pinned, 1, { pinned: false, pin_order: undefined }).sessions[1], session);
 });
 
 test("withDiffStats stores new stats and skips missing or unchanged ones", () => {

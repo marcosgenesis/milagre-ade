@@ -1,8 +1,11 @@
 {
   "name": "milagre-monorepo",
-  "productName": "Milagre",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "type": "module",
   "main": "apps/desktop/electron/main.cjs",
   "scripts": {
@@ -30,7 +33,12 @@
     "mobile:cloudflare": "node scripts/mobile-cloudflare.cjs",
     "typecheck:relay": "npm run typecheck --workspace @milagre/relay",
     "typecheck:mobile": "npm run typecheck --workspace @milagre/mobile",
-    "package:repositories": "node scripts/generate-linux-repository.cjs"
+    "package:repositories": "node scripts/generate-linux-repository.cjs",
+    "lint": "oxlint",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "prepare": "node -e \"require('node:fs').existsSync('.git') && require('node:child_process').execSync('lefthook install', { stdio: 'inherit' })\"",
+    "knip": "knip"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -38,9 +46,17 @@
     "@semantic-release/release-notes-generator": "^14.1.1",
     "electron": "^44.5.1",
     "electron-builder": "26.17.0",
+    "knip": "6.39.0",
+    "lefthook": "2.1.17",
+    "lockfile-lint": "5.0.1",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0",
     "qrcode-terminal": "^0.12.0",
     "semantic-release": "^25.0.9",
     "yaml": "^2.9.1"
+  },
+  "engines": {
+    "node": ">=24"
   },
   "build": {
     "appId": "com.milagre.app",
@@ -50,7 +66,10 @@
     "asarUnpack": [
       "node_modules/@milagre/core/src/bundled-skills/**/*",
       "node_modules/expo-device-hub/**/*",
-      "node_modules/node-datachannel/**/*"
+      "node_modules/node-datachannel/**/*",
+      "node_modules/ws/**/*",
+      "node_modules/mediabunny/**/*",
+      "node_modules/@fastify/busboy/**/*"
     ],
     "files": [
       "dist/**/*",
@@ -103,7 +122,7 @@
       "executableName": "milagre",
       "category": "Development",
       "maintainer": "Milagre contributors",
-      "icon": "apps/desktop/app/public/logo-milagre-image.png",
+      "icon": "apps/desktop/build/icons",
       "syncDesktopName": true
     },
     "publish": {
@@ -113,11 +132,5 @@
       "releaseType": "release"
     }
   },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
-  "engines": {
-    "node": ">=24"
-  }
+  "productName": "Milagre"
 }

@@ -1,5 +1,13 @@
-export interface RecommendationOption { id: string; label: string; recommended: boolean }
-export interface Recommendation { intro: string; question: string; options: RecommendationOption[] }
+export interface RecommendationOption {
+  id: string;
+  label: string;
+  recommended: boolean;
+}
+export interface Recommendation {
+  intro: string;
+  question: string;
+  options: RecommendationOption[];
+}
 
 const ITEM = /^\s*(\d+)[.)]\s+(.+)$/;
 const MAX_LABEL = 120;

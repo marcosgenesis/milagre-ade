@@ -19,7 +19,7 @@ const chats = [
   { id: "2", label: "if a session creates multiple worktrees", ids: [10, 12] },
   { id: "3", label: "lets start creating a diff viewer", ids: [20, 30] },
   { id: "4", label: "currently the chats are reordering", ids: [35, 36] },
-].map((chat) => ({ ...chat, sessionMessages: chat.ids.map((id) => ({ id })) }));
+].map((chat) => ({ ...chat, session: {}, sessionMessages: chat.ids.map((id) => ({ id })) }));
 function Fixture() {
   const { chatOrder } = useSettings();
   const recents = orderChats(chats, chatOrder).map(({ id, label }) => ({ id, label }));
@@ -39,7 +39,7 @@ async function browserChecks() {
   await app.whenReady();
   const window = new BrowserWindow({ width: 1280, height: 760, show: false, webPreferences: { backgroundThrottling: false, partition: "chat-order-check" } });
   window.webContents.on("did-finish-load", () => window.webContents.setZoomFactor(1));
-  const evaluate = source => window.webContents.executeJavaScript(source);
+  const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function waitFor(source) {
     for (let i = 0; i < 200; i++) {
       if (await evaluate(source)) return;
@@ -48,8 +48,11 @@ async function browserChecks() {
     throw new Error(`Timed out: ${source}`);
   }
   // The chats' keywords in the order they read in the sidebar.
-  const order = () => evaluate('(() => { const text = document.querySelector("aside").innerText; return ["chat names", "worktrees", "diff viewer", "reordering"].sort((a, b) => text.indexOf(a) - text.indexOf(b)); })()');
-  const screenshot = async name => {
+  const order = () =>
+    evaluate(
+      '(() => { const text = document.querySelector("aside").innerText; return ["chat names", "worktrees", "diff viewer", "reordering"].sort((a, b) => text.indexOf(a) - text.indexOf(b)); })()',
+    );
+  const screenshot = async (name) => {
     const dir = process.env.MILAGRE_SCREENSHOT_DIR;
     if (!dir) return;
     fs.mkdirSync(dir, { recursive: true });
@@ -88,19 +91,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "chat-order-fixture",
-      resolveId(id) { if (id === "/__chat_order_fixture.tsx") return id; },
-      load(id) { if (id === "/__chat_order_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__chat_order__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__chat_order_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "chat-order-fixture",
+        resolveId(id) {
+          if (id === "/__chat_order_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__chat_order_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__chat_order__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__chat_order_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -109,13 +121,13 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__chat_order__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

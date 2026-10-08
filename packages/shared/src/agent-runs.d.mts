@@ -1,4 +1,14 @@
-import type { AgentEvent, AgentTask, ChatStep, CoordinatorState, TranscriptState, PermissionDecision, PermissionRequest, QuestionRequest } from "./model.ts";
+import type {
+  AgentEvent,
+  AgentTask,
+  ChatStep,
+  ContextUsage,
+  CoordinatorState,
+  TranscriptState,
+  PermissionDecision,
+  PermissionRequest,
+  QuestionRequest,
+} from "./model.ts";
 
 /** What the user sent for a request the turn waits on: an approval decision, or a question answered or dismissed. */
 export type SentAnswer = PermissionDecision | "answered" | "dismissed";
@@ -23,6 +33,8 @@ export interface AgentRun {
   waitingForSubagents?: boolean;
   /** The agent's to-do list as it last reported it; gone with the run when the turn ends. */
   tasks?: AgentTask[];
+  /** How full the agent's context window is; saved on the chat when the turn ends. */
+  contextUsage?: ContextUsage;
 }
 
 export type AgentRuns = Record<string, AgentRun>;
@@ -42,4 +54,10 @@ export function runStatus(run: AgentRun | undefined): "idle" | "working" | "wait
 export function applyRunEvent(runs: AgentRuns, chatId: string, event: AgentEvent, model?: string): AgentRuns;
 export function applyAgentEvent<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string, event: AgentEvent): AppliedEvent<T>;
 export function splitRunForSteer<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string): AppliedEvent<T>;
-export function recordAnswers<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string, body: string): { state: T; runs: AgentRuns; messageId: number | null };
+export function recordAnswers<T extends TranscriptState>(
+  state: T,
+  runs: AgentRuns,
+  projectPath: string,
+  chatId: string,
+  body: string,
+): { state: T; runs: AgentRuns; messageId: number | null };

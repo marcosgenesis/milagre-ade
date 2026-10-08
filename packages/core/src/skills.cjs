@@ -25,14 +25,17 @@ function metadata(content, file) {
   let data = {};
   if (match) {
     // Provider-specific fields (such as argument-hint) are not catalog metadata.
-    const fields = match[1].split(/\r?\n(?=[^\s#])/).filter((field) => /^(name|description):/.test(field)).join("\n");
+    const fields = match[1]
+      .split(/\r?\n(?=[^\s#])/)
+      .filter((field) => /^(name|description):/.test(field))
+      .join("\n");
     try {
       data = parse(fields, { maxAliasCount: 0 });
     } catch {
       // Common hand-written skills use unquoted colons in a one-line description.
       // Keep full YAML support, but treat that field as text on this retry.
       const repaired = fields.replace(/^description:[ \t]+([^\r\n]+)$/m, (line, value) => {
-        if (/^["'|>\[{]/.test(value.trim())) return line;
+        if (/^["'|>[{]/.test(value.trim())) return line;
         return `description: ${JSON.stringify(value.trim())}`;
       });
       data = parse(repaired, { maxAliasCount: 0 });
@@ -44,9 +47,12 @@ function metadata(content, file) {
   return { name, description };
 }
 
+// `projectPath` null lists the user and bundled skills only (no open Project).
 async function discoverSkills(projectPath, { home = os.homedir(), bundledDirectory = BUNDLED_SKILLS_DIRECTORY } = {}) {
-  if (typeof projectPath !== "string" || !path.isAbsolute(projectPath)) throw new Error("An absolute workspace path is required");
+  if (projectPath !== null && (typeof projectPath !== "string" || !path.isAbsolute(projectPath))) throw new Error("An absolute workspace path is required");
   const skills = new Map();
+  // Same-named skills found after the winner: the `/` menu ignores them, Settings shows them.
+  const shadowed = [];
   const visited = new Set();
   const warnings = [];
   let directories = 0;
@@ -74,7 +80,9 @@ async function discoverSkills(projectPath, { home = os.homedir(), bundledDirecto
       try {
         const info = metadata(await readSkill(file), file);
         const key = info.name.toLowerCase();
-        if (!skills.has(key)) skills.set(key, { ...info, path: file, scope, provider });
+        const winner = skills.get(key);
+        if (winner) shadowed.push({ ...info, path: file, scope, provider, shadowedBy: winner.path });
+        else skills.set(key, { ...info, path: file, scope, provider });
       } catch (error) {
         warnings.push(`Cannot read ${file}: ${error.message}`);
       }
@@ -86,22 +94,38 @@ async function discoverSkills(projectPath, { home = os.homedir(), bundledDirecto
     }
   }
 
-  for (const [base, scope] of [[projectPath, "workspace"], [home, "user"]]) {
+  for (const [base, scope] of [...(projectPath === null ? [] : [[projectPath, "workspace"]]), [home, "user"]]) {
     for (const directory of SKILL_DIRECTORIES) await walk(path.join(base, directory, "skills"), scope, directory.slice(1));
   }
   if (bundledDirectory) await walk(bundledDirectory, "bundled", "milagre");
-  return { skills: [...skills.values()].sort((a, b) => a.name.localeCompare(b.name)), warnings };
+  return { skills: [...skills.values()].sort((a, b) => a.name.localeCompare(b.name)), shadowed, warnings };
+}
+
+// One discovered SKILL.md (a winner or a shadowed one), read with the same size limit. Only a file discovery
+// returned is read, so the caller can't name any other file.
+async function readDiscoveredSkill(projectPath, file, options) {
+  const { skills, shadowed } = await discoverSkills(projectPath, options);
+  if (typeof file !== "string" || !file || ![...skills, ...shadowed].some((skill) => skill.path === file))
+    throw new Error("That skill is no longer there. Reload the list.");
+  return readSkill(file);
 }
 
 function skillCommands(prompt) {
-  return new Set(promptSkillTokens(prompt).map(token => token.name.toLowerCase()));
+  return new Set(promptSkillTokens(prompt).map((token) => token.name.toLowerCase()));
 }
 
 async function expandSkillPrompt(projectPath, prompt, options) {
   const commands = skillCommands(prompt);
   if (!commands.size) return prompt;
   const { skills } = await discoverSkills(projectPath, options);
-  const invoked = new Set(promptSkillParts(prompt, skills.map(skill => skill.name)).filter(part => part.skill).map(part => part.text.slice(1).toLowerCase()));
+  const invoked = new Set(
+    promptSkillParts(
+      prompt,
+      skills.map((skill) => skill.name),
+    )
+      .filter((part) => part.skill)
+      .map((part) => part.text.slice(1).toLowerCase()),
+  );
   const selected = skills.filter((skill) => invoked.has(skill.name.toLowerCase()));
   if (!selected.length) return prompt;
   const sections = [];
@@ -115,4 +139,4 @@ async function expandSkillPrompt(projectPath, prompt, options) {
   return `${prompt}\n\nThe user invoked the following skills. Read and apply their instructions for this request, subject to the user's instructions and the current permission mode.\n\n${sections.join("\n\n")}`;
 }
 
-module.exports = { discoverSkills, expandSkillPrompt, skillCommands };
+module.exports = { discoverSkills, expandSkillPrompt, readDiscoveredSkill, skillCommands };

@@ -1,0 +1,45 @@
+# Fails when a PR changes the native fingerprint (so OTA updates would stop reaching the TestFlight build)
+# unless the PR carries the native-build-approved label. Never starts a build.
+name: Mobile fingerprint
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths: ["apps/mobile/**", "package-lock.json", "packages/shared/**"]
+permissions:
+  contents: read
+jobs:
+  fingerprint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Fingerprint the PR
+        working-directory: apps/mobile
+        run: npx expo-updates fingerprint:generate --platform ios > "$RUNNER_TEMP/head.json"
+      - name: Fingerprint main
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git worktree add "$RUNNER_TEMP/base" "origin/$BASE_REF"
+          cd "$RUNNER_TEMP/base" && npm ci --ignore-scripts --workspace @milagre/mobile --include-workspace-root && npx patch-package --patch-dir apps/mobile/patches && cd apps/mobile && npx expo-updates fingerprint:generate --platform ios > "$RUNNER_TEMP/base.json"
+      - name: Compare
+        env:
+          APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'native-build-approved') }}
+        run: |
+          head=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/head.json","utf8")).hash')
+          base=$(node -p 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/base.json","utf8")).hash')
+          echo "base $base"; echo "head $head"
+          if [ -z "$head" ] || [ "$head" = undefined ] || [ -z "$base" ] || [ "$base" = undefined ]; then
+            echo "::error::Could not read a fingerprint hash"; exit 1
+          fi
+          if [ "$head" != "$base" ] && [ "$APPROVED" != true ]; then
+            echo "::error::This PR changes the native fingerprint. Every later OTA update would miss the current TestFlight build. Get approval for a new build and add the native-build-approved label, or find a JS-only way."
+            exit 1
+          fi

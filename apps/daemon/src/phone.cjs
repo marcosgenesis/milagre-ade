@@ -1,30 +1,33 @@
-const { preparePrivateDirectory, assertPrivate } = require('@milagre/core/private-files');
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { randomBytes } = require('node:crypto');
-const QRCode = require('qrcode');
-const { startMobileBridge } = require('./mobile-bridge.cjs');
-const { readCloudflare } = require('./mobile-cloudflare.cjs');
-const { pairingLink, relayPairingLink, computerName } = require('./mobile-pairing.cjs');
-const { startRelayHost } = require('./relay-host.cjs');
-const { readIdentity, rotateIdentity, readRetired, createPhones } = require('./relay-identity.cjs');
-const { b64url } = require('@milagre/shared/relay-crypto');
-const defaultTunnels = require('./mobile-tunnel.cjs');
+const { preparePrivateDirectory, assertPrivate } = require("@milagre/core/private-files");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { randomBytes } = require("node:crypto");
+const QRCode = require("qrcode");
+const { startMobileBridge } = require("./mobile-bridge.cjs");
+const { readCloudflare } = require("./mobile-cloudflare.cjs");
+const { pairingLink, relayPairingLink, computerName } = require("./mobile-pairing.cjs");
+const { startRelayHost } = require("./relay-host.cjs");
+const { readIdentity, rotateIdentity, readRetired, createPhones } = require("./relay-identity.cjs");
+const { b64url } = require("@milagre/shared/relay-crypto");
+const defaultTunnels = require("./mobile-tunnel.cjs");
+const { startLanHost, LAN_PORT } = require("./lan-host.cjs");
+const { lanAddresses } = require("./lan-addresses.cjs");
 
 // Without a Cloudflare tunnel the bridge only answers on this Mac's loopback. 8797 is the port `mobile:cloudflare` also defaults to.
 const LOCAL_PORT = 8797;
-const RELAY_URL = 'wss://relay.milagre.cloud';
+const RELAY_URL = "wss://relay.milagre.cloud";
 // A phone that is not yet known may pair only for this long after the QR was shown, so a leaked link is not a standing invitation.
 const PAIRING_WINDOW_MS = 10 * 60 * 1000;
 // After a Reset, the old relay room keeps answering for this long, so a phone paired before hears "this Mac was reset".
 const RETIRED_MS = 14 * 24 * 60 * 60 * 1000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 const TOKEN = /^[a-f0-9]{64}$/;
-const message = error => error instanceof Error ? error.message : String(error);
+const PHONE_KEY = /^[A-Za-z0-9_-]{43}$/;
+const message = (error) => (error instanceof Error ? error.message : String(error));
 
 /**
  * The Phone setting, run by the daemon: the HTTP bridge and its tunnel, started and stopped on request. State lives in
- * `<dataDir>/mobile.json` ({ enabled, token }, 0600). Transitions run one at a time. `setEnabled`, `reset` and `start`
+ * `<dataDir>/mobile.json` ({ enabled, token, lan }, 0600). Transitions run one at a time. `setEnabled`, `reset` and `start`
  * return once the new state is saved and the change has begun (`status().state` is then 'starting' or 'off'); `settled()`
  * resolves when it has finished, and every change goes to `onChange`. A start that fails is an 'error' state, not a throw.
  * Without a Cloudflare tunnel the Mac reaches the phone through the public relay (`remote: 'relay'`); `status()` then also
@@ -32,68 +35,122 @@ const message = error => error instanceof Error ? error.message : String(error);
  * `pairedPhones`, how many phones have paired since the last Reset. `onPaired({ pairedPhones })` runs when a phone pairs
  * for the first time. While the phone is on, identities a Reset replaced keep their old relay rooms for RETIRED_MS, only
  * to tell the phones that dial them that this Mac was reset.
+ * Whatever the remote route, a running phone also listens on the local network (`lanPort`, unless `lan` is switched off
+ * with `setLan` or the phone is confined): `status().lan` reports it, and a phone asks `routes` for the Mac's addresses.
+ * A LAN port that cannot be bound never stops phone access; it shows up as `lan.error`.
  * `allowedRoot` confines a paired phone to one folder (see the bridge); the owner's app never sets it.
  */
-function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMobileBridge, relayUrl = RELAY_URL, startRelay = startRelayHost, now = Date.now, onChange = () => {}, onPaired = () => {}, localPort = LOCAL_PORT, retryDelaysMs = RETRY_DELAYS_MS, retiredMs = RETIRED_MS, name = computerName, allowedRoot }) {
-  const file = path.join(dataDir, 'mobile.json');
-  let config; // { enabled, token | null }, read once
-  let state = 'off';
+function createPhone({
+  dataDir,
+  tunnels = defaultTunnels,
+  startBridge = startMobileBridge,
+  relayUrl = RELAY_URL,
+  startRelay = startRelayHost,
+  now = Date.now,
+  onChange = () => {},
+  onPaired = () => {},
+  localPort = LOCAL_PORT,
+  retryDelaysMs = RETRY_DELAYS_MS,
+  retiredMs = RETIRED_MS,
+  name = computerName,
+  allowedRoot,
+  startLan = startLanHost,
+  lanPort = LAN_PORT,
+  lanHostname = "0.0.0.0",
+  addresses = lanAddresses,
+}) {
+  const file = path.join(dataDir, "mobile.json");
+  let config; // { enabled, token | null, lan }, read once
+  let state = "off";
   let error;
-  let live; // { bridge, tunnel, relay, retired, localUrl, publicUrl, remote, link, qrSvg } while on
-  let remote = 'none';
-  let relayStatus = 'offline';
+  let live; // { bridge, tunnel, relay, retired, lan, identity, phones, localUrl, publicUrl, remote, link, qrSvg } while on
+  let remote = "none";
+  let relayStatus = "offline";
   let pairingUntil = 0;
   let relayPhones; // the paired-phone list, one instance so a reset clears what the running host sees
   let generation = 0; // a bridge or retry from an earlier run must not touch this one
   let attempts = 0;
   let retryTimer;
+  let lanError;
+  // A confined phone (the review demo) never opens a door on the network.
+  const lanAllowed = lanPort !== null && allowedRoot === undefined;
   let queue = Promise.resolve();
   let closed = false;
-  const enqueue = work => { const run = queue.then(work); queue = run.catch(() => {}); return run; };
+  const enqueue = (work) => {
+    const run = queue.then(work);
+    queue = run.catch(() => {});
+    return run;
+  };
+
+  function lanStatus(on) {
+    const enabled = lanAllowed && config.lan !== false;
+    return { enabled, addresses: enabled && on && live.lan ? addresses() : [], ...(enabled && lanError ? { error: lanError } : {}) };
+  }
 
   function status() {
-    const on = state === 'on' && live;
+    const on = state === "on" && live;
     const current = live?.remote ?? remote;
     return {
-      enabled: config?.enabled === true, state,
-      ...(state === 'error' ? { error } : {}),
+      enabled: config?.enabled === true,
+      state,
+      ...(state === "error" ? { error } : {}),
       remote: current,
-      ...(current === 'relay' ? { relay: relayStatus, pairingUntil, pairedPhones: relayPhones?.count() ?? 0 } : {}),
+      ...(current === "relay" ? { relay: relayStatus, pairingUntil, pairedPhones: relayPhones?.count() ?? 0 } : {}),
+      ...(config ? { lan: lanStatus(on) } : {}),
       ...(on ? { localUrl: live.localUrl, ...(live.publicUrl ? { publicUrl: live.publicUrl } : {}), pairingLink: live.link, qrSvg: live.qrSvg } : {}),
     };
   }
-  const changed = () => { try { onChange(status()); } catch { /* a listener must not break the setting */ } };
+  const changed = () => {
+    try {
+      onChange(status());
+    } catch {
+      /* a listener must not break the setting */
+    }
+  };
   function set(next, failure) {
     if (state === next && error === failure) return;
-    state = next; error = failure;
+    state = next;
+    error = failure;
     changed();
   }
 
   async function load() {
     if (config) return config;
     try {
-      const value = JSON.parse(await fs.readFile(file, 'utf8'));
-      config = { enabled: value.enabled === true && TOKEN.test(value.token), token: TOKEN.test(value.token) ? value.token : null };
-    } catch { config = { enabled: false, token: null }; }
+      const value = JSON.parse(await fs.readFile(file, "utf8"));
+      config = { enabled: value.enabled === true && TOKEN.test(value.token), token: TOKEN.test(value.token) ? value.token : null, lan: value.lan !== false };
+    } catch {
+      config = { enabled: false, token: null, lan: true };
+    }
     return config;
   }
   async function save() {
     await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
     if (process.platform === "win32") preparePrivateDirectory(dataDir);
-    const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
+    const temporary = `${file}.${randomBytes(8).toString("hex")}.tmp`;
     try {
-      await fs.writeFile(temporary, JSON.stringify({ enabled: config.enabled, token: config.token }, null, 2), { flag: 'wx', mode: 0o600 });
+      await fs.writeFile(temporary, JSON.stringify({ enabled: config.enabled, token: config.token, lan: config.lan }, null, 2), { flag: "wx", mode: 0o600 });
       await fs.rename(temporary, file);
-    } finally { await fs.rm(temporary, { force: true }); }
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
   }
 
-  const openPairing = () => { pairingUntil = now() + PAIRING_WINDOW_MS; };
+  const openPairing = () => {
+    pairingUntil = now() + PAIRING_WINDOW_MS;
+  };
 
-  // The tunnel or relay goes first so it never answers 502 from a bridge that is already gone.
+  // The LAN host, tunnel and relay go first so none of them answers 502 from a bridge that is already gone.
   async function closeLive(old) {
+    await old?.lan?.close().catch(() => {});
     await old?.tunnel?.close().catch(() => {});
     await old?.relay?.close().catch(() => {});
-    await Promise.all((old?.retired ?? []).map(({ host, timer }) => { clearTimeout(timer); return host.close().catch(() => {}); }));
+    await Promise.all(
+      (old?.retired ?? []).map(({ host, timer }) => {
+        clearTimeout(timer);
+        return host.close().catch(() => {});
+      }),
+    );
     await old?.bridge?.close().catch(() => {});
   }
 
@@ -104,7 +161,12 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
       // A reset that failed after saving the retired key may still use it: two hosts on one id would knock each other off.
       if (old.hostId === current.hostId) continue;
       const host = startRelay({ relayUrl, identity: { hostId: old.hostId, sign: old.sign }, retired: true });
-      const timer = setTimeout(() => { void host.close().catch(() => {}); }, Math.min(old.until - now(), 2 ** 31 - 1));
+      const timer = setTimeout(
+        () => {
+          void host.close().catch(() => {});
+        },
+        Math.min(old.until - now(), 2 ** 31 - 1),
+      );
       timer.unref?.();
       held.push({ host, timer });
     }
@@ -116,48 +178,97 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
     clearTimeout(retryTimer);
     const old = live;
     live = undefined;
-    relayStatus = 'offline';
+    relayStatus = "offline";
     await closeLive(old);
   }
 
+  /** Listens on the local network for `current`. A port that is taken is reported in `lan.error`, never thrown. */
+  async function startLanFor(current) {
+    if (!lanAllowed || config.lan === false || current.lan) return;
+    try {
+      current.lan = await startLan({
+        port: lanPort,
+        hostname: lanHostname,
+        identity: current.identity,
+        phones: current.phones,
+        token: config.token,
+        bridgeUrl: current.bridge.url,
+      });
+      lanError = undefined;
+    } catch (failure) {
+      lanError = message(failure);
+    }
+  }
+
+  /**
+   * Answers a phone that already reached this Mac over a route it trusts. Knowing the phone's key is what lets it finish a
+   * hello on the LAN, so it is remembered here. That is not a new pairing, so nothing announces one.
+   */
+  async function routes(phoneKey) {
+    if (typeof phoneKey !== "string" || !PHONE_KEY.test(phoneKey)) throw Object.assign(new Error("Expected this phone's key"), { status: 400 });
+    const current = live;
+    if (!current) throw Object.assign(new Error("Phone access is starting. Try again."), { status: 409 });
+    if (!current.phones.isKnown(phoneKey)) await relayPhones.add(phoneKey);
+    const port = current.lan?.port;
+    return { hostId: current.identity.hostId, key: b64url(current.identity.box.publicKey), lan: port ? addresses().map((ip) => `ws://${ip}:${port}`) : [] };
+  }
+
   async function cloudflareOrNull() {
-    try { await fs.access(path.join(dataDir, 'cloudflare.json')); } catch { return null; }
+    try {
+      await fs.access(path.join(dataDir, "cloudflare.json"));
+    } catch {
+      return null;
+    }
     return readCloudflare(dataDir);
   }
 
   // `retrying`: a failure waits and tries again (up to retryDelaysMs.length times) instead of ending in 'error'.
   async function launch({ retrying = false } = {}) {
     const mine = generation;
-    set('starting');
+    set("starting");
     let bridge, tunnel, relay, retired;
     try {
       const cloudflare = await cloudflareOrNull();
-      remote = cloudflare ? 'cloudflare' : 'relay';
-      relayStatus = 'connecting';
-      bridge = await startBridge({ dataDir, port: cloudflare ? cloudflare.port : localPort, token: config.token, ...(allowedRoot ? { allowedRoot } : {}) });
+      remote = cloudflare ? "cloudflare" : "relay";
+      relayStatus = "connecting";
+      bridge = await startBridge({
+        dataDir,
+        port: cloudflare ? cloudflare.port : localPort,
+        token: config.token,
+        phoneRoutes: (phoneKey) => routes(phoneKey),
+        ...(allowedRoot ? { allowedRoot } : {}),
+      });
+      const identity = await readIdentity(dataDir);
+      relayPhones ??= createPhones(dataDir);
+      await relayPhones.load();
+      const known = relayPhones;
+      const phones = {
+        isKnown: (id) => known.isKnown(id),
+        async add(id) {
+          await known.add(id);
+          // A pairing the old host saw while a reset tore it down is about to be forgotten: nothing to announce.
+          if (mine !== generation) return;
+          changed();
+          try {
+            onPaired({ pairedPhones: known.count() });
+          } catch {
+            /* a listener must not break the setting */
+          }
+        },
+      };
       let link;
       if (cloudflare) {
         tunnel = await tunnels.startNamedTunnel({ hostname: cloudflare.hostname, connectorToken: cloudflare.connectorToken });
         link = pairingLink({ address: tunnel.url || bridge.url, token: config.token, name: name(), access: cloudflare.access });
       } else {
-        const identity = await readIdentity(dataDir);
-        relayPhones ??= createPhones(dataDir);
-        await relayPhones.load();
-        const known = relayPhones;
-        const phones = {
-          isKnown: id => known.isKnown(id),
-          async add(id) {
-            await known.add(id);
-            // A pairing the old host saw while a reset tore it down is about to be forgotten: nothing to announce.
-            if (mine !== generation) return;
-            changed();
-            try { onPaired({ pairedPhones: known.count() }); } catch { /* a listener must not break the setting */ }
-          },
-        };
         relay = startRelay({
-          relayUrl, identity, phones, token: config.token, bridgeUrl: bridge.url,
+          relayUrl,
+          identity,
+          phones,
+          token: config.token,
+          bridgeUrl: bridge.url,
           canPair: () => now() < pairingUntil,
-          onStatus: next => {
+          onStatus: (next) => {
             if (mine !== generation) return;
             relayStatus = next;
             changed();
@@ -167,15 +278,19 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
         link = relayPairingLink({ relay: relayUrl, hostId: identity.hostId, key: b64url(identity.box.publicKey), token: config.token, name: name() });
       }
       const publicUrl = tunnel?.url;
-      const qrSvg = await QRCode.toString(link, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' });
-      live = { bridge, tunnel, relay, retired, localUrl: bridge.url, publicUrl, remote, link, qrSvg };
+      const qrSvg = await QRCode.toString(link, { type: "svg", margin: 2, errorCorrectionLevel: "M" });
+      live = { bridge, tunnel, relay, retired, identity, phones, localUrl: bridge.url, publicUrl, remote, link, qrSvg };
+      // Last, so a failure before it leaves no listener behind.
+      await startLanFor(live);
       attempts = 0;
-      void bridge.lost.then(() => { if (mine === generation) restartLater(); });
-      set('on');
+      void bridge.lost.then(() => {
+        if (mine === generation) restartLater();
+      });
+      set("on");
     } catch (failure) {
       await closeLive({ tunnel, relay, retired, bridge });
       if (retrying && attempts < retryDelaysMs.length) restartLater();
-      else set('error', message(failure));
+      else set("error", message(failure));
     }
   }
 
@@ -184,13 +299,15 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
     if (closed || !config?.enabled) return;
     const mine = ++generation;
     const delay = retryDelaysMs[attempts++];
-    set('starting');
+    set("starting");
     const old = live;
     live = undefined;
     // Closing is queued so a new enable or disable cannot interleave with it.
     void enqueue(() => closeLive(old));
     retryTimer = setTimeout(() => {
-      void enqueue(async () => { if (mine === generation && !closed && config.enabled) await launch({ retrying: true }); });
+      void enqueue(async () => {
+        if (mine === generation && !closed && config.enabled) await launch({ retrying: true });
+      });
     }, delay);
   }
 
@@ -199,24 +316,27 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
     return enqueue(async () => {
       await teardown();
       if (closed) return;
-      if (config.enabled) await launch(); else set('off');
+      if (config.enabled) await launch();
+      else set("off");
     });
   }
 
   return {
     status,
+    routes,
     settled: () => queue,
     async setEnabled(enabled) {
-      if (typeof enabled !== 'boolean') throw new Error('Expected enabled to be true or false');
+      if (typeof enabled !== "boolean") throw new Error("Expected enabled to be true or false");
       await enqueue(async () => {
         await load();
-        if (enabled && config.enabled && state !== 'error') return;
+        if (enabled && config.enabled && state !== "error") return;
         config.enabled = enabled;
-        if (enabled && !config.token) config.token = randomBytes(32).toString('hex');
+        if (enabled && !config.token) config.token = randomBytes(32).toString("hex");
         if (enabled) openPairing();
         await save();
         attempts = 0;
-        if (enabled) set('starting'); else set('off');
+        if (enabled) set("starting");
+        else set("off");
         void apply().catch(() => {});
       });
       return status();
@@ -230,12 +350,15 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
     async reset() {
       await enqueue(async () => {
         await load();
-        if (config.enabled) set('starting');
+        if (config.enabled) set("starting");
         await teardown();
         try {
-          config.token = randomBytes(32).toString('hex');
+          config.token = randomBytes(32).toString("hex");
           await save();
-          if (!relayPhones) { relayPhones = createPhones(dataDir); await relayPhones.load(); }
+          if (!relayPhones) {
+            relayPhones = createPhones(dataDir);
+            await relayPhones.load();
+          }
           const hadPhones = relayPhones.count() > 0;
           // Phones paired through the relay are bound to the old token, so they go with it.
           await relayPhones.clear();
@@ -244,11 +367,36 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
           await rotateIdentity(dataDir, hadPhones ? { retireUntil: now() + retiredMs, now: now() } : {});
           openPairing();
         } catch (failure) {
-          if (config.enabled) { set('error', message(failure)); return; }
-          set('off');
+          if (config.enabled) {
+            set("error", message(failure));
+            return;
+          }
+          set("off");
           throw failure;
         }
-        if (config.enabled) { attempts = 0; void apply().catch(() => {}); } else set('off');
+        if (config.enabled) {
+          attempts = 0;
+          void apply().catch(() => {});
+        } else set("off");
+      });
+      return status();
+    },
+    /** Turns the LAN listener on or off without touching the bridge, tunnel or relay. */
+    async setLan(enabled) {
+      if (typeof enabled !== "boolean") throw new Error("Expected enabled to be true or false");
+      await enqueue(async () => {
+        await load();
+        if (config.lan !== enabled) {
+          config.lan = enabled;
+          await save();
+        }
+        if (live && !enabled) {
+          const host = live.lan;
+          live.lan = undefined;
+          await host?.close().catch(() => {});
+        } else if (live) await startLanFor(live);
+        if (!enabled) lanError = undefined;
+        changed();
       });
       return status();
     },
@@ -256,7 +404,10 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
     async openPairing() {
       await enqueue(async () => {
         await load();
-        if (config.enabled) { openPairing(); changed(); }
+        if (config.enabled) {
+          openPairing();
+          changed();
+        }
       });
       return status();
     },
@@ -264,7 +415,10 @@ function createPhone({ dataDir, tunnels = defaultTunnels, startBridge = startMob
     async start() {
       await enqueue(async () => {
         await load();
-        if (config.enabled && !closed) { set('starting'); void apply().catch(() => {}); }
+        if (config.enabled && !closed) {
+          set("starting");
+          void apply().catch(() => {});
+        }
       });
       return status();
     },

@@ -62,14 +62,17 @@ async function realProcessCheck() {
     const net = require("node:net");
     // Like an MCP server: a direct child in the agent's own group, listening.
     spawn(process.execPath, ["-e", "require('net').createServer().listen(0, '127.0.0.1'); setInterval(() => {}, 1000)"], { stdio: "ignore" });
-    // Like a Bash tool call: a shell in its own group that backgrounds a server and exits.
-    spawn("/bin/zsh", ["-c", "nohup " + JSON.stringify(process.execPath) + " -e \\"require('net').createServer().listen(0, '127.0.0.1'); setInterval(() => {}, 1000)\\" >/dev/null 2>&1 &"], { detached: true, stdio: "ignore" });
+    // Like a Bash tool call: a shell in its own group that starts and waits for a server.
+    spawn("/bin/zsh", ["-c", "nohup " + JSON.stringify(process.execPath) + " -e \\"require('net').createServer().listen(0, '127.0.0.1'); setInterval(() => {}, 1000)\\" >/dev/null 2>&1 & wait"], { detached: true, stdio: "ignore" });
     setInterval(() => {}, 1000);
   `;
   const fs = require("node:fs");
   const cwd = fs.realpathSync(fs.mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-ports-worktree-")));
   const agent = spawn(process.execPath, ["-e", agentSource], { cwd, detached: true, stdio: "ignore" });
-  let roots = new Map([["/fixture#1", { pid: agent.pid, cwd }], ["/other#2", { pid: 999999, cwd: path.dirname(cwd) + "/another-worktree" }]]);
+  let roots = new Map([
+    ["/fixture#1", { pid: agent.pid, cwd }],
+    ["/other#2", { pid: 999999, cwd }],
+  ]);
   const published = [];
   const watcher = new PortWatcher({ roots: () => roots, publish: (ports) => published.push(ports), pollMs: 60_000 });
   try {
@@ -80,16 +83,21 @@ async function realProcessCheck() {
       ports = watcher.snapshot()["/fixture#1"];
     }
     assert.ok(ports, "The backgrounded server's port shows for the chat");
-    assert.equal(watcher.snapshot()["/other#2"], undefined, "Another worktree's chat doesn't get it");
+    assert.equal(watcher.snapshot()["/other#2"], undefined, "Another Chat in the same Worktree does not get it");
     assert.equal(ports.length, 1, `Only the command's server counts, not the agent's own child: ${JSON.stringify(ports)}`);
     assert.equal(ports[0].address, "127.0.0.1");
     // The agent stops (its session closed); the orphaned server still belongs to the chat until it stops.
     const server = ports[0].pid;
+    process.kill(watcher.processes.get(server).pgid, "SIGKILL");
     process.kill(-agent.pid, "SIGKILL");
     roots = new Map();
     await delay(300);
     await watcher.poll();
-    assert.deepEqual(watcher.snapshot()["/fixture#1"]?.map((port) => port.pid), [server], "An orphaned server stays with its chat");
+    assert.deepEqual(
+      watcher.snapshot()["/fixture#1"]?.map((port) => port.pid),
+      [server],
+      "An orphaned server stays with its chat",
+    );
     assert.equal(await watcher.stopPort("/fixture#1", server), true, "Stop ends the orphaned server");
     assert.throws(() => process.kill(server, 0), /ESRCH/, "The server process is gone");
     assert.deepEqual(watcher.snapshot(), {}, "A stopped server leaves the list");
@@ -97,8 +105,14 @@ async function realProcessCheck() {
     console.log(`PASS: real ps/lsof run found port ${ports[0].port}, ignored the agent's own listener, kept the orphan, dropped it once stopped`);
   } finally {
     watcher.close();
-    try { process.kill(-agent.pid, "SIGKILL"); } catch {}
-    for (const pids of Object.values(watcher.snapshot())) for (const { pid } of pids) try { process.kill(pid, "SIGKILL"); } catch {}
+    try {
+      process.kill(-agent.pid, "SIGKILL");
+    } catch {}
+    for (const pids of Object.values(watcher.snapshot()))
+      for (const { pid } of pids)
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {}
   }
 }
 
@@ -110,10 +124,15 @@ async function browserChecks() {
   const window = new BrowserWindow({ width: 1000, height: 560, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
   const opened = [];
   guardNavigation(window.webContents, { appUrl: process.argv[2], openExternal: (url) => opened.push(url) });
-  window.webContents.on("console-message", (details) => { if (details.level === "error") console.error(details.message); });
+  window.webContents.on("console-message", (details) => {
+    if (details.level === "error") console.error(details.message);
+  });
   const evaluate = async (source) => {
-    try { return await window.webContents.executeJavaScript(source); }
-    catch (error) { throw new Error(`${source}: ${error.message}`); }
+    try {
+      return await window.webContents.executeJavaScript(source);
+    } catch (error) {
+      throw new Error(`${source}: ${error.message}`);
+    }
   };
   const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR;
   async function screenshot(name) {
@@ -136,13 +155,19 @@ async function browserChecks() {
     await window.loadURL(process.argv[2]);
     await waitFor('!!document.querySelector("[data-slot=port-track]")');
     assert.equal(await evaluate(`document.querySelector("${pill}").textContent`), "Ports 3");
-    const row = await evaluate(`(() => {const a=document.querySelector("${pill}").getBoundingClientRect(), b=document.querySelector("[data-slot=task-track] button").getBoundingClientRect();return {gap:b.left-a.right,dy:Math.abs(a.top-b.top)}})()`);
+    const row = await evaluate(
+      `(() => {const a=document.querySelector("${pill}").getBoundingClientRect(), b=document.querySelector("[data-slot=task-track] button").getBoundingClientRect();return {gap:b.left-a.right,dy:Math.abs(a.top-b.top)}})()`,
+    );
     assert.ok(row.gap >= 0 && row.gap <= 12 && row.dy < 1, `Ports pill is not beside the to-do pill: ${JSON.stringify(row)}`);
     for (const theme of ["dark", "light"]) {
       await evaluate(`window.setDark(${theme === "dark"})`);
       await evaluate(`document.querySelector("${pill}").click()`);
       await waitFor('!!document.querySelector("[data-slot=port-popover]")');
-      assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-port-row] a")].map(a => a.getAttribute("href"))'), ["http://localhost:5173", "http://localhost:8081", "http://[::1]:54321"]);
+      assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-port-row] a")].map(a => a.getAttribute("href"))'), [
+        "http://localhost:5173",
+        "http://localhost:8081",
+        "http://[::1]:54321",
+      ]);
       assert.ok(await evaluate('document.querySelector("[data-port-row]").textContent.includes(":5173")'));
       await screenshot(`ports-popover-${theme}`);
       window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
@@ -160,12 +185,20 @@ async function browserChecks() {
     // Stop: the row shows a spinner until the port is gone, then leaves the list.
     await evaluate(`document.querySelector("${pill}").click()`);
     await waitFor('!!document.querySelector("[data-slot=port-popover]")');
-    assert.equal(await evaluate('getComputedStyle(document.querySelector("[data-port-stop]").parentElement.parentElement).opacity'), "0", "Stop is hidden until the row is hovered");
+    assert.equal(
+      await evaluate('getComputedStyle(document.querySelector("[data-port-stop]").parentElement.parentElement).opacity'),
+      "0",
+      "Stop is hidden until the row is hovered",
+    );
     // A hidden window has no hover or focus, so show the second row as hovered for the screenshot.
-    await evaluate('window.setDark(true)');
-    await evaluate('(() => { const row = document.querySelector("[data-port-row]:nth-child(2)"); row.style.background = "var(--color-hover)"; for (const el of row.querySelectorAll(".opacity-0")) el.style.opacity = "1"; })()');
+    await evaluate("window.setDark(true)");
+    await evaluate(
+      '(() => { const row = document.querySelector("[data-port-row]:nth-child(2)"); row.style.background = "var(--color-hover)"; for (const el of row.querySelectorAll(".opacity-0")) el.style.opacity = "1"; })()',
+    );
     await screenshot("ports-stop-hover-dark");
-    await evaluate('(() => { const row = document.querySelector("[data-port-row]:nth-child(2)"); row.style.background = ""; for (const el of row.querySelectorAll(".opacity-0")) el.style.opacity = ""; })()');
+    await evaluate(
+      '(() => { const row = document.querySelector("[data-port-row]:nth-child(2)"); row.style.background = ""; for (const el of row.querySelectorAll(".opacity-0")) el.style.opacity = ""; })()',
+    );
     await evaluate('document.querySelector("[data-port-row]:nth-child(2) [data-port-stop]").click()');
     await waitFor('!!document.querySelector("[data-port-row][data-stopping] [role=status]")');
     await screenshot("ports-stopping-dark");
@@ -175,16 +208,18 @@ async function browserChecks() {
     await evaluate('document.querySelector("[data-port-stop-all]").click()');
     await waitFor('!document.querySelector("[data-slot=port-track]") && !document.querySelector("[data-slot=port-popover]")');
     assert.deepEqual(await evaluate("window.stopped.sort()"), [4211, 4380, 4402]);
-    await evaluate(`window.setPorts([{ port: 5173, pid: 4211, command: "node", address: "127.0.0.1" }, { port: 8081, pid: 4380, command: "node", address: "*" }, { port: 54321, pid: 4402, command: "postgres", address: "::1" }])`);
+    await evaluate(
+      `window.setPorts([{ port: 5173, pid: 4211, command: "node", address: "127.0.0.1" }, { port: 8081, pid: 4380, command: "node", address: "*" }, { port: 54321, pid: 4402, command: "postgres", address: "::1" }])`,
+    );
     await waitFor('!!document.querySelector("[data-slot=port-track]")');
 
     // The sidebar hover card lists the chat's ports.
-    await evaluate('window.setDark(true)');
+    await evaluate("window.setDark(true)");
     await evaluate(`${firstRow}.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }))`);
     await waitFor('!!document.querySelector("[data-chat-card-ports]")');
     assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-chat-card-port]")].map(a => a.textContent)'), [":5173", ":8081", ":54321"]);
     await screenshot("ports-hover-card-dark");
-    await evaluate('window.setDark(false)');
+    await evaluate("window.setDark(false)");
     await screenshot("ports-hover-card-light");
     await evaluate('document.querySelector("[data-chat-card-port]").click()');
     await delay(100);
@@ -198,7 +233,9 @@ async function browserChecks() {
     await evaluate(`${firstRow}.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }))`);
     await waitFor('!!document.querySelector("[data-chat-hover-card]")');
     assert.equal(await evaluate('!!document.querySelector("[data-chat-card-ports]")'), false);
-    console.log("PASS: Ports pill beside the to-do list, rows and links, Stop and Stop all, light and dark, Escape, opens in the browser, hover card ports, hidden when empty");
+    console.log(
+      "PASS: Ports pill beside the to-do list, rows and links, Stop and Stop all, light and dark, Escape, opens in the browser, hover card ports, hidden when empty",
+    );
     app.exit(0);
   } catch (error) {
     console.error(error);
@@ -212,19 +249,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "ports-fixture",
-      resolveId(id) { if (id === "/__ports_fixture.tsx") return id; },
-      load(id) { if (id === "/__ports_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__ports__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__ports_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "ports-fixture",
+        resolveId(id) {
+          if (id === "/__ports_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__ports_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__ports__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__ports_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();

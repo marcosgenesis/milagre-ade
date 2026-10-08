@@ -11,13 +11,15 @@ function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return sources(path);
-    return /\.tsx$/.test(entry.name) && path !== OWNER ? [path] : [];
+    return entry.name.endsWith(".tsx") && path !== OWNER ? [path] : [];
   });
 }
 
 function offenders(pattern: RegExp) {
   return sources(SRC).flatMap((path) =>
-    readFileSync(path, "utf8").split("\n").flatMap((line, index) => (pattern.test(line) ? [`${relative(SRC, path)}:${index + 1}`] : [])),
+    readFileSync(path, "utf8")
+      .split("\n")
+      .flatMap((line, index) => (pattern.test(line) ? [`${relative(SRC, path)}:${index + 1}`] : [])),
   );
 }
 
@@ -36,5 +38,9 @@ test("no component scrolls vertically without ScrollArea", () => {
 });
 
 test("no component restyles the scrollbar", () => {
-  assert.deepEqual(offenders(/scrollbar-color|scrollbar-width:\s*thin|-webkit-scrollbar-(thumb|track)/), [], "The scrollbar look lives in styles.css; hiding a scrollbar is fine");
+  assert.deepEqual(
+    offenders(/scrollbar-color|scrollbar-width:\s*thin|-webkit-scrollbar-(thumb|track)/),
+    [],
+    "The scrollbar look lives in styles.css; hiding a scrollbar is fine",
+  );
 });

@@ -32,7 +32,16 @@ class SessionManager {
   async startTurn(request) {
     const start = (entry) => {
       clearTimeout(entry.idleTimer);
-      return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode, effort: request.effort, ultracode: request.ultracode, fastMode: request.fastMode, replies: request.replies });
+      return entry.session.startTurn({
+        prompt: request.prompt,
+        images: request.images,
+        model: request.model,
+        permissionMode: request.permissionMode,
+        effort: request.effort,
+        ultracode: request.ultracode,
+        fastMode: request.fastMode,
+        replies: request.replies,
+      });
     };
     const entry = await this.serial(request.chatId, () => this.currentEntry(request));
     try {
@@ -50,13 +59,34 @@ class SessionManager {
     const tldrEnabled = request.tldrEnabled !== false;
     const accountId = request.accountId ?? "default";
     const workspaceRoots = [...new Set(request.workspaceRoots ?? [])].sort();
-    const sameChat = existing && existing.provider === provider && existing.cwd === cwd && JSON.stringify(existing.workspaceRoots) === JSON.stringify(workspaceRoots) && existing.workspaceInstructions === request.workspaceInstructions;
+    const sameChat =
+      existing &&
+      existing.provider === provider &&
+      existing.cwd === cwd &&
+      JSON.stringify(existing.workspaceRoots) === JSON.stringify(workspaceRoots) &&
+      existing.workspaceInstructions === request.workspaceInstructions;
     // System instructions are fixed for a provider session. Resume it between turns when
     // the preference changes, preserving its native history and any running reply.
-    if (sameChat && !existing.session.closed && ((existing.tldrEnabled === tldrEnabled && existing.accountId === accountId) || existing.session.turnActive || existing.activeChildren?.size)) return existing;
-    const resumeId = sameChat && !existing.session.closed ? existing.session.nativeId ?? request.resumeId : request.resumeId;
+    if (
+      sameChat &&
+      !existing.session.closed &&
+      ((existing.tldrEnabled === tldrEnabled && existing.accountId === accountId) || existing.session.turnActive || existing.activeChildren?.size)
+    )
+      return existing;
+    const resumeId = sameChat && !existing.session.closed ? (existing.session.nativeId ?? request.resumeId) : request.resumeId;
     if (existing) await this.closeEntry(chatId, existing);
-    const entry = { provider, cwd, tldrEnabled, accountId, workspaceRoots, workspaceInstructions: request.workspaceInstructions, session: null, idleTimer: null };
+    const entry = {
+      provider,
+      cwd,
+      tldrEnabled,
+      accountId,
+      command: request.command,
+      env: request.env,
+      workspaceRoots,
+      workspaceInstructions: request.workspaceInstructions,
+      session: null,
+      idleTimer: null,
+    };
     entry.session = this.createSession(provider, {
       cwd,
       workspaceRoots: request.workspaceRoots,
@@ -159,6 +189,12 @@ class SessionManager {
 
   permissionMode(chatId) {
     return this.sessions.get(chatId)?.session.permissions?.mode ?? "ask";
+  }
+
+  activeAccount(chatId, provider) {
+    const entry = this.sessions.get(chatId);
+    if (!entry || (provider && entry.provider !== provider) || entry.session.closed || (!entry.session.turnActive && !entry.activeChildren?.size)) return null;
+    return { accountId: entry.accountId, command: entry.command, env: entry.env };
   }
 
   isTurnActive(chatId) {

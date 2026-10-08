@@ -3,7 +3,7 @@ const test = require("node:test");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { discoverSkills, expandSkillPrompt, skillCommands } = require("./skills.cjs");
+const { discoverSkills, expandSkillPrompt, readDiscoveredSkill, skillCommands } = require("./skills.cjs");
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-skills-"));
@@ -52,6 +52,47 @@ test("workspace overrides user skills and directory precedence is deterministic"
   assert.equal(skills[0].path, preferred);
 });
 
+test("reports every skill a same-named winner hides, with the winner's path", async (t) => {
+  const { project, home, skill } = await fixture(t);
+  const user = await skill(home, ".agents", "review", "User");
+  const claude = await skill(project, ".claude", "review", "Claude");
+  const winner = await skill(project, ".agents", "review", "Workspace");
+  await skill(project, ".agents", "solo", "Solo");
+  const { skills, shadowed } = await discoverSkills(project, { home, bundledDirectory: null });
+  assert.deepEqual(
+    skills.map((item) => item.path),
+    [winner, path.join(project, ".agents", "skills", "solo", "SKILL.md")],
+  );
+  assert.deepEqual(
+    shadowed.map(({ path, scope, provider, shadowedBy }) => ({ path, scope, provider, shadowedBy })),
+    [
+      { path: claude, scope: "workspace", provider: "claude", shadowedBy: winner },
+      { path: user, scope: "user", provider: "agents", shadowedBy: winner },
+    ],
+  );
+});
+
+test("a null Project lists user skills only", async (t) => {
+  const { project, home, skill } = await fixture(t);
+  await skill(project, ".agents", "local", "Local");
+  await skill(home, ".claude", "mine", "Mine");
+  const { skills } = await discoverSkills(null, { home, bundledDirectory: null });
+  assert.deepEqual(
+    skills.map(({ name, scope }) => ({ name, scope })),
+    [{ name: "mine", scope: "user" }],
+  );
+});
+
+test("reads only SKILL.md files discovery returned, shadowed ones included", async (t) => {
+  const { project, home, skill } = await fixture(t);
+  const user = await skill(home, ".agents", "review", "User copy");
+  await skill(project, ".agents", "review", "Workspace copy");
+  assert.equal(await readDiscoveredSkill(project, user, { home, bundledDirectory: null }), "User copy");
+  const other = path.join(project, "notes.md");
+  await fs.writeFile(other, "Private");
+  await assert.rejects(readDiscoveredSkill(project, other, { home, bundledDirectory: null }), /no longer there/);
+});
+
 test("follows nested and symlinked skill directories without looping or duplicates", async (t) => {
   const { project, home, skill } = await fixture(t);
   const file = await skill(project, ".agents", "nested/review", "Review");
@@ -67,12 +108,15 @@ test("follows nested and symlinked skill directories without looping or duplicat
 
 test("missing directories are harmless and malformed or oversized skills do not hide valid skills", async (t) => {
   const { project, home, skill } = await fixture(t);
-  assert.deepEqual(await discoverSkills(project, { home, bundledDirectory: null }), { skills: [], warnings: [] });
-  await skill(project, ".agents", "bad", '---\nname: [broken\n---\nBody');
+  assert.deepEqual(await discoverSkills(project, { home, bundledDirectory: null }), { skills: [], shadowed: [], warnings: [] });
+  await skill(project, ".agents", "bad", "---\nname: [broken\n---\nBody");
   await skill(project, ".agents", "large", "x".repeat(256 * 1024 + 1));
   await skill(project, ".agents", "valid", "Valid");
   const { skills, warnings } = await discoverSkills(project, { home, bundledDirectory: null });
-  assert.deepEqual(skills.map((item) => item.name), ["valid"]);
+  assert.deepEqual(
+    skills.map((item) => item.name),
+    ["valid"],
+  );
   assert.equal(warnings.length, 2);
 });
 
@@ -82,7 +126,10 @@ test("changing workspaces does not reuse skills from the previous workspace", as
   await skill(home, ".agents", "shared", "Shared");
   await discoverSkills(project, { home, bundledDirectory: null });
   const { skills } = await discoverSkills(path.join(root, "second"), { home, bundledDirectory: null });
-  assert.deepEqual(skills.map((item) => item.name), ["shared"]);
+  assert.deepEqual(
+    skills.map((item) => item.name),
+    ["shared"],
+  );
 });
 
 test("expands requested skills once, preserving arguments and reference directories", async (t) => {
@@ -128,24 +175,32 @@ test("rejects relative workspace paths and limits combined skill context", async
 
 test("tolerates unquoted colons in descriptions used by installed skills", async (t) => {
   const { project, home, skill } = await fixture(t);
-  await skill(home, ".agents", "shipit", "---\nname: shipit\ndescription: Open a PR. Usage: /shipit [draft]\nargument-hint: [draft] [skip-checks]\n---\nInstructions");
+  await skill(
+    home,
+    ".agents",
+    "shipit",
+    "---\nname: shipit\ndescription: Open a PR. Usage: /shipit [draft]\nargument-hint: [draft] [skip-checks]\n---\nInstructions",
+  );
   const { skills, warnings } = await discoverSkills(project, { home, bundledDirectory: null });
   assert.deepEqual(warnings, []);
   assert.equal(skills[0].description, "Open a PR. Usage: /shipit [draft]");
 });
 
-
 test("bundles tldr with its checklist for machines without installed skills", async (t) => {
   const { project, home } = await fixture(t);
   const { skills, warnings } = await discoverSkills(project, { home });
   assert.deepEqual(warnings, []);
-  assert.deepEqual(skills.map(({ name, scope, provider }) => ({ name, scope, provider })), [
-    { name: "tldr", scope: "bundled", provider: "milagre" },
-  ]);
+  assert.deepEqual(
+    skills.map(({ name, scope, provider }) => ({ name, scope, provider })),
+    [
+      { name: "simulator", scope: "bundled", provider: "milagre" },
+      { name: "tldr", scope: "bundled", provider: "milagre" },
+    ],
+  );
   const expanded = await expandSkillPrompt(project, "/tldr Rewrite this paragraph", { home });
   assert.ok(expanded.startsWith("/tldr Rewrite this paragraph"));
-  assert.ok(expanded.includes(await fs.readFile(skills[0].path, "utf8")));
-  assert.ok((await fs.readFile(path.join(path.dirname(skills[0].path), "eval.md"), "utf8")).includes("# tldr eval"));
+  assert.ok(expanded.includes(await fs.readFile(skills.find((skill) => skill.name === "tldr").path, "utf8")));
+  assert.ok((await fs.readFile(path.join(path.dirname(skills.find((skill) => skill.name === "tldr").path), "eval.md"), "utf8")).includes("# tldr eval"));
 });
 
 test("installed tldr overrides the bundled slash skill without duplicates", async (t) => {

@@ -16,7 +16,11 @@ const DEFAULT_WORKTREE_ROOT = path.join(os.homedir(), ".milagre", "worktrees");
 async function resolveStartRef(projectPath, baseBranch) {
   let upstream = [];
   try {
-    const { stdout } = await git(projectPath, ["for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream:short)", `refs/heads/${baseBranch}`]);
+    const { stdout } = await git(projectPath, [
+      "for-each-ref",
+      "--format=%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream:short)",
+      `refs/heads/${baseBranch}`,
+    ]);
     upstream = stdout.trim().split("\0");
   } catch {}
   const [remote, remoteRef, trackingRef] = upstream;
@@ -38,7 +42,10 @@ async function resolveStartRef(projectPath, baseBranch) {
 async function listBranches(projectPath) {
   try {
     const { stdout } = await git(projectPath, ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"]);
-    return stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+    return stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -61,10 +68,19 @@ function slugify(text) {
 // The base comes from a client (a phone, a window): it must name an existing commit and can never be read as an option.
 async function checkBase(projectPath, baseBranch) {
   const valid = typeof baseBranch === "string" && baseBranch !== "" && !baseBranch.startsWith("-") && !/[\0\n]/.test(baseBranch);
-  if (!valid || !(await client.read.refExists(projectPath, baseBranch))) throw new Error(`The base branch ${JSON.stringify(String(baseBranch))} is missing from this project.`);
+  if (!valid || !(await client.read.refExists(projectPath, baseBranch)))
+    throw new Error(`The base branch ${JSON.stringify(String(baseBranch))} is missing from this project.`);
 }
 
-async function createWorktree({ projectPath, baseBranch, prompt = "", root = DEFAULT_WORKTREE_ROOT, suffix = Math.random().toString(36).slice(2, 6), copyPatterns, copyLimits }) {
+async function createWorktree({
+  projectPath,
+  baseBranch,
+  prompt = "",
+  root = DEFAULT_WORKTREE_ROOT,
+  suffix = Math.random().toString(36).slice(2, 6),
+  copyPatterns,
+  copyLimits,
+}) {
   await checkBase(projectPath, baseBranch);
   const name = `${slugify(prompt) || "chat"}-${suffix}`;
   const branch = `milagre/${name}`;

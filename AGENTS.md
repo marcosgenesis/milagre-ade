@@ -1,5 +1,9 @@
 ## Agent skills
 
+### Checks before a PR
+
+Run `npm run typecheck`, `npm run lint` and `npm test -- --unit` before opening or updating a PR. Run the Electron check for the screen you touched with `npm test -- --only <name>`.
+
 ### Issue tracker
 
 Issues and specs live in GitHub Issues. See `docs/agents/issue-tracker.md`.

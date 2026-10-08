@@ -4,9 +4,12 @@ import type { PhoneStatus } from "../electron";
 export function phoneStatusLine(status: PhoneStatus | null): string {
   if (!status) return "Checking…";
   switch (status.state) {
-    case "off": return "Off";
-    case "starting": return "Starting…";
-    case "error": return status.error || "Phone access stopped.";
+    case "off":
+      return "Off";
+    case "starting":
+      return "Starting…";
+    case "error":
+      return status.error || "Phone access stopped.";
     case "on":
       if (status.remote === "cloudflare" && status.publicUrl) return `Reachable at ${new URL(status.publicUrl).host}`;
       if (status.remote === "relay") {
@@ -17,6 +20,15 @@ export function phoneStatusLine(status: PhoneStatus | null): string {
       // Without a tunnel the bridge answers on this Mac's loopback only.
       return `This Mac only — ${status.localUrl ? new URL(status.localUrl).hostname : "127.0.0.1"}`;
   }
+}
+
+/** The line under "Allow on local network". Null until the daemon reports it. */
+export function phoneLanLine(status: PhoneStatus | null): string | null {
+  if (!status?.lan) return null;
+  if (!status.lan.enabled) return "Off";
+  if (status.lan.error) return `Couldn't listen on the local network: ${status.lan.error}`;
+  if (!status.lan.addresses.length) return "Not connected to a local network";
+  return `Reachable at ${status.lan.addresses.join(", ")}`;
 }
 
 /** Whether new phones may still pair, and for how many whole minutes (rounded up). Only a relay phone has a window. */

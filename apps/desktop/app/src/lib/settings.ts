@@ -19,6 +19,8 @@ export interface AppSettings {
   notifyWhenWaiting: boolean;
   notifyOnCompletion: boolean;
   showDockBadge: boolean;
+  /** The top-right button that opens a chat waiting on the user in another project. */
+  showAttentionButton: boolean;
   /** Keep the Mac from sleeping while an agent works; the screen can still turn off. */
   keepAwake: boolean;
   /** The editor that "Open in" uses, by id; empty means the first one found. */
@@ -29,6 +31,8 @@ export interface AppSettings {
   tldrEnabled: boolean;
   /** Sidebar chats by start date, or with the latest message first. */
   chatOrder: ChatOrder;
+  /** The sidebar lists every recent Project and Link with its chats, not only the open one's. */
+  sidebarAllProjects: boolean;
   /** Let the blurred desktop show through the window (macOS). */
   windowTranslucent: boolean;
   /** How much of the desktop shows through the window's own background, 10 to 100. */
@@ -47,8 +51,29 @@ const CLAUDE_REPLIES: ClaudeReplies[] = ["concise", "normal"];
 const CHAT_ORDERS: ChatOrder[] = ["created", "recent"];
 export const WINDOW_TRANSLUCENCY_RANGE = { min: 10, max: 100, step: 5 };
 export const PANEL_TRANSLUCENCY_RANGE = { min: 10, max: 90, step: 5 };
-const clampTo = (value: unknown, range: { min: number; max: number }, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? Math.min(range.max, Math.max(range.min, value)) : fallback);
-const DEFAULTS: AppSettings = { theme: "light", defaultModelId: MODEL_CATALOG[0].id, defaultPermissionMode: "ask", usageDisplay: "used", showUsageInSidebar: true, notifyWhenWaiting: true, notifyOnCompletion: true, showDockBadge: true, keepAwake: true, editorId: "", claudeReplies: "concise", tldrEnabled: true, chatOrder: "created", windowTranslucent: false, windowTranslucency: 80, panelTranslucency: 40, translucentDots: true };
+const clampTo = (value: unknown, range: { min: number; max: number }, fallback: number) =>
+  typeof value === "number" && Number.isFinite(value) ? Math.min(range.max, Math.max(range.min, value)) : fallback;
+const DEFAULTS: AppSettings = {
+  theme: "light",
+  defaultModelId: MODEL_CATALOG[0].id,
+  defaultPermissionMode: "ask",
+  usageDisplay: "used",
+  showUsageInSidebar: true,
+  notifyWhenWaiting: true,
+  notifyOnCompletion: true,
+  showDockBadge: true,
+  showAttentionButton: true,
+  keepAwake: true,
+  editorId: "",
+  claudeReplies: "concise",
+  tldrEnabled: true,
+  chatOrder: "created",
+  sidebarAllProjects: false,
+  windowTranslucent: false,
+  windowTranslucency: 80,
+  panelTranslucency: 40,
+  translucentDots: true,
+};
 
 function load(): AppSettings {
   try {
@@ -60,17 +85,21 @@ function load(): AppSettings {
       // Any saved id is kept: the agents report models the maintained list lacks, and App falls back
       // to a provider's recommended model when the saved one isn't offered.
       defaultModelId: typeof saved.defaultModelId === "string" && saved.defaultModelId ? saved.defaultModelId : DEFAULTS.defaultModelId,
-      defaultPermissionMode: PERMISSION_MODES.some((mode) => mode.id === saved.defaultPermissionMode) ? saved.defaultPermissionMode! : DEFAULTS.defaultPermissionMode,
+      defaultPermissionMode: PERMISSION_MODES.some((mode) => mode.id === saved.defaultPermissionMode)
+        ? saved.defaultPermissionMode!
+        : DEFAULTS.defaultPermissionMode,
       usageDisplay: USAGE_DISPLAYS.includes(saved.usageDisplay as UsageDisplay) ? saved.usageDisplay! : DEFAULTS.usageDisplay,
       showUsageInSidebar: typeof saved.showUsageInSidebar === "boolean" ? saved.showUsageInSidebar : DEFAULTS.showUsageInSidebar,
       notifyWhenWaiting: typeof saved.notifyWhenWaiting === "boolean" ? saved.notifyWhenWaiting : DEFAULTS.notifyWhenWaiting,
       notifyOnCompletion: typeof saved.notifyOnCompletion === "boolean" ? saved.notifyOnCompletion : DEFAULTS.notifyOnCompletion,
       showDockBadge: typeof saved.showDockBadge === "boolean" ? saved.showDockBadge : DEFAULTS.showDockBadge,
+      showAttentionButton: typeof saved.showAttentionButton === "boolean" ? saved.showAttentionButton : DEFAULTS.showAttentionButton,
       keepAwake: typeof saved.keepAwake === "boolean" ? saved.keepAwake : DEFAULTS.keepAwake,
       editorId: typeof saved.editorId === "string" ? saved.editorId : DEFAULTS.editorId,
       tldrEnabled: typeof saved.tldrEnabled === "boolean" ? saved.tldrEnabled : DEFAULTS.tldrEnabled,
       claudeReplies: CLAUDE_REPLIES.includes(saved.claudeReplies as ClaudeReplies) ? saved.claudeReplies! : DEFAULTS.claudeReplies,
       chatOrder: CHAT_ORDERS.includes(saved.chatOrder as ChatOrder) ? saved.chatOrder! : DEFAULTS.chatOrder,
+      sidebarAllProjects: typeof saved.sidebarAllProjects === "boolean" ? saved.sidebarAllProjects : DEFAULTS.sidebarAllProjects,
       windowTranslucent: typeof saved.windowTranslucent === "boolean" ? saved.windowTranslucent : DEFAULTS.windowTranslucent,
       windowTranslucency: clampTo(saved.windowTranslucency, WINDOW_TRANSLUCENCY_RANGE, DEFAULTS.windowTranslucency),
       panelTranslucency: clampTo(saved.panelTranslucency, PANEL_TRANSLUCENCY_RANGE, DEFAULTS.panelTranslucency),
@@ -114,7 +143,7 @@ function subscribeSystemTheme(listener: () => void) {
   return () => darkQuery.removeEventListener("change", listener);
 }
 
-export function useResolvedTheme(): "light" | "dark" {
+function useResolvedTheme(): "light" | "dark" {
   const { theme } = useSettings();
   const systemDark = useSyncExternalStore(subscribeSystemTheme, () => darkQuery.matches);
   return theme === "system" ? (systemDark ? "dark" : "light") : theme;

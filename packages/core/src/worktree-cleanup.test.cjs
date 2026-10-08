@@ -13,7 +13,8 @@ async function fixture(t) {
   const project = path.join(root, "shop");
   const remote = path.join(root, "remote.git");
   await fs.mkdir(project);
-  const run = (cwd, ...args) => execFileSync("git", ["-C", cwd, "-c", "user.name=Milagre", "-c", "user.email=milagre@example.com", ...args], { encoding: "utf8" });
+  const run = (cwd, ...args) =>
+    execFileSync("git", ["-C", cwd, "-c", "user.name=Milagre", "-c", "user.email=milagre@example.com", ...args], { encoding: "utf8" });
   run(project, "init", "-b", "main");
   await fs.writeFile(path.join(project, ".gitignore"), ".env*\n");
   await fs.writeFile(path.join(project, "README.md"), "shop\n");
@@ -35,16 +36,34 @@ const commit = async (worktree, name = "change.txt") => {
   worktree.git("add", name);
   worktree.git("commit", "-m", `add ${name}`);
 };
-const exists = (file) => fs.lstat(file).then(() => true, () => false);
+const exists = (file) =>
+  fs.lstat(file).then(
+    () => true,
+    () => false,
+  );
 // What the app sends: the status the user saw (taken now, before anything changes), the base and the project.
 const remove = async (fx, wt, { force = false, seen, ...rest } = {}) =>
-  removeWorktree({ path: wt.path, root: fx.worktreeRoot, projectPath: fx.project, base: wt.base, force, seen: force ? (seen ?? (await worktreeStatus(wt.path, wt.base))) : undefined, ...rest });
+  removeWorktree({
+    path: wt.path,
+    root: fx.worktreeRoot,
+    projectPath: fx.project,
+    base: wt.base,
+    force,
+    seen: force ? (seen ?? (await worktreeStatus(wt.path, wt.base))) : undefined,
+    ...rest,
+  });
 const branches = (fx) => fx.git("branch", "--format=%(refname:short)").split("\n").filter(Boolean);
 
 test("a fresh worktree is removable", async (t) => {
   const fx = await fixture(t);
   const wt = await fx.make("a1");
-  assert.deepEqual(await worktreeStatus(wt.path, wt.base), { uncommitted: 0, unpushed: 0, branch: wt.branch, head: wt.git("rev-parse", "HEAD").trim(), removable: true });
+  assert.deepEqual(await worktreeStatus(wt.path, wt.base), {
+    uncommitted: 0,
+    unpushed: 0,
+    branch: wt.branch,
+    head: wt.git("rev-parse", "HEAD").trim(),
+    removable: true,
+  });
 });
 
 test("copied env files and other ignored files do not count as uncommitted", async (t) => {
@@ -72,7 +91,13 @@ test("unpushed counts commits on neither the base nor the upstream; no upstream 
   const wt = await fx.make("c1");
   await commit(wt, "one.txt");
   await commit(wt, "two.txt");
-  assert.deepEqual(await worktreeStatus(wt.path, wt.base), { uncommitted: 0, unpushed: 2, branch: wt.branch, head: wt.git("rev-parse", "HEAD").trim(), removable: false });
+  assert.deepEqual(await worktreeStatus(wt.path, wt.base), {
+    uncommitted: 0,
+    unpushed: 2,
+    branch: wt.branch,
+    head: wt.git("rev-parse", "HEAD").trim(),
+    removable: false,
+  });
   wt.git("push", "-u", "origin", wt.branch);
   assert.equal((await worktreeStatus(wt.path, wt.base)).unpushed, 0);
   await commit(wt, "three.txt");
@@ -166,7 +191,10 @@ test("a symlink under the root that points outside is refused", async (t) => {
   await fs.mkdir(path.join(fx.worktreeRoot, "shop"), { recursive: true });
   const link = path.join(fx.worktreeRoot, "shop", "sneaky");
   await fs.symlink(outside, link);
-  await assert.rejects(removeWorktree({ path: link, root: fx.worktreeRoot, projectPath: fx.project, base: "main", force: true, seen: { head: "x", uncommitted: 0, unpushed: 0 } }), /outside/);
+  await assert.rejects(
+    removeWorktree({ path: link, root: fx.worktreeRoot, projectPath: fx.project, base: "main", force: true, seen: { head: "x", uncommitted: 0, unpushed: 0 } }),
+    /outside/,
+  );
   assert.equal(await exists(outside), true);
 });
 
@@ -213,7 +241,16 @@ test("delete path: it refuses when uncommitted files grew, unpushed commits grew
 
   const committed = await fx.make("m2");
   await fs.writeFile(path.join(committed.path, "one.txt"), "1\n");
-  await assert.rejects(remove(fx, committed, { force: true, closeSession: async () => { await fs.rm(path.join(committed.path, "one.txt")); await commit(committed, "late.txt"); } }), /WORKTREE_CHANGED/);
+  await assert.rejects(
+    remove(fx, committed, {
+      force: true,
+      closeSession: async () => {
+        await fs.rm(path.join(committed.path, "one.txt"));
+        await commit(committed, "late.txt");
+      },
+    }),
+    /WORKTREE_CHANGED/,
+  );
   assert.equal(await exists(committed.path), true);
 });
 
@@ -242,7 +279,10 @@ test("a detached HEAD is never removable, and its stranded commits count as unpu
   const fx = await fixture(t);
   const wt = await fx.make("o1");
   wt.git("switch", "--detach");
-  assert.deepEqual({ ...(await worktreeStatus(wt.path, wt.base)), head: undefined }, { uncommitted: 0, unpushed: 0, branch: null, head: undefined, removable: false });
+  assert.deepEqual(
+    { ...(await worktreeStatus(wt.path, wt.base)), head: undefined },
+    { uncommitted: 0, unpushed: 0, branch: null, head: undefined, removable: false },
+  );
   await commit(wt, "stranded.txt");
   const status = await worktreeStatus(wt.path, wt.base);
   assert.equal(status.unpushed, 1);
@@ -275,7 +315,12 @@ test("removing gets a long timeout, the checks a short one", async (t) => {
   const { promisify } = require("node:util");
   const real = promisify(require("node:child_process").execFile);
   const seen = [];
-  await remove(fx, wt, { exec: (command, args, options) => { seen.push({ args: args.slice(2), timeout: options.timeout }); return real(command, args, options); } });
+  await remove(fx, wt, {
+    exec: (command, args, options) => {
+      seen.push({ args: args.slice(2), timeout: options.timeout });
+      return real(command, args, options);
+    },
+  });
   const timeoutOf = (...prefix) => seen.find((call) => prefix.every((word, index) => call.args[index] === word))?.timeout;
   assert.equal(timeoutOf("worktree", "list"), GIT_TIMEOUT_MS);
   assert.equal(timeoutOf("worktree", "remove"), REMOVE_TIMEOUT_MS);
@@ -300,7 +345,10 @@ test("a worktree whose branch was renamed after creation is removed with its ren
   const result = await remove(fx, wt);
   assert.equal(await exists(wt.path), false);
   assert.deepEqual([result.branch, result.branchDeleted], [renamed, true]);
-  assert.equal(branches(fx).some((name) => name.startsWith("milagre/")), false);
+  assert.equal(
+    branches(fx).some((name) => name.startsWith("milagre/")),
+    false,
+  );
 });
 
 test("it only deletes branches Milagre made", async (t) => {

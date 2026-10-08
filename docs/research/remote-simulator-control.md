@@ -12,13 +12,13 @@ This is a research recommendation, not an accepted implementation spec. No appli
 
 The original [T3 Code demo](https://x.com/ParthJadhav8/status/2106755380638609895) shows the desired interaction: view a Mac-hosted simulator on a phone and touch it directly. X blocked direct retrieval; the clip was retrieved through an alternate public metadata endpoint and inspected. The implementation claims below come from source and pull requests, not inference from the clip.
 
-| Product | Evidence found | Lesson for Milagre |
-| --- | --- | --- |
-| T3 Code | Integrated mobile simulator viewer; Expo Device Hub capture; native WebView with shared browser code. The mobile implementation examined prefers MJPEG on iOS and handles one pointer. | Closest ADE precedent. Reuse its separation between host tools and authenticated client access. |
-| Orca | Desktop iOS streaming through serve-sim/MJPEG and Android through scrcpy. No simulator viewer was verified in its mobile agent interface. | Its fixes show how renderer reloads and forgotten stream listeners can break an otherwise working viewer. |
-| SimDeck Studio | Dedicated phone/tablet simulator client with WebRTC, device selection and controls; open-source host. | Closest reusable alternative backend; direct WebRTC is already practical in this category. |
-| Mata | Dedicated iPhone/browser/Mac viewer. Advertises touch, multiple simulators and native H.265 streaming between Apple devices. | Useful product reference, but its proprietary native path is not an immediate Milagre integration. |
-| Superset, Paseo, Happy | Remote agent access found; an equivalent local-simulator phone viewer was not verified. Superset's Limrun workflow uses cloud simulator links. | Remote terminal/chat access alone does not establish the desired feature. |
+| Product                | Evidence found                                                                                                                                                                         | Lesson for Milagre                                                                                        |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| T3 Code                | Integrated mobile simulator viewer; Expo Device Hub capture; native WebView with shared browser code. The mobile implementation examined prefers MJPEG on iOS and handles one pointer. | Closest ADE precedent. Reuse its separation between host tools and authenticated client access.           |
+| Orca                   | Desktop iOS streaming through serve-sim/MJPEG and Android through scrcpy. No simulator viewer was verified in its mobile agent interface.                                              | Its fixes show how renderer reloads and forgotten stream listeners can break an otherwise working viewer. |
+| SimDeck Studio         | Dedicated phone/tablet simulator client with WebRTC, device selection and controls; open-source host.                                                                                  | Closest reusable alternative backend; direct WebRTC is already practical in this category.                |
+| Mata                   | Dedicated iPhone/browser/Mac viewer. Advertises touch, multiple simulators and native H.265 streaming between Apple devices.                                                           | Useful product reference, but its proprietary native path is not an immediate Milagre integration.        |
+| Superset, Paseo, Happy | Remote agent access found; an equivalent local-simulator phone viewer was not verified. Superset's Limrun workflow uses cloud simulator links.                                         | Remote terminal/chat access alone does not establish the desired feature.                                 |
 
 Sources: [T3 device architecture](https://github.com/pingdotgg/t3code/blob/3a9c1a6df1b71d8ba73d287be90443e8e874802f/docs/internals/devices.md), [T3 mobile viewer](https://github.com/pingdotgg/t3code/blob/3a9c1a6df1b71d8ba73d287be90443e8e874802f/apps/mobile/src/features/devices/DeviceStreamWebView.tsx), [Orca frame streaming](https://github.com/stablyai/orca/blob/059e81a106f675aa445bdce4a4e8a9ed56cfa9f1/src/main/ipc/emulator-frame-stream.ts), [SimDeck video guide](https://github.com/NativeScript/SimDeck/blob/82e61b304d771b717eb134c32c6802a88ffa783b/docs/guide/video.md), [SimDeck Studio listing](https://apps.apple.com/ca/app/simdeck-studio/id6770182703), [Mata](https://getmata.app/). The adjacent ADE finding is a search boundary, not proof those products cannot provide the feature.
 
@@ -26,13 +26,13 @@ T3's [initial mobile viewer PR](https://github.com/pingdotgg/t3code/pull/12531) 
 
 ## Backend choice
 
-| Criterion | Expo Device Hub | SimDeck |
-| --- | --- | --- |
-| Artifacts inspected | `expo-device-hub@0.15.1`, `@expo/serve-sim@0.6.0` | `simdeck@0.2.0` |
-| iOS host | Swift N-API addon, macOS 14+, arm64 | Separate native executable; arm64 and x64 artifacts |
-| Video | Direct WebRTC; other HTTP/WebSocket formats also available | Direct WebRTC |
-| Input | Separate HID WebSocket; iOS rejects WebRTC datachannels | Control datachannels attached to peer connection |
-| Android | adb/scrcpy 4.0 capture/control | Emulator gRPC/shared-video capture; benefits from owning emulator startup |
+| Criterion           | Expo Device Hub                                            | SimDeck                                                                   |
+| ------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Artifacts inspected | `expo-device-hub@0.15.1`, `@expo/serve-sim@0.6.0`          | `simdeck@0.2.0`                                                           |
+| iOS host            | Swift N-API addon, macOS 14+, arm64                        | Separate native executable; arm64 and x64 artifacts                       |
+| Video               | Direct WebRTC; other HTTP/WebSocket formats also available | Direct WebRTC                                                             |
+| Input               | Separate HID WebSocket; iOS rejects WebRTC datachannels    | Control datachannels attached to peer connection                          |
+| Android             | adb/scrcpy 4.0 capture/control                             | Emulator gRPC/shared-video capture; benefits from owning emulator startup |
 
 Choose Expo first because the separate input path fits daemon-enforced control ownership, and adb/scrcpy suits emulators already running outside Milagre. This Mac is arm64. If Intel Mac support is a release requirement, Expo's inspected iOS artifact cannot cover it; reconsider SimDeck or provide an explicit platform limitation.
 
@@ -59,12 +59,12 @@ flowchart LR
 
 Use WebRTC for compressed video. It supplies browser decoding, congestion handling and NAT traversal. Keep video out of the React Native bridge and Milagre's JSON relay. Relay only SDP/ICE negotiation and small typed input messages through the existing authenticated phone connection.
 
-| Alternative | Why it is not the default |
-| --- | --- |
+| Alternative                           | Why it is not the default                                                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | JPEG frames into React Native `Image` | Repeated base64, encryption, decode and rendering work; suitable as a low-rate fallback with one pending latest frame. |
-| MJPEG in a DOM viewer | Milagre's current HTTP relay fully buffers responses. An endless multipart body cannot pass through unchanged. |
-| H.264/WebCodecs over WebSocket | Requires custom framing, decoder setup, keyframe recovery and backpressure. TCP stalls can accumulate stale video. |
-| Native React Native WebRTC | Possible fallback if DOM playback fails, but introduces native code and requires approval for a new build. |
+| MJPEG in a DOM viewer                 | Milagre's current HTTP relay fully buffers responses. An endless multipart body cannot pass through unchanged.         |
+| H.264/WebCodecs over WebSocket        | Requires custom framing, decoder setup, keyframe recovery and backpressure. TCP stalls can accumulate stale video.     |
+| Native React Native WebRTC            | Possible fallback if DOM playback fails, but introduces native code and requires approval for a new build.             |
 
 The code evidence for the relay constraint is [relay-host.cjs](../../apps/daemon/src/relay-host.cjs): its HTTP forwarding uses `response.arrayBuffer()`, while live forwarding stringifies socket data. Existing limits and nonce ordering also make it unsuitable as an unmodified high-rate media pipe. WebCodecs availability itself is established by [WebKit's Safari 16.4 notes](https://webkit.org/blog/13966/webkit-features-in-safari-16-4/); transport suitability remains an engineering judgment.
 
@@ -88,13 +88,13 @@ Keep the long-lived TURN key server-side and issue short-lived credentials only 
 
 The helper belongs to the persistent daemon, consistent with [ADR-0003](../adr/0003-runtime-ownership.md). Electron quit should disconnect a viewer while the daemon and simulators remain available to the phone. Run the native addon in a separate supervised process so its crash cannot terminate Chats. Pin and integrity-check the helper artifact; avoid a floating `npx` download per session.
 
-| Boundary | Required integration |
-| --- | --- |
-| Device identity | Add a machine-level simulator/emulator identity, with explicit Worktree and optional Chat associations. Existing phone push `deviceId` values are unrelated. Treat Device as a proposed new glossary term. |
+| Boundary        | Required integration                                                                                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Device identity | Add a machine-level simulator/emulator identity, with explicit Worktree and optional Chat associations. Existing phone push `deviceId` values are unrelated. Treat Device as a proposed new glossary term.            |
 | Input ownership | Allow several viewers, one controller lease. Human takeover revokes agent control. Expiration, disconnect and backgrounding release input and end gestures. Reject stale lease, sequence and orientation generations. |
-| Authentication | Enforce ownership using server-known client or Chat identity. Core currently receives a null command event, so trusting a caller-supplied actor field would be insufficient. |
-| Client exposure | Add explicit desktop preload methods, mobile RPC allowlisting and confinement rules. Use the native phone transport to bridge DOM messages; browser WebSockets cannot inherit native bearer-header assumptions. |
-| Lifetime | Keep simulator lifetime, helper lifetime and viewer subscriptions separate. Closing a viewer must not shut down an externally booted simulator. Update/restart must stop owned helpers before replacing binaries. |
+| Authentication  | Enforce ownership using server-known client or Chat identity. Core currently receives a null command event, so trusting a caller-supplied actor field would be insufficient.                                          |
+| Client exposure | Add explicit desktop preload methods, mobile RPC allowlisting and confinement rules. Use the native phone transport to bridge DOM messages; browser WebSockets cannot inherit native bearer-header assumptions.       |
+| Lifetime        | Keep simulator lifetime, helper lifetime and viewer subscriptions separate. Closing a viewer must not shut down an externally booted simulator. Update/restart must stop owned helpers before replacing binaries.     |
 
 Source seams: [core runtime](../../packages/core/src/runtime.cjs), [daemon server](../../apps/daemon/src/server.cjs), [mobile bridge](../../apps/daemon/src/mobile-bridge.cjs), [confinement](../../apps/daemon/src/confine.cjs), [desktop preload](../../apps/desktop/electron/preload.cjs), [daemon bootstrap](../../apps/daemon/src/bootstrap.cjs). A Chat-bound agent adapter can follow the identity pattern in [linked-mcp-server.cjs](../../packages/core/src/linked-mcp-server.cjs), without making a Device a Link endpoint.
 
@@ -134,12 +134,12 @@ If those gates pass, proceed with Expo helper + shared DOM WebRTC receiver. If D
 
 ## Evidence pins and limits
 
-| Source | Revision inspected |
-| --- | --- |
-| T3 Code | `3a9c1a6df1b71d8ba73d287be90443e8e874802f`; Hub pin `0.12.0` |
-| Orca | `059e81a106f675aa445bdce4a4e8a9ed56cfa9f1` |
-| Expo published release | Hub `0.15.1`, serve-sim `0.6.0`; git head `9ea662fe02464154989313276a73c7b940115fd6` |
-| Expo source checkout | `4822dc0448bfdc99c73b080957e54d5c7a6c2851`; newer canary, not identical to release |
-| SimDeck published release | `0.2.0`; git head `82e61b304d771b717eb134c32c6802a88ffa783b` |
+| Source                    | Revision inspected                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------ |
+| T3 Code                   | `3a9c1a6df1b71d8ba73d287be90443e8e874802f`; Hub pin `0.12.0`                         |
+| Orca                      | `059e81a106f675aa445bdce4a4e8a9ed56cfa9f1`                                           |
+| Expo published release    | Hub `0.15.1`, serve-sim `0.6.0`; git head `9ea662fe02464154989313276a73c7b940115fd6` |
+| Expo source checkout      | `4822dc0448bfdc99c73b080957e54d5c7a6c2851`; newer canary, not identical to release   |
+| SimDeck published release | `0.2.0`; git head `82e61b304d771b717eb134c32c6802a88ffa783b`                         |
 
 Research downloads were kept outside the repository under `/private/tmp/milagre-host-research`. Published bundles were inspected separately from current source. Claims about product availability are source/listing observations; claims about performance, installed TestFlight behavior, runtime compatibility and production readiness remain unverified until the experiment above.

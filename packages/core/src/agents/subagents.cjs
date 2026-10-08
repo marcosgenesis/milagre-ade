@@ -1,132 +1,188 @@
 // Provider-owned children have their own lifecycle; a launch tool finishing is not a child finishing.
-const { capOutput, claudeStep, codexStep } = require('./steps.cjs');
-const { createHash } = require('node:crypto');
-const active = agent => ['running', 'initializing', 'waiting'].includes(agent.status);
+const { capOutput, claudeStep, codexStep } = require("./steps.cjs");
+const { createHash } = require("node:crypto");
+const active = (agent) => ["running", "initializing", "waiting"].includes(agent.status);
 function update(state, id, patch, entry) {
   state.subagents ??= new Map();
   const previous = state.subagents.get(id);
   const row = entry?.text ? { ...entry, text: capOutput(entry.text) } : null;
-  const previousRow = row && previous?.transcript.find(item => item.id === row.id);
+  const previousRow = row && previous?.transcript.find((item) => item.id === row.id);
   const sameRow = !row || (previousRow?.kind === row.kind && previousRow?.text === row.text);
-  if (previous && sameRow && Object.entries(patch).every(([key, value]) => previous[key] === value)) return {type:'subagent-update',agent:previous};
+  if (previous && sameRow && Object.entries(patch).every(([key, value]) => previous[key] === value)) return { type: "subagent-update", agent: previous };
   const time = Date.now();
-  const agent = { id, title: 'Subagent', status: 'running', startedAt: time, transcript: [], ...previous, ...patch, updatedAt: time };
+  const agent = { id, title: "Subagent", status: "running", startedAt: time, transcript: [], ...previous, ...patch, updatedAt: time };
   if (row && !sameRow) {
-    agent.transcript = [...agent.transcript.filter(item => item.id !== row.id), row].slice(-100);
+    agent.transcript = [...agent.transcript.filter((item) => item.id !== row.id), row].slice(-100);
   }
   if (!active(agent)) agent.endedAt ??= time;
   else delete agent.endedAt;
   state.subagents.set(id, agent);
-  return { type: 'subagent-update', agent };
+  return { type: "subagent-update", agent };
 }
-const textContent = content => typeof content === 'string' ? content : (content ?? []).map(b => b.text ?? b.content ?? '').filter(v=>typeof v==='string').join('\n');
+const textContent = (content) =>
+  typeof content === "string"
+    ? content
+    : (content ?? [])
+        .map((b) => b.text ?? b.content ?? "")
+        .filter((v) => typeof v === "string")
+        .join("\n");
 // Keep a small, deduplicated history. Polling the same provider item must not replay a message.
 function communicate(state, ownerId, id, fromId, toId, text) {
   const agent = state.subagents?.get(ownerId);
   if (!agent || !text) return [];
   // Retain seen IDs beyond the visible history cap so polling older items cannot replay them.
   state.subagentCommunicationIds ??= new Set();
-  if (state.subagentCommunicationIds.has(id) || agent.communications?.some(entry => entry.id === id)) return [];
+  if (state.subagentCommunicationIds.has(id) || agent.communications?.some((entry) => entry.id === id)) return [];
   state.subagentCommunicationIds.add(id);
-  const communication = {id, fromId, toId, text:capOutput(text), at:Date.now()};
-  return [update(state, ownerId, {communications:[...(agent.communications ?? []), communication].slice(-20)})];
+  const communication = { id, fromId, toId, text: capOutput(text), at: Date.now() };
+  return [update(state, ownerId, { communications: [...(agent.communications ?? []), communication].slice(-20) })];
 }
 function claudeRecipient(state, recipient) {
-  const id = state.subagents?.has(recipient) ? recipient : state.taskAgents?.get(recipient) ?? state.subagentNames?.get(recipient);
+  const id = state.subagents?.has(recipient) ? recipient : (state.taskAgents?.get(recipient) ?? state.subagentNames?.get(recipient));
   return state.subagents?.has(id) ? id : undefined;
 }
 function claudeSubagents(message, state) {
   const events = [];
   const parent = message.parent_tool_use_id;
   const content = message.message?.content;
-  if (message.type === 'assistant' && Array.isArray(content)) {
+  if (message.type === "assistant" && Array.isArray(content)) {
     for (const [index, block] of content.entries()) {
-      if (block.type === 'tool_use' && ['Agent','Task'].includes(block.name)) {
+      if (block.type === "tool_use" && ["Agent", "Task"].includes(block.name)) {
         if (!parent && !block.input?.run_in_background) {
           state.foregroundChildren ??= new Set();
           state.foregroundChildren.add(block.id);
-          events.push({type:'subagents-waiting',waiting:true});
+          events.push({ type: "subagents-waiting", waiting: true });
         }
-        events.push(update(state, block.id, { title: block.input?.description || 'Subagent', prompt: block.input?.prompt, ...(parent ? {parentId:parent} : {}) }));
+        events.push(
+          update(state, block.id, { title: block.input?.description || "Subagent", prompt: block.input?.prompt, ...(parent ? { parentId: parent } : {}) }),
+        );
         if (block.input?.name) {
           state.subagentNames ??= new Map();
-          state.subagentNames.set(block.input.name,block.id);
+          state.subagentNames.set(block.input.name, block.id);
         }
         events.push(...communicate(state, block.id, `task:${block.id}`, parent ?? null, block.id, block.input?.prompt));
       }
-      if (block.type === 'tool_use' && block.name === 'SendMessage' && (!parent || state.subagents?.has(parent))) {
+      if (block.type === "tool_use" && block.name === "SendMessage" && (!parent || state.subagents?.has(parent))) {
         const input = block.input ?? {};
         const text = input.message ?? input.content;
-        const toId = claudeRecipient(state,input.to ?? input.recipient);
-        if ((!input.type || input.type === 'message') && toId && typeof text === 'string' && text) {
+        const toId = claudeRecipient(state, input.to ?? input.recipient);
+        if ((!input.type || input.type === "message") && toId && typeof text === "string" && text) {
           state.subagentMessages ??= new Map();
-          state.subagentMessages.set(block.id,{fromId:parent ?? null,toId,text});
+          state.subagentMessages.set(block.id, { fromId: parent ?? null, toId, text });
         }
       }
       if (parent && state.subagents?.has(parent)) {
-        const text = block.type === 'text' ? block.text : block.type === 'thinking' ? block.thinking : block.type === 'tool_use' ? claudeStep(block.id, block.name, block.input).title : '';
-        events.push(update(state, parent, { latestActivity: block.type === 'tool_use' ? text : 'Responding' }, { id: `${message.uuid ?? message.message.id}:${block.id ?? index}:${block.type}`, kind: block.type === 'tool_use' ? 'tool' : 'message', text }));
+        const text =
+          block.type === "text"
+            ? block.text
+            : block.type === "thinking"
+              ? block.thinking
+              : block.type === "tool_use"
+                ? claudeStep(block.id, block.name, block.input).title
+                : "";
+        events.push(
+          update(
+            state,
+            parent,
+            { latestActivity: block.type === "tool_use" ? text : "Responding" },
+            { id: `${message.uuid ?? message.message.id}:${block.id ?? index}:${block.type}`, kind: block.type === "tool_use" ? "tool" : "message", text },
+          ),
+        );
       }
     }
   }
-  if (message.type === 'user' && Array.isArray(content)) {
+  if (message.type === "user" && Array.isArray(content)) {
     for (const block of content) {
-      if (block.type !== 'tool_result') continue;
+      if (block.type !== "tool_result") continue;
       const sent = state.subagentMessages?.get(block.tool_use_id);
       if (sent) {
         state.subagentMessages.delete(block.tool_use_id);
-        if (!block.is_error && message.tool_use_result?.success !== false) events.push(...communicate(state,sent.toId,`send:${block.tool_use_id}`,sent.fromId,sent.toId,sent.text));
+        if (!block.is_error && message.tool_use_result?.success !== false)
+          events.push(...communicate(state, sent.toId, `send:${block.tool_use_id}`, sent.fromId, sent.toId, sent.text));
       }
       if (state.subagents?.has(block.tool_use_id)) {
         if (!parent) {
           state.foregroundChildren?.delete(block.tool_use_id);
-          events.push({type:'subagents-waiting',waiting:Boolean(state.foregroundChildren?.size)});
+          events.push({ type: "subagents-waiting", waiting: Boolean(state.foregroundChildren?.size) });
         }
-        if (message.tool_use_result?.status !== 'async_launched') {
-          events.push(update(state, block.tool_use_id, {status:block.is_error ? 'failed':'completed',latestActivity:'Finished'}, {id:'result',kind:'message',text:textContent(block.content)}));
-          events.push(...communicate(state, block.tool_use_id, `result:${block.tool_use_id}`, block.tool_use_id, state.subagents.get(block.tool_use_id).parentId ?? null, textContent(block.content)));
+        if (message.tool_use_result?.status !== "async_launched") {
+          events.push(
+            update(
+              state,
+              block.tool_use_id,
+              { status: block.is_error ? "failed" : "completed", latestActivity: "Finished" },
+              { id: "result", kind: "message", text: textContent(block.content) },
+            ),
+          );
+          events.push(
+            ...communicate(
+              state,
+              block.tool_use_id,
+              `result:${block.tool_use_id}`,
+              block.tool_use_id,
+              state.subagents.get(block.tool_use_id).parentId ?? null,
+              textContent(block.content),
+            ),
+          );
         }
       }
-      if (parent && state.subagents?.has(parent)) events.push(update(state,parent,{}, {id:`result:${block.tool_use_id}`,kind:'tool',text:textContent(block.content)}));
+      if (parent && state.subagents?.has(parent))
+        events.push(update(state, parent, {}, { id: `result:${block.tool_use_id}`, kind: "tool", text: textContent(block.content) }));
     }
   }
-  if (message.type === 'system' && message.subtype?.startsWith('task_')) {
+  if (message.type === "system" && message.subtype?.startsWith("task_")) {
     state.taskAgents ??= new Map();
     let id = state.taskAgents.get(message.task_id) ?? message.tool_use_id;
     const known = id && state.subagents?.has(id);
-    if (!known && !(message.subtype === 'task_started' && (message.task_type === 'local_agent' || message.subagent_type))) return events;
+    if (!known && !(message.subtype === "task_started" && (message.task_type === "local_agent" || message.subagent_type))) return events;
     id ??= message.task_id;
-    state.taskAgents.set(message.task_id,id);
-    const patch = { ...(message.description ? {title:message.description} : {}), ...(message.prompt ? {prompt:message.prompt} : {}) };
-    if (message.subtype === 'task_started') patch.status = 'running';
-    if (message.subtype === 'task_progress') patch.latestActivity = message.summary || message.last_tool_name || message.description;
-    if (message.subtype === 'task_notification') {
-      patch.status = {completed:'completed',failed:'failed',stopped:'cancelled'}[message.status] ?? 'unknown';
+    state.taskAgents.set(message.task_id, id);
+    const patch = { ...(message.description ? { title: message.description } : {}), ...(message.prompt ? { prompt: message.prompt } : {}) };
+    if (message.subtype === "task_started") patch.status = "running";
+    if (message.subtype === "task_progress") patch.latestActivity = message.summary || message.last_tool_name || message.description;
+    if (message.subtype === "task_notification") {
+      patch.status = { completed: "completed", failed: "failed", stopped: "cancelled" }[message.status] ?? "unknown";
       patch.latestActivity = message.summary;
     }
-    if (message.subtype === 'task_updated') {
-      if (message.patch.status) patch.status = {pending:'initializing',running:'running',completed:'completed',failed:'failed',killed:'cancelled',paused:'waiting'}[message.patch.status] ?? 'unknown';
+    if (message.subtype === "task_updated") {
+      if (message.patch.status)
+        patch.status =
+          { pending: "initializing", running: "running", completed: "completed", failed: "failed", killed: "cancelled", paused: "waiting" }[
+            message.patch.status
+          ] ?? "unknown";
       if (message.patch.description) patch.title = message.patch.description;
     }
-    events.push(update(state,id,patch,message.summary ? {id:'summary',kind:'message',text:message.summary}:undefined));
-    if (message.subtype === 'task_notification') events.push(...communicate(state,id,`notification:${message.task_id}:${message.status}`,id,state.subagents.get(id).parentId ?? null,message.summary));
+    events.push(update(state, id, patch, message.summary ? { id: "summary", kind: "message", text: message.summary } : undefined));
+    if (message.subtype === "task_notification")
+      events.push(
+        ...communicate(state, id, `notification:${message.task_id}:${message.status}`, id, state.subagents.get(id).parentId ?? null, message.summary),
+      );
   }
   return events;
 }
-const codexStatus = status => ({pendingInit:'initializing',running:'running',interrupted:'cancelled',completed:'completed',errored:'failed',shutdown:'cancelled',notFound:'unknown'}[status] ?? 'unknown');
+const codexStatus = (status) =>
+  ({
+    pendingInit: "initializing",
+    running: "running",
+    interrupted: "cancelled",
+    completed: "completed",
+    errored: "failed",
+    shutdown: "cancelled",
+    notFound: "unknown",
+  })[status] ?? "unknown";
 function codexSubagents(method, params, state) {
   const item = params.item;
   const foreign = params.threadId && state.threadId && params.threadId !== state.threadId;
   if (foreign && !state.subagents?.has(params.threadId)) return [];
   if (!foreign && state.turnId && params.turnId && params.turnId !== state.turnId) return [];
   const events = [];
-  if (item?.type === 'subAgentActivity' && ['item/started','item/completed'].includes(method)) {
+  if (item?.type === "subAgentActivity" && ["item/started", "item/completed"].includes(method)) {
     const target = item.agentThreadId;
     const sender = foreign ? params.threadId : null;
     const id = `activity:${params.threadId ?? state.threadId}:${item.id}:${item.kind}`;
     state.subagentActivityIds ??= new Set();
     if (state.subagentActivityIds.has(id)) return [];
-    if (item.kind === 'interacted') {
+    if (item.kind === "interacted") {
       const toId = target === state.threadId ? null : target;
       const owner = toId ?? sender;
       if (!state.subagents?.has(owner)) return [];
@@ -134,55 +190,88 @@ function codexSubagents(method, params, state) {
       if (toId) {
         // An interaction may wake a completed child, but only its next thread read can prove it.
         state.subagentRecheckUntil ??= new Map();
-        state.subagentRecheckUntil.set(toId,Date.now() + 10_000);
+        state.subagentRecheckUntil.set(toId, Date.now() + 10_000);
       }
-      events.push(...communicate(state,owner,id,sender,toId,'Message sent'));
+      events.push(...communicate(state, owner, id, sender, toId, "Message sent"));
     } else if (target && target !== state.threadId) {
       state.subagentActivityIds.add(id);
-      const status = {started:'running',interrupted:'cancelled',completed:'completed'}[item.kind];
-      events.push(update(state,target,{title:item.agentPath || 'Subagent',status:status ?? 'unknown',...(foreign && item.kind === 'started' ? {parentId:params.threadId}:{})}));
+      const status = { started: "running", interrupted: "cancelled", completed: "completed" }[item.kind];
+      events.push(
+        update(state, target, {
+          title: item.agentPath || "Subagent",
+          status: status ?? "unknown",
+          ...(foreign && item.kind === "started" ? { parentId: params.threadId } : {}),
+        }),
+      );
     }
   }
-  if (foreign && method === 'thread/status/changed') {
-    const status = params.status?.type === 'active'
-      ? params.status.activeFlags?.some(flag => ['waitingOnApproval','waitingOnUserInput'].includes(flag)) ? 'waiting' : 'running'
-      : {systemError:'failed',notLoaded:'unknown'}[params.status?.type];
+  if (foreign && method === "thread/status/changed") {
+    const status =
+      params.status?.type === "active"
+        ? params.status.activeFlags?.some((flag) => ["waitingOnApproval", "waitingOnUserInput"].includes(flag))
+          ? "waiting"
+          : "running"
+        : { systemError: "failed", notLoaded: "unknown" }[params.status?.type];
     // Unloading describes the provider process, not a change to its recorded turn outcome.
-    const unloadedTerminal = params.status?.type === 'notLoaded' && ['completed','failed','cancelled'].includes(state.subagents.get(params.threadId).status);
-    if (status && !unloadedTerminal) events.push(update(state,params.threadId,{status}));
+    const unloadedTerminal = params.status?.type === "notLoaded" && ["completed", "failed", "cancelled"].includes(state.subagents.get(params.threadId).status);
+    if (status && !unloadedTerminal) events.push(update(state, params.threadId, { status }));
   }
-  if (item?.type === 'collabAgentToolCall' && ['item/started','item/completed'].includes(method)) {
+  if (item?.type === "collabAgentToolCall" && ["item/started", "item/completed"].includes(method)) {
     for (const id of item.receiverThreadIds ?? []) {
       const sender = foreign ? params.threadId : null;
       if (id === state.threadId) {
-        if (foreign && method === 'item/completed' && item.status !== 'failed' && item.tool === 'sendInput') events.push(...communicate(state,sender,`${item.id}:${id}`,sender,null,item.prompt));
+        if (foreign && method === "item/completed" && item.status !== "failed" && item.tool === "sendInput")
+          events.push(...communicate(state, sender, `${item.id}:${id}`, sender, null, item.prompt));
         continue;
       }
       const status = item.agentsStates?.[id];
-      if (!state.subagents?.has(id) && !status && item.tool !== 'spawnAgent') continue;
-      const patch = { ...(foreign && item.tool === 'spawnAgent' ? {parentId:params.threadId} : {}), ...(item.tool === 'spawnAgent' ? {title:item.prompt?.split('\n')[0].slice(0,120) || 'Subagent',prompt:item.prompt} : {}), ...(status ? {status:codexStatus(status.status)} : {}) };
-      events.push(update(state,id,patch,status?.message ? {id:'result',kind:'message',text:status.message}:undefined));
-      if (method === 'item/completed' && item.status !== 'failed') {
-        if (['spawnAgent','sendInput'].includes(item.tool)) events.push(...communicate(state,id,`${item.id}:${id}`,sender,id,item.prompt));
+      if (!state.subagents?.has(id) && !status && item.tool !== "spawnAgent") continue;
+      const patch = {
+        ...(foreign && item.tool === "spawnAgent" ? { parentId: params.threadId } : {}),
+        ...(item.tool === "spawnAgent" ? { title: item.prompt?.split("\n")[0].slice(0, 120) || "Subagent", prompt: item.prompt } : {}),
+        ...(status ? { status: codexStatus(status.status) } : {}),
+      };
+      events.push(update(state, id, patch, status?.message ? { id: "result", kind: "message", text: status.message } : undefined));
+      if (method === "item/completed" && item.status !== "failed") {
+        if (["spawnAgent", "sendInput"].includes(item.tool)) events.push(...communicate(state, id, `${item.id}:${id}`, sender, id, item.prompt));
         if (status?.message) {
           // agentsStates is a snapshot: another wait call can report the same reply again.
-          const resultId = createHash('sha256').update(JSON.stringify([id,sender,status.status,status.message])).digest('hex');
-          events.push(...communicate(state,id,`reply:${resultId}`,id,sender,status.message));
+          const resultId = createHash("sha256")
+            .update(JSON.stringify([id, sender, status.status, status.message]))
+            .digest("hex");
+          events.push(...communicate(state, id, `reply:${resultId}`, id, sender, status.message));
         }
       }
     }
-    if (!foreign && item.tool === 'wait') events.push({type:'subagents-waiting',waiting:method === 'item/started'});
+    if (!foreign && item.tool === "wait") events.push({ type: "subagents-waiting", waiting: method === "item/started" });
   }
-  if (foreign && method === 'item/completed' && item) {
+  if (foreign && method === "item/started" && item) {
+    const activity = codexStep(item)?.title ?? (item.type === "reasoning" ? "Thinking" : item.type === "agentMessage" ? "Responding" : undefined);
+    if (activity) events.push(update(state, params.threadId, { latestActivity: activity }));
+  }
+  if (foreign && method === "item/completed" && item) {
     const step = codexStep(item);
-    const text = item.type === 'agentMessage' ? item.text : item.type === 'reasoning' ? (item.summary ?? []).join('\n') : step ? [step.title,item.aggregatedOutput].filter(Boolean).join('\n') : '';
-    if (text) events.push(update(state,params.threadId,{latestActivity:step?.title || 'Responding'}, {id:item.id,kind:step?'tool':'message',text}));
+    const text =
+      item.type === "agentMessage"
+        ? item.text
+        : item.type === "reasoning"
+          ? (item.summary ?? []).join("\n")
+          : step
+            ? [step.title, item.aggregatedOutput].filter(Boolean).join("\n")
+            : "";
+    if (text)
+      events.push(update(state, params.threadId, { latestActivity: step?.title || "Responding" }, { id: item.id, kind: step ? "tool" : "message", text }));
   }
-  if (foreign && method === 'turn/started') events.push(update(state,params.threadId,{status:'running'}));
-  if (foreign && method === 'turn/completed') events.push(update(state,params.threadId,{status:params.turn?.status === 'failed' ? 'failed' : params.turn?.status === 'interrupted' ? 'cancelled' : 'completed'}));
+  if (foreign && method === "turn/started") events.push(update(state, params.threadId, { status: "running" }));
+  if (foreign && method === "turn/completed")
+    events.push(
+      update(state, params.threadId, {
+        status: params.turn?.status === "failed" ? "failed" : params.turn?.status === "interrupted" ? "cancelled" : "completed",
+      }),
+    );
   return events;
 }
-function settleSubagents(state,status) {
-  return [...(state.subagents?.values() ?? [])].filter(active).map(agent=>update(state,agent.id,{status}));
+function settleSubagents(state, status) {
+  return [...(state.subagents?.values() ?? [])].filter(active).map((agent) => update(state, agent.id, { status }));
 }
 module.exports = { claudeSubagents, codexSubagents, settleSubagents, active };

@@ -2,8 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 // Agents need real filesystem paths to read a skill's references outside Electron.
-const BUNDLED_SKILLS_DIRECTORY = path.join(__dirname, "bundled-skills")
-  .replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
+const BUNDLED_SKILLS_DIRECTORY = path.join(__dirname, "bundled-skills").replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
 
 function bundledWritingInstructions() {
   const directory = path.join(BUNDLED_SKILLS_DIRECTORY, "tldr");

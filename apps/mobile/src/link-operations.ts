@@ -5,8 +5,12 @@ export function createLinkOperations() {
     forSend(key: string, signature: string, makeId: () => string) {
       const previous = pending.get(key);
       if (previous?.signature === signature) return previous.id;
-      const id = makeId(); pending.set(key, { signature, id }); return id;
+      const id = makeId();
+      pending.set(key, { signature, id });
+      return id;
     },
-    accepted(key: string, id: string) { if (pending.get(key)?.id === id) pending.delete(key); },
+    accepted(key: string, id: string) {
+      if (pending.get(key)?.id === id) pending.delete(key);
+    },
   };
 }

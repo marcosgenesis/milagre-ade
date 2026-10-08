@@ -1,16 +1,7 @@
 import { useReducedMotion } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
-import {
-  type ComponentPropsWithRef,
-  type ReactNode,
-  type Ref,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ComponentPropsWithRef, type Ref, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PreviewRail, type PreviewRailItem } from "../motion/PreviewRail";
 import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 
@@ -44,25 +35,17 @@ function getMessagePreview(message: HTMLElement, assistantResponse?: HTMLElement
   if (text.length <= PREVIEW_TITLE_LENGTH) {
     return {
       label: text,
-      description: responseText
-        ? truncateMessageText(responseText, PREVIEW_DESCRIPTION_LENGTH)
-        : undefined,
+      description: responseText ? truncateMessageText(responseText, PREVIEW_DESCRIPTION_LENGTH) : undefined,
     };
   }
 
   const titleExcerpt = text.slice(0, PREVIEW_TITLE_LENGTH);
   const titleBoundary = titleExcerpt.lastIndexOf(" ");
-  const titleEnd =
-    titleBoundary > PREVIEW_TITLE_LENGTH * 0.65
-      ? titleBoundary
-      : PREVIEW_TITLE_LENGTH;
+  const titleEnd = titleBoundary > PREVIEW_TITLE_LENGTH * 0.65 ? titleBoundary : PREVIEW_TITLE_LENGTH;
 
   return {
     label: `${text.slice(0, titleEnd).trim()}…`,
-    description: truncateMessageText(
-      responseText || text.slice(titleEnd).trim(),
-      PREVIEW_DESCRIPTION_LENGTH,
-    ),
+    description: truncateMessageText(responseText || text.slice(titleEnd).trim(), PREVIEW_DESCRIPTION_LENGTH),
   };
 }
 
@@ -79,14 +62,8 @@ export interface MessageScrollerProps extends ComponentPropsWithRef<"div"> {
   contentClassName?: string;
   railClassName?: string;
   viewportRef?: Ref<HTMLElement>;
-  viewportProps?: Omit<
-    ComponentPropsWithRef<"section">,
-    "children" | "className" | "ref"
-  >;
-  contentProps?: Omit<
-    ComponentPropsWithRef<"div">,
-    "children" | "className" | "ref"
-  >;
+  viewportProps?: Omit<ComponentPropsWithRef<"section">, "children" | "className" | "ref">;
+  contentProps?: Omit<ComponentPropsWithRef<"div">, "children" | "className" | "ref">;
   /** Compatibility with the previous local API. */
   autoScrollKey?: string | number;
 }
@@ -146,6 +123,7 @@ export function MessageScroller({
       if (typeof externalViewportRef === "function") {
         externalViewportRef(node);
       } else if (externalViewportRef) {
+        // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
         externalViewportRef.current = node;
       }
     },
@@ -172,8 +150,7 @@ export function MessageScroller({
       return;
     }
 
-    const distanceFromEnd =
-      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    const distanceFromEnd = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     if (distanceFromEnd <= followThreshold) {
       const lastId = targets.at(-1)?.[0] ?? "";
       setActiveRailId((current) => (current === lastId ? current : lastId));
@@ -194,8 +171,7 @@ export function MessageScroller({
       else high = mid;
     }
     const previous = low > 0 ? low - 1 : low;
-    const nearest =
-      Math.abs(centerOf(previous) - viewportCenter) <= Math.abs(centerOf(low) - viewportCenter) ? previous : low;
+    const nearest = Math.abs(centerOf(previous) - viewportCenter) <= Math.abs(centerOf(low) - viewportCenter) ? previous : low;
     const nearestId = targets[nearest][0];
 
     setActiveRailId((current) => (current === nearestId ? current : nearestId));
@@ -209,6 +185,7 @@ export function MessageScroller({
 
     const messages = Array.from(content.querySelectorAll<HTMLElement>('[data-slot="message"]'));
     // The first assistant message after each one, found in a single backwards pass.
+    // oxlint-disable-next-line unicorn/no-new-array -- array is pre-sized and filled by index on purpose
     const responses: Array<HTMLElement | undefined> = new Array(messages.length);
     let nextAssistant: HTMLElement | undefined;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -293,9 +270,12 @@ export function MessageScroller({
     programmaticScrollRef.current = true;
     viewport.scrollTo({ top: viewport.scrollHeight, behavior });
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
-    scrollTimerRef.current = window.setTimeout(() => {
-      programmaticScrollRef.current = false;
-    }, behavior === "smooth" ? 320 : 0);
+    scrollTimerRef.current = window.setTimeout(
+      () => {
+        programmaticScrollRef.current = false;
+      },
+      behavior === "smooth" ? 320 : 0,
+    );
   }, []);
 
   const updateJumpToBottom = useCallback(() => {
@@ -374,9 +354,7 @@ export function MessageScroller({
     // Only messages being added or removed rebuild the list; text streaming inside one never reaches this observer.
     // A list that doesn't exist yet (or is replaced) is found again through the content's own children.
     const listOf = () =>
-      content.querySelector<HTMLElement>('[data-slot="message"]')?.parentElement ??
-      (content.firstElementChild as HTMLElement | null) ??
-      content;
+      content.querySelector<HTMLElement>('[data-slot="message"]')?.parentElement ?? (content.firstElementChild as HTMLElement | null) ?? content;
     let list = listOf();
     const mutationObserver = new MutationObserver(() => {
       const current = listOf();
@@ -438,9 +416,12 @@ export function MessageScroller({
       const behavior = reduce || !smooth ? "auto" : "smooth";
       viewport.scrollTo({ top, behavior });
       if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
-      scrollTimerRef.current = window.setTimeout(() => {
-        programmaticScrollRef.current = false;
-      }, behavior === "smooth" ? 320 : 0);
+      scrollTimerRef.current = window.setTimeout(
+        () => {
+          programmaticScrollRef.current = false;
+        },
+        behavior === "smooth" ? 320 : 0,
+      );
     },
     [railItems, reduce, scrollToEnd, setFollowing, smooth],
   );

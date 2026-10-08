@@ -1,6 +1,6 @@
 import type { AgentSession, CoordinatorState, DiffStat, Subagent } from "./model.ts";
 
-export type SessionPatch = Partial<Pick<AgentSession, "title" | "unread" | "archived">>;
+export type SessionPatch = Partial<Pick<AgentSession, "title" | "unread" | "archived" | "pinned" | "pin_order">>;
 
 /** A new worktree's branch, renamed from its prompt's first words to the name picked for its chat. */
 export type WorktreeRename = { projectPath: string; path: string; from: string; name: string };

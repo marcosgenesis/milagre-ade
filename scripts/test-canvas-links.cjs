@@ -29,11 +29,25 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
   const window = new BrowserWindow({ width: 1100, height: 690, show: false, webPreferences: { backgroundThrottling: false } });
-  const evaluate = code => window.webContents.executeJavaScript(code);
-  const mouse = (type, x, y) => window.webContents.sendInputEvent({ type, x, y, button: "left", clickCount: 1, modifiers: type === "mouseMove" ? ["leftButtonDown"] : [] });
-  const waitFor = async code => { for (let i = 0; i < 200; i++) { if (await evaluate(code)) return; await delay(25); } throw new Error(`Timed out: ${code}`); };
-  const point = (nodeName, handle) => evaluate(`(() => { const node = [...document.querySelectorAll('.react-flow__node')].find(node => node.textContent.includes(${JSON.stringify(nodeName)}) && node.classList.contains('react-flow__node-project')); const r = node?.querySelector(${JSON.stringify(`.react-flow__handle[data-handleid="${handle}"]`)})?.getBoundingClientRect(); return r && { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
-  const screenshot = name => { if (!process.env.MILAGRE_SCREENSHOT_DIR) return Promise.resolve(); fs.mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true }); return window.webContents.capturePage().then(image => fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, `${name}.png`), image.toPNG())); };
+  const evaluate = (code) => window.webContents.executeJavaScript(code);
+  const mouse = (type, x, y) =>
+    window.webContents.sendInputEvent({ type, x, y, button: "left", clickCount: 1, modifiers: type === "mouseMove" ? ["leftButtonDown"] : [] });
+  const waitFor = async (code) => {
+    for (let i = 0; i < 200; i++) {
+      if (await evaluate(code)) return;
+      await delay(25);
+    }
+    throw new Error(`Timed out: ${code}`);
+  };
+  const point = (nodeName, handle) =>
+    evaluate(
+      `(() => { const node = [...document.querySelectorAll('.react-flow__node')].find(node => node.textContent.includes(${JSON.stringify(nodeName)}) && node.classList.contains('react-flow__node-project')); const r = node?.querySelector(${JSON.stringify(`.react-flow__handle[data-handleid="${handle}"]`)})?.getBoundingClientRect(); return r && { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`,
+    );
+  const screenshot = (name) => {
+    if (!process.env.MILAGRE_SCREENSHOT_DIR) return Promise.resolve();
+    fs.mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+    return window.webContents.capturePage().then((image) => fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, `${name}.png`), image.toPNG()));
+  };
   try {
     await window.loadURL(process.argv[2]);
     await evaluate('localStorage.removeItem("canvas-test-links")');
@@ -41,14 +55,17 @@ async function browserChecks() {
     await waitFor('document.querySelectorAll(".react-flow__node-project").length === 2');
     assert.equal(await evaluate('document.body.textContent.includes("Archived")'), false);
     await evaluate('[...document.querySelectorAll(".react-flow__node-worktree button")].find(button => button.textContent === "Add API").click()');
-    assert.deepEqual(await evaluate('window.__openedChat'), { path: "/b", id: 2 });
+    assert.deepEqual(await evaluate("window.__openedChat"), { path: "/b", id: 2 });
     await screenshot("before");
     const from = await point("Frontend", "right-source");
     const to = await point("Backend", "left-target");
     assert.ok(from && to, "project handles are rendered");
     mouse("mouseMove", from.x, from.y);
     mouse("mouseDown", from.x, from.y);
-    for (let i = 1; i <= 20; i++) { mouse("mouseMove", Math.round(from.x + (to.x - from.x) * i / 20), Math.round(from.y + (to.y - from.y) * i / 20)); await delay(15); }
+    for (let i = 1; i <= 20; i++) {
+      mouse("mouseMove", Math.round(from.x + ((to.x - from.x) * i) / 20), Math.round(from.y + ((to.y - from.y) * i) / 20));
+      await delay(15);
+    }
     mouse("mouseUp", to.x, to.y);
     await waitFor('JSON.parse(localStorage.getItem("canvas-test-links") || "[]").length === 1');
     await waitFor('document.querySelectorAll(".react-flow__edge").length === 1');
@@ -63,35 +80,66 @@ async function browserChecks() {
     await waitFor('document.querySelectorAll(".react-flow__node-project").length === 2');
     const fromAgain = await point("Frontend", "right-source");
     const toAgain = await point("Backend", "left-target");
-    mouse("mouseMove", fromAgain.x, fromAgain.y); mouse("mouseDown", fromAgain.x, fromAgain.y);
-    for (let i = 1; i <= 20; i++) { mouse("mouseMove", Math.round(fromAgain.x + (toAgain.x - fromAgain.x) * i / 20), Math.round(fromAgain.y + (toAgain.y - fromAgain.y) * i / 20)); await delay(15); }
+    mouse("mouseMove", fromAgain.x, fromAgain.y);
+    mouse("mouseDown", fromAgain.x, fromAgain.y);
+    for (let i = 1; i <= 20; i++) {
+      mouse("mouseMove", Math.round(fromAgain.x + ((toAgain.x - fromAgain.x) * i) / 20), Math.round(fromAgain.y + ((toAgain.y - fromAgain.y) * i) / 20));
+      await delay(15);
+    }
     mouse("mouseUp", toAgain.x, toAgain.y);
     await waitFor('JSON.parse(localStorage.getItem("canvas-test-links") || "[]").length === 1');
     await window.reload();
     await waitFor('document.querySelectorAll(".react-flow__edge").length === 1');
     console.log("PASS: canvas nodes, archived Chat hidden, Link drag, removal, persistence after reload");
     app.exit(0);
-  } catch (error) { console.error(error); app.exit(1); }
+  } catch (error) {
+    console.error(error);
+    app.exit(1);
+  }
 }
 
 async function main() {
   const { createServer } = await import("vite");
   const { spawn } = require("node:child_process");
-  const server = await createServer({ server: { host: "127.0.0.1", port: 0 }, plugins: [{
-    name: "canvas-links-fixture",
-    resolveId(id) { if (id === "/__canvas_links_fixture.tsx") return id; },
-    load(id) { if (id === "/__canvas_links_fixture.tsx") return fixture; },
-    configureServer(server) { server.middlewares.use(async (request, response, next) => {
-      if (request.url !== "/__canvas_links__") return next();
-      const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__canvas_links_fixture.tsx"></script></body></html>');
-      response.setHeader("Content-Type", "text/html"); response.end(html);
-    }); },
-  }] });
+  const server = await createServer({
+    server: { host: "127.0.0.1", port: 0 },
+    plugins: [
+      {
+        name: "canvas-links-fixture",
+        resolveId(id) {
+          if (id === "/__canvas_links_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__canvas_links_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__canvas_links__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__canvas_links_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
+      },
+    ],
+  });
   try {
     await server.listen();
-    const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__canvas_links__`], { env, stdio: "inherit" });
-    process.exitCode = await new Promise((resolve, reject) => { child.on("error", reject); child.on("exit", code => resolve(code ?? 1)); });
-  } finally { await server.close(); }
+    process.exitCode = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code) => resolve(code ?? 1));
+    });
+  } finally {
+    await server.close();
+  }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => { console.error(error); process.exitCode = 1; });
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

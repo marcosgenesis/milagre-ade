@@ -6,27 +6,42 @@ import type { ChatStep } from "../model.ts";
 const url = (n: number) => `https://github.com/example/repo/pull/${n}`;
 const shell = (detail: string, status: "done" | "failed" = "done"): ChatStep => ({ id: detail, kind: "shell", title: "Ran", status, detail });
 const reply = (...steps: ChatStep[]) => ({ steps });
-const pr = (number: number, extra: Partial<{ state: "OPEN" | "MERGED"; hasConflicts: boolean; readyToMerge: boolean; isBehind: boolean; changesRequested: boolean }> = {}) =>
-  ({ number, url: url(number), title: `PR ${number}`, state: "OPEN" as const, readyToMerge: false, hasConflicts: false, ...extra });
+const pr = (
+  number: number,
+  extra: Partial<{ state: "OPEN" | "MERGED"; hasConflicts: boolean; readyToMerge: boolean; isBehind: boolean; changesRequested: boolean }> = {},
+) => ({ number, url: url(number), title: `PR ${number}`, state: "OPEN" as const, readyToMerge: false, hasConflicts: false, ...extra });
 
 test("finds the URL gh prints after creating a PR", () => {
-  assert.deepEqual(pullRequestRefs([reply(shell(`$ git push -u origin HEAD && gh pr create --title "Add chips" --body "Closes #44"\nbranch 'x' set up to track 'origin/x'.\n${url(84)}\n`))]), [url(84)]);
+  assert.deepEqual(
+    pullRequestRefs([
+      reply(shell(`$ git push -u origin HEAD && gh pr create --title "Add chips" --body "Closes #44"\nbranch 'x' set up to track 'origin/x'.\n${url(84)}\n`)),
+    ]),
+    [url(84)],
+  );
 });
 
 test("keeps creation order across replies and drops repeats", () => {
-  assert.deepEqual(pullRequestRefs([
-    reply(shell(`$ gh pr create --fill\n${url(84)}`)),
-    reply(shell(`$ gh pr create --fill\n${url(90)}`), shell(`$ gh pr create --fill\n${url(84)}`)),
-  ]), [url(84), url(90)]);
+  assert.deepEqual(
+    pullRequestRefs([
+      reply(shell(`$ gh pr create --fill\n${url(84)}`)),
+      reply(shell(`$ gh pr create --fill\n${url(90)}`), shell(`$ gh pr create --fill\n${url(84)}`)),
+    ]),
+    [url(84), url(90)],
+  );
 });
 
 test("ignores PR URLs from other gh commands and failed steps", () => {
-  assert.deepEqual(pullRequestRefs([reply(
-    shell(`$ gh pr list --json url\n${url(70)}`),
-    shell(`$ gh pr view 71\ntitle: Something\nurl: ${url(71)}`),
-    shell(`$ gh pr create --fill\n${url(72)}`, "failed"),
-    { ...shell(`$ gh pr create\n${url(73)}`), kind: "edit" },
-  )]), []);
+  assert.deepEqual(
+    pullRequestRefs([
+      reply(
+        shell(`$ gh pr list --json url\n${url(70)}`),
+        shell(`$ gh pr view 71\ntitle: Something\nurl: ${url(71)}`),
+        shell(`$ gh pr create --fill\n${url(72)}`, "failed"),
+        { ...shell(`$ gh pr create\n${url(73)}`), kind: "edit" },
+      ),
+    ]),
+    [],
+  );
 });
 
 test("a URL inside the PR body is not the created PR", () => {
@@ -36,12 +51,17 @@ test("a URL inside the PR body is not the created PR", () => {
 });
 
 test("merged PRs come from the merge command's argument", () => {
-  assert.deepEqual(pullRequestRefs([reply(
-    shell("$ gh pr merge 88 --squash --delete-branch\n"),
-    shell(`$ gh pr merge ${url(90)} --squash`),
-    shell("$ cd /tmp/x && gh pr merge -R example/other 12 --merge --subject 'Ship it'"),
-    shell("$ gh pr merge --squash --body \"long body\" 91; echo done"),
-  )]), ["88", url(90), "https://github.com/example/other/pull/12", "91"]);
+  assert.deepEqual(
+    pullRequestRefs([
+      reply(
+        shell("$ gh pr merge 88 --squash --delete-branch\n"),
+        shell(`$ gh pr merge ${url(90)} --squash`),
+        shell("$ cd /tmp/x && gh pr merge -R example/other 12 --merge --subject 'Ship it'"),
+        shell('$ gh pr merge --squash --body "long body" 91; echo done'),
+      ),
+    ]),
+    ["88", url(90), "https://github.com/example/other/pull/12", "91"],
+  );
 });
 
 test("merging the current branch adds nothing: the branch PR already shows", () => {
@@ -58,14 +78,30 @@ test("a merged number matching a created URL is the same PR", () => {
 
 test("the chat's PRs keep creation order and include the branch PR once", () => {
   const found = { [url(84)]: pr(84, { state: "MERGED" }), "88": pr(88), [url(90)]: null };
-  assert.deepEqual(chatPullRequests([url(84), "88", url(90)], found, pr(92)).map((item) => item.number), [84, 88, 92]);
-  assert.deepEqual(chatPullRequests([url(84), "88"], found, pr(88)).map((item) => item.number), [84, 88]);
+  assert.deepEqual(
+    chatPullRequests([url(84), "88", url(90)], found, pr(92)).map((item) => item.number),
+    [84, 88, 92],
+  );
+  assert.deepEqual(
+    chatPullRequests([url(84), "88"], found, pr(88)).map((item) => item.number),
+    [84, 88],
+  );
   assert.deepEqual(chatPullRequests([], {}, undefined), []);
 });
 
 test("the row shows PRs that need attention first, then the rest in order", () => {
-  const prs = [pr(84, { state: "MERGED" }), pr(88), pr(90, { hasConflicts: true }), pr(91, { readyToMerge: true }), pr(92, { isBehind: true }), pr(93, { changesRequested: true })];
-  assert.deepEqual(rowPullRequests(prs).map((item) => item.number), [90, 92, 93, 88, 91, 84]);
+  const prs = [
+    pr(84, { state: "MERGED" }),
+    pr(88),
+    pr(90, { hasConflicts: true }),
+    pr(91, { readyToMerge: true }),
+    pr(92, { isBehind: true }),
+    pr(93, { changesRequested: true }),
+  ];
+  assert.deepEqual(
+    rowPullRequests(prs).map((item) => item.number),
+    [90, 92, 93, 88, 91, 84],
+  );
 });
 
 test("the refs cache rescans a chat only when one of its messages is a different object", () => {

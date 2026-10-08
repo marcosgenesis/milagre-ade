@@ -20,21 +20,39 @@ function projectState(agents = [child("child")]) {
 }
 function deferred() {
   let resolve, reject;
-  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  const promise = new Promise((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
   return { promise, resolve, reject };
 }
 async function harness({ state = projectState(), reader, loaded = true } = {}) {
-  const reads = [], saved = [], broadcasts = [], published = [], started = [];
+  const reads = [],
+    saved = [],
+    broadcasts = [],
+    published = [],
+    started = [];
   const states = new ProjectStates({
-    read: async path => { reads.push(path); return state; },
-    save: async (path, next) => { saved.push({ path, state: next }); },
+    read: async (path) => {
+      reads.push(path);
+      return state;
+    },
+    save: async (path, next) => {
+      saved.push({ path, state: next });
+    },
   });
   if (loaded) await states.get(PROJECT);
   const host = new ChatHost({
     states,
-    startTurn: async request => { started.push(request); },
-    publish: (...args) => { published.push(args); },
-    broadcast: (path, next) => { broadcasts.push({ path, state: next }); },
+    startTurn: async (request) => {
+      started.push(request);
+    },
+    publish: (...args) => {
+      published.push(args);
+    },
+    broadcast: (path, next) => {
+      broadcasts.push({ path, state: next });
+    },
     ...(reader ? { readSubagents: reader } : {}),
   });
   return { host, states, reads, saved, broadcasts, published, started };
@@ -44,26 +62,47 @@ test("recovery reads only eligible unknown children and saves terminal outcomes 
   const oldEntry = { id: "partial", kind: "message", text: "Partial result" };
   const oldMessage = { id: "request", fromId: null, toId: "done", text: "Review", at: 15 };
   const eligible = [child("done", { transcript: [oldEntry], communications: [oldMessage] }), child("failed"), child("cancelled")];
-  const excluded = [child("archived", { archived: true }), child("running", { status: "running" }), child("finished", { status: "completed" }), child("native-parent")];
+  const excluded = [
+    child("archived", { archived: true }),
+    child("running", { status: "running" }),
+    child("finished", { status: "completed" }),
+    child("native-parent"),
+  ];
   const state = projectState([...eligible, ...excluded]);
   const calls = [];
   const recovered = eligible.map((agent, index) => completed(agent, ["completed", "failed", "cancelled"][index]));
   recovered[0].agent.transcript = [{ id: "final", kind: "message", text: "Final result" }];
   recovered[0].agent.communications = [{ ...oldMessage, at: 199 }];
-  const { host, states, saved, broadcasts, published, started } = await harness({ state, reader: async request => { calls.push(request); return recovered; } });
+  const { host, states, saved, broadcasts, published, started } = await harness({
+    state,
+    reader: async (request) => {
+      calls.push(request);
+      return recovered;
+    },
+  });
 
   await host.recoverSubagents(CHAT);
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].cwd, CWD);
-  assert.deepEqual(calls[0].agents.map(agent => agent.id), ["done", "failed", "cancelled"]);
+  assert.deepEqual(
+    calls[0].agents.map((agent) => agent.id),
+    ["done", "failed", "cancelled"],
+  );
   calls[0].agents.forEach((agent, index) => assert.equal(agent, eligible[index]));
   const next = await states.get(PROJECT);
   const children = next.sessions[1].subagents;
-  assert.deepEqual(children.slice(0, 3).map(agent => agent.status), ["completed", "failed", "cancelled"]);
+  assert.deepEqual(
+    children.slice(0, 3).map((agent) => agent.status),
+    ["completed", "failed", "cancelled"],
+  );
   assert.deepEqual(children[0].transcript, [oldEntry, recovered[0].agent.transcript[0]]);
   assert.deepEqual(children[0].communications, [oldMessage]);
-  for (const untouched of excluded.filter(agent => agent.id !== "native-parent")) assert.equal(children.find(agent => agent.id === untouched.id), untouched);
+  for (const untouched of excluded.filter((agent) => agent.id !== "native-parent"))
+    assert.equal(
+      children.find((agent) => agent.id === untouched.id),
+      untouched,
+    );
   await states.flush(PROJECT);
   assert.equal(saved.length, 1);
   assert.deepEqual(broadcasts, [{ path: PROJECT, state: next }]);
@@ -75,9 +114,16 @@ test("recovery reads only eligible unknown children and saves terminal outcomes 
 });
 
 test("simultaneous refreshes share one read and an empty result can be retried", async () => {
-  const reading = deferred(), entered = deferred();
+  const reading = deferred(),
+    entered = deferred();
   let calls = 0;
-  const { host, saved, broadcasts } = await harness({ reader: async () => { calls++; entered.resolve(); return reading.promise; } });
+  const { host, saved, broadcasts } = await harness({
+    reader: async () => {
+      calls++;
+      entered.resolve();
+      return reading.promise;
+    },
+  });
   const first = host.recoverSubagents(CHAT);
   const second = host.recoverSubagents(CHAT);
   await entered.promise;
@@ -91,17 +137,24 @@ test("simultaneous refreshes share one read and an empty result can be retried",
 });
 
 test("reader errors propagate to all waiters and clear the pending recovery for retry", async () => {
-  const failed = deferred(), entered = deferred();
+  const failed = deferred(),
+    entered = deferred();
   const problem = new Error("Provider history is unavailable");
   let calls = 0;
-  const { host, states, saved, broadcasts } = await harness({ reader: async ({ agents }) => {
-    calls++;
-    if (calls === 1) { entered.resolve(); return failed.promise; }
-    return [completed(agents[0])];
-  } });
-  const first = host.recoverSubagents(CHAT), second = host.recoverSubagents(CHAT);
-  const firstFailure = assert.rejects(first, error => error === problem);
-  const secondFailure = assert.rejects(second, error => error === problem);
+  const { host, states, saved, broadcasts } = await harness({
+    reader: async ({ agents }) => {
+      calls++;
+      if (calls === 1) {
+        entered.resolve();
+        return failed.promise;
+      }
+      return [completed(agents[0])];
+    },
+  });
+  const first = host.recoverSubagents(CHAT),
+    second = host.recoverSubagents(CHAT);
+  const firstFailure = assert.rejects(first, (error) => error === problem);
+  const secondFailure = assert.rejects(second, (error) => error === problem);
   await entered.promise;
   failed.reject(problem);
   await Promise.all([firstFailure, secondFailure]);
@@ -122,94 +175,155 @@ test("the optional reader defaults to leaving saved state unchanged", async () =
   assert.deepEqual(broadcasts, []);
 });
 
-test("ineligible chats never read provider history", async t => {
+test("ineligible chats never read provider history", async (t) => {
   const cases = [
-    ["project not loaded", state => state, { loaded: false }],
-    ["chat missing", state => ({ ...state, sessions: {} })],
-    ["different provider", state => sessionEdit(state, { provider: "claude" })],
-    ["native session missing", state => sessionEdit(state, { native_session_id: undefined })],
-    ["chat archived", state => sessionEdit(state, { archived: true })],
-    ["worktree missing", state => ({ ...state, worktrees: {} })],
-    ["worktree path missing", state => ({ ...state, worktrees: { 1: { id: 1 } } })],
-    ["only archived unknown children", state => sessionEdit(state, { subagents: [child("archived", { archived: true })] })],
-    ["only known children", state => sessionEdit(state, { subagents: [child("running", { status: "running" }), child("done", { status: "completed" })] })],
-    ["parent is the only unknown entry", state => sessionEdit(state, { subagents: [child("native-parent")] })],
-    ["turn running", state => state, {}, host => { host.runs[CHAT] = { text: "Working" }; }],
-    ["host quitting", state => state, {}, host => { host.quitting = true; }],
+    ["project not loaded", (state) => state, { loaded: false }],
+    ["chat missing", (state) => ({ ...state, sessions: {} })],
+    ["different provider", (state) => sessionEdit(state, { provider: "claude" })],
+    ["native session missing", (state) => sessionEdit(state, { native_session_id: undefined })],
+    ["chat archived", (state) => sessionEdit(state, { archived: true })],
+    ["worktree missing", (state) => ({ ...state, worktrees: {} })],
+    ["worktree path missing", (state) => ({ ...state, worktrees: { 1: { id: 1 } } })],
+    ["only archived unknown children", (state) => sessionEdit(state, { subagents: [child("archived", { archived: true })] })],
+    ["only known children", (state) => sessionEdit(state, { subagents: [child("running", { status: "running" }), child("done", { status: "completed" })] })],
+    ["parent is the only unknown entry", (state) => sessionEdit(state, { subagents: [child("native-parent")] })],
+    [
+      "turn running",
+      (state) => state,
+      {},
+      (host) => {
+        host.runs[CHAT] = { text: "Working" };
+      },
+    ],
+    [
+      "host quitting",
+      (state) => state,
+      {},
+      (host) => {
+        host.quitting = true;
+      },
+    ],
   ];
-  for (const [name, prepare, options, configure] of cases) await t.test(name, async () => {
-    let calls = 0;
-    const { host, reads, saved, broadcasts } = await harness({ state: prepare(projectState()), ...options, reader: async () => { calls++; return []; } });
-    configure?.(host);
-    await host.recoverSubagents(CHAT);
-    assert.equal(calls, 0);
-    assert.deepEqual(saved, []);
-    assert.deepEqual(broadcasts, []);
-    if (options?.loaded === false) assert.deepEqual(reads, []);
-  });
+  for (const [name, prepare, options, configure] of cases)
+    await t.test(name, async () => {
+      let calls = 0;
+      const { host, reads, saved, broadcasts } = await harness({
+        state: prepare(projectState()),
+        ...options,
+        reader: async () => {
+          calls++;
+          return [];
+        },
+      });
+      configure?.(host);
+      await host.recoverSubagents(CHAT);
+      assert.equal(calls, 0);
+      assert.deepEqual(saved, []);
+      assert.deepEqual(broadcasts, []);
+      if (options?.loaded === false) assert.deepEqual(reads, []);
+    });
 });
 
-test("chat identity and lifecycle changes during a read discard the recovered snapshot", async t => {
+test("chat identity and lifecycle changes during a read discard the recovered snapshot", async (t) => {
   const cases = [
-    ["native session changed", state => sessionEdit(state, { native_session_id: "replacement-native" })],
-    ["provider changed", state => sessionEdit(state, { provider: "claude" })],
-    ["chat archived", state => sessionEdit(state, { archived: true })],
-    ["chat removed", state => ({ ...state, sessions: {} })],
-    ["worktree removed", state => ({ ...state, worktrees: {} })],
-    ["worktree path changed", state => ({ ...state, worktrees: { 1: { ...state.worktrees[1], path: "/worktrees/replacement" } } })],
-    ["worktree identity changed at the same path", state => ({ ...sessionEdit(state, { worktree_id: 2 }), worktrees: { ...state.worktrees, 2: { id: 2, path: CWD } } })],
-    ["turn starts", state => state, host => { host.runs[CHAT] = { text: "New turn" }; }],
-    ["host starts quitting", state => state, host => { host.quitting = true; }],
+    ["native session changed", (state) => sessionEdit(state, { native_session_id: "replacement-native" })],
+    ["provider changed", (state) => sessionEdit(state, { provider: "claude" })],
+    ["chat archived", (state) => sessionEdit(state, { archived: true })],
+    ["chat removed", (state) => ({ ...state, sessions: {} })],
+    ["worktree removed", (state) => ({ ...state, worktrees: {} })],
+    ["worktree path changed", (state) => ({ ...state, worktrees: { 1: { ...state.worktrees[1], path: "/worktrees/replacement" } } })],
+    [
+      "worktree identity changed at the same path",
+      (state) => ({ ...sessionEdit(state, { worktree_id: 2 }), worktrees: { ...state.worktrees, 2: { id: 2, path: CWD } } }),
+    ],
+    [
+      "turn starts",
+      (state) => state,
+      (host) => {
+        host.runs[CHAT] = { text: "New turn" };
+      },
+    ],
+    [
+      "host starts quitting",
+      (state) => state,
+      (host) => {
+        host.quitting = true;
+      },
+    ],
   ];
-  for (const [name, change, configure] of cases) await t.test(name, async () => {
-    const reading = deferred(), entered = deferred();
-    const { host, states, saved, broadcasts } = await harness({ reader: async request => { entered.resolve(request); return reading.promise; } });
-    const pending = host.recoverSubagents(CHAT);
-    const request = await entered.promise;
-    await states.update(PROJECT, change);
-    configure?.(host);
-    const latest = await states.get(PROJECT);
-    const savesBeforeRecovery = saved.length;
-    reading.resolve([completed(request.agents[0])]);
-    await pending;
-    assert.equal(await states.get(PROJECT), latest);
-    assert.equal(saved.length, savesBeforeRecovery);
-    assert.deepEqual(broadcasts, []);
-  });
+  for (const [name, change, configure] of cases)
+    await t.test(name, async () => {
+      const reading = deferred(),
+        entered = deferred();
+      const { host, states, saved, broadcasts } = await harness({
+        reader: async (request) => {
+          entered.resolve(request);
+          return reading.promise;
+        },
+      });
+      const pending = host.recoverSubagents(CHAT);
+      const request = await entered.promise;
+      await states.update(PROJECT, change);
+      configure?.(host);
+      const latest = await states.get(PROJECT);
+      const savesBeforeRecovery = saved.length;
+      reading.resolve([completed(request.agents[0])]);
+      await pending;
+      assert.equal(await states.get(PROJECT), latest);
+      assert.equal(saved.length, savesBeforeRecovery);
+      assert.deepEqual(broadcasts, []);
+    });
 });
 
-test("new child objects and archives win while unchanged siblings can still recover", async t => {
+test("new child objects and archives win while unchanged siblings can still recover", async (t) => {
   const cases = [
-    ["live child update", agent => ({ ...agent, status: "running", latestActivity: "New live activity", updatedAt: 201 })],
-    ["same-status replacement", agent => ({ ...agent, latestActivity: "New unknown activity" })],
-    ["child archived", agent => ({ ...agent, archived: true })],
+    ["live child update", (agent) => ({ ...agent, status: "running", latestActivity: "New live activity", updatedAt: 201 })],
+    ["same-status replacement", (agent) => ({ ...agent, latestActivity: "New unknown activity" })],
+    ["child archived", (agent) => ({ ...agent, archived: true })],
     ["child removed", () => null],
   ];
-  for (const [name, changeChild] of cases) await t.test(name, async () => {
-    const reading = deferred(), entered = deferred();
-    const { host, states, broadcasts } = await harness({ state: projectState([child("changed"), child("unchanged")]), reader: async request => { entered.resolve(request); return reading.promise; } });
-    const pending = host.recoverSubagents(CHAT);
-    const request = await entered.promise;
-    let replacement;
-    await states.update(PROJECT, state => {
-      replacement = changeChild(state.sessions[1].subagents[0]);
-      return sessionEdit(state, { subagents: [replacement, state.sessions[1].subagents[1]].filter(Boolean) });
+  for (const [name, changeChild] of cases)
+    await t.test(name, async () => {
+      const reading = deferred(),
+        entered = deferred();
+      const { host, states, broadcasts } = await harness({
+        state: projectState([child("changed"), child("unchanged")]),
+        reader: async (request) => {
+          entered.resolve(request);
+          return reading.promise;
+        },
+      });
+      const pending = host.recoverSubagents(CHAT);
+      const request = await entered.promise;
+      let replacement;
+      await states.update(PROJECT, (state) => {
+        replacement = changeChild(state.sessions[1].subagents[0]);
+        return sessionEdit(state, { subagents: [replacement, state.sessions[1].subagents[1]].filter(Boolean) });
+      });
+      reading.resolve(request.agents.map((agent) => completed(agent)));
+      await pending;
+      const agents = (await states.get(PROJECT)).sessions[1].subagents;
+      assert.equal(
+        agents.find((agent) => agent.id === "changed"),
+        replacement ?? undefined,
+      );
+      assert.equal(agents.find((agent) => agent.id === "unchanged").status, "completed");
+      assert.equal(broadcasts.length, 1);
     });
-    reading.resolve(request.agents.map(agent => completed(agent)));
-    await pending;
-    const agents = (await states.get(PROJECT)).sessions[1].subagents;
-    assert.equal(agents.find(agent => agent.id === "changed"), replacement ?? undefined);
-    assert.equal(agents.find(agent => agent.id === "unchanged").status, "completed");
-    assert.equal(broadcasts.length, 1);
-  });
 });
 
 test("unrelated edits survive recovery instead of replacing the latest project state", async () => {
-  const reading = deferred(), entered = deferred();
-  const { host, states, broadcasts } = await harness({ reader: async request => { entered.resolve(request); return reading.promise; } });
+  const reading = deferred(),
+    entered = deferred();
+  const { host, states, broadcasts } = await harness({
+    reader: async (request) => {
+      entered.resolve(request);
+      return reading.promise;
+    },
+  });
   const pending = host.recoverSubagents(CHAT);
   const request = await entered.promise;
-  await states.update(PROJECT, state => sessionEdit(state, { title: "Renamed during history read", unread: true }));
+  await states.update(PROJECT, (state) => sessionEdit(state, { title: "Renamed during history read", unread: true }));
   reading.resolve([completed(request.agents[0])]);
   await pending;
   const session = (await states.get(PROJECT)).sessions[1];
@@ -220,12 +334,14 @@ test("unrelated edits survive recovery instead of replacing the latest project s
 });
 
 test("nonterminal, unrelated, and older events do not save or broadcast unchanged state", async () => {
-  const { host, states, saved, broadcasts, published, started } = await harness({ reader: async ({ agents }) => [
-    { type: "turn-started", turnId: "unexpected" },
-    completed(child("unrequested")),
-    { type: "subagent-update", agent: { ...agents[0], status: "running", updatedAt: 300 } },
-    { type: "subagent-update", agent: { ...agents[0], status: "completed", updatedAt: 99 } },
-  ] });
+  const { host, states, saved, broadcasts, published, started } = await harness({
+    reader: async ({ agents }) => [
+      { type: "turn-started", turnId: "unexpected" },
+      completed(child("unrequested")),
+      { type: "subagent-update", agent: { ...agents[0], status: "running", updatedAt: 300 } },
+      { type: "subagent-update", agent: { ...agents[0], status: "completed", updatedAt: 99 } },
+    ],
+  });
   const before = await states.get(PROJECT);
   await host.recoverSubagents(CHAT);
   assert.equal(await states.get(PROJECT), before);

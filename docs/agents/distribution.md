@@ -8,11 +8,11 @@ brew install --cask the-ptf/tap/milagre
 
 The tap starts with the signed, notarized `v0.88.0` release for Apple Silicon and Intel. Its scheduled updater downloads both stable-release DMGs, checks their sizes and hashes, and commits the new cask. Uninstalling keeps saved Chats and settings.
 
-| Platform | Architecture | Installers | Distribution |
-| --- | --- | --- | --- |
-| macOS | Apple Silicon, Intel | DMG, ZIP | Homebrew tap and signed GitHub releases |
-| Windows | x64 | Per-user NSIS EXE | WinGet manifest; public listing awaits a tested signed release |
-| Linux | x64 | AppImage, DEB, RPM | Signed APT/RPM metadata and Cloudflare hosting workflow; first publication pending |
+| Platform | Architecture         | Installers         | Distribution                                                                       |
+| -------- | -------------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| macOS    | Apple Silicon, Intel | DMG, ZIP           | Homebrew tap and signed GitHub releases                                            |
+| Windows  | x64                  | Per-user NSIS EXE  | WinGet manifest; public listing awaits a tested signed release                     |
+| Linux    | x64                  | AppImage, DEB, RPM | Signed APT/RPM metadata and Cloudflare hosting workflow; first publication pending |
 
 Windows ARM64, Linux ARM64, Chocolatey, Scoop, Flatpak and Snap remain outside this implementation. Git and a supported, logged-in agent CLI are still required. Electron bundles the host's Node runtime.
 
@@ -40,7 +40,7 @@ node scripts/finalize-update-feeds.cjs --tag v1.2.3 --check
 
 `package:repositories` requires `GNUPGHOME` outside the repo and `MILAGRE_LINUX_SIGNING_KEY` set to the full signing fingerprint. [Repository instructions](../../distribution/linux-repository/README.md) cover tooling and prior-release retention.
 
-`package:managers` supports `macos`, `windows`, `linux`, or `all`, plus `--artifacts` and `--output`. It requires stable tags and nonempty regular installer files. It writes `homebrew/milagre.rb`, `winget/Milagre.Milagre.yaml`, and `SHA256SUMS` from the final installer bytes. For the old Intel naming convention, pass `--mac-intel-name Milagre-X.Y.Z.dmg`.
+`package:managers` supports `macos`, `windows`, `linux`, a comma list such as `macos,linux` (also accepted by `finalize-update-feeds.cjs --platform`), or `all`, plus `--artifacts` and `--output`. It requires stable tags and nonempty regular installer files. It writes `homebrew/milagre.rb`, `winget/Milagre.Milagre.yaml`, and `SHA256SUMS` from the final installer bytes. For the old Intel naming convention, pass `--mac-intel-name Milagre-X.Y.Z.dmg`.
 
 The cask follows the [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook). WinGet uses Microsoft's [singleton manifest format](https://learn.microsoft.com/en-us/windows/package-manager/package/manifest), user scope, and `/currentuser`. Its proposed identifier is `Milagre.Milagre`. Generating a manifest does not create a public WinGet listing.
 
@@ -48,16 +48,30 @@ The cask follows the [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook
 
 **Build package candidates** runs on every push to `main`, on dispatch, and on a PR once it carries the `preview:installers` label. Windows pipe, ACL and process tests and Linux repository signing run on every PR in CI's `native-tests` job without an installer. It builds on native macOS, Windows and Ubuntu runners. It installs the NSIS/DEB packages and runs the real desktop against temporary profiles, including saved Chats, shared-host updates, crash recovery, and ownership errors. Windows also runs real named-pipe, NTFS ACL and process tests. Candidate installers are unsigned/ad-hoc Actions artifacts, kept for 14 days.
 
+The `release` job of CI cuts a candidate (a tag and a draft release) for every push to `main` once `javascript` and `native-tests` pass. The non-required `desktop-checks` job does not gate it. Drafts are invisible to installed apps.
+
 **Publish installers** defaults to `platforms=macos`. Selecting `all` adds Windows and Linux builds. Windows requires Authenticode signing; Linux signs the RPM and APT/RPM indexes. All selected platforms must pass before the draft becomes public. The final stage verifies complete updater feeds and regenerates combined checksums/manifests from the signed assets. DMG notarization and RPM signing are followed by feed hash refreshes.
+
+`platforms=macos+linux` ships macOS and Linux without Windows signing: it runs the macOS and Linux builds only, the macOS leg stages `signed-macos` instead of un-drafting, and a final job requires `latest-mac.yml`, `beta-mac.yml` and `latest-linux.yml`, uploads the DMG, zip, AppImage, DEB, RPM, blockmaps, feeds, `milagre-linux-repository.tar.gz`, the Homebrew cask and `SHA256SUMS` (no WinGet manifest), then un-drafts the release. The first Linux publication needs `initialize_linux_repository=true`. APT/RPM hosting needs the `CLOUDFLARE_PACKAGES_API_TOKEN` secret and a run of the **Deploy Linux package repository** workflow afterwards.
+
+## Beta channel
+
+Installs set to Beta in Settings read `beta-mac.yml`; Stable installs read `latest-mac.yml` and never see a beta. **Publish beta** runs on weekdays at 09:00 UTC and on dispatch. It takes the newest draft candidate (`vX.Y.Z`), builds and signs it on the beta channel, and publishes `vX.Y.Z-beta.<run>` as a prerelease that is never marked latest. It skips the run when a beta for the same commit already exists. Ship one by hand with `gh workflow run publish-beta.yml`, optionally `-f tag=vX.Y.Z` to pick a specific draft.
+
+Promotion is unchanged: **Publish installers** publishes the untouched draft as stable. A stable release now uploads both `latest-mac.yml` and `beta-mac.yml` (same installers): electron-builder writes only the current channel's feed, so the stable build copies `latest-mac.yml` to `beta-mac.yml` before the feeds are refreshed. Beta installs move to the stable build once it ships.
+
+electron-updater reads the newest release from `releases.atom` and takes the first stable-or-beta entry; on the first stable release after a beta, confirm a beta install updates to it. If it does not, delete the superseded `vX.Y.Z-beta.*` prereleases (`gh release delete <tag> --cleanup-tag --yes`) once stable X.Y.Z is published.
+
+If `gh release create` succeeded but the asset upload failed, the next run sees a beta for that commit and skips it. Delete the broken prerelease and its tag with `gh release delete <betaTag> --cleanup-tag --yes`, then rerun the workflow. With no draft candidate, a scheduled run does nothing.
 
 Required repository secrets:
 
-| Purpose | Secrets |
-| --- | --- |
-| Apple signing | `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` |
-| Windows signing | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` |
-| Linux signing | `LINUX_REPOSITORY_PRIVATE_KEY`, `LINUX_REPOSITORY_KEY_FINGERPRINT` |
-| Cloudflare deployment | `CLOUDFLARE_PACKAGES_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` |
+| Purpose               | Secrets                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| Apple signing         | `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` |
+| Windows signing       | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`                                                     |
+| Linux signing         | `LINUX_REPOSITORY_PRIVATE_KEY`, `LINUX_REPOSITORY_KEY_FINGERPRINT`                         |
+| Cloudflare deployment | `CLOUDFLARE_PACKAGES_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`                                   |
 
 Apple and Linux signing secrets and the Cloudflare account ID are configured. Windows signing and the dedicated Cloudflare deployment token still need setup. The existing local Cloudflare token stays in its private environment file; it is not copied into GitHub. Use a dedicated deployment token for the repository workflow.
 
@@ -66,6 +80,12 @@ For the first Linux release, select `initialize_linux_repository=true`. Later re
 The repository key fingerprint is `0AC0E3D496374278E689EC0F6605D632D39BA587`. Its private key and revocation certificate are stored outside the checkout. Rotate the pinned fingerprint and public installation instructions together when rotating the key.
 
 After a signed Windows EXE is public, validate the attached manifest with `winget validate`, test `winget install --manifest`, and submit it to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). `winget install --id Milagre.Milagre` becomes available after Microsoft accepts the submission.
+
+## In-app updates
+
+Desktop checks at launch, every five minutes, when a window regains focus, and when the computer wakes. Automatic checks are throttled to one per minute; a manual check bypasses that throttle. Checks share one pending request and leave a downloading or downloaded update intact.
+
+Downloads run in the background. A ready update opens a dismissible card with its release notes and an explicit **Install & restart** action. Dismissal keeps an update button available on every screen. Settings opens the same card before installation, which warns that restarting stops running agents. Installation saves and stops the shared host first; failed shutdown leaves the downloaded update available for retry. Normal quit never installs an update. These client checks do not change the publication schedules above.
 
 ## Runtime
 

@@ -11,8 +11,21 @@ test("one chat is not called chats", () => {
 });
 
 test("several worktrees still fit one line", () => {
-  assert.equal(restoredChatsNotice([{ worktree: "a", count: 2 }, { worktree: "b", count: 1 }]), "Brought back 3 chats saved in a and b.");
-  assert.equal(restoredChatsNotice([{ worktree: "a", count: 1 }, { worktree: "b", count: 1 }, { worktree: "c", count: 1 }]), "Brought back 3 chats saved in a, b and c.");
+  assert.equal(
+    restoredChatsNotice([
+      { worktree: "a", count: 2 },
+      { worktree: "b", count: 1 },
+    ]),
+    "Brought back 3 chats saved in a and b.",
+  );
+  assert.equal(
+    restoredChatsNotice([
+      { worktree: "a", count: 1 },
+      { worktree: "b", count: 1 },
+      { worktree: "c", count: 1 },
+    ]),
+    "Brought back 3 chats saved in a, b and c.",
+  );
 });
 
 test("nothing brought back shows nothing", () => {

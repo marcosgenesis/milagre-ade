@@ -16,9 +16,9 @@ function sources(dir: string): string[] {
 
 test("no component renders a native <select>, <option> or <optgroup>", () => {
   const offenders = sources(SRC).flatMap((path) =>
-    readFileSync(path, "utf8").split("\n").flatMap((line, index) =>
-      /<(select|option|optgroup)[\s>]/.test(line) ? [`${relative(SRC, path)}:${index + 1}`] : [],
-    ),
+    readFileSync(path, "utf8")
+      .split("\n")
+      .flatMap((line, index) => (/<(select|option|optgroup)[\s>]/.test(line) ? [`${relative(SRC, path)}:${index + 1}`] : [])),
   );
   assert.deepEqual(offenders, [], "Use Select from components/primitives/Select instead");
 });

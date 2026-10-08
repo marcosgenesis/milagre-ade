@@ -1,17 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pairedPhonesLine, pairingWindow, phoneQrSrc, phoneStatusLine } from "./phone.ts";
+import { pairedPhonesLine, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "./phone.ts";
 
 test("the status line says what is happening and where the phone can reach this Mac", () => {
   assert.equal(phoneStatusLine(null), "Checking…");
   assert.equal(phoneStatusLine({ enabled: false, state: "off", remote: "none" }), "Off");
   assert.equal(phoneStatusLine({ enabled: true, state: "starting", remote: "cloudflare" }), "Starting…");
   assert.equal(phoneStatusLine({ enabled: true, state: "error", remote: "none", error: "Address already in use" }), "Address already in use");
-  assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "cloudflare", localUrl: "http://127.0.0.1:8797", publicUrl: "https://mac.example.com" }), "Reachable at mac.example.com");
+  assert.equal(
+    phoneStatusLine({ enabled: true, state: "on", remote: "cloudflare", localUrl: "http://127.0.0.1:8797", publicUrl: "https://mac.example.com" }),
+    "Reachable at mac.example.com",
+  );
   assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "none", localUrl: "http://127.0.0.1:8797" }), "This Mac only — 127.0.0.1");
-  assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "online", localUrl: "http://127.0.0.1:8797" }), "On, reachable from any network");
-  assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "connecting", localUrl: "http://127.0.0.1:8797" }), "On, connecting to the relay…");
-  assert.equal(phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "offline", localUrl: "http://127.0.0.1:8797" }), "On, can't reach the relay. Retrying…");
+  assert.equal(
+    phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "online", localUrl: "http://127.0.0.1:8797" }),
+    "On, reachable from any network",
+  );
+  assert.equal(
+    phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "connecting", localUrl: "http://127.0.0.1:8797" }),
+    "On, connecting to the relay…",
+  );
+  assert.equal(
+    phoneStatusLine({ enabled: true, state: "on", remote: "relay", relay: "offline", localUrl: "http://127.0.0.1:8797" }),
+    "On, can't reach the relay. Retrying…",
+  );
 });
 
 test("the pairing window counts whole minutes up and closes at the deadline", () => {
@@ -40,4 +52,16 @@ test("the QR image source is an inert data URL", () => {
   const src = phoneQrSrc('<svg viewBox="0 0 1 1"><path d="M0 0h1"/></svg>');
   assert.match(src, /^data:image\/svg\+xml;charset=utf-8,%3Csvg/);
   assert.equal(decodeURIComponent(src.split(",")[1]), '<svg viewBox="0 0 1 1"><path d="M0 0h1"/></svg>');
+});
+
+test("phoneLanLine says where a phone on the same network reaches this Mac", () => {
+  const on = { enabled: true, state: "on", remote: "relay" } as const;
+  assert.equal(phoneLanLine(null), null);
+  assert.equal(phoneLanLine({ ...on, lan: { enabled: false, addresses: [] } }), "Off");
+  assert.equal(phoneLanLine({ ...on, lan: { enabled: true, addresses: ["192.168.1.20", "10.0.0.7"] } }), "Reachable at 192.168.1.20, 10.0.0.7");
+  assert.equal(phoneLanLine({ ...on, lan: { enabled: true, addresses: [] } }), "Not connected to a local network");
+  assert.equal(
+    phoneLanLine({ ...on, lan: { enabled: true, addresses: [], error: "listen EADDRINUSE" } }),
+    "Couldn't listen on the local network: listen EADDRINUSE",
+  );
 });

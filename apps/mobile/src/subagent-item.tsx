@@ -1,16 +1,36 @@
-import { Text } from 'react-native';
-import { AiBrainIcon } from '@hugeicons/core-free-icons';
-import type { Subagent } from '@milagre/shared/model';
-import { ActivityItem } from './activity-item';
-import { colors, styles } from './ui';
-
-const LABELS: Record<Subagent['status'], string> = { initializing: 'Starting', running: 'Running', waiting: 'Waiting', completed: 'Done', failed: 'Failed', cancelled: 'Stopped', unknown: 'Unknown' };
+import { Text } from "react-native";
+import { AiBrainIcon } from "@hugeicons/core-free-icons";
+import { subagentActivityLabel } from "@milagre/shared/agent-activity";
+import type { Subagent } from "@milagre/shared/model";
+import { ActivityItem } from "./activity-item";
+import { colors, styles } from "./ui";
 
 /** Subagent data adapted to the same icon, shimmer and output surface used by tool activity. */
 export function SubagentItem({ agent }: { agent: Subagent }) {
-  const state = agent.status === 'initializing' || agent.status === 'running' ? 'running' : agent.status === 'waiting' ? 'waiting' : agent.status === 'failed' ? 'failed' : 'idle';
-  return <ActivityItem title={agent.title} icon={AiBrainIcon} state={state} status={LABELS[agent.status]} disclosureOnly>
-    {!!agent.latestActivity && <Text selectable style={styles.caption}>{agent.latestActivity}</Text>}
-    {agent.transcript.slice(-4).map(item => <Text key={item.id} selectable style={item.kind === 'tool' ? [styles.code, { fontSize: 12, color: colors.ink2 }] : { color: colors.ink2, fontSize: 13, lineHeight: 18 }}>{item.text}</Text>)}
-  </ActivityItem>;
+  const state =
+    agent.status === "initializing" || agent.status === "running"
+      ? "running"
+      : agent.status === "waiting"
+        ? "waiting"
+        : agent.status === "failed"
+          ? "failed"
+          : "idle";
+  return (
+    <ActivityItem title={agent.title} icon={AiBrainIcon} state={state} status={subagentActivityLabel(agent)} disclosureOnly>
+      {!!agent.latestActivity && (
+        <Text selectable style={styles.caption}>
+          {agent.latestActivity}
+        </Text>
+      )}
+      {agent.transcript.slice(-4).map((item) => (
+        <Text
+          key={item.id}
+          selectable
+          style={item.kind === "tool" ? [styles.code, { fontSize: 12, color: colors.ink2 }] : { color: colors.ink2, fontSize: 13, lineHeight: 18 }}
+        >
+          {item.text}
+        </Text>
+      ))}
+    </ActivityItem>
+  );
 }

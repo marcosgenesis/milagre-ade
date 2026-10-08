@@ -1,22 +1,31 @@
-export type SimulatorDevice = { id: string; name: string; platform: 'ios' | 'android'; version: string };
-export type SimulatorOrientation = 'portrait' | 'portrait-upside-down' | 'landscape-left' | 'landscape-right';
+export type SimulatorDevice = { id: string; name: string; platform: "ios" | "android"; version: string };
+export type SimulatorOrientation = "portrait" | "portrait-upside-down" | "landscape-left" | "landscape-right";
 export type SimulatorStatus = { width: number; height: number; orientation: SimulatorOrientation; generation: number; controlling: boolean; ready: boolean };
 export type SimulatorInput =
-  | { kind: 'touch'; phase: 'begin' | 'move' | 'end'; points: { x: number; y: number }[] }
-  | { kind: 'button'; button: 'home' | 'back' }
-  | { kind: 'rotate'; orientation: SimulatorOrientation }
-  | { kind: 'key'; phase: 'down' | 'up'; usage: number; key?: string; shifted?: boolean };
-export type SimulatorList = { devices: SimulatorDevice[]; supported: boolean; error?: string };
+  | { kind: "touch"; phase: "begin" | "move" | "end"; points: { x: number; y: number }[] }
+  | { kind: "button"; button: "home" | "back" }
+  | { kind: "rotate"; orientation: SimulatorOrientation }
+  | { kind: "key"; phase: "down" | "up"; usage: number; key?: string; shifted?: boolean };
+export type SimulatorList = {
+  devices: SimulatorDevice[];
+  chatId?: string;
+  attached?: SimulatorDevice[];
+  available?: SimulatorDevice[];
+  supported: boolean;
+  error?: string;
+};
 export type SimulatorOpen = { viewerId: string; device: SimulatorDevice; iceServers: { urls: string | string[]; username?: string; credential?: string }[] };
 export interface SimulatorApi {
-  list(): Promise<SimulatorList>;
-  open(request: { deviceId: string }): Promise<SimulatorOpen>;
-  offer(request: { viewerId: string; sdp: string }): Promise<{ type: 'answer'; sdp: string }>;
+  list(request: { chatId: string }): Promise<SimulatorList>;
+  attach(request: { chatId: string; deviceId: string }): Promise<SimulatorList>;
+  detach(request: { chatId: string; deviceId: string }): Promise<SimulatorList>;
+  open(request: { deviceId: string; chatId: string }): Promise<SimulatorOpen>;
+  offer(request: { viewerId: string; sdp: string }): Promise<{ type: "answer"; sdp: string }>;
   status(request: { viewerId: string }): Promise<SimulatorStatus>;
   control(request: { viewerId: string; takeOver: boolean }): Promise<SimulatorStatus>;
   input(request: { viewerId: string; sequence: number; generation: number; event: SimulatorInput }): Promise<{ accepted: boolean }>;
   close(request: { viewerId: string }): Promise<null>;
 }
-export type SimulatorMethod = Exclude<keyof SimulatorApi, 'list'>;
-export type SimulatorRpcRequest = { channel: 'milagre-simulator'; id: number; method: SimulatorMethod; args: Record<string, unknown> };
-export type SimulatorRpcResponse = { channel: 'milagre-simulator'; id: number; result?: unknown; error?: string };
+export type SimulatorMethod = Exclude<keyof SimulatorApi, "list" | "attach" | "detach">;
+export type SimulatorRpcRequest = { channel: "milagre-simulator"; id: number; method: SimulatorMethod; args: Record<string, unknown> };
+export type SimulatorRpcResponse = { channel: "milagre-simulator"; id: number; result?: unknown; error?: string };

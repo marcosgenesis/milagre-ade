@@ -53,6 +53,7 @@ import * as Haptics from "expo-haptics";
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { colors as palette, fonts } from "./theme";
 import { confirmSheet } from "./confirm-store";
+import { showChoiceSheet } from "./choice-store";
 import { Icon, type IconData, type Tone } from "./icons";
 
 export const colors = { ...palette, bg: palette.page, panel: palette.surface, text: palette.ink, muted: palette.ink2, error: palette.red };
@@ -510,6 +511,7 @@ export function PullDown({
   onPress,
   style,
   nativeTrigger,
+  searchable,
 }: {
   title?: string;
   sections: MenuSection[];
@@ -519,7 +521,25 @@ export function PullDown({
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
   nativeTrigger?: NativeMenuTrigger;
+  searchable?: { placeholder: string; emptyLabel: string };
 }) {
+  if (searchable)
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label}${nativeTrigger?.title ? `: ${nativeTrigger.title}` : ""}`}
+        accessibilityState={{ disabled: !!nativeTrigger?.disabled }}
+        disabled={nativeTrigger?.disabled}
+        style={style}
+        onPress={() => {
+          Keyboard.dismiss();
+          tap();
+          showChoiceSheet({ title: title || sections[0]?.title || label, ...searchable, items: sections.flatMap((section) => section.items), onSelect });
+        }}
+      >
+        {children}
+      </Pressable>
+    );
   if (Platform.OS === "ios" && nativeTrigger && !onPress) {
     // Composer menus use only SwiftUI views. No React child is handed to SwiftUI, avoiding the Fabric reparenting crash.
     const select = (id: string) => {

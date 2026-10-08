@@ -12,9 +12,11 @@ import { hex } from "../theme";
 import { UpdateShell } from "../update-sheet";
 import { SidePanelsHost, SidePanelsProvider } from "../side-panels";
 import { setConfirmPresenter } from "../confirm-store";
+import { setChoicePresenter } from "../choice-store";
 
 // Confirmations open as a bottom sheet over whatever is showing, the side panels included.
 setConfirmPresenter(() => router.push("/confirm-sheet"));
+setChoicePresenter(() => router.push("/choice-sheet"));
 
 export default function Layout() {
   const scheme = useColorScheme();
@@ -60,6 +62,11 @@ export default function Layout() {
                     <Stack.Screen name="settings" options={{ title: "Settings" }} />
                     <Stack.Screen name="update-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                     <Stack.Screen name="confirm-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
+                    {/* Native search needs the header visible at presentation: enabling it later remounts the sheet. */}
+                    <Stack.Screen
+                      name="choice-sheet"
+                      options={{ ...sheet, headerShown: true, headerBackVisible: false, sheetAllowedDetents: [0.75, 1], sheetInitialDetentIndex: 0 }}
+                    />
                     <Stack.Screen name="notifications" options={{ title: "Notifications" }} />
                     <Stack.Screen name="usage" options={{ title: "Plan usage" }} />
                     <Stack.Screen name="skills" options={{ title: "Skills" }} />

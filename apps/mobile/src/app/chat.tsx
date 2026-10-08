@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Reanimated from "react-native-reanimated";
 import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
 import { LiquidGlassView } from "@sbaiahmed1/react-native-blur";
-import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
+import type { NavigationProp } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Add01Icon,
@@ -62,6 +63,7 @@ import { AttentionPill } from "../attention";
 const PAGE = 40;
 
 export default function ChatScreen() {
+  const navigation = useNavigation<NavigationProp<{ chat: { worktreeId?: string } }, "chat">>();
   const params = useLocalSearchParams<{ id?: string; worktreeId?: string; projectPath?: string; hostId?: string }>();
   const session = useSession();
   const composer = useComposer();
@@ -910,10 +912,14 @@ export default function ChatScreen() {
                     </PullDown>
                     <PullDown
                       label="Choose branch"
+                      searchable={{
+                        placeholder: newWorktree ? "Search branches" : "Search worktrees",
+                        emptyLabel: newWorktree ? "No branches found." : "No worktrees found.",
+                      }}
                       nativeTrigger={{ title: branchName, systemImage: "arrow.triangle.branch", disabled: branchDisabled, maxWidth: 180 }}
                       sections={[
                         {
-                          title: newWorktree ? "Branch from" : "Choose a branch",
+                          title: newWorktree ? "Branch from" : "Choose a worktree",
                           items: newWorktree
                             ? (branches?.items || []).map((item) => ({
                                 id: item,
@@ -925,6 +931,7 @@ export default function ChatScreen() {
                             : Object.values(project.state.worktrees).map((item) => ({
                                 id: String(item.id),
                                 title: item.name,
+                                subtitle: item.path?.split("/").filter(Boolean).pop(),
                                 checked: item.id === worktreeId,
                                 systemImage: "arrow.triangle.branch",
                                 disabled: targetDisabled,
@@ -934,7 +941,7 @@ export default function ChatScreen() {
                       onSelect={(id) => {
                         if (!branchDisabled) {
                           if (newWorktree) setBaseBranch(id);
-                          else router.setParams({ worktreeId: id });
+                          else navigation.setParams({ worktreeId: id });
                         }
                       }}
                     >

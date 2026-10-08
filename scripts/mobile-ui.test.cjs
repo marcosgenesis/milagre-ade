@@ -765,6 +765,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
       Redirect: "Redirect",
       Stack: { Screen: "Screen", Toolbar: Object.assign(() => null, { Menu: "ToolbarMenu", MenuAction: "ToolbarMenuAction", Button: "ToolbarButton" }) },
       router,
+      useNavigation: () => ({ setParams: (values) => Object.assign(params, values) }),
       useLocalSearchParams: () => params,
       useFocusEffect: (fn) => react.effect(fn, [fn]),
     },
@@ -1399,6 +1400,7 @@ function pullDownHost() {
     "./theme": { colors: { ink2: "#aaa", ink3: "#666" }, fonts: { mono: "monospace" } },
     "./icons": { Icon: "Icon" },
     "./confirm-store": { confirmSheet: (...args) => sheets.push(args) },
+    "./choice-store": require("../apps/mobile/src/choice-store.ts"),
   });
   return { PullDown, sheets };
 }
@@ -1458,6 +1460,106 @@ test("header switchers keep the shared native overlay without hosting React view
   t.mock.timers.tick(250);
   assert.deepEqual(selected, ["other"]);
   assert.equal(sheets.length, 0);
+});
+
+test("the branch picker opens searchable choices while short action menus remain native", () => {
+  const { PullDown } = pullDownHost();
+  const choices = require("../apps/mobile/src/choice-store.ts");
+  const screen = chatHost();
+  const trigger = find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose branch");
+  assert.equal(trigger.props.searchable.placeholder, "Search worktrees");
+  const rendered = PullDown(trigger.props);
+  assert.equal(
+    find(rendered, (node) => node.type === "IOSMenu"),
+    undefined,
+  );
+  rendered.props.onPress();
+  const entry = choices.currentChoice();
+  assert.equal(entry.title, "Choose a worktree");
+  assert.equal(entry.items[0].title, "main");
+  entry.choose(null);
+});
+
+test("choosing a worktree updates the Chat route while the picker route is still leaving", () => {
+  const screen = chatHost();
+  const picker = find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose branch");
+  screen.router.setParams = () => {
+    throw new Error("global params target the sheet");
+  };
+  picker.props.onSelect("2");
+  assert.equal(screen.params.worktreeId, "2");
+});
+
+test("searching the choice sheet filters full names and selection applies only after dismissal", () => {
+  const choices = require("../apps/mobile/src/choice-store.ts");
+  const picks = [];
+  const longName = "milagre/resolve-pr-246-conflicts-and-mj8k";
+  choices.showChoiceSheet({
+    title: "Branch from",
+    placeholder: "Search branches",
+    emptyLabel: "No branches found.",
+    items: [
+      { id: "main", title: "main", checked: true },
+      { id: longName, title: longName },
+    ],
+    onSelect: (id) => picks.push(id),
+  });
+  const react = hookHost();
+  react.useEffect = react.effect;
+  let closed = 0;
+  const { default: Screen } = load("app/choice-sheet.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { FlatList: "FlatList", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { hairlineWidth: 1 } },
+    "expo-router": {
+      router: {
+        back() {
+          closed++;
+        },
+      },
+      Stack: {
+        Title: "StackTitle",
+        SearchBar: "SearchBar",
+        Toolbar: Object.assign(function Toolbar() {}, { Button: "ToolbarButton", SearchBarSlot: "SearchBarSlot" }),
+      },
+    },
+    "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 20 }) },
+    "@hugeicons/core-free-icons": {},
+    "../choice-store": choices,
+    "../icons": { Icon: "Icon" },
+    "../ui": { CircleButton: "CircleButton", Field: "Field", colors: {}, styles: {} },
+    "../theme": { fonts: { mono: "mono" } },
+  });
+  const render = () => {
+    react.begin();
+    const tree = Screen();
+    react.flush();
+    return tree;
+  };
+  const list = () => find(render(), (node) => node.type === "FlatList");
+  const field = () => find(render(), (node) => node.type === "SearchBar");
+  assert.equal(find(render(), (node) => node.type === "StackTitle").props.children, "Branch from");
+  assert.equal(field().props.placement, "integrated");
+  assert.equal(field().props.obscureBackground, false, "filtered rows remain tappable during search");
+  assert.equal(find(render(), (node) => node.type?.name === "Toolbar" && node.props.placement === "bottom").props.children.type, "SearchBarSlot");
+  assert.equal(list().props.data.length, 2);
+  field().props.onChangeText({ nativeEvent: { text: "  RESOLVE-PR-246  " } });
+  assert.equal(list().props.data.length, 1);
+  const row = list().props.renderItem({ item: list().props.data[0] });
+  assert.equal(row.props.accessibilityLabel, longName);
+  assert.equal(find(row, (node) => node.type === "Text").props.numberOfLines, undefined, "the full name can wrap");
+  field().props.onChangeText({ nativeEvent: { text: "missing" } });
+  assert.equal(list().props.data.length, 0);
+  assert.equal(list().props.ListEmptyComponent.props.children, "No branches found.");
+  field().props.onCancelButtonPress();
+  assert.equal(list().props.data.length, 2, "native cancel restores the complete list");
+  field().props.onChangeText({ nativeEvent: { text: "resolve" } });
+  row.props.onPress();
+  row.props.onPress();
+  assert.equal(closed, 1);
+  assert.deepEqual(picks, [], "route updates wait for the native sheet to leave");
+  react.cleanup();
+  assert.deepEqual(picks, [longName]);
 });
 
 // A Project with one Chat (5) in a Milagre worktree that holds an uncommitted file, its turn running.

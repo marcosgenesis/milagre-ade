@@ -137,7 +137,10 @@ right away. The daemon holds the channel open, records a pending request `{ key,
 `devices:pending` to its own window (never to desktops: `devices:*` is denied). The Mac's window shows a prompt:
 "studio wants to drive this Mac's chats. Allow / Deny", with the name from the hello. Allow stores the device as a
 computer and opens its connection on the held channel; Deny refuses it with `reason: "denied"` and saves nothing. A
-request that gets no answer within the pairing window, or whose channel closes, is dropped. Known computers reconnect
+request that gets no answer within the pairing window it arrived in, or whose channel closes, is dropped. While it
+waits, the Mac sends the desktop a pending notice every 20 s so the 15 s hello timer and idle relay sockets don't drop
+it. Deny, expiry and a full queue (at most 4 waiting) answer `code: "unknown-phone"` with `reason: "denied"` or
+`"busy"`. Once allowed, the "New computer paired" notification is not shown (the owner just clicked Allow). Known computers reconnect
 without asking. The desktop shows "Waiting for studio to allow this Mac…" until then.
 
 ## This Mac (Electron main)
@@ -146,11 +149,12 @@ without asking. The desktop shows "Waiting for studio to allow this Mac…" unti
 
 A new `apps/desktop/electron/computers.cjs`:
 
-- `computers.json` in userData: `[{ id, hostId, name, relay, lanRoutes, addedAt }]`. The pinned host key and the
-  desktop's own keypair live in the keychain through `safeStorage`.
-- One transport per computer: `createRelayTransport` from `apps/mobile/src/relay-transport.ts`, moved to
-  `packages/shared` with its socket and random sources injected (Node's global `WebSocket` and `crypto`), plus the pure
-  route supervisor from `apps/mobile/src/routes.ts`. LAN first, relay otherwise, re-checked on connect, every 60 s and on
+- `computers.json` in userData: `[{ id, hostId, name, relay, lanRoutes, addedAt, lastSeen }]`. The pinned host key,
+  the pairing token (every hello carries it, even from known devices) and the desktop's own keypair are sealed with
+  `safeStorage`.
+- One transport per computer: a desktop client (`peer-client.cjs`) that speaks `rpc`/`evt`/`part` over the relay
+  crypto, with the handshake timing of the phone's `relay-transport.ts` (which stays on the phone: it speaks
+  HTTP-over-channel), plus the pure route supervisor from `apps/mobile/src/routes.ts`, moved to `packages/shared`. LAN first, relay otherwise, re-checked on connect, every 60 s and on
   network change.
 - One remote runtime per computer, reusing `daemon-runtime.cjs` with the channel in place of the socket: the same
   reconnect, `eventSeq` watermark, paged snapshot and state-patch resync.

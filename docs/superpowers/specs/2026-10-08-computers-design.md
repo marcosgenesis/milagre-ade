@@ -24,6 +24,7 @@ machine as just the first host, a footer popover listing hosts with status, and 
 | Pairing | The phone's pairing link and QR, unchanged in format. Add computer takes the pasted link. |
 | Transport | Same as the phone: the encrypted LAN route when both Macs share a network, relay.milagre.cloud otherwise. |
 | Trust | A paired desktop can do anything the Mac's own window can, except pairing and device management. Removable any time from that Mac. |
+| Allowing a computer | A new computer's first pairing waits for Allow on the Mac being paired. Phones pair as before. Decided 2026-10-08: the pairing token lives until Reset, so without this any phone that ever scanned the QR could pair a full-control computer. |
 | Offline computer | Its Projects and chats stay in the sidebar from a local cache, dimmed and read-only. |
 | Phone in this work | The phone sends its name when pairing so Settings › Devices can list it. A merged multi-computer list on the phone is a follow-up. |
 | Rollout | Behind Settings › Experimental ("Other computers") until the last PR lands. |
@@ -128,6 +129,16 @@ a Cloudflare tunnel use the bearer token and are not listed. "Reset all" stays a
   Project. Starts at the home folder; refuses paths outside it. Feeds the remote folder picker.
 - `media:read({ path })`: the bytes of an image or file a chat references, limited to files the daemon already serves to
   the phone (`attachment-preview.cjs` rules). Replaces `milagre-media://` for remote chats.
+
+### Allowing a new computer
+
+A desktop hello from a key the Mac doesn't know yet, inside the pairing window, no longer opens a daemon connection
+right away. The daemon holds the channel open, records a pending request `{ key, name, at }` and broadcasts
+`devices:pending` to its own window (never to desktops: `devices:*` is denied). The Mac's window shows a prompt:
+"studio wants to drive this Mac's chats. Allow / Deny", with the name from the hello. Allow stores the device as a
+computer and opens its connection on the held channel; Deny refuses it with `reason: "denied"` and saves nothing. A
+request that gets no answer within the pairing window, or whose channel closes, is dropped. Known computers reconnect
+without asking. The desktop shows "Waiting for studio to allow this Mac…" until then.
 
 ## This Mac (Electron main)
 

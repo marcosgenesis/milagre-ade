@@ -18,6 +18,8 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 // Handled here, never by core, and not in the mobile bridge's allow-list: a paired phone must not manage its own access.
 const PUSH_METHODS = Object.freeze(["push:register", "push:unregister", "push:focus"]);
 const PHONE_METHODS = Object.freeze(["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing", "phone:set-lan"]);
+// Paired phones and computers, listed and removed from this Mac's own window only (Settings > Devices).
+const DEVICE_METHODS = Object.freeze(["devices:list", "devices:remove"]);
 // A client that asks for them (daemon:state-patches) gets what changed in a state event, not the whole state; see
 // state-patch.mjs. state:read gives it a whole state and its version when it has none or missed one.
 const STATE_PATCHES = "state-patches-v1";
@@ -455,7 +457,7 @@ async function startDaemon({
             dataDir,
             socketPath,
             capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1", "mobile-push-v1", STATE_PATCHES, CHAT_PAGES],
-            methods: [...runtime.methods, ...PHONE_METHODS, ...PUSH_METHODS, ...STATE_METHODS].filter((method) => !policy?.denies(method)),
+            methods: [...runtime.methods, ...PHONE_METHODS, ...DEVICE_METHODS, ...PUSH_METHODS, ...STATE_METHODS].filter((method) => !policy?.denies(method)),
           };
         else if (request.method === "phone:status") result = phone.status();
         // Settings shows the reply, which arrives after the status events: answer with the settled status, not the
@@ -474,6 +476,8 @@ async function startDaemon({
           result = phone.status();
         } else if (request.method === "phone:open-pairing") result = await phone.openPairing();
         else if (request.method === "phone:set-lan") result = await phone.setLan(request.args[0]);
+        else if (request.method === "devices:list") result = await phone.devices();
+        else if (request.method === "devices:remove") result = await phone.removeDevice(request.args[0]);
         else if (request.method === "push:register") result = await push.register(request.args[0]);
         else if (request.method === "push:unregister") result = await push.unregister(request.args[0]);
         else if (request.method === "push:focus") result = push.focus(request.args[0]);

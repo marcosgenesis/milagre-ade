@@ -35,7 +35,9 @@ All on the Chat's canvas, approved 2026-10-08:
 - `sidebar-c-sections` v6: merged list, computer on each chat's second line, popover open, gear tooltip.
 - `add-computer` v1: paste the link, the computer it found and how it is reached, "Show it as" name, full-control note.
 - `settings-devices` v1: on the other Mac. Replaces Settings › Phone. The on/off switch, Pair a device (QR, Copy link,
-  countdown), then Computers and Phones lists, each with status, last seen and Remove.
+  countdown), then Computers and Phones lists, each with status, last seen and Remove. Its "Each link pairs one
+  device" line is wrong: any number of devices can pair while the window is open, and the link only changes on Reset.
+  The Remove confirm reads "Remove <name>? It can pair again from Pair a device."
 - `add-project-remote` v1: choose the computer (offline ones disabled), then browse that computer's folders.
 - `computer-settings` v1: what the gear opens for a remote computer. Name (local label only), connection routes and
   which is in use, what lives there, Remove. For This Mac the gear opens Settings › Devices.
@@ -51,7 +53,7 @@ window runs on; others are paired computers. **Device** covers phones and comput
 ## Today
 
 - The daemon serves the desktop over a private Unix socket. `apps/daemon/src/server.cjs:335-535` handles each
-  connection inline: `wire()` framing, `dispatch()` (423-522), per-socket `context.clientId`, `views`, `resultPages`,
+  connection inline: `wire()` framing, `dispatch()` (383-534, method chain from about 461), per-socket `context.clientId`, `views`, `resultPages`,
   `patchSockets`, and `broadcast()` fan-out (256-272). Nothing there is socket-agnostic.
 - Electron main registers every daemon method as a pass-through (`apps/desktop/electron/main.cjs:209-215`) and rebroadcasts
   every event to all windows (184-196). `daemon-runtime.cjs` owns reconnect, resync and state patches.
@@ -68,8 +70,10 @@ window runs on; others are paired computers. **Device** covers phones and comput
 
 ### Connections
 
-Factor the inline handler into `acceptConnection({ send, close, onClose, policy })` in `server.cjs`. It owns the
-connection key, `context.clientId`, the view, result pages, patch subscription, in-flight limits and cleanup
+Factor the inline handler into `acceptConnection({ send, end, destroy, isClosed, requireAuthentication, policy })` in
+`server.cjs`, returning `{ receive, invalid, close }`. The socket needs `end` and `destroy` separately, `isClosed` for
+the late simulator and browser cleanup, and Windows authentication, so a smaller signature cannot keep its behavior. It
+owns the connection key, `context.clientId`, the view, result pages, patch subscription, in-flight limits and cleanup
 (`runtime.disconnect`). The Unix socket calls it with `wire()`'s `send`; paired desktops call it with a channel `send`.
 Behavior over the socket does not change; the existing daemon tests must pass untouched.
 
@@ -97,12 +101,19 @@ Paired desktops use the phone's routes (relay room and LAN on 8798) and its cryp
 ### Devices store
 
 Replace `relay-phones.json` with `devices.json`: `{ devices: [{ key, kind: "phone" | "computer", name, pairedAt,
-lastSeen }] }`, mode 0600. On first read, existing phone keys migrate as `{ kind: "phone", name: null }` and show as
-"Phone". `MAX_DEVICES` stays 32. `isKnown` and `add` keep their shapes; `add` records name and kind from the hello and
-`lastSeen` updates on every accepted hello (written at most once a minute).
+lastSeen }], removed: [{ key, at }] }`, mode 0600. On first read, existing phone keys migrate as `{ kind: "phone",
+name: null }` and show as "Phone", and the old file is deleted. `MAX_DEVICES` stays 32. `isKnown` and `add` keep their
+shapes; every accepted hello updates the name (so migrated phones pick theirs up) and `lastSeen` (written at most once
+a minute). The hello says `kind: "desktop"`; the store records that device as `kind: "computer"`.
 
-New methods, socket only (they are in the deny set): `devices:list` and `devices:remove(key)`. Remove deletes the entry
-and closes that device's open channels. "Reset all" stays as the existing rotate-identity action.
+The pairing check becomes per device: a key in `removed` cannot pair again inside a pairing window that was already
+open when it was removed. Without this, a removed phone redials and re-pairs within seconds, because showing the QR in
+Settings opens the window.
+
+New methods, socket only (they are in the deny set): `devices:list` and `devices:remove(key)`. Remove deletes the entry,
+adds it to `removed` and closes that device's open channels on the relay and the LAN. Known limits: push registrations
+are keyed by an id the phone makes, not its pairing key, so a removed phone keeps receiving push until Reset; phones on
+a Cloudflare tunnel use the bearer token and are not listed. "Reset all" stays as the existing rotate-identity action.
 
 ### Remote-only helpers
 
@@ -163,8 +174,12 @@ deletes its folder.
 
 ## Phone
 
-- The phone's hello sends `name` (the device name from `expo-device`, already linked at `~57.0.2`, so the fingerprint
-  does not change; confirm with the fingerprint check before merging). JS only, shipped as an OTA.
+- The phone's hello sends `name`: `Device.deviceName` from `expo-device` (already linked at `~57.0.2` and used by
+  `push-native.ts`, so the fingerprint does not change; confirm with the fingerprint check). iOS 16 and later return a
+  generic "iPhone" without an entitlement that needs a native build, so the phone falls back to `Device.modelName`
+  ("iPhone 16 Pro"). JS only, shipped as an OTA.
+- Copy that says "Settings → Phone" (`relay-transport.ts`, `pairing.ts`, `client.ts`, `app/index.tsx`,
+  `add-computer.tsx`) becomes "Settings → Devices", as do `notifications.cjs`, the docs and the help skill.
 - Nothing else changes on the phone in this work.
 
 ## Errors
@@ -174,8 +189,9 @@ deletes its folder.
 - Removed on the other Mac: `hostAccept` refuses with `unknown-phone`; the computer shows "Removed on studio. Pair
   again with a new link." and its cache stays until removed here.
 - A pairing link past its 10 minutes: "This link expired. Copy a new one on studio."
-- Version skew: a daemon without the `desktop-peer-v1` capability answers the hello with a refusal; the window shows
-  "Update Milagre on studio to connect."
+- Version skew: a daemon from before PR 1 ignores `kind`, accepts a desktop hello as a phone and closes the channel on
+  the first `rpc` message. PR 1's daemons refuse a desktop hello with `reason: "kind"`. Either way the window shows
+  "Update Milagre on studio to connect." Only daemons with `desktop-peer-v1` (PR 2) accept desktops.
 - Relay room full (16 devices): "studio has too many devices connected. Remove one in its Settings › Devices."
 
 ## Testing

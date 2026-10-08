@@ -274,4 +274,4 @@ function codexSubagents(method, params, state) {
 function settleSubagents(state, status) {
   return [...(state.subagents?.values() ?? [])].filter(active).map((agent) => update(state, agent.id, { status }));
 }
-module.exports = { claudeSubagents, codexSubagents, settleSubagents, active };
+module.exports = { claudeSubagents, codexSubagents, settleSubagents, active, update, communicate };

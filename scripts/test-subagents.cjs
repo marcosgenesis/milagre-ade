@@ -39,6 +39,7 @@ function Fixture() {
   window.setMessageCount = setCount;
   window.setDraft = setDraft;
   window.setModel = (id) => setModel(MODEL_CATALOG.find((item) => item.id === id));
+  window.useAntigravity = () => setModel(MODEL_CATALOG.find((item) => item.provider === "antigravity"));
   const messages = Array.from({ length: count }, (_, index) => ({
     id: index + 1, session_id: 1, context: null, role: index === 0 ? "user" : "assistant",
     body: index === 0 ? "Review authentication and run the relevant tests." : "I started two subagents. Their progress is available below.",
@@ -68,6 +69,36 @@ function Fixture() {
 document.documentElement.classList.add("dark");
 createRoot(document.getElementById("root")).render(<DotBackground><Fixture /></DotBackground>);
 `;
+
+// Two Antigravity children as a live run of agy 1.3.0 reported them (ids, titles, prompts and rows).
+const ANTIGRAVITY_CHILDREN = [
+  {
+    id: "6615864f0d7a4cf5a4c2b0f1e7a9d311",
+    title: "Subagent One",
+    prompt: "Run 'sleep 4; cat a.txt' using run_command, then read a.txt with view_file, and report.",
+    status: "running",
+    latestActivity: "Read `a.txt`",
+    transcript: [
+      { id: "6615864f0d7a4cf5a4c2b0f1e7a9d311:1", kind: "tool", text: "Ran `sleep 4; cat a.txt`\n$ sleep 4; cat a.txt\nFile a: hello from a." },
+      { id: "step:3:0", kind: "tool", text: "Read `a.txt`" },
+    ],
+    communications: [
+      { id: "task:6615864f0d7a4cf5a4c2b0f1e7a9d311", fromId: null, toId: "6615864f0d7a4cf5a4c2b0f1e7a9d311", text: "Run 'sleep 4; cat a.txt'", at: 1 },
+    ],
+  },
+  {
+    id: "45dea2d0b8e34a7c9a0f62d1c4b7e815",
+    title: "Subagent Two",
+    prompt: "Read b.txt with view_file and run 'wc -c b.txt', and report.",
+    status: "completed",
+    latestActivity: "Finished",
+    transcript: [
+      { id: "45dea2d0b8e34a7c9a0f62d1c4b7e815:1", kind: "tool", text: "Ran `wc -c b.txt`\n$ wc -c b.txt\n      22 b.txt" },
+      { id: "step:1:0", kind: "tool", text: "Read `b.txt`" },
+      { id: "result", kind: "message", text: "Here are the exact outputs:\n\nFile b: hello from b.\n22 b.txt" },
+    ],
+  },
+];
 
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
@@ -929,6 +960,36 @@ async function browserChecks() {
     assert.ok(await evaluate('document.querySelector("[data-advisor-result]").textContent.includes("Codex advisor result: Security")'));
     assert.equal(await evaluate('document.querySelector("[data-advisor-result]").closest("article").dataset.from'), "app");
     await screenshot("advisor-result");
+    await evaluate("window.setAdvisorResult(false)");
+    // Antigravity's children (read from its transcripts, see antigravity-subagents.cjs) render like any other provider's.
+    await evaluate(
+      `window.useAntigravity(); window.setChildren(${JSON.stringify(ANTIGRAVITY_CHILDREN)}.map(child => ({...child, startedAt: Date.now() - 16000, updatedAt: Date.now(), ...(child.status === "completed" ? { endedAt: Date.now() } : {})})))`,
+    );
+    await waitFor('!!document.querySelector("[data-slot=subagent-track] > button")');
+    await evaluate('document.querySelector("[data-slot=subagent-popover]") || document.querySelector("[data-slot=subagent-track] > button").click()');
+    await waitFor('!!document.querySelector("[data-slot=subagent-popover]")');
+    // The list may still show the archived children from the checks above.
+    await evaluate(
+      'document.querySelector("[data-subagent-archived-toggle]")?.textContent === "Back to subagents" && document.querySelector("[data-subagent-archived-toggle]").click()',
+    );
+    await waitFor('document.querySelectorAll("[data-subagent-row]").length === 2');
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-subagent-row]")].map(row => row.textContent.trim())'), [
+      "Subagent One",
+      "Subagent Two",
+    ]);
+    assert.ok(
+      await evaluate('[...document.querySelectorAll("[data-subagent-row] path")].some(path => path.getAttribute("d").startsWith("M21.751"))'),
+      "A finished Antigravity child shows the Antigravity mark",
+    );
+    await screenshot("antigravity-subagents");
+    await evaluate('document.querySelector("[data-subagent-open]").click()');
+    await waitFor('!!document.querySelector("[data-slot=subagent-transcript]")');
+    for (const text of ["Ran `sleep 4; cat a.txt`", "Read `a.txt`", "File a: hello from a."])
+      assert.ok(await evaluate(`document.querySelector("[data-slot=subagent-transcript]").textContent.includes(${JSON.stringify(text)})`), text);
+    await screenshot("antigravity-subagent-transcript");
+    await clickLabel("Close subagents");
+    await evaluate("window.setChildren([])");
+    await waitFor('!document.querySelector("[data-slot=subagent-track]")');
     console.log(
       "PASS: embedded canvas, drag/pan/zoom, collision pushes, keyboard transcript, persistent layout, sequential arrivals, stable names, dead/sleeping/angry states, message/pointer gaze, reduced motion, compact layout, and original subagent list/archive/transcript checks",
     );

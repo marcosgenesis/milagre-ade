@@ -165,12 +165,12 @@ class ChatHost {
       const saved = await this.states.get(projectPath);
       const session = saved.sessions[sessionId];
       const cwd = session?.workspacePath ?? saved.worktrees?.[session?.worktree_id]?.path;
-      if (!cwd || session?.provider !== "codex" || !session.native_session_id || session.archived) return;
+      if (!cwd || !["codex", "antigravity"].includes(session?.provider) || !session.native_session_id || session.archived) return;
       const unknown = (session.subagents ?? []).filter(
         (agent) => agent.status === "unknown" && agent.source !== "milagre-advisor" && !agent.archived && agent.id !== session.native_session_id,
       );
       if (!unknown.length) return;
-      const events = await this.readSubagents({ cwd, agents: unknown, projectPath });
+      const events = await this.readSubagents({ cwd, agents: unknown, projectPath, provider: session.provider, nativeSessionId: session.native_session_id });
       if (!events.length) return;
       const { state, changed } = await this.states.update(projectPath, (latest) => {
         const current = latest.sessions[sessionId];

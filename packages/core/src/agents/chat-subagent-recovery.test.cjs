@@ -352,3 +352,21 @@ test("nonterminal, unrelated, and older events do not save or broadcast unchange
   assert.deepEqual(started, []);
   assert.deepEqual(host.snapshot(), { runs: {}, seq: 0 });
 });
+
+test("an Antigravity chat recovers its unknown children from the transcripts, passing the provider and native session", async () => {
+  const calls = [];
+  const agy = projectState();
+  const { host, states } = await harness({
+    state: sessionEdit(agy, { provider: "antigravity", native_session_id: "agy-parent" }),
+    reader: async (request) => {
+      calls.push(request);
+      return request.agents.map((agent) => completed(agent));
+    },
+  });
+  await host.recoverSubagents(CHAT);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].provider, "antigravity");
+  assert.equal(calls[0].nativeSessionId, "agy-parent");
+  assert.equal(calls[0].cwd, CWD);
+  assert.equal((await states.get(PROJECT)).sessions[1].subagents[0].status, "completed");
+});

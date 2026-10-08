@@ -151,6 +151,15 @@ class AcpSession {
     this.turnEnded = Promise.resolve();
     this.markTurnEnded = null;
     this.modeChange = Promise.resolve();
+    // Children the agent runs on its own, when the config knows how to see them.
+    this.subagents =
+      config.subagents?.({
+        state: this.state,
+        env: env ?? process.env,
+        emit: (event) => this.emit(event),
+        forward: (update) => this.mapUpdate(update),
+        turnActive: () => this.turnActive && !this.cancelRequested,
+      }) ?? null;
     this.permissions = new PendingPermissions((event) => this.emit(event));
     this.questions = new PendingQuestions((event) => this.emit(event));
   }
@@ -238,6 +247,7 @@ class AcpSession {
     blocks.push({ type: "text", text: prompt });
     for (const image of images) blocks.push({ type: "image", mimeType: image.mime, data: image.base64 ?? Buffer.from(image.bytes).toString("base64") });
     this.instructionsSent = true;
+    this.subagents?.beginTurn();
     this.emit({ type: "turn-started", turnId });
     this.rpc.request("session/prompt", { sessionId: this.state.sessionId, prompt: blocks }, { timeoutMs: 0 }).then(
       (result) => this.promptEnded(turnId, result),
@@ -385,9 +395,15 @@ class AcpSession {
     if (method !== "session/update" || this.replaying) return;
     if (params.sessionId && this.state.sessionId && params.sessionId !== this.state.sessionId) return;
     const update = params.update ?? {};
+    // A child's tool calls belong to the child, and may come after the parent's turn has ended.
+    if (this.subagents?.route(update)) return;
     if (!this.turnActive && !STATE_UPDATES.has(update.sessionUpdate)) return;
     // Once Stop is pressed, Antigravity answers with "The request was cancelled by the client." as reply text.
     if (this.cancelRequested && update.sessionUpdate === "agent_message_chunk") return;
+    this.mapUpdate(update);
+  }
+
+  mapUpdate(update) {
     for (const event of mapAcpUpdate(update, this.state)) this.emit(event);
   }
 
@@ -478,6 +494,7 @@ class AcpSession {
 
   handleExit({ detail, signal, code, error }) {
     this.closed = true;
+    this.subagents?.close(this.cancelRequested ? "cancelled" : "failed");
     void this.removeTemp();
     const reason =
       error?.code === "ENOENT"
@@ -495,6 +512,8 @@ class AcpSession {
     this.permissions.cancelAll();
     this.questions.cancelAll();
     const thinking = closeThinking(this.state);
+    // The transcripts' last word lands in the turn; a stopped turn stops its children too.
+    this.subagents?.turnEnded({ cancelled: events.some((event) => event.type === "turn-cancelled") });
     // A tool still running when the turn stopped never completes; the renderer closes its step.
     this.state.steps.clear();
     this.state.calls.clear();
@@ -533,6 +552,7 @@ class AcpSession {
   }
 
   async close() {
+    this.subagents?.close("cancelled");
     this.permissions.cancelAll();
     this.questions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;

@@ -74,8 +74,19 @@ function virtualClient(daemon, options = {}) {
   };
 }
 
-test("the paired-desktop policy denies pairing, device management, push and stopping the daemon, and nothing else", () => {
-  for (const method of ["phone:status", "phone:reset", "phone:open-pairing", "devices:list", "devices:remove", "push:register", "push:focus", "daemon:stop"])
+test("the paired-desktop policy denies pairing, device management, push, stopping the daemon and signing in to Linear on this Mac, and nothing else", () => {
+  for (const method of [
+    "phone:status",
+    "phone:reset",
+    "phone:open-pairing",
+    "devices:list",
+    "devices:remove",
+    "push:register",
+    "push:focus",
+    "daemon:stop",
+    "linear:connect",
+    "linear:disconnect",
+  ])
     assert.equal(peerPolicy.denies(method), true, method);
   for (const method of [
     "daemon:status",
@@ -86,6 +97,7 @@ test("the paired-desktop policy denies pairing, device management, push and stop
     "project:recent",
     "git:push",
     "chat:set-open",
+    "linear:status",
   ])
     assert.equal(peerPolicy.denies(method), false, method);
 });

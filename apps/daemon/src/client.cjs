@@ -15,6 +15,8 @@ const SLOW_METHODS = Object.freeze({
   "worktree:remove": 330000,
   // Installing Antigravity downloads about 110 MB and unpacks it; a slow connection takes minutes.
   "agent:update-cli": 1200000,
+  // A Linear sign-in waits up to five minutes for the browser, plus two 15 s requests.
+  "linear:connect": 330000,
 });
 const deadlineFor = (method, fallback) => Math.max(fallback, SLOW_METHODS[method] ?? 0);
 

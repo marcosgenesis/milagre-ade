@@ -3,6 +3,7 @@ import { ProjectAccountsGroup, ProjectAccountsSettings } from "./ProjectAccounts
 import { AccountsSettings } from "./AccountsSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
+import { LINEAR_CONNECTING, LINEAR_HINT, LINEAR_TITLE, linearStatusLine, type LinearStatus } from "@milagre/shared/linear";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -206,6 +207,7 @@ function ExperimentalSettings() {
       >
         <Switch label="Murilo mode" checked={settings.muriloMode} onChange={(muriloMode) => updateSettings({ muriloMode })} />
       </Row>
+      <LinearSettings />
     </Group>
   );
 }
@@ -1222,6 +1224,98 @@ export function MainSyncDefaultSetting() {
       <Row label={MAIN_SYNC_TITLE} description={MAIN_SYNC_HINT}>
         <Switch label={MAIN_SYNC_TITLE} checked={syncMain === true} onChange={(next) => void change(next)} />
       </Row>
+      {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}
+    </div>
+  );
+}
+
+// Experimental > Linear: the daemon keeps the switch (phones share it) and the Mac's one connection.
+function LinearSettings() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<LinearStatus | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Connect again replaces a waiting sign-in; only the latest attempt may update the row.
+  const attempt = useRef(0);
+  useEffect(() => {
+    let live = true;
+    // Started inside a promise so a bridge without the command (an older host) reads as off instead of throwing.
+    Promise.resolve()
+      .then(() => window.milagre.readLinearEnabled())
+      .then(
+        (value) => live && setEnabled(value?.enabled === true),
+        () => live && setEnabled(false),
+      );
+    Promise.resolve()
+      .then(() => window.milagre.readLinearStatus())
+      .then(
+        (value) => live && setStatus(value),
+        () => live && setStatus({ connected: false }),
+      );
+    const stop = window.milagre.onLinearStatusChanged?.((next) => {
+      if (!live) return;
+      setStatus(next);
+      if (next.connected) {
+        // The sign-in finished: a connect still waiting is over, and a late failure of it must not show.
+        attempt.current++;
+        setConnecting(false);
+        setError(null);
+      }
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
+  async function changeEnabled(next: boolean) {
+    setError(null);
+    setEnabled(next);
+    try {
+      setEnabled((await window.milagre.saveLinearEnabled(next)).enabled);
+    } catch (failure) {
+      setEnabled(!next);
+      setError(ipcErrorMessage(failure));
+    }
+  }
+  async function connect() {
+    const id = ++attempt.current;
+    setError(null);
+    setConnecting(true);
+    try {
+      const next = await window.milagre.connectLinear();
+      if (id === attempt.current) setStatus(next);
+    } catch (failure) {
+      if (id === attempt.current) setError(ipcErrorMessage(failure));
+    } finally {
+      if (id === attempt.current) setConnecting(false);
+    }
+  }
+  async function disconnect() {
+    setError(null);
+    try {
+      setStatus(await window.milagre.disconnectLinear());
+    } catch (failure) {
+      setError(ipcErrorMessage(failure));
+    }
+  }
+  return (
+    <div data-linear-settings data-linear-connected={status?.connected ? "true" : "false"} className="divide-y divide-line">
+      <Row label={LINEAR_TITLE} description={LINEAR_HINT}>
+        <Switch label={LINEAR_TITLE} checked={enabled === true} onChange={(next) => void changeEnabled(next)} />
+      </Row>
+      {enabled && status && (
+        <Row label={linearStatusLine(status, "mac")} description={connecting ? LINEAR_CONNECTING : undefined}>
+          {status.connected ? (
+            <button type="button" className={SECONDARY_BUTTON} onClick={() => void disconnect()}>
+              Disconnect
+            </button>
+          ) : (
+            <button type="button" className={SECONDARY_BUTTON} onClick={() => void connect()}>
+              {connecting ? "Start again" : "Connect"}
+            </button>
+          )}
+        </Row>
+      )}
       {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}
     </div>
   );

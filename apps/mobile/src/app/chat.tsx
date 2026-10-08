@@ -30,12 +30,15 @@ import { SimulatorChip } from "../simulator";
 import { PortsChip } from "../ports";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { ChatReply } from "../chat-reply";
+import { HandoffDivider } from "../handoff-divider";
+import { showBrief } from "../handoff-brief-store";
+import { isHandoff } from "@milagre/shared/handoff";
 import { ThinkingIndicator } from "../running-logo";
 import { BottomFade, EdgeFade } from "../bottom-fade";
 import { useDotBackground } from "../dot-background";
 import { Approval, Questions } from "../questions";
 import { AgentControls, PermissionChip } from "../agent-controls";
-import { selectedModel, sendOptions } from "../turn-options";
+import { modelsFor, selectedModel, sendOptions } from "../turn-options";
 import { Icon } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
@@ -213,6 +216,11 @@ export default function ChatScreen() {
       }
     }
   };
+  const handoffModels = useMemo(() => [...modelsFor("claude", session.models), ...modelsFor("codex", session.models)], [session.models]);
+  const openBrief = useCallback((brief: string) => {
+    showBrief(brief);
+    router.push("/handoff-brief");
+  }, []);
   const openActivity = useCallback((message: string) => router.push({ pathname: "/activity", params: { id: String(params.id), message } }), [params.id]);
   const { rememberChat } = session;
   const canRemember = !!params.id && !!session.snapshot?.project.state.sessions[Number(params.id)] && targetMatches;
@@ -271,7 +279,7 @@ export default function ChatScreen() {
   const run = chat ? runs.runs[chatId] : undefined;
   const contextUsage = run?.contextUsage ?? chat?.contextUsage;
   const preferences = composer.preferences[chatId] || composer.defaults;
-  const actualProvider = chat?.provider || preferences.provider;
+  const actualProvider = composer.preferences[chatId]?.provider ?? chat?.provider ?? composer.defaults.provider;
   const model = selectedModel(actualProvider, preferences.model || (chat ? lastUserModel(project.state, chat.id) : ""), session.models);
   const worktreeId = chat?.worktree_id ?? Number(params.worktreeId);
   const worktree = project.state.worktrees[worktreeId];
@@ -692,7 +700,11 @@ export default function ChatScreen() {
                 }
               }}
             >
-              <ChatReply message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />
+              {isHandoff(message) ? (
+                <HandoffDivider context={message.context} models={handoffModels} onOpen={openBrief} />
+              ) : (
+                <ChatReply message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />
+              )}
             </View>,
           ])}
           {!pendingInput && liveReply}
@@ -968,7 +980,7 @@ export default function ChatScreen() {
                     onToggle={() => {
                       router.push({
                         pathname: "/model-sheet",
-                        params: { chatId, model: model.id, ...(chat?.provider ? { locked: chat.provider } : {}), ...(run ? { busy: "1" } : {}) },
+                        params: { chatId, model: model.id, provider: actualProvider, ...(run ? { busy: "1" } : {}) },
                       });
                     }}
                   />

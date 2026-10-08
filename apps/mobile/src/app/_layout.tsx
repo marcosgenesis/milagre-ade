@@ -80,6 +80,7 @@ export default function Layout() {
                       options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
                     />
                     <Stack.Screen name="activity" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
+                    <Stack.Screen name="handoff-brief" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
                     <Stack.Screen
                       name="viewer"
                       options={{ presentation: "transparentModal", headerShown: false, animation: "none", contentStyle: { backgroundColor: "transparent" } }}

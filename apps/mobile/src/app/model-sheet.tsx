@@ -14,13 +14,12 @@ import { CircleButton, colors, styles } from "../ui";
 
 /** Model, thinking effort, Ultracode and fast mode for one Chat. Cancel (✕) discards, Done (✓) applies, per Apple's sheet guidance. */
 export default function ModelSheet() {
-  const params = useLocalSearchParams<{ chatId: string; model?: string; locked?: string; busy?: string }>();
+  const params = useLocalSearchParams<{ chatId: string; model?: string; provider?: string; busy?: string }>();
   const session = useSession();
   const composer = useComposer();
   const navigation = useNavigation();
   const saved = composer.preferences[params.chatId] || composer.defaults;
-  const locked = params.locked as ModelProvider | undefined;
-  const initial: TurnPreferences = { ...saved, provider: locked || saved.provider, model: params.model || saved.model };
+  const initial: TurnPreferences = { ...saved, provider: (params.provider as ModelProvider | undefined) || saved.provider, model: params.model || saved.model };
   const [draft, setDraft] = useState<TurnPreferences>(initial);
   const busy = params.busy === "1";
   const model = selectedModel(draft.provider, draft.model, session.models);
@@ -68,14 +67,11 @@ export default function ModelSheet() {
         >
           {PROVIDERS.map((provider) => {
             const on = provider === draft.provider;
-            const off = !!locked && provider !== locked;
             return (
               <Pressable
                 key={provider}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: on, disabled: off }}
-                accessibilityHint={off ? `This Chat runs on ${providerName(locked!)}. Start a new Chat to use ${providerName(provider)}.` : undefined}
-                disabled={off}
+                accessibilityState={{ selected: on }}
                 onPress={() => setDraft((current) => ({ ...current, provider, model: "", fastMode: false, ultracode: false }))}
                 style={{
                   flex: 1,
@@ -87,7 +83,6 @@ export default function ModelSheet() {
                   justifyContent: "center",
                   gap: 6,
                   backgroundColor: on ? colors.surface : "transparent",
-                  opacity: off ? 0.4 : 1,
                   boxShadow: on ? "0 1px 3px #0000001a" : undefined,
                 }}
               >

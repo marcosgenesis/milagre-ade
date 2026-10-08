@@ -102,3 +102,13 @@ test("a malformed --shard is rejected", () => {
   for (const value of ["0/2", "3/2", "2", "a/b", "1/0", "1.5/2"]) assert.throws(() => parseArgs(["--shard", value]), /--shard needs <index>\/<count>/, value);
   assert.throws(() => parseArgs(["--shard"]), /--shard needs a value/);
 });
+
+test("every Electron check that loads the built renderer asks for the build", () => {
+  // Shards run on separate runners, so a check cannot rely on another check having built dist first.
+  const fs = require("node:fs");
+  for (const file of discoverElectronChecks(root)) {
+    const name = path.basename(file);
+    if (fs.readFileSync(path.join(root, file), "utf8").includes("apps/desktop/dist/index.html"))
+      assert.equal(MANIFEST[name]?.needsBuild, true, `${name} loads apps/desktop/dist but is missing needsBuild in MANIFEST`);
+  }
+});

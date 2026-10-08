@@ -10,6 +10,8 @@ const MANIFEST = {
   "test-windows-cli.cjs": { platforms: ["win32"] },
   "test-ports.cjs": { needs: ["zsh", "ps", "lsof"] },
   "test-desktop.cjs": { needsBuild: true },
+  // Loads apps/desktop/dist/index.html; it only passed serially because test-desktop built it first.
+  "test-project-links.cjs": { needsBuild: true },
   // Red on the Linux CI runner (xvfb); each issue holds the log and the triage notes.
   "test-chat-layout.cjs": { platforms: ["darwin"], reason: "message preview overlaps the prompt on Linux, #234" },
   "test-chat-send-feedback.cjs": { platforms: ["darwin"], reason: "message navigation rebuilds on Linux, #235" },

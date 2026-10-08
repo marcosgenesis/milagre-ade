@@ -126,7 +126,7 @@ export function UsageSection() {
             </View>
           ))
         ) : !usage.error ? (
-          <Text style={styles.muted}>No plan usage is available. Sign in to Claude or Codex on your computer, then refresh.</Text>
+          <Text style={styles.muted}>No plan usage is available. Sign in to Claude, Codex or Antigravity on your computer, then refresh.</Text>
         ) : null}
         {usage.error ? (
           <Text selectable accessibilityRole="alert" style={[styles.muted, { color: colors.orange }]}>

@@ -6,6 +6,7 @@ const path = require("node:path");
 // This is everything AcpSession needs to know about it. Run against agy 1.3.0 on macOS arm64; the other platforms' archives are pinned by hash and layout.
 
 const { AMBIENT_ENV, argsFor, memberNames } = require("./antigravity-install.cjs");
+const { AntigravitySubagents } = require("./antigravity-subagents.cjs");
 const { ANTIGRAVITY_AGENT_OPTIONS, antigravityFamilies, resolveAntigravityModel } = require("@milagre/shared/antigravity-models");
 
 // Ambient credentials and settings that would pick another account, project or token store, or open a
@@ -99,6 +100,8 @@ const antigravityAcp = {
   isLoginError,
   isSubscriptionError,
   resolveModel,
+  // Its subagents are read from the transcripts in the account's profile (see antigravity-subagents.cjs).
+  subagents: (options) => new AntigravitySubagents(options),
   subscriptionMessage: "Antigravity needs an eligible subscription for this Google account. Choose another account in Settings, then send your message again.",
   // The per-process temporary directories live under this root (see makeTempDir and sweepTempDirs).
   tempRoot: path.join(os.tmpdir(), "milagre-antigravity"),

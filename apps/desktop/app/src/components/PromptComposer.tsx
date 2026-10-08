@@ -18,6 +18,7 @@ import { useSkills } from "./useSkills";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { promptSkillParts } from "../lib/prompt-skills";
 import { PromptHighlights } from "./PromptHighlights";
+import { ContextRing } from "./ContextRing";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -81,38 +82,6 @@ const POPOVER_TOP_INSET = 48;
 const POPOVER_BOTTOM_INSET = 16;
 // Smallest room below a tall composer that still fits a usable list.
 const POPOVER_MIN_BELOW = 220;
-
-const formatTokens = (tokens: number) => (tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens));
-
-/** A ring that fills as the agent's context window does; the agent compacts it when it gets close to full. */
-function ContextRing({ used, size }: ContextUsage) {
-  const ratio = Math.min(1, used / size);
-  const percent = Math.round(ratio * 100);
-  const radius = 6;
-  const circumference = 2 * Math.PI * radius;
-  const label = `Context: ${percent}% used (${formatTokens(used)} of ${formatTokens(size)} tokens)`;
-  return (
-    <Tooltip align="end" label={label}>
-      <span role="img" aria-label={label} className="flex size-7 shrink-0 items-center justify-center">
-        <svg width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
-          <circle cx="8" cy="8" r={radius} fill="none" stroke="var(--line-strong)" strokeWidth="2" />
-          <circle
-            cx="8"
-            cy="8"
-            r={radius}
-            fill="none"
-            stroke={percent >= 90 ? "var(--red)" : percent >= 75 ? "var(--accent-ink)" : "var(--ink-2)"}
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={circumference * (1 - ratio)}
-            className="transition-[stroke-dashoffset] duration-300 ease-out motion-reduce:transition-none"
-          />
-        </svg>
-      </span>
-    </Tooltip>
-  );
-}
 
 /** Rising bars, one per level the model offers; the filled ones show how hard the agent will think. */
 function EffortMeter({ level, total }: { level: number; total: number }) {

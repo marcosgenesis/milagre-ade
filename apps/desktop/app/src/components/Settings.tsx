@@ -1246,7 +1246,16 @@ function LinearSettings() {
         (value) => live && setStatus(value),
         () => live && setStatus({ connected: false }),
       );
-    const stop = window.milagre.onLinearStatusChanged?.((next) => live && setStatus(next));
+    const stop = window.milagre.onLinearStatusChanged?.((next) => {
+      if (!live) return;
+      setStatus(next);
+      if (next.connected) {
+        // The sign-in finished: a connect still waiting is over, and a late failure of it must not show.
+        attempt.current++;
+        setConnecting(false);
+        setError(null);
+      }
+    });
     return () => {
       live = false;
       stop?.();

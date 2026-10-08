@@ -18,10 +18,19 @@ window.milagre = {
   readLinearEnabled: async () => ({ enabled }),
   saveLinearEnabled: async (value) => ({ enabled: (enabled = value) }),
   readLinearStatus: async () => status,
-  connectLinear: () => new Promise((resolve) => setTimeout(() => resolve((status = connected)), 300)),
+  connectLinear: () =>
+    window.__hangConnect
+      ? new Promise((resolve, reject) => (window.__rejectConnect = () => reject(new Error('Linear sign-in timed out. Try again.'))))
+      : new Promise((resolve) => setTimeout(() => resolve((status = connected)), 300)),
   disconnectLinear: async () => (status = { connected: false }),
   onLinearStatusChanged: (callback) => (listeners.add(callback), () => listeners.delete(callback)),
 };
+// What the Mac's daemon does when the status changes behind the window's back (a phone, or a sign-in finishing).
+window.__emitLinear = (next) => {
+  status = next;
+  listeners.forEach((callback) => callback(next));
+};
+window.__connectedStatus = connected;
 function Fixture() {
   const [section, setSection] = useState('appearance');
   return (
@@ -81,6 +90,27 @@ async function browserChecks() {
     await screenshot("connected");
     await evaluate(`${button("Disconnect")}.click()`);
     await waitFor(`document.querySelector('[data-linear-settings]').dataset.linearConnected === 'false'`);
+    // A status that arrives from the daemon (a sign-in that finished elsewhere) updates the row without a click.
+    await evaluate(`window.__emitLinear(window.__connectedStatus)`);
+    await waitFor(`document.querySelector('[data-linear-settings]').dataset.linearConnected === 'true'`);
+    assert.match(await evaluate(text), /Connected as Victor to Acme/);
+    await evaluate(`${button("Disconnect")}.click()`);
+    await waitFor(`document.querySelector('[data-linear-settings]').dataset.linearConnected === 'false'`);
+    // A connect still waiting when the connected status arrives ends quietly: no error, no "Start again", even when
+    // the waiting call later fails.
+    await evaluate(`window.__hangConnect = true`);
+    await evaluate(`${button("Connect")}.click()`);
+    await waitFor(`!!${button("Start again")}`);
+    await evaluate(`window.__emitLinear(window.__connectedStatus)`);
+    await waitFor(`document.querySelector('[data-linear-settings]').dataset.linearConnected === 'true'`);
+    await evaluate(`window.__rejectConnect()`);
+    await delay(150);
+    const row = await evaluate(text);
+    assert.match(row, /Connected as Victor to Acme/);
+    assert.doesNotMatch(row, /timed out|Finish signing in/);
+    assert.equal(await evaluate(`!!${button("Start again")}`), false);
+    assert.equal(await evaluate(`!!document.querySelector('[data-linear-settings] .text-red')`), false, "no error shown");
+    await screenshot("connected-elsewhere");
     assert.deepEqual(errors, []);
     console.log("PASS: Experimental > Linear shows the connection only when on, connects through the browser and disconnects");
     app.exit(0);

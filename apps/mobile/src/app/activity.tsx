@@ -8,6 +8,7 @@ import { ToolRow } from "../tool-row";
 import { Markdown } from "../markdown";
 import { useSession } from "../session";
 import { CircleButton, PageScroll, colors, styles } from "../ui";
+import { useChatPage } from "../chat-pages";
 
 /** A reply's tools and notes, like desktop's expanded ActivityBlock; live while the turn runs. Each tool expands to its output. */
 export default function ActivitySheet() {
@@ -16,26 +17,31 @@ export default function ActivitySheet() {
   const project = session.snapshot?.project;
   const chatId = `${project?.path}#${id}`;
   const run = message === "run" ? session.snapshot?.runs.runs[chatId] : undefined;
+  // A host that keeps messages by Chat sends the snapshot without them: the sheet reads its Chat's as a page.
+  const page = useChatPage(project?.state.messagesInChats ? session.client : null, project?.path, Number(id), session.snapshot);
+  const chatMessages = project?.state.messagesInChats ? page.messages : (project?.state.messages ?? []);
   // When the live turn ends while the sheet is open, its saved reply takes over.
   const saved =
     message === "run"
       ? run
         ? undefined
-        : project?.state.messages.filter((entry) => entry.session_id === Number(id) && entry.role !== "user").at(-1)
-      : project?.state.messages.find((entry) => entry.id === Number(message));
+        : chatMessages.filter((entry) => entry.session_id === Number(id) && entry.role !== "user").at(-1)
+      : chatMessages.find((entry) => entry.id === Number(message));
   // The snapshot leaves tool output out; the sheet fetches this message whole so each tool can expand.
-  const [full, setFull] = useState<{ id: number; steps: ChatStep[] } | null>(null);
+  const [full, setFull] = useState<{ id: number; steps: ChatStep[]; body: string } | null>(null);
+  // A reply before the page held here is read by id.
+  const outside = !saved && message !== "run" && !!project?.state.messagesInChats && !page.loading;
   const client = session.client,
     projectPath = project?.path,
-    savedId = saved?.id,
-    slim = !!saved?.steps?.some((step) => step.hasDetail);
+    savedId = saved?.id ?? (outside ? Number(message) : undefined),
+    slim = outside || !!saved?.steps?.some((step) => step.hasDetail);
   useEffect(() => {
     if (!client || !projectPath || savedId === undefined || !slim) return;
     let cancelled = false;
     void client
       .message(projectPath, savedId)
       .then((whole) => {
-        if (!cancelled) setFull({ id: savedId, steps: whole.steps ?? [] });
+        if (!cancelled) setFull({ id: savedId, steps: whole.steps ?? [], body: whole.body });
       })
       .catch(() => {});
     return () => {
@@ -43,7 +49,7 @@ export default function ActivitySheet() {
     };
   }, [client, projectPath, savedId, slim]);
   const steps = run?.steps ?? (full && full.id === savedId ? full.steps : saved?.steps) ?? [];
-  const { setup, activity, images } = replyActivity(run?.text ?? saved?.body ?? "", steps);
+  const { setup, activity, images } = replyActivity(run?.text ?? saved?.body ?? (full && full.id === savedId ? full.body : "") ?? "", steps);
   const waiting = !!(run?.approvals.length || run?.questions.length);
   const summary = activitySummary(steps);
   return (

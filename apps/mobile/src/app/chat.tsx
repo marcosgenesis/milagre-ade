@@ -57,6 +57,7 @@ import { archiveFromPhone, showArchiveNotice } from "../archive";
 import { confirmSheet } from "../confirm-store";
 import { randomUUID } from "expo-crypto";
 import { runChatAction } from "../chat-actions";
+import { useChatPage } from "../chat-pages";
 import { MessageNavigation } from "../message-navigation";
 import { AttentionPill } from "../attention";
 
@@ -171,20 +172,28 @@ export default function ChatScreen() {
     }, [acceptedSessionId, pending?.promoted, pendingKey, setPendingChats]),
   );
   const allMessages = session.snapshot?.project.state.messages;
+  // A host that keeps messages by Chat sends the snapshot without them: the Chat on screen reads its own as pages.
+  const lean = !!session.snapshot?.project.state.messagesInChats;
+  const page = useChatPage(lean ? connected : null, projectPath, params.id ? Number(params.id) : null, session.snapshot);
+  const canonicalPage = useChatPage(lean && pendingCanonicalId !== null ? connected : null, projectPath, pendingCanonicalId, session.snapshot);
   const media = useCallback((path: string) => connected!.image(projectPath!, path), [connected, projectPath]);
   const savedMessages = useMemo(
-    () => (params.id && allMessages ? allMessages.filter((m) => m.session_id === Number(params.id)) : []),
-    [allMessages, params.id],
+    () => (lean ? page.messages : params.id && allMessages ? allMessages.filter((m) => m.session_id === Number(params.id)) : []),
+    [lean, page.messages, allMessages, params.id],
   );
   const messages = useMemo(
     () =>
       pending
         ? pendingCanonicalId !== null
-          ? (allMessages || []).filter((message) => message.session_id === pendingCanonicalId)
+          ? lean
+            ? canonicalPage.messages
+            : (allMessages || []).filter((message) => message.session_id === pendingCanonicalId)
           : [...savedMessages, pending.preview.message]
         : savedMessages,
-    [pending, pendingCanonicalId, allMessages, savedMessages],
+    [pending, pendingCanonicalId, lean, canonicalPage.messages, allMessages, savedMessages],
   );
+  // Messages the host still holds before the ones here.
+  const remote = lean && !pending ? page.total - page.messages.length : 0;
   // The design the user last chose on the design sheet, which its cards mark.
   const chosen = useMemo(() => chosenDesign(messages.filter((message) => message.role === "user").map((message) => message.body)), [messages]);
   const designChoice = chosen ? `${chosen.id}:${chosen.version}` : undefined;
@@ -737,12 +746,14 @@ export default function ChatScreen() {
             </View>
           )}
           {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
-          {messages.length > visible && (
+          {messages.length + remote > visible && (
             <PillButton
-              title={`Show earlier messages (${messages.length - visible})`}
+              title={`Show earlier messages (${messages.length + remote - visible})`}
               secondary
-              onPress={() => {
+              onPress={async () => {
                 following.current = false;
+                // None left here: read the next turns from the host first.
+                if (messages.length <= visible) await page.loadEarlier().catch(() => {});
                 setShown({ id: params.id, count: visible + PAGE });
               }}
               style={{ alignSelf: "center" }}

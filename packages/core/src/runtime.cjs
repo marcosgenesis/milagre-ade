@@ -122,16 +122,23 @@ function createRuntime(options) {
     },
   };
   const { createChatSimulators, simulatorToolDefinitions } = require("./chat-simulators.cjs");
+  const existingChat = (action) => async (chatId) => {
+    const scope = projectOfKey(chatId),
+      id = sessionIdFromKey(chatId);
+    if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
+      throw new Error(`Open an existing Chat before ${action}.`);
+  };
   const simulators = createChatSimulators({
     simulators: options.simulators ?? require("./simulators.cjs").createSimulators(),
     file: path.join(dataDir, "simulator-attachments.json"),
-    validateChat: async (chatId) => {
-      const scope = projectOfKey(chatId),
-        id = sessionIdFromKey(chatId);
-      if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
-        throw new Error("Open an existing Chat before attaching a simulator.");
-    },
+    validateChat: existingChat("attaching a simulator"),
   });
+  const { createChatArtifacts, artifactToolDefinitions } = require("./chat-artifacts.cjs");
+  const artifacts = createChatArtifacts({ directory: path.join(dataDir, "artifacts"), validateChat: existingChat("showing a design") });
+  commands.handle("artifact:get", (_context, request) => artifacts.get(request));
+  commands.handle("artifact:list", (_context, request) => artifacts.list(request));
+  commands.handle("artifact:add-comments", (_context, request) => artifacts.addComments(request));
+  commands.handle("artifact:comments", (_context, request) => artifacts.comments(request));
   for (const method of ["list", "attach", "detach"])
     commands.handle(`simulator:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
@@ -440,6 +447,10 @@ function createRuntime(options) {
       if (others.length) throw new Error("Another chat uses this worktree now, so it is kept.");
     };
     inUse(await states.get(projectPath));
+    // The chats on this worktree go with it, and so do their designs.
+    const goneChats = Object.values((await states.get(projectPath)).sessions)
+      .filter((session) => session.worktree_id === worktree.id)
+      .map((session) => `${projectPath}#${session.id}`);
     await environmentReady;
     const result = await removeWorktree({
       path: worktreePath,
@@ -459,7 +470,10 @@ function createRuntime(options) {
     });
     // Read again, the project drops the worktree git no longer lists, with its chats.
     if (states.has(projectPath)) await readProject(projectPath);
-    if (result.removed) await pruneLinks();
+    if (result.removed) {
+      await Promise.all(goneChats.map((id) => artifacts.removeChat(id).catch(() => {})));
+      await pruneLinks();
+    }
     return result;
   }
   commands.handle("files-to-copy:read", async (_event, projectPath) => {
@@ -873,7 +887,7 @@ function createRuntime(options) {
     chats,
     agents,
     emit,
-    extraTools: (chatId) => simulatorToolDefinitions(chatId, simulators),
+    extraTools: (chatId) => [...simulatorToolDefinitions(chatId, simulators), ...artifactToolDefinitions(chatId, artifacts)],
   });
   const linkWorkspaces = createLinkWorkspaces({
     store: linkStore,
@@ -1035,7 +1049,7 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
-      await simulators.close();
+      await Promise.all([simulators.close(), artifacts.close()]);
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();

@@ -9,6 +9,7 @@ import type {
 } from "@milagre/shared/model";
 import type { Result } from "@milagre/shared/result";
 import type { SimulatorApi } from "@milagre/shared/simulator";
+import type { ArtifactApi } from "@milagre/shared/artifact";
 
 import type { AgentRuns } from "./lib/agent-runs";
 import type { SessionPatch, WorktreeRename } from "@milagre/shared/project-edits";
@@ -101,6 +102,7 @@ declare global {
   interface Window {
     milagre: {
       simulators: SimulatorApi;
+      artifacts: ArtifactApi;
       getRuntimeConnection: () => Promise<RuntimeConnection>;
       /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
       restartHost: () => Promise<void>;
@@ -204,6 +206,8 @@ declare global {
       /** Delegations and Negotiations still open across Links, and the Codex Chats that only receive. */
       getLinkedWork: () => Promise<LinkedWork>;
       onLinkedWork: (callback: (work: LinkedWork) => void) => () => void;
+      /** An app ⌘⇧ shortcut pressed while an embedded frame had focus, forwarded by the main process (its letter). */
+      onAppShortcut: (callback: (key: string) => void) => () => void;
       /** The canvas's Stop on a Link: the Negotiation stops, turns already running finish. */
       stopNegotiation: (id: string) => Promise<void>;
       setWorktreePosition: (id: string, worktreePath: string, position: { x: number; y: number }) => Promise<unknown>;

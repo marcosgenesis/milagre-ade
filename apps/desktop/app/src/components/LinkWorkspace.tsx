@@ -563,7 +563,7 @@ export function LinkWorkspace({
             asking: !agents.runs[key]?.approvals.length,
             waitingFor: waitingFor(agents.runs[key]),
           }))}
-          offset={!canvasOpen && !!session}
+          offset={!canvasOpen && session ? 1 : 0}
           onOpen={(key) => onCanvasChat(projectOfKey(key), sessionIdFromKey(key))}
         />
       )}

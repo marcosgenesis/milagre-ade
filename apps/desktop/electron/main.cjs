@@ -27,6 +27,7 @@ const { copyImage, saveImage } = require("./generated-images.cjs");
 const { revealFolder } = require("./reveal.cjs");
 const { applyTranslucency, OPAQUE_BACKGROUND } = require("./window-translucency.cjs");
 const { guardNavigation } = require("./links.cjs");
+const { forwardAppShortcuts } = require("./app-shortcuts.cjs");
 const { AttentionNotifier } = require("./notifications.cjs");
 const { createMediaHandler } = require("./media.cjs");
 protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
@@ -257,6 +258,7 @@ async function startDesktop() {
       });
     }
     guardNavigation(window.webContents, { appUrl, openExternal: (url) => shell.openExternal(url).catch(() => {}) });
+    forwardAppShortcuts(window.webContents);
     // A reload keeps every turn running: the main process saves them, and the renderer takes the
     // turns streaming now, with their approval and question cards, from "chat:runs".
     if (!app.isPackaged) {

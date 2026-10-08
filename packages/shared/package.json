@@ -18,6 +18,7 @@
     "src/usage.ts",
     "src/simulator.ts",
     "src/message-navigation.ts",
+    "src/artifact.ts",
     "src/message-search.ts",
     "src/agent-activity.ts"
   ],
@@ -96,6 +97,7 @@
     "./usage": "./src/usage.ts",
     "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
+    "./artifact": "./src/artifact.ts",
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
       "default": "./src/simulator-receiver.mjs"

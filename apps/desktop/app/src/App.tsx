@@ -56,6 +56,8 @@ import { isMilagreWorktree, worktreeShared } from "./lib/archive";
 import { archiveChat as runArchive } from "./lib/archive-flow";
 import type { ArchiveMode, ArchivePlan } from "./lib/archive";
 import { ChangesPanel } from "./components/changes/ChangesPanel";
+import { isMac } from "./lib/shortcut-hints";
+import { CORNER_PITCH, PanelToggles, sidePanelCount, useSidePanels } from "./components/agents/PanelToggles";
 import { ChangesPanelSlot } from "./components/changes/ChangesPanelSlot";
 import { AttentionButton, ChangesToggle, DiffBar } from "./components/changes/ChangesChrome";
 import { AnimatePresence } from "motion/react";
@@ -448,6 +450,7 @@ function App() {
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const sidePanels = useSidePanels();
   const changes = useChanges({
     cwd: selectedWorktree?.path,
     base: selectedWorktree?.base,
@@ -1248,6 +1251,15 @@ function App() {
     openChat(sessionId);
   }
 
+  // The main process sends on the app's ⌘⇧ shortcuts pressed inside an embedded frame (a design, the simulator), which
+  // the window's listeners never see; replayed here, every handler takes them as if pressed in the window.
+  useEffect(
+    () =>
+      window.milagre.onAppShortcut?.((key) =>
+        window.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: isMac, ctrlKey: !isMac, shiftKey: true, bubbles: true, cancelable: true })),
+      ),
+    [],
+  );
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
       if (selectedLinkRef.current) return;
@@ -1694,6 +1706,7 @@ function App() {
         )}
         <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
         {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+        <PanelToggles right={changesAvailable ? 12 + CORNER_PITCH : 12} />
         {showAttentionButton && attentionChats[0] && (
           <AttentionButton
             label={attentionLabel(attentionPaths.map(projectName))}
@@ -1702,7 +1715,7 @@ function App() {
               asking: !agentRuns.runs[item.key]?.approvals.length,
               waitingFor: waitingFor(agentRuns.runs[item.key]),
             }))}
-            offset={changesAvailable}
+            offset={(changesAvailable ? 1 : 0) + sidePanelCount(sidePanels)}
             onOpen={openChatByKey}
           />
         )}
@@ -1816,6 +1829,7 @@ function App() {
                   imageDraft={imageDraft}
                   projectPath={selectedWorktree?.path ?? project.path}
                   onSend={() => void sendMessage()}
+                  onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
                   onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
                   pullRequestAction={
                     selectedSession && selectedPullRequest && pullRequestBlocker

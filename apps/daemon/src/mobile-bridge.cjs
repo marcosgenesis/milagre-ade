@@ -117,7 +117,10 @@ function projectPullRequestRefs(project) {
     list.push(message);
     messages.set(message.session_id, list);
   }
-  const refs = Object.fromEntries([...messages].map(([id, list]) => [id, pullRequestRefs(list)]).filter(([, refs]) => refs.length));
+  // A Chat's summary has its refs; only a Chat without one (an older state) is read message by message.
+  const refs = Object.fromEntries(
+    [...messages].map(([id, list]) => [id, project.state.sessions?.[id]?.summary?.pullRequests ?? pullRequestRefs(list)]).filter(([, refs]) => refs.length),
+  );
   // The same objects as last time where nothing changed, so a phone's patch carries only the Chats whose refs did.
   const stable = reconcileState(lastPullRequestRefs.get(project.path), refs);
   lastPullRequestRefs.delete(project.path);

@@ -1,3 +1,4 @@
+import { chatSummary } from "@milagre/shared/chat-summary";
 import type { AgentRun } from "@milagre/shared/agent-runs";
 import type { AgentSession, ChatMessage, Subagent } from "@milagre/shared/model";
 export function agentCounts(agents: Subagent[]) {
@@ -17,7 +18,8 @@ export function chatMark(chat: AgentSession | undefined, run?: AgentRun, message
   if (run) return "running";
   if (chat?.resumeTurn) return "interrupted";
   if (chat?.unread) return "unread";
-  if (messages.at(-1)?.outcome === "failed") return "failed";
+  // How the last reply ended (the commit dialog's notes aren't replies), as desktop's sidebar reads it.
+  if (chatSummary(chat, messages).lastOutcome === "failed") return "failed";
   return "idle";
 }
 export const MARK_LABEL: Record<ChatMark, string> = {

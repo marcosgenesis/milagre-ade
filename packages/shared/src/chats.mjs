@@ -53,7 +53,7 @@ export function pinOrderAt(orders, index) {
 let nextPreviewId = -2;
 
 /** A local message preview. It is never written into the Project's persisted state. */
-export function createPendingChat({ state, worktreeId, sessionId = null, body, images = [], files = [], model, provider }) {
+export function createPendingChat({ state, worktreeId, sessionId = null, body, images = [], files = [], model, provider, context = null }) {
   const id = nextPreviewId--;
   const session = state.sessions[sessionId] ?? {
     id,
@@ -67,7 +67,7 @@ export function createPendingChat({ state, worktreeId, sessionId = null, body, i
     session_id: session.id,
     body,
     role: "user",
-    context: null,
+    context,
     images,
     files,
     model,

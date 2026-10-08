@@ -29,6 +29,10 @@
   ],
   "type": "module",
   "exports": {
+    "./pr-action": {
+      "types": "./src/pr-action.d.mts",
+      "default": "./src/pr-action.mjs"
+    },
     "./prompt-skills": {
       "types": "./src/prompt-skills.d.mts",
       "default": "./src/prompt-skills.mjs"

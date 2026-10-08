@@ -1,4 +1,4 @@
-import type { AgentSession, LinkChatSession, ChatMessage, CoordinatorState, ImageAttachment, ModelProvider } from "./model.ts";
+import type { AgentSession, LinkChatSession, ChatContext, ChatMessage, CoordinatorState, ImageAttachment, ModelProvider } from "./model.ts";
 export { pullRequestRefs, pullRequestRefsCache, chatPullRequests, type PullRequestRef } from "./chat-pull-requests.mjs";
 
 export function chatMarkTone(
@@ -29,6 +29,8 @@ export function createPendingChat(input: {
   files?: string[];
   model: string;
   provider: ModelProvider;
+  /** What the message is when no person typed it, such as a PR-blocker pill's action. */
+  context?: ChatContext;
 }): PendingChat;
 export function pendingChatSessionId(state: CoordinatorState, pending: PendingChat | null | undefined): number | null;
 export function withPendingChat(state: CoordinatorState, pending: PendingChat | null | undefined): CoordinatorState;

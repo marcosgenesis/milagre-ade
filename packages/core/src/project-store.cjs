@@ -10,6 +10,7 @@ const {
   referencedDetails,
   sweepDetailContent,
 } = require("./project-content.cjs");
+const { MESSAGES_MARKER, isMarker, readMessages, writeMessages } = require("./chat-db.cjs");
 // ProjectStates owns write ordering. This adapter performs one atomic snapshot write.
 const stateFile = (projectPath) => path.join(projectPath, ".milagre", "coordination.json");
 let counter = 0;
@@ -18,6 +19,9 @@ let counter = 0;
 // writes only the agents whose transcript changed. Updated only after the state itself is on disk.
 const MAX_PROJECTS = 50;
 const settled = new Map();
+// Per project, the message rows chats.db holds (id -> the message object and position written), so a save writes only
+// the messages that changed. Set by a read or a save; a project without one rewrites every row on its next save.
+const savedMessages = new Map();
 // Superseded sidecars are removed once the new state is saved; a younger one may belong to a save still in flight.
 const SWEEP_MIN_AGE_MS = 60_000;
 const swept = new Set();
@@ -30,7 +34,15 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
   const details = { wrote: false };
   const compacted = await compactDetails(projectPath, await migrateImages(projectPath, state), { tracker: details });
   const persisted = await compactSubagents(projectPath, compacted, tracker);
-  const contents = JSON.stringify(persisted);
+  // Messages go to chats.db first; coordination.json then points at it. A state from before keeps its array until then.
+  let rows;
+  if (Array.isArray(persisted.messages)) {
+    // The first save after the move keeps the old file once, beside it, in case anything needs it back.
+    if (!savedMessages.has(projectPath))
+      await fs.copyFile(stateFile(projectPath), `${stateFile(projectPath)}.before-chats-db`, fs.constants.COPYFILE_EXCL).catch(() => {});
+    rows = await writeMessages(projectPath, persisted.messages, savedMessages.get(projectPath), { durable });
+  }
+  const contents = JSON.stringify(rows ? { ...persisted, messages: MESSAGES_MARKER } : persisted);
   const directory = path.dirname(stateFile(projectPath));
   await fs.mkdir(directory, { recursive: true });
   const temporary = path.join(directory, `coordination.json.${process.pid}.${++counter}.tmp`);
@@ -54,8 +66,10 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
     const oldest = settled.keys().next().value;
     settled.delete(oldest);
     swept.delete(oldest);
+    savedMessages.delete(oldest);
   }
   settled.set(projectPath, tracker.next);
+  if (rows) savedMessages.set(projectPath, rows);
   // A new sidecar supersedes the one before it; the first save of a run also clears older leftovers.
   if (tracker.wrote || details.wrote || !swept.has(projectPath)) {
     swept.add(projectPath);
@@ -63,9 +77,19 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
     await sweepDetailContent(projectPath, referencedDetails(persisted), { minAgeMs: sweepMinAgeMs });
   }
 }
-/** The saved state, with subagent transcripts read back and long step details (from before sidecars) moved out. */
+/**
+ * The saved state, with its messages read from chats.db, subagent transcripts read back and long step details (from
+ * before sidecars) moved out.
+ */
 async function readProjectState(projectPath) {
-  const state = await hydrateSubagents(projectPath, JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")));
+  const raw = JSON.parse(await fs.readFile(stateFile(projectPath), "utf8"));
+  if (isMarker(raw.messages)) {
+    const messages = await readMessages(projectPath);
+    if (!messages) throw new Error(`This Project's messages are kept in ${path.join(projectPath, ".milagre", "chats.db")}, which is missing.`);
+    raw.messages = messages;
+    savedMessages.set(projectPath, new Map(messages.map((message, position) => [message.id, { message, position }])));
+  } else savedMessages.delete(projectPath);
+  const state = await hydrateSubagents(projectPath, raw);
   return compactDetails(projectPath, state);
 }
 /** For ProjectStates: moves the long step details of the messages a change added into sidecars. */

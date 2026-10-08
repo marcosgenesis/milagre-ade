@@ -1,4 +1,5 @@
 const test = require("node:test");
+const { readProjectState: readSavedState } = require("@milagre/core/project-store");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -178,7 +179,7 @@ test("independent clients reconnect to a running Chat and its pending approval",
   // Every client hears the stop was asked for, so a desktop doesn't start the host again.
   assert.equal(events.at(-1).channel, "daemon:stopping");
   assert.equal(sessions[0].closed, true);
-  const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
+  const saved = await readSavedState(project);
   assert.ok(saved.sessions[session.id].resumeTurn, "stop saves resumable turn state");
   await assert.rejects(fs.stat(daemon.socketPath), { code: "ENOENT" });
 });
@@ -251,7 +252,7 @@ test("desktop capability advertises methods, flush preserves a running turn, and
   desktop.close();
   assert.equal(sessions[0].closed, false);
   assert.ok(JSON.stringify(await mobile.call("chat:runs")).includes("permission-1"));
-  const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
+  const saved = await readSavedState(project);
   assert.ok(saved.messages.some((message) => message.body === "Shared Chat"));
 });
 

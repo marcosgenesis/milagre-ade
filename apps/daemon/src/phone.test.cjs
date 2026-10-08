@@ -6,6 +6,8 @@ const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 const { createPhone, LOCAL_PORT, RETIRED_MS } = require("./phone.cjs");
 const { createDevices } = require("./devices.cjs");
+const { b64url } = require("@milagre/shared/relay-crypto");
+const { readIdentity } = require("./relay-identity.cjs");
 
 const PAIRING_WINDOW_MS = 10 * 60 * 1000;
 
@@ -23,7 +25,17 @@ async function waitFor(read) {
 /** A bridge and tunnel that only record what the phone asks of them. */
 async function fixture(
   t,
-  { cloudflare = false, failBridge, failTunnel, failLan, lanPort = 8798, onPaired = () => {}, retryDelaysMs = [1, 1, 1], clock = { now: 0 } } = {},
+  {
+    cloudflare = false,
+    failBridge,
+    failTunnel,
+    failLan,
+    lanPort = 8798,
+    onPaired = () => {},
+    retryDelaysMs = [1, 1, 1],
+    clock = { now: 0 },
+    phoneOptions = {},
+  } = {},
 ) {
   const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-phone-")));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
@@ -131,6 +143,7 @@ async function fixture(
       startLan,
       lanPort,
       addresses: () => ["192.168.1.20"],
+      ...phoneOptions,
     });
   const phone = create();
   t.after(() => phone.close());
@@ -309,10 +322,13 @@ test("status counts the paired phones, and a first pairing is announced once", a
   await relays[0].options.phones.add("phoneA");
   assert.equal(relays[0].options.phones.isKnown("phoneA"), true);
   assert.equal(phone.status().pairedPhones, 1);
-  assert.deepEqual(paired, [{ pairedPhones: 1 }]);
+  assert.deepEqual(paired, [{ pairedPhones: 1, kind: "phone" }]);
   assert.equal(changes.length, before + 1, "Settings hears the new count");
   await relays[0].options.phones.add("phoneB");
-  assert.deepEqual(paired, [{ pairedPhones: 1 }, { pairedPhones: 2 }]);
+  assert.deepEqual(paired, [
+    { pairedPhones: 1, kind: "phone" },
+    { pairedPhones: 2, kind: "phone" },
+  ]);
   await phone.reset();
   await phone.settled();
   assert.equal(phone.status().pairedPhones, 0, "a reset forgets them");
@@ -840,4 +856,36 @@ test("a removed phone reaching routes through a trusted route is not added back"
   const after = createDevices(dataDir);
   await after.load();
   assert.equal(after.isKnown(key), false);
+});
+
+test("a computer's first pairing is announced with its kind", async (t) => {
+  const { phone, relays, paired } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  await relays[0].options.phones.add("deskA", { kind: "computer", name: "studio" });
+  assert.deepEqual(paired, [{ pairedPhones: 1, kind: "computer" }]);
+  assert.equal(relays[0].options.phones.kindOf("deskA"), "computer");
+});
+
+test("the relay and LAN hosts get openPeer, and a confined phone never hosts a desktop", async (t) => {
+  const openPeer = () => ({ receive() {}, invalid() {}, close() {} });
+  const open = await fixture(t, { phoneOptions: { openPeer } });
+  await open.phone.setEnabled(true);
+  await open.phone.settled();
+  assert.equal(open.relays[0].options.openPeer, openPeer);
+  assert.equal(open.lans[0].options.openPeer, openPeer);
+  const confined = await fixture(t, { phoneOptions: { openPeer, allowedRoot: "/tmp/milagre-demo" } });
+  await confined.phone.setEnabled(true);
+  await confined.phone.settled();
+  assert.equal(confined.relays[0].options.openPeer, undefined);
+  assert.equal(confined.lans.length, 0);
+});
+
+test("peerRoutes names this Mac's relay identity and LAN routes, and refuses while phone access is off", async (t) => {
+  const { phone, dataDir } = await fixture(t);
+  assert.throws(() => phone.peerRoutes(), /starting/);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const identity = await readIdentity(dataDir);
+  assert.deepEqual(phone.peerRoutes(), { hostId: identity.hostId, key: b64url(identity.box.publicKey), lan: ["ws://192.168.1.20:8798"] });
 });

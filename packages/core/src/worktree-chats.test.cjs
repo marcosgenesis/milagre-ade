@@ -532,3 +532,19 @@ test("a crash between the save and the rename brings nothing back twice", async 
   assert.equal(opened.state.messages.filter((item) => item.body === "Before the crash").length, 1);
   assert.equal((await migratedFiles(linked.linked)).length, 1);
 });
+
+test("a chat whose parked native session is already in the main state is a duplicate", () => {
+  const worktrees = { 1: { id: 1, path: "/repo/linked", name: "linked" } };
+  const main = {
+    next_id: 10,
+    projects: { 1: { id: 1 } },
+    worktrees,
+    sessions: { 2: chat(2, 1, { provider: "codex", native_session_id: "codex-1", native_sessions: { claude: "claude-1" } }) },
+    messages: [message(3, 2, "Hello")],
+    tasks: {},
+  };
+  const old = { ...main, next_id: 40, sessions: { 4: chat(4, 1, { native_session_id: "claude-1" }) }, messages: [message(5, 4, "Another opening")] };
+  const result = mergeWorktreeChats(main, old);
+  assert.equal(result.duplicates, 1);
+  assert.equal(result.migrated, 0);
+});

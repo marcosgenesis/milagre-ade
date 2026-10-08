@@ -1,5 +1,5 @@
 import { Text } from "react-native";
-import { AiBrainIcon, CommandLineIcon, File01Icon, FileEditIcon, Image01Icon, Search01Icon, Wrench01Icon } from "@hugeicons/core-free-icons";
+import { AiBrainIcon, CommandLineIcon, File01Icon, FileEditIcon, Image01Icon, Search01Icon, Wrench01Icon, PaintBoardIcon } from "@hugeicons/core-free-icons";
 import type { ChatStep, StepKind } from "@milagre/shared/model";
 import type { IconData } from "./icons";
 import { ActivityItem } from "./activity-item";
@@ -14,6 +14,7 @@ const icons: Record<StepKind, IconData> = {
   search: Search01Icon,
   thinking: AiBrainIcon,
   image: Image01Icon,
+  artifact: PaintBoardIcon,
   other: Wrench01Icon,
 };
 

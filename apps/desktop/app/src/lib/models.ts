@@ -57,8 +57,9 @@ export function keepIfSame<T>(previous: T, next: T): T {
 /**
  * The model the composer shows once `models` changed (lists arrived or were fetched again).
  * - `applyDefault` is true once: when the agents' lists first arrive and the user hasn't picked a model. The
- *   Settings default then replaces the model the app started with, unless the open chat is locked to the other
- *   provider (a chat stays on the agent it started with).
+ *   Settings default then replaces the model the app started with, unless the open chat is on the other
+ *   provider, which it starts on instead. `preferredProvider` only seeds that first selection: a chat can switch
+ *   provider, so a later change of lists never moves the user's pick back to the chat's provider.
  * - Every other time the current model stays, or gives way to its provider's recommended model when the lists
  *   no longer offer it.
  * Returns `current` itself when nothing changed, so the composer doesn't re-render.
@@ -66,15 +67,17 @@ export function keepIfSame<T>(previous: T, next: T): T {
 export function nextSelection(
   models: ModelOption[],
   current: ModelOption,
-  { defaultId, applyDefault, lockedProvider }: { defaultId: string; applyDefault: boolean; lockedProvider?: ModelProvider },
+  { defaultId, applyDefault, preferredProvider }: { defaultId: string; applyDefault: boolean; preferredProvider?: ModelProvider },
 ): ModelOption {
   const useDefault =
     applyDefault &&
-    (lockedProvider === undefined ||
-      providerForId(defaultId) === lockedProvider ||
-      models.find((model) => model.id === defaultId)?.provider === lockedProvider);
+    (preferredProvider === undefined ||
+      providerForId(defaultId) === preferredProvider ||
+      models.find((model) => model.id === defaultId)?.provider === preferredProvider);
   const wanted = useDefault ? defaultId : current.id;
-  const provider = lockedProvider ?? (useDefault ? (models.find((model) => model.id === wanted)?.provider ?? providerForId(wanted)) : current.provider);
+  const provider = useDefault
+    ? (models.find((model) => model.id === wanted)?.provider ?? providerForId(wanted))
+    : ((applyDefault ? preferredProvider : undefined) ?? current.provider);
   const next = resolveModel(models, wanted, provider);
   return next.id === current.id && next.name === current.name && next.provider === current.provider ? current : next;
 }

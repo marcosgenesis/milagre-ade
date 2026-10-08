@@ -387,3 +387,17 @@ test("unloading a Codex child without a known outcome keeps its status unknown",
   assert.deepEqual(mapCodexNotification("thread/status/changed", { threadId: "stranger", status: { type: "notLoaded" } }, state), []);
   assert.equal(state.subagents.has("stranger"), false);
 });
+
+test("Codex publishes current subagent activity when work starts", () => {
+  const state = { threadId: "root", subagents: new Map([["child", { id: "child", title: "Review", status: "running", transcript: [] }]]) };
+  const start = (item) => child(mapCodexNotification("item/started", { threadId: "child", item }, state));
+  const testing = start({ id: "test", type: "commandExecution", command: "npm test" });
+  assert.equal(testing.latestActivity, "Ran `npm test`");
+  assert.equal(testing.transcript.length, 0);
+  assert.equal(
+    start({ id: "edit", type: "fileChange", changes: [{ path: "auth.ts", kind: { type: "update" }, diff: "" }] }).latestActivity,
+    "Edited `auth.ts`",
+  );
+  assert.equal(start({ id: "reason", type: "reasoning" }).latestActivity, "Thinking");
+  assert.equal(start({ id: "reply", type: "agentMessage" }).latestActivity, "Responding");
+});

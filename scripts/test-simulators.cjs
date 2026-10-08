@@ -7,6 +7,7 @@ const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatComposer } from "/src/components/ChatComposer";
+import { PanelToggles } from "/src/components/agents/PanelToggles";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
@@ -71,7 +72,7 @@ function Fixture() {
   </div>;
 }
 document.documentElement.classList.add("dark");
-createRoot(document.getElementById("root")).render(<Fixture />);
+createRoot(document.getElementById("root")).render(<><Fixture /><PanelToggles right={12} /></>);
 `;
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
@@ -124,10 +125,17 @@ async function browserChecks() {
     await click("[data-slot=simulator-track] button");
     await evaluate('window.attachedIds=[]; document.dispatchEvent(new Event("visibilitychange"))');
     await waitFor('!document.querySelector("[data-slot=simulator-track]") && !document.querySelector("[data-slot=simulator-popover]")');
+    assert.equal(await evaluate('!!document.querySelector("[data-panel-toggle=simulator]")'), false, "no corner button without an attached simulator");
     await screenshot("no-attachments");
     await evaluate('window.attachedIds=[0,1]; document.dispatchEvent(new Event("visibilitychange"))');
     await waitFor('!!document.querySelector("[data-slot=simulator-track]")');
     assert.equal(await evaluate('!!document.querySelector("[data-slot=simulator-popover]")'), false, "reattaching must not reopen the viewer");
+    // The corner button shows while a simulator is attached, and opens the same list as the pill.
+    await waitFor('!!document.querySelector("[data-panel-toggle=simulator]")');
+    await click("[data-panel-toggle=simulator]");
+    await waitFor('document.querySelectorAll("[data-simulator-device]").length===2');
+    await click("[data-panel-toggle=simulator]");
+    await waitFor('!document.querySelector("[data-slot=simulator-popover]")');
     await screenshot("composer-dark");
     await click("[data-slot=simulator-track] button");
     await waitFor('document.querySelectorAll("[data-simulator-device]").length===2');
@@ -137,20 +145,23 @@ async function browserChecks() {
     await click('[data-simulator-device="device-0"]');
     await waitFor("window.simulatorCalls.length===1");
     await waitFor('document.querySelector("[data-slot=simulator-frame]")');
-    await click('[aria-label="Dock simulator to the right"]');
+    // A device's viewer docks beside the chat on its own; there is no undocked viewer.
     await waitFor('document.querySelector("[data-slot=simulator-popover]").dataset.docked==="true"');
-    assert.ok(
-      await evaluate(
-        '(()=>{const pane=document.querySelector("[data-chat-pane]").getBoundingClientRect(),dock=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return pane.right<=dock.left&&dock.right<=innerWidth})()',
-      ),
-      "docked viewer sits beside the chat pane",
+    assert.equal(
+      await evaluate('!!document.querySelector(\'[aria-label="Dock simulator to the right"], [aria-label="Undock simulator"]\')'),
+      false,
+      "no dock toggle",
+    );
+    // Once the viewer has slid in and the chat has made room for it.
+    await waitFor(
+      '(()=>{const pane=document.querySelector("[data-chat-pane]").getBoundingClientRect(),dock=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return pane.right<=dock.left&&dock.right<=innerWidth})()',
     );
     await click("textarea");
     await delay(100);
     assert.ok(await evaluate('!!document.querySelector("[data-slot=simulator-popover]")'), "pressing the chat keeps the docked viewer");
     await screenshot("docked-dark");
     const footerMatches =
-      '(()=>{const doc=document.querySelector("[data-slot=simulator-frame]").contentDocument;return doc && getComputedStyle(doc.body).backgroundColor===getComputedStyle(document.querySelector("[data-slot=simulator-popover]")).backgroundColor})()';
+      '(()=>{const doc=document.querySelector("[data-slot=simulator-frame]").contentDocument;return doc && getComputedStyle(doc.body).backgroundColor===getComputedStyle(document.querySelector("[data-slot=simulator-popover] > div")).backgroundColor})()';
     await waitFor(footerMatches);
     await evaluate("window.setDark(false)");
     await waitFor(footerMatches);
@@ -158,19 +169,9 @@ async function browserChecks() {
     await screenshot("docked-light");
     await evaluate("window.setDark(true)");
     await waitFor(footerMatches);
-    await click('[aria-label="Undock simulator"]');
-    assert.equal(await evaluate('document.documentElement.style.getPropertyValue("--simulator-dock")'), "", "undocking returns the space");
-    window.setContentSize(390, 500);
-    await delay(200);
-    assert.ok(
-      await evaluate(
-        '(()=>{const r=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return r.top>=0&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()',
-      ),
-      "viewer fits short/narrow window",
-    );
-    await screenshot("viewer-narrow");
     await click('[aria-label="Close simulator"]');
     await waitFor('!document.querySelector("[data-slot=simulator-popover]") && window.simulatorClosed.length>0');
+    assert.equal(await evaluate('document.documentElement.style.getPropertyValue("--simulator-dock")'), "", "closing returns the space");
     window.setContentSize(1000, 800);
     await evaluate("window.setDark(false)");
     await screenshot("composer-light");
@@ -185,7 +186,8 @@ async function browserChecks() {
     await click("[data-simulator-device=device-2]");
     await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("3")');
     assert.equal(await evaluate("window.simulatorCalls.at(-1).chatId"), "/fixture#1");
-    assert.equal(await evaluate("!!document.querySelector(\"[aria-label='Back to devices']\")"), false, "the viewer has no back button");
+    // Once the device list has gone and the docked viewer has come in.
+    await waitFor("!document.querySelector(\"[aria-label='Back to devices']\")");
     assert.equal(
       await evaluate('document.querySelector("[data-slot=simulator-popover] header").textContent.includes("This Chat")'),
       false,
@@ -209,7 +211,7 @@ async function browserChecks() {
     await waitFor('!document.querySelector("[data-slot=simulator-track]") && !document.querySelector("[data-slot=simulator-popover]")');
     await screenshot("last-detached");
     console.log(
-      "PASS: icon/count and composer placement, on-demand capture, chooser, dock/undock, narrow layout, close cleanup, Escape, light/dark screenshots",
+      "PASS: icon/count and composer placement, on-demand capture, chooser, the viewer docked beside the chat, close cleanup, Escape, light/dark screenshots",
     );
     app.exit(0);
   } catch (error) {

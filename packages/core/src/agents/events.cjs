@@ -1,3 +1,4 @@
+const path = require("node:path");
 const { cliName } = require("@milagre/shared/providers");
 const { claudeSubagents, codexSubagents } = require("./subagents.cjs");
 /** @typedef {import("@milagre/shared/model").AgentEvent} AgentEvent */
@@ -7,7 +8,7 @@ const { isTurnEnd: isTerminal } = require("@milagre/shared/agent-runs");
 const { applyToolResult, applyToolUse, codexPlanTasks } = require("./tasks.cjs");
 const { claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep } = require("./steps.cjs");
 
-const { bundledWritingInstructions } = require("../bundled-skills.cjs");
+const { BUNDLED_SKILLS_DIRECTORY, bundledWritingInstructions } = require("../bundled-skills.cjs");
 const TLDR_INSTRUCTIONS = bundledWritingInstructions();
 const LINKS_INSTRUCTIONS = [
   "Links: the user can link this Chat's Worktree to Worktrees of other Projects on Milagre's canvas. When a turn's input starts with a <linked_worktrees> block, that is Milagre's summary of the linked side, not a message from the user.",
@@ -26,6 +27,7 @@ function milagreInstructions(tldrEnabled = true, workspaceInstructions = "") {
     "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
     LINKS_INSTRUCTIONS,
     "Simulators: use milagre simulator_list, simulator_attach and simulator_detach to manage devices for this Chat. After choosing a simulator for mobile work, attach its exact deviceId so the user can view it. The bundled simulator skill has the workflow. Discovery never attaches devices; detach leaves them running.",
+    `Designs: when the user asks to see a UI, screen, mockup or visual design, show it with milagre artifact_show as one self-contained HTML document, with the width and height of the screen it is for (390 by 844 for a phone). The Chat shows it as a card, and the user sees every design of the Chat on a canvas beside it, where they can comment on a spot or choose one; those reach you as their messages. Each comment has an id: once you have addressed one (usually by showing a revised version), resolve it with artifact_resolve_comment and a short note on what you changed. To revise a design, show it again with the same id; to offer variants, show each with its own id. Before your first design in a Chat, read the bundled design skill at ${path.join(BUNDLED_SKILLS_DIRECTORY, "design", "SKILL.md")}: it has the process.`,
     ...(workspaceInstructions ? [workspaceInstructions] : []),
   ].join("\n\n");
 }

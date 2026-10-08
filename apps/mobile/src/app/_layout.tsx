@@ -70,6 +70,7 @@ export default function Layout() {
                     <Stack.Screen name="project-settings" options={{ title: "Project" }} />
                     <Stack.Screen name="link-projects" options={{ ...sheet, sheetAllowedDetents: [1] }} />
                     <Stack.Screen name="chat" options={{ title: "Chat" }} />
+                    <Stack.Screen name="context-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                     <Stack.Screen name="permission-sheet" options={{ ...sheet, sheetAllowedDetents: [0.42, 0.6], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="model-sheet" options={{ ...sheet, sheetAllowedDetents: [0.55, 1], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="agents" options={{ ...sheet, sheetAllowedDetents: [0.5, 1], sheetInitialDetentIndex: 0 }} />
@@ -79,7 +80,13 @@ export default function Layout() {
                       name="simulator-sheet"
                       options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
                     />
+                    {/* Full screen too: a design scrolls and takes taps of its own. */}
+                    <Stack.Screen
+                      name="artifact-sheet"
+                      options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
+                    />
                     <Stack.Screen name="activity" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
+                    <Stack.Screen name="handoff-brief" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
                     <Stack.Screen
                       name="viewer"
                       options={{ presentation: "transparentModal", headerShown: false, animation: "none", contentStyle: { backgroundColor: "transparent" } }}

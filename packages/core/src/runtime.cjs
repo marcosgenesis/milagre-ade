@@ -125,16 +125,23 @@ function createRuntime(options) {
     },
   };
   const { createChatSimulators, simulatorToolDefinitions } = require("./chat-simulators.cjs");
+  const existingChat = (action) => async (chatId) => {
+    const scope = projectOfKey(chatId),
+      id = sessionIdFromKey(chatId);
+    if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
+      throw new Error(`Open an existing Chat before ${action}.`);
+  };
   const simulators = createChatSimulators({
     simulators: options.simulators ?? require("./simulators.cjs").createSimulators(),
     file: path.join(dataDir, "simulator-attachments.json"),
-    validateChat: async (chatId) => {
-      const scope = projectOfKey(chatId),
-        id = sessionIdFromKey(chatId);
-      if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
-        throw new Error("Open an existing Chat before attaching a simulator.");
-    },
+    validateChat: existingChat("attaching a simulator"),
   });
+  const { createChatArtifacts, artifactToolDefinitions } = require("./chat-artifacts.cjs");
+  const artifacts = createChatArtifacts({ directory: path.join(dataDir, "artifacts"), validateChat: existingChat("showing a design") });
+  commands.handle("artifact:get", (_context, request) => artifacts.get(request));
+  commands.handle("artifact:list", (_context, request) => artifacts.list(request));
+  commands.handle("artifact:add-comments", (_context, request) => artifacts.addComments(request));
+  commands.handle("artifact:comments", (_context, request) => artifacts.comments(request));
   for (const method of ["list", "attach", "detach"])
     commands.handle(`simulator:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
@@ -168,6 +175,7 @@ function createRuntime(options) {
       const store = key === "default-default" ? usageStore : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
       accountUsage.set(key, {
         key,
+        accountIds: { claude, codex },
         store,
         read: createUsageReader({
           ready: () => environmentReady,
@@ -182,6 +190,23 @@ function createRuntime(options) {
       });
     }
     return accountUsage.get(key);
+  }
+
+  async function usageWithAccounts(usage, snapshot) {
+    const identities = await accounts.list();
+    return {
+      ...snapshot,
+      accountKey: usage.key,
+      providers: snapshot.providers.map((provider) => {
+        // Use the IDs captured for this read, even if a selection changed while it was pending.
+        const id = usage.accountIds[provider.provider];
+        const account = identities.providers.find((group) => group.provider === provider.provider)?.accounts.find((entry) => entry.id === id);
+        return {
+          ...provider,
+          account: { id, label: account?.label || "Removed account", ...(account?.email ? { email: account.email } : {}) },
+        };
+      }),
+    };
   }
 
   async function discoverWorktrees(projectPath) {
@@ -299,7 +324,7 @@ function createRuntime(options) {
     await chats.resumeInterrupted(projectPath, state).catch((error) => console.warn("Milagre couldn't resume a chat:", error.message));
     state = await states.get(projectPath);
     chatTitles.resume(projectPath, state);
-    void chats.recoverHandovers(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handover:", error.message));
+    void chats.recoverHandoffs(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handoff:", error.message));
     void diffs.refresh(projectPath).catch(() => {});
     return { path: projectPath, name: projectName(projectPath), state };
   }
@@ -428,6 +453,10 @@ function createRuntime(options) {
       if (others.length) throw new Error("Another chat uses this worktree now, so it is kept.");
     };
     inUse(await states.get(projectPath));
+    // The chats on this worktree go with it, and so do their designs.
+    const goneChats = Object.values((await states.get(projectPath)).sessions)
+      .filter((session) => session.worktree_id === worktree.id)
+      .map((session) => `${projectPath}#${session.id}`);
     await environmentReady;
     const result = await removeWorktree({
       path: worktreePath,
@@ -447,7 +476,10 @@ function createRuntime(options) {
     });
     // Read again, the project drops the worktree git no longer lists, with its chats.
     if (states.has(projectPath)) await readProject(projectPath);
-    if (result.removed) await pruneLinks();
+    if (result.removed) {
+      await Promise.all(goneChats.map((id) => artifacts.removeChat(id).catch(() => {})));
+      await pruneLinks();
+    }
     return result;
   }
   commands.handle("files-to-copy:read", async (_event, projectPath) => {
@@ -716,12 +748,12 @@ function createRuntime(options) {
     if (options.readUsage) return options.readUsage();
     await environmentReady;
     const usage = usageForAccounts(scope);
-    return { ...(await usage.read()), accountKey: usage.key };
+    return usageWithAccounts(usage, await usage.read());
   });
   commands.handle("usage:cached", async (_event, scope) => {
     scope = await validateAccountScope(scope, true);
     const usage = usageForAccounts(scope);
-    return { ...cachedSnapshot(usage.store, Date.now()), accountKey: usage.key };
+    return usageWithAccounts(usage, cachedSnapshot(usage.store, Date.now()));
   });
 
   // The "Commit and open PR" dialog: Milagre runs git and gh itself, in the chat's folder, once the login
@@ -741,14 +773,6 @@ function createRuntime(options) {
   commands.handle("chat:resume", (_event, projectPath, sessionId) => {
     if (!scopeStates.has(projectPath)) throw new Error("Open the project before continuing its chats.");
     return chats.resumeChat(projectPath, Number(sessionId));
-  });
-  commands.handle("chat:handover", (_event, request) => {
-    if (!scopeStates.has(request?.projectPath)) throw new Error("Open the project before handing over its chats.");
-    return chats.handover(request);
-  });
-  commands.handle("chat:handover-draft", (_event, projectPath, sessionId, text) => {
-    if (!scopeStates.has(projectPath) || typeof sessionId !== "number" || typeof text !== "string") return undefined;
-    return chats.setHandoverDraft(projectPath, sessionId, text).then(() => {});
   });
   commands.handle("chat:patch", (_event, projectPath, sessionId, patch) =>
     scopeStates.has(projectPath) ? editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined,
@@ -804,6 +828,8 @@ function createRuntime(options) {
   });
 
   commands.handle("agent:interrupt", async (_event, chatId) => {
+    // A handoff still writing its brief has no agent to stop: cancelling it is the whole interrupt.
+    if (await chats.cancelHandoff(chatId)) return;
     await worktreeSetups.cancel(chatId);
     await linked.stop({ chatKey: chatId });
     await agents.interrupt(chatId);
@@ -884,7 +910,7 @@ function createRuntime(options) {
     chats,
     agents,
     emit,
-    extraTools: (chatId) => simulatorToolDefinitions(chatId, simulators),
+    extraTools: (chatId) => [...simulatorToolDefinitions(chatId, simulators), ...artifactToolDefinitions(chatId, artifacts)],
   });
   const linkWorkspaces = createLinkWorkspaces({
     store: linkStore,
@@ -1046,7 +1072,7 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
-      await simulators.close();
+      await Promise.all([simulators.close(), artifacts.close()]);
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();
@@ -1060,7 +1086,7 @@ function createRuntime(options) {
         await Promise.allSettled([worktreeSetups.cancelAll(), agents.closeAll()]);
         await Promise.allSettled([...starting]);
         await agents.closeAll();
-        await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
+        await Promise.allSettled([...background, ...chatTitles.pending.values()]);
       }
       while (background.size) await Promise.allSettled([...background]);
       await states.close();

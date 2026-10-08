@@ -5,8 +5,8 @@ const path = require("node:path");
 const { chatTitle } = require("@milagre/shared/chats");
 const { claudeModel, codexModel, antigravityModel } = require("../git-text.cjs");
 
-// Handing a chat over to the other provider: the chat as a markdown transcript on disk, and a short brief
-// for the new agent written by the source provider's small model. The brief is the new chat's first message.
+// Handing a chat off to the other provider in place: the chat as a markdown transcript on disk, and a short brief
+// for the next agent written by the previous provider's small model, sent ahead of the user's message.
 
 const TRANSCRIPT_LIMIT = 60_000;
 const TIMEOUT_MS = 30_000;
@@ -17,27 +17,34 @@ const SYSTEM = [
   'Reply with only JSON: {"brief": "..."}. The brief is markdown addressed to the next agent, in the language of the chat, under 400 words,',
   "with these sections: Goal, Decisions (with the reason for each), Files touched, Current state, Next steps.",
 ].join(" ");
+const CATCH_UP = " The next agent already knows the work before this transcript: cover only what happened in it, using the same sections.";
 
 function stepLine(step) {
   const notes = [step.status === "failed" ? "failed" : null, step.note, step.file].filter(Boolean);
   return `- ${step.title}${notes.length ? ` (${notes.join(", ")})` : ""}`;
 }
 
-/** The chat as markdown: a header, then each message with its tool steps (not thinking) as one line each. */
-function renderTranscript(state, sessionId) {
+/**
+ * The chat as markdown: a header, then each message with its tool steps (not thinking) as one line each, and a
+ * heading for each handoff. With `after`, only the messages after that id, for a provider catching up.
+ */
+function renderTranscript(state, sessionId, { after } = {}) {
   const session = state.sessions[sessionId];
-  const messages = state.messages.filter((message) => message.session_id === sessionId);
-  const worktree = state.worktrees[session.worktree_id];
-  const parts = [
-    `# Chat transcript: ${chatTitle(session, messages)}`,
-    `Provider: ${providerName(session.provider)} · Worktree: ${worktree?.path ?? "unknown"}`,
-  ];
+  const all = state.messages.filter((message) => message.session_id === sessionId);
+  const messages = after == null ? all : all.filter((message) => message.id > after);
+  // A Link chat's state has no worktrees: it runs in its own workspace.
+  const workspace = state.worktrees?.[session.worktree_id]?.path ?? session.workspacePath ?? "unknown";
+  const parts = [`# Chat transcript: ${chatTitle(session, all)}`, `Provider: ${providerName(session.provider)} · Worktree: ${workspace}`];
+  if (after != null) parts.push("Earlier messages are left out: you already know them.");
   for (const message of messages) {
-    if (message.role === "assistant") {
+    if (message.context?.kind === "handoff") {
+      const failed = message.context.status === "failed" ? " (failed)" : "";
+      parts.push(`## Handoff${failed}: ${providerName(message.context.from.provider)} → ${providerName(message.context.to.provider)}`);
+    } else if (message.role === "assistant") {
       const steps = (message.steps ?? []).filter((step) => step.kind !== "thinking").map(stepLine);
       parts.push(`## Assistant${message.model ? ` (${message.model})` : ""}`, [steps.join("\n"), message.body].filter(Boolean).join("\n\n"));
     } else {
-      // A handed-over chat's first message was sent as its brief followed by what the user typed.
+      // A legacy handed-over chat's first message was sent as its brief followed by what the user typed.
       parts.push("## User", [message.handoverBrief, message.body].filter((part) => part?.trim()).join("\n\n"));
     }
   }
@@ -56,7 +63,7 @@ async function writeTranscript({ dir, projectPath, sessionId, markdown }) {
   return file;
 }
 
-const pointer = (file) => `Full transcript of the previous chat: ${file}. Read it if you need details the brief leaves out.`;
+const pointer = (file) => `Full transcript of this chat: ${file}. Read it if you need details the brief leaves out.`;
 
 function parseBrief(reply) {
   try {
@@ -71,13 +78,21 @@ function parseBrief(reply) {
   }
 }
 
-async function ask(call, input, timeoutMs) {
+async function ask(call, input, timeoutMs, outer) {
   const controller = new AbortController();
+  const abort = () => {
+    controller.abort();
+    resolveOuter?.(null);
+  };
+  let resolveOuter;
   let timer;
   try {
+    if (outer?.aborted) return null;
+    outer?.addEventListener("abort", abort, { once: true });
     return await Promise.race([
       call({ ...input, signal: controller.signal }),
       new Promise((resolve) => {
+        resolveOuter = resolve;
         timer = setTimeout(() => {
           controller.abort();
           resolve(null);
@@ -85,19 +100,28 @@ async function ask(call, input, timeoutMs) {
       }),
     ]);
   } finally {
+    outer?.removeEventListener("abort", abort);
     clearTimeout(timer);
   }
 }
 
-/** The new chat's first message. Never throws: when the model can't answer, a minimal brief takes its place. */
-async function generateBrief({ transcript, transcriptPath: file, provider, lastUserMessage, changedFiles }, { models = {}, timeoutMs = TIMEOUT_MS } = {}) {
-  const opening = `You're taking over a chat that ran on ${providerName(provider)}.`;
+/** The brief that opens the next agent's turn. Never throws: when the model can't answer, a minimal brief takes its place. */
+async function generateBrief(
+  { transcript, transcriptPath: file, provider, lastUserMessage, changedFiles, catchUp = false, signal },
+  { models = {}, timeoutMs = TIMEOUT_MS } = {},
+) {
+  const opening = catchUp
+    ? `You're back on this chat. Here is what happened on ${providerName(provider)} since you last worked on it.`
+    : `You're taking over a chat that ran on ${providerName(provider)}.`;
   const shown =
     transcript.length > TRANSCRIPT_LIMIT
       ? `[Earlier messages are cut off; read the transcript file for them.]\n${transcript.slice(-TRANSCRIPT_LIMIT)}`
       : transcript;
   const brief = models[provider]
-    ? await ask(models[provider], { system: SYSTEM, prompt: `<transcript>\n${shown}\n</transcript>` }, timeoutMs).then(parseBrief, () => null)
+    ? await ask(models[provider], { system: catchUp ? SYSTEM + CATCH_UP : SYSTEM, prompt: `<transcript>\n${shown}\n</transcript>` }, timeoutMs, signal).then(
+        parseBrief,
+        () => null,
+      )
     : null;
   if (brief) return `${opening}\n\n${brief}\n\n${pointer(file)}`;
   const files = await changedFiles().catch(() => []);

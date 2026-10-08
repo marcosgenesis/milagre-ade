@@ -243,6 +243,11 @@ test("cached usage resolves the requested account pair without leaking the viewe
   for (const project of projects) await runtime.openProject(project);
   const usage = async (scope) =>
     (await runtime.invoke("usage:cached", scope ? [scope] : [])).providers.find((provider) => provider.provider === "claude").windows[0].usedPercent;
+  const workUsage = await runtime.invoke("usage:cached", [projects[0]]);
+  assert.deepEqual(workUsage.providers[0].account, { id: ids.work, label: "work", email: "fixture@example.test" });
+  const personalUsage = await runtime.invoke("usage:cached", [projects[1]]);
+  assert.equal(personalUsage.providers[0].account.id, ids.personal);
+  assert.equal(personalUsage.providers[0].account.label, "personal");
   assert.equal(await usage(projects[0]), 17);
   assert.equal(await usage(projects[1]), 81);
   assert.equal(await usage(), 81);

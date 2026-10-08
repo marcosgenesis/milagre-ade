@@ -18,9 +18,9 @@ function Fixture() {
   window.setSession = setSession;
   window.setCollapsed = setCollapsed;
   const snapshot = { providers: [
-    { provider: "claude", status: "ok", windows: [{ ...session, usedPercent: 0 }, { ...weekly, usedPercent: 82 }] },
+    { provider: "claude", account: { id: "work", label: "Work" }, status: "ok", windows: [{ ...session, usedPercent: 0 }, { ...weekly, usedPercent: 82 }] },
+    { provider: "codex", account: { id: "personal", label: "Personal", email: "victor@example.test" }, status: "ok", windows: hasSession ? [session, weekly] : [weekly], bankedResets: 3 },
     { provider: "antigravity", status: "unavailable", windows: [], message: "Google doesn't report Antigravity quota." },
-    { provider: "codex", status: "ok", windows: hasSession ? [session, weekly] : [weekly], bankedResets: 3 },
   ] };
   return <aside className="bg-surface rounded-[8px]" data-sidebar-collapsed={collapsed} style={{ width: collapsed ? 44 : 224, padding: 8, margin: 24 }}>
     <SidebarUsage usage={{ snapshot, loading: false, refresh: async () => {}, refreshIfStale: () => {} }} />
@@ -52,7 +52,9 @@ async function browserChecks() {
   const screenshot = async (name) => {
     await delay(350);
     const image = await window.webContents.capturePage();
-    require("node:fs").writeFileSync(path.join(require("node:os").tmpdir(), `milagre-usage-${name}.png`), image.toPNG());
+    if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
+    require("node:fs").mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+    require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, `${name}.png`), image.toPNG());
   };
   try {
     await window.loadURL(process.argv[2]);
@@ -93,11 +95,19 @@ async function browserChecks() {
     await evaluate('document.querySelector("aside").style.marginTop = "300px"');
     const cardText = '(document.querySelector("[data-usage-card]")?.textContent ?? "")';
     await evaluate('document.querySelectorAll(".sidebar-usage-row")[1].click()');
-    await waitFor(`${cardText}.includes("Codex")`);
+    await waitFor(`${cardText}.includes("victor@example.test")`);
+    assert.doesNotMatch(await evaluate(cardText), /Codex/);
     assert.match(await evaluate(cardText), /Banked resets3 left/);
+    assert.equal(await evaluate('document.querySelector("[data-usage-account]").textContent'), "victor@example.test");
+    assert.match(await evaluate('document.querySelectorAll(".sidebar-usage-row")[1].getAttribute("aria-label")'), /victor@example.test/);
     await screenshot("codex-card-banked");
+    await evaluate('document.documentElement.classList.add("dark")');
+    await screenshot("codex-account-dark");
     await evaluate('document.querySelectorAll(".sidebar-usage-row")[0].click()');
-    await waitFor(`${cardText}.includes("Claude")`);
+    await waitFor(`${cardText}.includes("Work")`);
+    assert.doesNotMatch(await evaluate(cardText), /Claude/);
+    assert.equal(await evaluate('document.querySelector("[data-usage-account]").textContent'), "Work");
+    await screenshot("claude-account-name");
     assert.doesNotMatch(await evaluate(cardText), /Banked/, "No banked row when the account has none");
     await evaluate('document.querySelector("aside").style.marginTop = ""');
     await evaluate("window.setCollapsed(true)");
@@ -105,7 +115,7 @@ async function browserChecks() {
     assert.equal(await evaluate('getComputedStyle(document.querySelectorAll(".sidebar-usage-row")[1].querySelector(".sidebar-copy")).display'), "none");
     assert.equal(await evaluate('document.querySelectorAll(".sidebar-usage-rail")[1].firstElementChild.getBoundingClientRect().width'), 16);
     console.log(
-      "PASS: weekly-only width, 5h column alignment, actual percentages, remaining mode, banked resets row, collapsed rail; five screenshots saved to the temp directory",
+      "PASS: weekly-only width, 5h column alignment, actual percentages, remaining mode, banked resets row, collapsed rail, account email and name fallback",
     );
     app.exit(0);
   } catch (error) {

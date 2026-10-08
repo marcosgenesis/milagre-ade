@@ -10,7 +10,7 @@ type Found = { path: string; name: string };
 type Results = { query: string; items: Found[]; error?: string };
 
 /** A home-folder path as the Mac's Finder would show it. */
-export const shortPath = (value: string) => value.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
+const shortPath = (value: string) => value.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 
 /**
  * Finds a Project on the computer by name: the Git repositories in its home folder (project:find). A full path still

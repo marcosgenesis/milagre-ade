@@ -291,6 +291,7 @@ async function readClaudeProfileUsage({ command, env, loadSdk = () => import('@a
   const done = (status, windows, message) => providerResult('claude', now, status, windows, message);
   try {
     const { query } = await loadSdk();
+    // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
     session = query({ prompt: { async *[Symbol.asyncIterator]() { await new Promise(() => {}); } }, options: {
       pathToClaudeCodeExecutable: command, env, cwd: os.homedir(), settingSources: [], persistSession: false,
     } });

@@ -140,12 +140,13 @@ test("bundles tldr with its checklist for machines without installed skills", as
   const { skills, warnings } = await discoverSkills(project, { home });
   assert.deepEqual(warnings, []);
   assert.deepEqual(skills.map(({ name, scope, provider }) => ({ name, scope, provider })), [
+    { name: "simulator", scope: "bundled", provider: "milagre" },
     { name: "tldr", scope: "bundled", provider: "milagre" },
   ]);
   const expanded = await expandSkillPrompt(project, "/tldr Rewrite this paragraph", { home });
   assert.ok(expanded.startsWith("/tldr Rewrite this paragraph"));
-  assert.ok(expanded.includes(await fs.readFile(skills[0].path, "utf8")));
-  assert.ok((await fs.readFile(path.join(path.dirname(skills[0].path), "eval.md"), "utf8")).includes("# tldr eval"));
+  assert.ok(expanded.includes(await fs.readFile(skills.find(skill => skill.name === "tldr").path, "utf8")));
+  assert.ok((await fs.readFile(path.join(path.dirname(skills.find(skill => skill.name === "tldr").path), "eval.md"), "utf8")).includes("# tldr eval"));
 });
 
 test("installed tldr overrides the bundled slash skill without duplicates", async (t) => {

@@ -16,7 +16,7 @@ const { createConfinement } = require('./confine.cjs');
 // Characters of a data URL the phone gets for a Project's icon (about 450 KB of image).
 const MAX_PROJECT_IMAGE = 600_000;
 const METHODS = new Set(['push:register', 'push:unregister', 'push:focus', 'daemon:status', 'project:recent', 'project:open', 'project:forget', 'project:find', 'project:image', 'chat:runs',
-  'simulator:list', 'simulator:open', 'simulator:offer', 'simulator:status', 'simulator:control', 'simulator:input', 'simulator:close',
+  'simulator:list', 'simulator:attach', 'simulator:detach', 'simulator:open', 'simulator:offer', 'simulator:status', 'simulator:control', 'simulator:input', 'simulator:close',
   'browser:list', 'browser:attach', 'browser:open', 'browser:frame', 'browser:status', 'browser:control', 'browser:input', 'browser:close',
   'project:registry', 'link:list', 'link:create', 'link:open', 'link:send',
   'chat:send', 'chat:resume', 'agent:interrupt', 'agent:respond-permission',
@@ -368,6 +368,7 @@ async function startMobileBridge({ dataDir, port = 8787, token, compressAbove = 
             await confine?.check(projectPath);
             await scopeRoots(projectPath);
             const folder = path.join(uploads, randomUUID());
+            // oxlint-disable-next-line no-control-regex -- strips control characters from an uploaded file name
             const filename = path.basename(name.replaceAll('\\', '/')).replace(/[\x00-\x1f\x7f]/g, '_').slice(0, 180);
             if (!filename || filename === '.' || filename === '..') throw failure(400, 'Choose a file with a name');
             const save = async () => {

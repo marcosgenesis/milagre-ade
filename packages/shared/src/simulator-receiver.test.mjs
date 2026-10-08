@@ -116,7 +116,7 @@ test('bundled script stays identical to tested source and every device uses the 
 function browserHarness(call, { playVideo = true } = {}) {
   const listeners = {}, elements = {}, timers = new Map(), intervals = new Map(), peers = [];
   let serial = 0;
-  for (const id of ['config', 'stage', 'video', 'message', 'retry', 'control', 'home', 'rotate', 'back']) elements[id] = { style: {}, clientWidth: 600, clientHeight: 600, dataset: { config: JSON.stringify({ deviceId: 'sim' }) }, getBoundingClientRect: () => ({ left: 0, top: 0 }), setPointerCapture() {} };
+  for (const id of ['config', 'stage', 'video', 'failure', 'message', 'retry', 'control', 'home', 'rotate', 'back']) elements[id] = { style: {}, clientWidth: 600, clientHeight: 600, dataset: { config: JSON.stringify({ deviceId: 'sim' }) }, getBoundingClientRect: () => ({ left: 0, top: 0 }), setPointerCapture() {} };
   const track = { stop() {} };
   elements.video.play = async () => { if (playVideo) elements.video.onplaying?.(); };
   const themeValues = {}; const rootStyle = { setProperty: (key,value) => { themeValues[key] = value; } };
@@ -240,4 +240,14 @@ test('theme updates restyle controls without reopening the stream', async () => 
  h.window.simulatorTheme({surface:'#fff',ink:'#111',ink2:'#555',line:'#ddd',hover:'#eee',accent:'#08f',scheme:'light'});
  assert.equal(h.document.documentElement.style.colorScheme,'light');
  assert.equal(calls.filter(([m])=>m==='open').length,1);assert.equal(h.peers[0].closed,undefined);
+});
+
+test('connection failures are visible in the screen area and retry clears them', async () => {
+  const h = browserHarness(async () => { throw Error('Simulator helper could not start.'); });
+  await h.flush();
+  assert.equal(h.elements.failure.hidden,false);
+  assert.match(h.elements.failure.textContent,/helper could not start/);
+  h.elements.retry.onclick();
+  assert.equal(h.elements.failure.hidden,true);
+  h.bridge.dispose();
 });

@@ -6,15 +6,16 @@ const { spawnSync } = require('node:child_process')
 const { test } = require('node:test')
 const YAML = require('yaml')
 
-const releaseWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/release.yml'), 'utf8'))
+const ciWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/ci.yml'), 'utf8'))
 const publishWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/publish-installers.yml'), 'utf8'))
+const buildWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/build-macos.yml'), 'utf8'))
 const candidateWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/package-candidates.yml'), 'utf8'))
 const credentials = ['CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID']
-const credentialStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Check Apple release credentials')
-const notarizeStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Notarize and staple disk images')
-const verifyStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Verify macOS signatures, notarization and disk images')
-const authStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Check Apple notarization authentication')
-const uploadStep = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Upload installers and publish the release')
+const credentialStep = buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Check Apple release credentials')
+const notarizeStep = buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Notarize and staple disk images')
+const verifyStep = buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Verify macOS signatures, notarization and disk images')
+const authStep = buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Check Apple notarization authentication')
+const uploadStep = buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Upload installers and publish the release')
 
 function runStep(step, cwd, overrides = {}) {
   const env = { ...process.env }
@@ -129,9 +130,21 @@ test('an accepted disk image is stapled', t => {
   assert.match(f.calls(), /xcrun stapler staple/)
 })
 
-test('merges to main only create a draft candidate, never a macOS build', () => {
-  assert.deepEqual(Object.keys(releaseWorkflow.jobs), ['release'])
-  assert.equal(releaseWorkflow.jobs.release['runs-on'], 'ubuntu-latest')
+test('a candidate is cut by the release job of CI after the required checks pass on main', () => {
+  const job = ciWorkflow.jobs.release
+  assert.equal(job.if, "github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'the-ptf/milagre-ade'")
+  assert.deepEqual(job.needs, ['javascript', 'native-tests'])
+  assert.equal(job.permissions.contents, 'write')
+  const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout'))
+  assert.equal(checkout.with['fetch-depth'], 0)
+  assert.equal(checkout.with['persist-credentials'], false)
+  const runs = job.steps.map(step => step.run).filter(Boolean)
+  assert.deepEqual(runs, ['npm ci', 'npm run release'])
+  assert.ok(!JSON.stringify(ciWorkflow.jobs.release).includes('package:mac'))
+  assert.ok(!fs.existsSync(path.join(__dirname, '../.github/workflows/release.yml')), 'no separate workflow_run release workflow')
+})
+
+test('release candidates are created as drafts', () => {
   const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../.releaserc.json'), 'utf8'))
   const github = config.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === '@semantic-release/github')
   assert.equal(github?.[1]?.draftRelease, true)
@@ -140,12 +153,17 @@ test('merges to main only create a draft candidate, never a macOS build', () => 
 test('a candidate is not published without the auto-updater metadata, and publishes with it', t => {
   const f = fixture(t)
   fs.writeFileSync(path.join(f.root, 'bin/gh'), '#!/bin/bash\nprintf \'gh %s\\n\' "$*" >> "$CALL_LOG"\n', { mode: 0o755 })
-  const env = { ...f.env, RELEASE_TAG: 'v9.9.9' }
+  const env = { ...f.env, RELEASE_TAG: 'v9.9.9', PUBLISH_PLATFORMS: 'macos' }
   const missing = runStep(uploadStep, f.root, env)
   assert.notEqual(missing.status, 0)
   assert.match(missing.stdout, /latest-mac\.yml/)
   assert.doesNotMatch(f.calls(), /gh release/)
   fs.writeFileSync(path.join(f.root, 'release/latest-mac.yml'), '')
+  const noBeta = runStep(uploadStep, f.root, env)
+  assert.notEqual(noBeta.status, 0)
+  assert.match(noBeta.stdout, /beta-mac\.yml/)
+  assert.doesNotMatch(f.calls(), /gh release/)
+  fs.writeFileSync(path.join(f.root, 'release/beta-mac.yml'), '')
   fs.writeFileSync(path.join(f.root, 'release/Milagre-arm64-mac.zip'), '')
   fs.mkdirSync(path.join(f.root, 'release/package-managers/homebrew'), { recursive: true })
   fs.writeFileSync(path.join(f.root, 'release/package-managers/homebrew/milagre.rb'), 'generated cask')
@@ -153,6 +171,7 @@ test('a candidate is not published without the auto-updater metadata, and publis
   const result = runStep(uploadStep, f.root, env)
   assert.equal(result.status, 0, result.stderr)
   assert.match(f.calls(), /gh release upload v9\.9\.9 .*release\/latest-mac\.yml/)
+  assert.match(f.calls(), /release\/beta-mac\.yml/)
   assert.match(f.calls(), /release\/Milagre-arm64\.dmg/)
   assert.match(f.calls(), /release\/Milagre-arm64-mac\.zip/)
   assert.match(f.calls(), /release\/package-managers\/homebrew\/milagre\.rb/)
@@ -164,9 +183,10 @@ test('missing or empty Homebrew metadata stops publication before any upload', t
   const f = fixture(t)
   fs.writeFileSync(path.join(f.root, 'bin/gh'), '#!/bin/bash\nprintf \'gh %s\\n\' "$*" >> "$CALL_LOG"\n', { mode: 0o755 })
   fs.writeFileSync(path.join(f.root, 'release/latest-mac.yml'), '')
+  fs.writeFileSync(path.join(f.root, 'release/beta-mac.yml'), '')
   const directory = path.join(f.root, 'release/package-managers')
   fs.mkdirSync(path.join(directory, 'homebrew'), { recursive: true })
-  const env = { ...f.env, RELEASE_TAG: 'v9.9.9' }
+  const env = { ...f.env, RELEASE_TAG: 'v9.9.9', PUBLISH_PLATFORMS: 'macos' }
   for (const contents of [null, '']) {
     if (contents !== null) {
       fs.writeFileSync(path.join(directory, 'homebrew/milagre.rb'), contents)
@@ -226,7 +246,7 @@ test('release commands trim Apple credentials, preserve certificate passwords an
   })
   assert.equal(result.status, 7, result.stderr)
   assert.equal(result.stdout + result.stderr, '')
-  const build = publishWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Build macOS installers')
+  const build = buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Build macOS installers')
   assert.match(build.run, /^node scripts\/with-apple-credentials\.cjs npm run package:mac /)
   assert.match(notarizeStep.run, /^node scripts\/with-apple-credentials\.cjs bash -e -o pipefail/)
 })
@@ -271,4 +291,52 @@ test('authentication failure during the wait stops immediately without logging c
   assert.equal((f.calls().match(/xcrun notarytool wait/g) || []).length, 1)
   assert.doesNotMatch(f.calls(), /stapler staple|sleep/)
   assert.doesNotMatch(result.stdout + result.stderr, /test-secret-/)
+})
+
+test('the stable macOS leg calls the reusable build on the latest channel and publishes', () => {
+  const job = publishWorkflow.jobs['package-macos']
+  assert.equal(job.uses, './.github/workflows/build-macos.yml')
+  assert.equal(job.with.channel, 'latest')
+  assert.equal(job.with.publish, true)
+  assert.deepEqual(job.secrets, Object.fromEntries(credentials.map(name => [name, `\${{ secrets.${name} }}`])))
+  const build = buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Build macOS installers')
+  assert.match(build.run, /--config\.publish\.channel="\$\{CHANNEL\}"/)
+  assert.doesNotMatch(build.run, /generateUpdatesFilesForAllChannels/, 'the flag does nothing for the github provider')
+  assert.ok(buildWorkflow.jobs['package-macos'].steps.find(step => step.name === 'Require a stable draft release').if.includes('require_draft'))
+})
+
+test('a stable build mirrors its feed to the beta channel before the feeds are refreshed', () => {
+  const steps = buildWorkflow.jobs['package-macos'].steps
+  const names = steps.map(step => step.name)
+  const mirror = steps.find(step => step.name === 'Mirror the stable feed to the beta channel')
+  assert.ok(mirror, 'the mirror step exists')
+  assert.equal(mirror.if, "inputs.channel == 'latest'")
+  assert.match(mirror.run, /cp release\/latest-mac\.yml release\/beta-mac\.yml/)
+  assert.match(mirror.run, /exit 1/, 'a missing stable feed fails the build')
+  assert.ok(names.indexOf('Build macOS installers') < names.indexOf('Mirror the stable feed to the beta channel'))
+  assert.ok(names.indexOf('Mirror the stable feed to the beta channel') < names.indexOf('Refresh feeds after DMG notarization'))
+})
+
+test('the reusable macOS build requires exactly the five Apple secrets and callers pass them by name', () => {
+  assert.deepEqual(buildWorkflow.on.workflow_call.secrets, Object.fromEntries(credentials.map(name => [name, { required: true }])))
+  const named = Object.fromEntries(credentials.map(name => [name, `\${{ secrets.${name} }}`]))
+  assert.deepEqual(publishWorkflow.jobs['package-macos'].secrets, named)
+  assert.deepEqual(betaWorkflow.jobs.build.secrets, named)
+  for (const text of ['publish-beta.yml', 'publish-installers.yml'].map(name => fs.readFileSync(path.join(__dirname, '../.github/workflows', name), 'utf8'))) {
+    assert.doesNotMatch(text, /secrets: inherit/)
+  }
+})
+
+const betaWorkflow = YAML.parse(fs.readFileSync(path.join(__dirname, '../.github/workflows/publish-beta.yml'), 'utf8'))
+test('a beta is a separate prerelease built from the newest draft candidate on the beta channel', () => {
+  assert.deepEqual(Object.keys(betaWorkflow.on), ['workflow_dispatch', 'schedule'])
+  const build = betaWorkflow.jobs.build
+  assert.equal(build.uses, './.github/workflows/build-macos.yml')
+  assert.equal(build.with.channel, 'beta')
+  assert.equal(build.with.require_draft, false)
+  assert.notEqual(build.with.publish, true)
+  const publish = JSON.stringify(betaWorkflow.jobs.publish.steps)
+  assert.ok(publish.includes('--prerelease'))
+  assert.ok(publish.includes('beta-mac.yml'))
+  assert.ok(!publish.includes('--latest'), 'a beta never becomes the latest release')
 })

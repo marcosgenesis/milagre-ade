@@ -28,6 +28,7 @@ import { createRoot } from 'react-dom/client';
 import '/src/styles.css';
 ${data}
 window.milagre = new Proxy({
+  simulators: { list: async ({ chatId }) => ({ chatId, supported: false, devices: [], attached: [], available: [] }) },
   getRuntimeConnection: async () => ({ connected: true }),
   getAgentPorts: async () => ({}),
   getRuns: async () => ({ seq: 0, runs: {} }),

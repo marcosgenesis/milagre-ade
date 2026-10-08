@@ -302,6 +302,7 @@ export default function ChatScreen() {
   }
   function headerAction(id: string) {
     if (id === 'changes') panels.show('right');
+    // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- pr comes unvalidated from the host's JSON response, so pr.url may be missing and startsWith would throw
     else if (id === 'pr' && pr && /^https:\/\//.test(pr.url)) void Linking.openURL(pr.url).catch(() => {});
     else if (id === 'agents' && chat) router.push({ pathname: '/agents', params: { id: String(chat.id) } });
     else if (id === 'rename' && chat) Alert.prompt('Rename Chat', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: (value?: string) => { if (value?.trim()) void action(() => client.call('chat:patch', [project.path, chat.id, { title: value.trim() }])); } }], 'plain-text', title);
@@ -396,7 +397,7 @@ export default function ChatScreen() {
         {pr && blockers.length > 0 && chat && <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />}
         <View style={{ flex: 1 }} />
         <BrowserChip chatId={params.id ? chatId : undefined} />
-        <SimulatorChip />
+        {params.id && Number(params.id) > 0 && <SimulatorChip key={chatId} chatId={chatId} />}
         {agents.length > 0 && <SubagentChip agents={agents} onPress={() => headerAction('agents')} />}
       </View>}
       {run?.approvals.map(approval => <Approval key={approval.requestId} approval={approval} busy={actionBusy} respond={decision => void action(async () => { const accepted = await client.call('agent:respond-permission', [{ chatId, requestId: approval.requestId, decision }]); if (!accepted) throw new Error('This approval is no longer pending. Refresh the Chat.'); }, true)} />)}

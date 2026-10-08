@@ -17,6 +17,8 @@ window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
+  // So is the linked-work snapshot (linked:snapshot); null would crash useLinkedWork.
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   getCurrentProject: async () => ({ path: "/fixture", name: "Fixture", state }),
   listBranches: async () => ["main", "develop"],
   createWorktree: () => new Promise((resolve, reject) => {
@@ -132,7 +134,8 @@ async function browserChecks() {
     await waitFor(`!document.querySelector('[aria-label="Send"]').disabled`);
     await evaluate(`document.querySelector('[aria-label="Send"]').click()`);
     await waitFor(`!!window.finishWorktree`);
-    assert.equal(await evaluate(`!!document.querySelector('[data-new-chat-pickers]')`), true, "Keep the new-chat layout until the worktree and first message are ready");
+    // Since #198 the submitted message shows at once while the worktree is prepared.
+    await waitFor(`document.querySelector('[aria-label="Conversation"]')?.textContent.includes('First prompt')`);
     await evaluate(`window.failWorktree()`);
     await waitFor(`document.body.textContent.includes('Could not create the worktree')`);
     assert.equal(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').value`), "First prompt");
@@ -142,7 +145,7 @@ async function browserChecks() {
     await waitFor(`!document.querySelector('[data-new-chat-pickers]')`);
     assert.equal(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').value`), "");
     assert.equal(await evaluate(`document.querySelector('[aria-label="Conversation"]').textContent.includes('First prompt')`), true);
-    console.log("PASS: first send waits for preparation and preserves the draft on failure");
+    console.log("PASS: first send shows the message while preparing and preserves the draft on failure");
     console.log("PASS: new chats follow Settings, remember explicit selections, and restore them after reload");
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }

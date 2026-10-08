@@ -45,7 +45,7 @@ const GLOW: Segment[] = [{ to: 1, duration: 288, easing: easeInOut }, hold(240),
 const TWINKLE: Segment[] = [hold(1200), { to: 1, duration: 480, easing: twinkleCurve }, { to: 2, duration: 360, easing: twinkleCurve }, { to: 3, duration: 360, easing: twinkleCurve }];
 
 /** Desktop's RunningLogo: the legs take turns lighting up while the sparkle swells and turns a quarter. */
-export const RunningLogo = memo(function RunningLogo({ size = 16 }: { size?: number }) {
+const RunningLogo = memo(function RunningLogo({ size = 16 }: { size?: number }) {
   const ink = hex(useColorScheme()).ink;
   const left = useKeyframes(GLOW);
   const right = useKeyframes(GLOW, 240);

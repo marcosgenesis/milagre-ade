@@ -29,7 +29,7 @@ export type ToolApprovalStatus =
   | "complete"
   | "error";
 
-export type ToolApprovalCodeLanguage = "text" | "bash" | "diff" | "json" | "tsx" | "typescript";
+type ToolApprovalCodeLanguage = "text" | "bash" | "diff" | "json" | "tsx" | "typescript";
 
 export interface ToolApprovalParameter {
   id: string;

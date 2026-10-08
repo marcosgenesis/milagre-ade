@@ -1,6 +1,5 @@
 import type { NamedProjectLink } from '@milagre/shared/model';
 import { ProjectAvatarStack } from './ProjectAvatarStack';
-"use client";
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -31,7 +30,6 @@ import { projectRows, type ProjectRow, type RecentProject } from "@/lib/project-
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
 import { useDismiss } from "../lib/use-dismiss";
 
-export type { SidebarRecent } from "./sidebar/ChatRow";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];

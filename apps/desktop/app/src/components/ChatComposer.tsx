@@ -10,18 +10,13 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Add01Icon,
-  AiBrowserIcon,
-  AiChat01Icon,
   ArrowDown01Icon,
-  Attachment01Icon,
-  CommandIcon,
   GitBranchIcon,
   GitForkIcon,
   GitPullRequestIcon,
   LaptopIcon,
 } from "@hugeicons/core-free-icons";
-import type { AgentCliStatus, EffortLevel, ModelCapability, AgentSession, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
+import type { AgentCliStatus, EffortLevel, ModelCapability, ChatMessage as AppChatMessage, ChatStep, Isolation, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { FindBar } from "./FindBar";
 import { Notice } from "./Notice";
 import { Attachments } from "./Attachments";
@@ -605,7 +600,7 @@ export function ChatComposer({
         <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
         <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
         <BrowserTrack key={`browser-${agentChatId ?? chatId}`} chatId={agentChatId} />
-        <SimulatorTrack key={`simulator-${chatId}`} />
+        {!isNewChat && typeof chatId === "number" && chatId > 0 && projectPath && <SimulatorTrack key={`simulator-${projectPath}-${chatId}`} chatId={`${projectPath}#${chatId}`} />}
         <SubagentTrack key={chatId} agents={subagents} provider={lockedProvider ?? selectedModel.provider} onOpenCanvas={() => setCanvasChat(chatId)} onArchiveFinished={onArchiveFinishedSubagents} onArchive={onArchiveSubagent} />
       </div>
 

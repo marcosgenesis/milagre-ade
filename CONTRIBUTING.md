@@ -15,9 +15,9 @@ npm install
 npm run dev
 npm run typecheck
 npm run build
-npm run test:agent
-npm run test:ui
-npm run test:monorepo
+npm test
+npm test -- --unit
+npm test -- --only <name>
 ```
 
 Use `npm run dev` for visual work. Keep the renderer and Electron process boundaries explicit:

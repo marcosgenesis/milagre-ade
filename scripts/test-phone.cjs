@@ -1,4 +1,4 @@
-// Run with npm run test:phone. Exercises Settings › Phone in the real App against a real daemon (its own temporary data
+// Run with npm test -- --only test-phone. Exercises Settings › Phone in the real App against a real daemon (its own temporary data
 // directory and socket, port chosen by the OS): turn phone access on, see the QR code and the relay status, copy the
 // link, see a phone pair, reset access, turn it off. The rest of the window's API is mocked, like the other checks.
 // Set MILAGRE_SCREENSHOT_DIR to save screenshots.

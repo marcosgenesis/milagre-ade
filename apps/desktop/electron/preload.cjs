@@ -5,7 +5,9 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 /** @type {Window["milagre"]} */
 const bridge = {
   simulators: {
-    list: () => ipcRenderer.invoke("simulator:list"),
+    list: request => ipcRenderer.invoke("simulator:list", request),
+    attach: request => ipcRenderer.invoke("simulator:attach", request),
+    detach: request => ipcRenderer.invoke("simulator:detach", request),
     open: request => ipcRenderer.invoke("simulator:open", request),
     offer: request => ipcRenderer.invoke("simulator:offer", request),
     status: request => ipcRenderer.invoke("simulator:status", request),
@@ -140,6 +142,8 @@ const bridge = {
   },
   getUpdateState: () => ipcRenderer.invoke("update:state"),
   checkForUpdates: () => ipcRenderer.invoke("update:check"),
+  getReleaseChannel: () => ipcRenderer.invoke("update:channel"),
+  setReleaseChannel: (channel) => ipcRenderer.invoke("update:set-channel", channel),
   installUpdate: () => ipcRenderer.invoke("update:install"),
   onUpdateState: (callback) => {
     const listener = (_event, state) => callback(state);

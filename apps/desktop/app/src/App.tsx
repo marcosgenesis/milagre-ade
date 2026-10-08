@@ -121,6 +121,7 @@ function App() {
   const selectedLinkRef = useRef(selectedLink); selectedLinkRef.current = selectedLink;
   const [linkInitialSession, setLinkInitialSession] = useState<number | undefined>();
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const scopeDrafts = useMemo(createScopeDrafts, []);
   const [linkStates, setLinkStates] = useState<Record<string, LinkState>>({});
   const linkStatesRef = useRef(linkStates); linkStatesRef.current = linkStates;
@@ -134,6 +135,7 @@ function App() {
   const selectedSessionRef = useRef<number | null>(null);
   selectedSessionRef.current = selectedSessionId;
   // The draft lives outside React state: a keystroke re-renders the composer (DraftChatComposer), not the whole app.
+  // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const draftStore = useMemo(createDraftStore, []);
   const setDraft = draftStore.set;
   const [selectedModel, setSelectedModel] = useState<ModelOption>(() => resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)));
@@ -269,6 +271,7 @@ function App() {
   async function loadInitialProject() {
     setLoading(true);
     setStartupError(null);
+    // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
     try { adoptProject(await window.milagre.getCurrentProject()); }
     catch (error) { setStartupError(ipcErrorMessage(error)); }
     finally { setLoading(false); }
@@ -286,6 +289,7 @@ function App() {
     });
     void window.milagre.getRuntimeConnection?.().then(state => { if (!updated) setHostConnection(state); }).catch(() => {});
     const snapshotOff = window.milagre.onRuntimeSnapshot?.(snapshot => {
+      // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
       for (const next of snapshot.projects) receiveState(next.path, next.state);
       for (const next of snapshot.links ?? []) setLinkStates(previous => ({ ...previous, [next.linkId]: next.state }));
     });
@@ -306,6 +310,7 @@ function App() {
   const worktrees = useMemo(() => (state ? sortedWorktrees(state) : []), [state]);
   const firstWorktree = worktrees[0];
   const selectedSession = state && selectedSessionId !== null ? state.sessions[selectedSessionId] : undefined;
+  // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads selectedSession.subagents and selectedSession.native_session_id, both listed; the compiler infers the whole selectedSession object from the property access
   const subagents = useMemo(() => selectedSession?.subagents?.filter(agent => agent.id !== selectedSession.native_session_id), [selectedSession?.subagents, selectedSession?.native_session_id]);
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   // Assigning a new Chat its persisted id keeps attachments for the next message; navigating away clears them.
@@ -332,6 +337,7 @@ function App() {
   // The renderer's preview never enters project state. The main process still owns the persisted transcript.
   const displayedMessages = useMemo(() => pendingHere && pendingSend
     ? pendingCanonicalId !== null ? state!.messages.filter(message => message.session_id === pendingCanonicalId) : [...messages, pendingSend.message]
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state!.messages (non-null assertion) and the list names state?.messages, the same value; the compiler infers state itself from the assertion
     : messages, [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages]);
   // A handed-over chat's brief, attached to its first message until it is sent.
   const handoverDraft = messages.length === 0 ? selectedSession?.handoverDraft : undefined;
@@ -445,6 +451,7 @@ function App() {
     }
     return grouped;
   }, [sidebarState?.messages]);
+  // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const readPullRequestRefs = useMemo(pullRequestRefsCache, []);
   const previousChats = useRef<SidebarRecent[]>([]);
   const chats = useMemo(() => {
@@ -662,6 +669,7 @@ function App() {
   // Clicking a notification opens its chat, in another project too.
   useEffect(() => window.milagre.onOpenChat((chatId) => {
     const owner = projectOfKey(chatId);
+    // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
     if (isLinkScopeKey(owner)) { void selectLink(owner.slice('milagre-link:'.length), sessionIdFromKey(chatId)); return; }
     const current = projectRef.current;
     const session = current && chatInProject(current.path, chatId) ? openState()?.sessions[sessionIdFromKey(chatId)] : undefined;
@@ -669,6 +677,7 @@ function App() {
     const separator = chatId.lastIndexOf("#");
     if (separator <= 0) return;
     pendingNotificationChat.current = chatId;
+    // oxlint-disable-next-line react/immutability -- React Compiler heuristic: the ref or handler is assigned or called after render, not during it
     void switchProject(chatId.slice(0, separator));
   }), []);
 
@@ -789,6 +798,7 @@ function App() {
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
     if (created.setupNote) setNotice(created.setupNote);
     void window.milagre.listBranches(project.path).then(next => {
+      // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
       if (projectRef.current?.path === project.path) setBranches(next);
     }).catch(() => {});
     return { sessionId: session.id as number | null, worktreeId: created.worktreeId };
@@ -1040,7 +1050,7 @@ function App() {
     onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
     onCommit: (id) => latest.current.openGitDialog(Number(id)),
     onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
-    onArchive: (id, mode, plan) => latest.current.archiveChat(Number(id), mode, plan),
+    onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
   }), []);
   const startNewChatFromSidebar = useEvent(() => startNewChat());
   const openProjectFromSidebar = useEvent(() => void openProject());

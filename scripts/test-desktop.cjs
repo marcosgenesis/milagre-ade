@@ -1,5 +1,5 @@
 // Runs the real main process, preload, and built renderer against temporary legacy-format data.
-// npm run build && npm run test:desktop [-- --packaged <.app, unpacked directory, or executable>]
+// npm run build && npm test -- --only test-desktop [-- --packaged <.app, unpacked directory, or executable>]
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -210,6 +210,7 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
       } finally { shared.close(); }
       await waitFor(async () => { try { await fs.stat(path.join(profile, 'runtime.lock')); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, 'host saves and releases the fixture profile');
     } catch (cleanupError) {
+      // oxlint-disable-next-line no-unsafe-finally -- the cleanup error is rethrown only when the body did not fail, so it never masks the original error
       if (!failure) throw cleanupError;
       console.error('Fixture cleanup failed:', cleanupError);
     }

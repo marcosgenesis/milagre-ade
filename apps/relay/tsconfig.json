@@ -6,6 +6,10 @@
     "lib": ["ES2023"],
     "types": ["@cloudflare/workers-types"],
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedParameters": true,
+    "noUnusedLocals": true,
     "noEmit": true,
     "skipLibCheck": true
   },

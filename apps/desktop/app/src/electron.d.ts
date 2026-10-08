@@ -22,6 +22,7 @@ export type WorktreeSetupSource = "repo" | "setting" | "none";
 /** The project's saved setup command, and the one that applies. `note` says why a repo file was ignored. */
 export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetupSource; command: string | null; note?: string };
 
+export type ReleaseChannel = "stable" | "beta";
 export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error" | "unavailable"; version: string | null; progress: number };
 
 /** The Phone setting as the host runs it. The link and QR (an SVG) are there only while it is on; both carry the access token. */
@@ -199,6 +200,8 @@ declare global {
       onAgentPorts: (callback: (ports: AgentPorts) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;
       checkForUpdates: () => Promise<UpdateState>;
+      getReleaseChannel: () => Promise<ReleaseChannel>;
+      setReleaseChannel: (channel: ReleaseChannel) => Promise<ReleaseChannel>;
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       getPhoneStatus: () => Promise<PhoneStatus>;

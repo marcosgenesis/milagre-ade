@@ -58,7 +58,7 @@ export type RelayRuntime = {
 };
 
 /** A short, stable file name for an image: FNV-1a twice over, plus the image's own extension. */
-export function mediaName(text: string, path: string): string {
+function mediaName(text: string, path: string): string {
   const fnv = (seed: number) => {
     let hash = seed >>> 0;
     for (let i = 0; i < text.length; i++) { hash ^= text.charCodeAt(i); hash = Math.imul(hash, 0x01000193) >>> 0; }

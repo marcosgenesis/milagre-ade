@@ -1,4 +1,4 @@
-// Run with npm run test:worktree-setup. Exercises the real App with an isolated project and mocked Electron IPC:
+// Run with npm test -- --only worktree-setup. Exercises the real App with an isolated project and mocked Electron IPC:
 // the Setup command field in Settings, and the setup step in the chat of a new worktree, which starts without asking.
 // Set MILAGRE_SCREENSHOT_DIR to save screenshots.
 const assert = require("node:assert/strict");
@@ -34,6 +34,8 @@ window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
+  // So is the linked-work snapshot (linked:snapshot); null would crash useLinkedWork.
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   getCurrentProject: async () => ({ path: "/fixture", name: "shop", state }),
   listBranches: async () => ["main"],
   createWorktree: async () => {

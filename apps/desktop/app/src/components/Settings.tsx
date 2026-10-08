@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon, GitBranchIcon, InformationCircleIcon, PaintBoardIcon, SecurityCheckIcon, Settings01Icon, SmartphoneIcon, UserMultipleIcon } from "@hugeicons/core-free-icons";
-import type { FilesToCopy as FilesToCopyResult, PhoneStatus, UpdateState, WorktreeSetupSettings } from "../electron";
+import type { FilesToCopy as FilesToCopyResult, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
@@ -260,6 +260,7 @@ function usePhoneStatus() {
     let pushed = false;
     // An update that arrives while the first read is in flight is newer than that read.
     const off = window.milagre.onPhoneStatus((next) => { pushed = true; setStatus(next); });
+    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
     window.milagre.getPhoneStatus().then((next) => { if (live && !pushed) setStatus(next); }, (error) => {
       if (live) setLoadError(`Couldn't read phone access: ${ipcErrorMessage(error)}`);
     });
@@ -299,6 +300,7 @@ function PhoneSettings() {
   useEffect(() => {
     if (!showingQr) return;
     let live = true;
+    // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
     window.milagre.openPhonePairing().then((next) => { if (live) setStatus(next); }, () => {});
     return () => { live = false; };
   }, [showingQr, setStatus]);
@@ -383,16 +385,26 @@ function updateDescription(update: UpdateState | null): string {
   }
 }
 
-function AboutSettings({ update }: { update: UpdateState | null }) {
+export function AboutSettings({ update }: { update: UpdateState | null }) {
   const [version, setVersion] = useState<string | null>(null);
+  const [channel, setChannel] = useState<ReleaseChannel | null>(null);
   useEffect(() => {
     void window.milagre.getAppVersion().then(setVersion);
+    void window.milagre.getReleaseChannel().then(setChannel);
   }, []);
   const electron = navigator.userAgent.match(/Electron\/([\d.]+)/)?.[1];
   const chrome = navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1];
   return (
     <Group title="Milagre">
       <Row label="Version"><span className="tabular-nums">{version ?? "…"}</span></Row>
+      <Row label="Release channel" description={channel === "beta" ? "Beta gets a build most days main changes. Switch back to Stable any time; you keep the version you have until the next stable release." : "Stable gets releases after they have run on Beta."}>
+        <Select<ReleaseChannel>
+          label="Release channel"
+          value={channel ?? "stable"}
+          onChange={(next) => { setChannel(next); void window.milagre.setReleaseChannel(next); }}
+          options={[{ value: "stable", label: "Stable" }, { value: "beta", label: "Beta" }]}
+        />
+      </Row>
       <Row label="Updates" description={updateDescription(update)}>
         <button
           type="button"
@@ -442,6 +454,7 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
   const refreshPreview = () => {
     const seq = ++previewSeq.current;
     void window.milagre.previewFilesToCopy(projectPath, parsePatterns(current.current)).then((next) => {
+      // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
       if (seq === previewSeq.current) setFound(next);
     }, () => {});
   };

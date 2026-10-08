@@ -46,9 +46,21 @@ The cask follows the [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook
 
 ## Validation and release
 
-**Build package candidates** builds the selected branch on native macOS, Windows and Ubuntu runners. It installs the NSIS/DEB packages and runs the real desktop against temporary profiles, including saved Chats, shared-host updates, crash recovery, and ownership errors. Windows also runs real named-pipe, NTFS ACL and process tests. Candidate installers are unsigned/ad-hoc Actions artifacts, kept for 14 days.
+**Build package candidates** runs on every push to `main`, on dispatch, and on a PR once it carries the `preview:installers` label. Windows pipe, ACL and process tests and Linux repository signing run on every PR in CI's `native-tests` job without an installer. It builds on native macOS, Windows and Ubuntu runners. It installs the NSIS/DEB packages and runs the real desktop against temporary profiles, including saved Chats, shared-host updates, crash recovery, and ownership errors. Windows also runs real named-pipe, NTFS ACL and process tests. Candidate installers are unsigned/ad-hoc Actions artifacts, kept for 14 days.
+
+The `release` job of CI cuts a candidate (a tag and a draft release) for every push to `main` once `javascript` and `native-tests` pass. The non-required `desktop-checks` job does not gate it. Drafts are invisible to installed apps.
 
 **Publish installers** defaults to `platforms=macos`. Selecting `all` adds Windows and Linux builds. Windows requires Authenticode signing; Linux signs the RPM and APT/RPM indexes. All selected platforms must pass before the draft becomes public. The final stage verifies complete updater feeds and regenerates combined checksums/manifests from the signed assets. DMG notarization and RPM signing are followed by feed hash refreshes.
+
+## Beta channel
+
+Installs set to Beta in Settings read `beta-mac.yml`; Stable installs read `latest-mac.yml` and never see a beta. **Publish beta** runs on weekdays at 09:00 UTC and on dispatch. It takes the newest draft candidate (`vX.Y.Z`), builds and signs it on the beta channel, and publishes `vX.Y.Z-beta.<run>` as a prerelease that is never marked latest. It skips the run when a beta for the same commit already exists. Ship one by hand with `gh workflow run publish-beta.yml`, optionally `-f tag=vX.Y.Z` to pick a specific draft.
+
+Promotion is unchanged: **Publish installers** publishes the untouched draft as stable. A stable release now uploads both `latest-mac.yml` and `beta-mac.yml` (same installers): electron-builder writes only the current channel's feed, so the stable build copies `latest-mac.yml` to `beta-mac.yml` before the feeds are refreshed. Beta installs move to the stable build once it ships.
+
+electron-updater reads the newest release from `releases.atom` and takes the first stable-or-beta entry; on the first stable release after a beta, confirm a beta install updates to it. If it does not, delete the superseded `vX.Y.Z-beta.*` prereleases (`gh release delete <tag> --cleanup-tag --yes`) once stable X.Y.Z is published.
+
+If `gh release create` succeeded but the asset upload failed, the next run sees a beta for that commit and skips it. Delete the broken prerelease and its tag with `gh release delete <betaTag> --cleanup-tag --yes`, then rerun the workflow. With no draft candidate, a scheduled run does nothing.
 
 Required repository secrets:
 
@@ -71,7 +83,7 @@ After a signed Windows EXE is public, validate the attached manifest with `winge
 
 Windows uses a local named pipe with mutual HMAC authentication. NTFS permissions restrict its token to the current Windows SID and SYSTEM. Unauthenticated peers receive no events or commands. Unix retains its private socket transport. Windows CLI shims run through their JavaScript entry points with literal arguments; Linux setup falls back to `sh`.
 
-Run `npm run test:release`, `npm run test:monorepo`, `npm run test:agent`, and `npm run build`. Real Windows behavior must pass its native runner before support is announced.
+Run `npm test -- --unit` and `npm run build`. Real Windows behavior must pass its native runner before support is announced.
 
 ## Evidence from this implementation
 

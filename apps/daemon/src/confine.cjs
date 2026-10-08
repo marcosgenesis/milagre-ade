@@ -28,6 +28,8 @@ const denied = () => { throw refused(); };
 const PATHS = Object.freeze({
   // Simulators are machine-wide. A demo Project never grants access to the host's devices.
   'simulator:list': denySimulator,
+  'simulator:attach': denySimulator,
+  'simulator:detach': denySimulator,
   'simulator:open': denySimulator,
   'simulator:offer': denySimulator,
   'simulator:status': denySimulator,

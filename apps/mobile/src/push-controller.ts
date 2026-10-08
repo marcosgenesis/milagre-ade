@@ -101,4 +101,3 @@ export function createPushController({ store, hosts, forgetHost = async () => {}
   };
   return controller;
 }
-export type PushController = ReturnType<typeof createPushController>;

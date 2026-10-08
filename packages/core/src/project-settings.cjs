@@ -42,7 +42,7 @@ function createProjectSettings(file) {
     const save = queue.catch(() => {}).then(async () => {
       const data = await read({ strict: true });
       const key = path.resolve(projectPath);
-      const entry = { ...(data.projects[key] ?? {}) };
+      const entry = { ...data.projects[key] };
       change(entry);
       if (Object.keys(entry).length > 0) data.projects[key] = entry;
       else delete data.projects[key];

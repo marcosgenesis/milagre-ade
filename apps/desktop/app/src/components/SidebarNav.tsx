@@ -338,6 +338,15 @@ function ScopeMenuButton({ name, items }: { name: string; items: ScopeMenuItem[]
 }
 
 const NO_PATHS: string[] = [];
+// The last lists and group order any sidebar loaded. A switch between a Project and a Link mounts the other sidebar,
+// which starts from these instead of empty, so its Links and groups don't blink while it reads them again.
+const lastLists = {
+  links: [] as NamedProjectLink[],
+  registered: [] as Array<{ id: string; name: string; path: string }>,
+  recent: [] as RecentProject[],
+  recentLoaded: false,
+  order: [] as string[],
+};
 
 function AttentionDot({ className = "" }: { className?: string }) {
   return <span role="img" aria-label="Needs attention" title="A chat here waits for you" className={`size-2 shrink-0 rounded-full bg-orange ${className}`} />;
@@ -681,12 +690,12 @@ export default memo(function SidebarNav({
   const [demoActiveTitle, setDemoActiveTitle] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspacePosition, setWorkspacePosition] = useState({ top: 0, left: 0 });
-  const [namedLinks, setNamedLinks] = useState<NamedProjectLink[]>([]);
-  const [registeredProjects, setRegisteredProjects] = useState<Array<{ id: string; name: string; path: string }>>([]);
-  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
-  const [recentLoaded, setRecentLoaded] = useState(false);
+  const [namedLinks, setNamedLinks] = useState(() => lastLists.links);
+  const [registeredProjects, setRegisteredProjects] = useState(() => lastLists.registered);
+  const [recentProjects, setRecentProjects] = useState(() => lastLists.recent);
+  const [recentLoaded, setRecentLoaded] = useState(() => lastLists.recentLoaded);
   // The Projects' group order for this session; see stableOrder.
-  const scopeOrder = useRef<string[]>([]);
+  const scopeOrder = useRef<string[]>(lastLists.order);
   const showHints = useShortcutHints() && hintsEnabled && !workspaceOpen;
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -749,6 +758,10 @@ export default memo(function SidebarNav({
       projectScopes.map((scope) => scope.key),
     );
   const orderedProjects = recentLoaded ? scopeOrder.current.map((key) => projectScopes.find((scope) => scope.key === key)!).filter(Boolean) : projectScopes;
+  // The next sidebar to mount (a Link's, or the Project one again) starts from what this one has.
+  useEffect(() => {
+    Object.assign(lastLists, { links: namedLinks, registered: registeredProjects, recent: recentProjects, recentLoaded, order: scopeOrder.current });
+  });
   const scopes = [...orderedProjects, ...namedLinks.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link }))];
   const scopeImage = useProjectImages(sidebarAllProjects ? scopes.filter((scope) => !scope.link).map((scope) => scope.key) : NO_PATHS);
   const showAll = sidebarAllProjects && !collapsed;

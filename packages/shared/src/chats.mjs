@@ -1,5 +1,6 @@
 // How a chat is named, shared by the sidebar and the main process's notifications. Types: chats.d.mts.
 export { pullRequestRefs, pullRequestRefsCache, chatPullRequests } from "./chat-pull-requests.mjs";
+import { summarizeChat } from "./chat-summary.mjs";
 
 /** The same status palette for desktop and mobile chat lists. */
 export function chatMarkTone(mark) {
@@ -9,15 +10,16 @@ export function chatMarkTone(mark) {
   return "accent";
 }
 
-/** The chat's name: the one the user gave it, else the first line of its first message. */
-export function chatTitle(session, messages) {
+/** The chat's name: the one the user gave it, else the first line of its first message (from its summary when it has one). */
+export function chatTitle(session, messages = []) {
   if (session.title?.trim()) return session.title.trim();
   if (session.generatedTitle?.trim()) return session.generatedTitle.trim();
-  const line =
-    messages
-      .find((message) => message.role !== "assistant" && message.body.trim())
-      ?.body.trim()
-      .split("\n")[0] ?? "";
+  const line = session.summary
+    ? (session.summary.titleLine ?? "")
+    : (messages
+        .find((message) => message.role !== "assistant" && message.body.trim())
+        ?.body.trim()
+        .split("\n")[0] ?? "");
   if (!line) return session.agent_name;
   return line.length > 60 ? `${line.slice(0, 57)}…` : line;
 }
@@ -104,9 +106,8 @@ export function pendingChatSessionId(state, pending) {
 /** A display projection shared by desktop's sidebar and the phone's drawer; canonical input replaces its preview. */
 export function withPendingChat(state, pending) {
   if (!pending || pendingChatSessionId(state, pending) !== null) return state;
-  return {
-    ...state,
-    sessions: { ...state.sessions, [pending.session.id]: pending.session },
-    messages: [...state.messages, { ...pending.message, id: pending.sortId }],
-  };
+  const messages = [...state.messages, { ...pending.message, id: pending.sortId }];
+  // The preview counts in its Chat's summary, so the lists show it (and order it) before the host saves it.
+  const summary = summarizeChat(messages.filter((message) => message.session_id === pending.session.id));
+  return { ...state, sessions: { ...state.sessions, [pending.session.id]: { ...pending.session, summary } }, messages };
 }

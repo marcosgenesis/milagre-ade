@@ -2,13 +2,14 @@ import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { LinkWorkspace } from "./components/LinkWorkspace";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
-import type { LinkState, OpenLink } from "@milagre/shared/model";
+import type { LinkState, NamedProjectLink, OpenLink } from "@milagre/shared/model";
 import { scopeKey, isLinkScopeKey, scopeFromKey } from "@milagre/shared/chat-scopes";
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shared/attention";
 import { reportChatAction } from "./lib/chat-action";
 import { stateEvents } from "./lib/state-events";
+import { chatSummary } from "@milagre/shared/chat-summary";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { cliName } from "@milagre/shared/providers";
 import { useCallback, useEffect, useMemo, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
@@ -16,6 +17,7 @@ import { flushSync } from "react-dom";
 import {
   ChatMessage,
   ImageAttachment,
+  AgentSession,
   CoordinatorState,
   Isolation,
   MODEL_CATALOG,
@@ -66,7 +68,7 @@ import { useDiffComments } from "./components/changes/useDiffComments";
 import { formatCommentsMessage } from "./lib/diff-comments";
 import { DiffToolbar, useDiffPreferences, useDiffPresence } from "./components/changes/DiffPrefs";
 import { useChanges } from "./components/changes/useChanges";
-import { gitChatContext, isGitNote, type GitChatContext } from "./lib/git-dialog";
+import { gitChatContext, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
 import { usePastedImages } from "./components/usePastedImages";
@@ -90,7 +92,7 @@ import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import { messageCommands } from "./lib/message-commands";
-import type { RecentProject } from "./lib/project-list";
+import { RECENT_PROJECTS_CHANGED, type RecentProject } from "./lib/project-list";
 import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
 import { createDraftStore, draftKey } from "./lib/draft-store";
@@ -115,6 +117,14 @@ const LAZY_VIEWS = [DiffView, GitActionsDialog, SettingsNav, CommandPalette, Med
 
 // The chat with the most recent message, or none so the app opens on a new chat. Archived chats don't count.
 function latestSessionId(state: CoordinatorState) {
+  const sessions = Object.values(state.sessions).filter((session) => !session.archived);
+  if (sessions.every((session) => session.summary)) {
+    const latest = sessions.reduce<AgentSession | null>(
+      (best, session) => ((session.summary!.lastId ?? -1) > (best?.summary!.lastId ?? -1) ? session : best),
+      null,
+    );
+    return latest?.summary!.lastId === undefined ? null : latest.id;
+  }
   return (
     state.messages
       .filter((message) => !state.sessions[message.session_id]?.archived)
@@ -123,6 +133,7 @@ function latestSessionId(state: CoordinatorState) {
 }
 
 const NO_MESSAGES: ChatMessage[] = [];
+const NO_REFS: string[] = [];
 // `sent`: the main process saved the message; the preview stays until the saved message reaches the window's state.
 type PendingSend = PendingChat & { view: number; projectPath: string; originSessionId: number | null; originWorktreeId: number; sent?: boolean };
 const NO_WORKTREE = -1;
@@ -141,7 +152,8 @@ function App() {
   const selectedLinkRef = useRef(selectedLink);
   selectedLinkRef.current = selectedLink;
   const [linkInitialSession, setLinkInitialSession] = useState<number | undefined>();
-  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  // `true` creates a Link; a Link edits that one.
+  const [linkDialogOpen, setLinkDialogOpen] = useState<boolean | NamedProjectLink>(false);
   // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const scopeDrafts = useMemo(createScopeDrafts, []);
   const [linkStates, setLinkStates] = useState<Record<string, LinkState>>({});
@@ -609,31 +621,35 @@ function App() {
     [attentionChats, states, projectName],
   );
   const delegated = useStableSet(useMemo(() => delegatedChats(linkedWork, project?.path ?? ""), [linkedWork, project?.path]));
+  // Chats carry a summary of their messages; only an older host's state, without one, is grouped message by message.
   const messagesBySession = useMemo(() => {
     const grouped = new Map<number, ChatMessage[]>();
+    if (!Object.values(sidebarState?.sessions ?? {}).some((session) => !session.summary)) return grouped;
     for (const message of sidebarState?.messages ?? []) {
       const list = grouped.get(message.session_id);
       if (list) list.push(message);
       else grouped.set(message.session_id, [message]);
     }
     return grouped;
-  }, [sidebarState?.messages]);
+  }, [sidebarState?.messages, sidebarState?.sessions]);
   // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const readPullRequestRefs = useMemo(pullRequestRefsCache, []);
   const previousChats = useRef<SidebarRecent[]>([]);
+  // Chats with an archive under way, by chat key: each keeps its row, under the progress, until the archive ends.
+  const [archivingChats, setArchivingChats] = useState<ReadonlySet<string>>(() => new Set());
   const chats = useMemo(() => {
     const state = sidebarState;
     if (!state) return [];
     const withMessages = Object.values(state.sessions)
-      .filter((session) => !session.archived)
+      .filter((session) => !session.archived || (project && archivingChats.has(chatKey(project.path, session.id))))
       .map((session) => ({ session, sessionMessages: messagesBySession.get(session.id) ?? NO_MESSAGES }))
-      .filter(({ session, sessionMessages }) => isListedChat(session, sessionMessages.length));
+      .filter(({ session, sessionMessages }) => isListedChat(session, chatSummary(session, sessionMessages).count));
     const rows = orderChats(withMessages, chatOrder).map(({ session, sessionMessages }) => {
       const worktree = state.worktrees[session.worktree_id];
       const failed = failedSends.find((send) => send.projectPath === project?.path && session.id === send.session.id);
       const pending = Boolean(pendingSend && pendingSend.projectPath === project?.path && session.id === (pendingCanonicalId ?? pendingSend.session.id));
-      // The commit dialog's notes aren't replies: they don't hide a failed turn.
-      const lastReply = [...sessionMessages].reverse().find((message) => message.role === "assistant" && !isGitNote(message));
+      // The commit dialog's notes aren't replies: they don't hide a failed turn (see summarizeChat).
+      const summary = chatSummary(session, sessionMessages);
       return {
         id: String(session.id),
         label: chatTitle(session, sessionMessages),
@@ -654,12 +670,12 @@ function App() {
           diff: worktree?.diff,
           pullRequests: worktree
             ? chatPullRequests(
-                readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages),
+                session.summary ? (summary.pullRequests ?? NO_REFS) : readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages),
                 chatPrs[worktree.path] ?? {},
                 pullRequests[worktree.path] ?? undefined,
               )
             : [],
-          failed: Boolean(failed) || lastReply?.outcome === "failed",
+          failed: Boolean(failed) || summary.lastOutcome === "failed",
           ports: project ? agentPorts[chatKey(project.path, session.id)] : undefined,
         },
       };
@@ -681,6 +697,7 @@ function App() {
     chatPrs,
     agentPorts,
     project,
+    archivingChats,
   ]);
   const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
   latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
@@ -690,6 +707,16 @@ function App() {
     if (current) void reportChatAction(window.milagre.patchChat(current.path, sessionId, patch), "Could not update Chat", setNotice);
   }
 
+  function controlAdvisor(action: "stop" | "retry", id: string) {
+    const current = projectRef.current;
+    const parentId = selectedSessionRef.current;
+    if (current && parentId !== null)
+      void reportChatAction(
+        (action === "stop" ? window.milagre.stopAdvisor : window.milagre.retryAdvisor)(`${current.path}#${parentId}`, id),
+        `Could not ${action} advisor`,
+        setNotice,
+      );
+  }
   function archiveChild(id: string, archived: boolean) {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
@@ -747,6 +774,7 @@ function App() {
     const projectPath = project.path;
     const key = chatKey(projectPath, sessionId);
     const wasOpen = selectedSessionId === sessionId;
+    setArchivingChats((current) => new Set(current).add(key));
     return runArchive(
       {
         projectPath,
@@ -781,7 +809,15 @@ function App() {
       sessionId,
       mode,
       plan,
-    ).catch((error) => setNotice(`Could not archive Chat: ${ipcErrorMessage(error)}`));
+    )
+      .catch((error) => setNotice(`Could not archive Chat: ${ipcErrorMessage(error)}`))
+      .finally(() =>
+        setArchivingChats((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        }),
+      );
   }
 
   // What the archive menu offers depends on the chat's worktree: whether Milagre made it, whether another chat
@@ -1400,7 +1436,8 @@ function App() {
       onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
       onCommit: (id) => latest.current.openGitDialog(Number(id)),
       onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
-      onArchive: (id, mode, plan) => void latest.current.archiveChat(Number(id), mode, plan),
+      // The row shows the progress until this settles.
+      onArchive: (id, mode, plan) => latest.current.archiveChat(Number(id), mode, plan),
     }),
     [],
   );
@@ -1496,12 +1533,34 @@ function App() {
     );
   }
 
+  async function editLink(id: string) {
+    try {
+      const link = (await window.milagre.listNamedLinks()).find((item) => item.id === id);
+      if (!link) throw new Error("Link no longer exists");
+      setLinkDialogOpen(link);
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    }
+  }
+  // An edited Link that is open reloads in place, so its header and member Projects follow.
+  async function linkEdited(link: NamedProjectLink) {
+    window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
+    if (selectedLinkRef.current?.link.id !== link.id) return;
+    try {
+      const next = await window.milagre.openNamedLink(link.id);
+      if (selectedLinkRef.current?.link.id === link.id) setSelectedLink(next);
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    }
+  }
   const linkDialog = linkDialogOpen ? (
     <LinkProjectDialog
+      link={typeof linkDialogOpen === "object" ? linkDialogOpen : undefined}
       onClose={() => setLinkDialogOpen(false)}
       onCreated={(link) => {
+        const edited = typeof linkDialogOpen === "object";
         setLinkDialogOpen(false);
-        void selectLink(link.id);
+        void (edited ? linkEdited(link) : selectLink(link.id));
       }}
     />
   ) : null;
@@ -1555,6 +1614,7 @@ function App() {
           onSwitchProject={(path) => void switchProject(path)}
           onSwitchLink={(id) => void selectLink(id)}
           onLinkProject={() => setLinkDialogOpen(true)}
+          onEditLink={(id) => void editLink(id)}
           onOpenProject={() => void openProject()}
           onSettings={() => {
             setSettingsSection("project-accounts");
@@ -1794,6 +1854,7 @@ function App() {
               workspaceImage={projectImage(project.path)}
               onSwitchLink={(id) => void selectLink(id)}
               onLinkProject={() => setLinkDialogOpen(true)}
+              onEditLink={(id) => void editLink(id)}
               onOpenProject={openProjectFromSidebar}
               recents={chats}
               activeId={
@@ -1914,6 +1975,8 @@ function App() {
                   subagents={subagents}
                   onArchiveFinishedSubagents={archiveFinishedChildren}
                   onArchiveSubagent={archiveChild}
+                  onStopAdvisor={(id) => controlAdvisor("stop", id)}
+                  onRetryAdvisor={(id) => controlAdvisor("retry", id)}
                   waitingForSubagents={run?.waitingForSubagents}
                   tasks={run?.tasks}
                   contextUsage={run?.contextUsage ?? selectedSession?.contextUsage}

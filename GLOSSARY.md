@@ -33,7 +33,7 @@ _Avoid_: tab (a browser's own UI term), session (the page's sign-in state is par
 ### Linking
 
 **Named Link**:
-A named, selectable set of two or more **Projects** in the desktop sidebar. Its shared **Chats** each create their own set of isolated **Worktrees**, one per member Project, and have one canonical conversation. The agent can edit all Worktrees owned by that Chat. Named Links do not create or replace canvas Links. See ADR-0005.
+A named, selectable set of two or more **Projects** in the desktop sidebar. Its shared **Chats** each create their own set of isolated **Worktrees**, one per member Project, and have one canonical conversation. The agent can edit all Worktrees owned by that Chat. Editing a Link's members changes only Chats started afterwards. Named Links do not create or replace canvas Links. See ADR-0005.
 
 **Link**:
 A symmetric, persistent relationship the user draws on the canvas between two **Link** endpoints, each a **Project** or a **Worktree**. Every **Chat** on either side sees the other side's state and can make a **Delegation** to it. A **Link** reaches one hop only: X–Y and Y–Z do not let X see or delegate to Z. It has no type and lasts until the user removes it or a **Worktree** endpoint stops being active. A **Project** endpoint stands for all of that project's active **Worktrees**, including ones created after the **Link**.

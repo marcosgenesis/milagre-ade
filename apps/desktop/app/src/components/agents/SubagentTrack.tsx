@@ -2,7 +2,7 @@ import { memo, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Archive02Icon, Cancel01Icon, ViewIcon } from "@hugeicons/core-free-icons";
-import { subagentActivityLabel } from "@milagre/shared/agent-activity";
+import { advisorAction, subagentRoleLabel, subagentActivityLabel } from "@milagre/shared/agent-activity";
 import type { ModelProvider, Subagent } from "../../model";
 import { subagentActive, subagentFinished } from "../../lib/subagents";
 import { Markdown } from "../markdown/Markdown";
@@ -26,7 +26,31 @@ function elapsed(agent: Subagent, now: number) {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-export const SubagentTranscript = memo(function SubagentTranscript({ agent }: { agent: Subagent }) {
+function AdvisorControls({ agent, onStop, onRetry }: { agent: Subagent; onStop?: (id: string) => void; onRetry?: (id: string) => void }) {
+  const action = advisorAction(agent);
+  if (!action || !(action === "stop" ? onStop : onRetry)) return null;
+  return (
+    <button
+      type="button"
+      data-advisor-stop={action === "stop" || undefined}
+      data-advisor-retry={action === "retry" || undefined}
+      aria-label={`${action === "stop" ? "Stop" : "Retry"} ${agent.title}`}
+      onClick={() => (action === "stop" ? onStop : onRetry)?.(agent.id)}
+      className="rounded px-2 py-1 text-[11px] text-ink-2 hover:bg-hover focus-visible:outline-2"
+    >
+      {action === "stop" ? "Stop" : "Retry"}
+    </button>
+  );
+}
+export const SubagentTranscript = memo(function SubagentTranscript({
+  agent,
+  onStop,
+  onRetry,
+}: {
+  agent: Subagent;
+  onStop?: (id: string) => void;
+  onRetry?: (id: string) => void;
+}) {
   // oxlint-disable-next-line react/purity -- Date.now() only seeds the initial clock state; an effect keeps it current
   const [now, setNow] = useState(Date.now());
   const running = subagentActive(agent);
@@ -40,7 +64,9 @@ export const SubagentTranscript = memo(function SubagentTranscript({ agent }: { 
       <div className="flex flex-wrap gap-3 text-[12px] text-ink-3">
         <span>{subagentActivityLabel(agent)}</span>
         <span>{elapsed(agent, now)}</span>
-        <span>Read-only transcript</span>
+        <span>{subagentRoleLabel(agent) ?? "Read-only transcript"}</span>
+        {agent.model && <span>{agent.model}</span>}
+        <AdvisorControls agent={agent} onStop={onStop} onRetry={onRetry} />
       </div>
       {agent.prompt && (
         <div className="rounded-lg bg-hover p-3">
@@ -70,12 +96,16 @@ export function SubagentTrack({
   onOpenCanvas,
   onArchiveFinished,
   onArchive,
+  onStop,
+  onRetry,
 }: {
   agents: Subagent[];
   provider?: ModelProvider;
   onOpenCanvas: () => void;
   onArchiveFinished?: () => void;
   onArchive?: (id: string, archived: boolean) => void;
+  onStop?: (id: string) => void;
+  onRetry?: (id: string) => void;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -155,7 +185,7 @@ export function SubagentTrack({
                   </button>
                 </header>
                 <ScrollArea>
-                  <SubagentTranscript agent={child} />
+                  <SubagentTranscript agent={child} onStop={onStop} onRetry={onRetry} />
                 </ScrollArea>
               </>
             ) : (
@@ -198,16 +228,20 @@ export function SubagentTrack({
                         className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-1 text-left text-[13px] focus-visible:outline-2"
                       >
                         <span className="flex size-4 shrink-0 items-center justify-center text-ink-3">
-                          {subagentActive(agent) ? <SpinnerRing size={12} /> : <ProviderLogo provider={provider} size={14} />}
+                          {subagentActive(agent) ? <SpinnerRing size={12} /> : <ProviderLogo provider={agent.provider ?? provider} size={14} />}
                         </span>
-                        <span className="truncate">{agent.title}</span>
+                        <span className="min-w-0">
+                          <span className="block truncate">{agent.title}</span>
+                          {subagentRoleLabel(agent) && <span className="block text-[11px] text-ink-3">{subagentRoleLabel(agent)}</span>}
+                        </span>
                       </button>
+                      <AdvisorControls agent={agent} onStop={onStop} onRetry={onRetry} />
                       <span className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
                         <Tooltip label={archived ? "Restore subagent" : "Archive subagent"}>
                           <button
                             type="button"
                             aria-label={`${archived ? "Restore" : "Archive"} ${agent.title}`}
-                            disabled={!onArchive}
+                            disabled={!onArchive || (agent.source === "milagre-advisor" && subagentActive(agent))}
                             onClick={() => onArchive?.(agent.id, !archived)}
                             className={actionClass}
                           >

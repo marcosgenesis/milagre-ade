@@ -13,6 +13,7 @@ import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
 window.subagentProfilerCommits = [];
+window.advisorActions = [];
 window.recordSubagentCommit = (id, phase, actualDuration) => window.subagentProfilerCommits.push({ id, phase, actualDuration });
 function Fixture() {
   const [count, setCount] = useState(2);
@@ -24,6 +25,8 @@ function Fixture() {
   const archive = (id,archived) => setChildren(items=>items.map(child=>child.id===id ? {...child,archived} : child));
   const archiveFinished = () => setChildren(items=>items.map(child=>["completed","failed","cancelled"].includes(child.status) ? {...child,archived:true} : child));
   window.setChildren = setChildren;
+  const controlAdvisor = (action,id) => {window.advisorActions.push({action,id});setChildren(items=>items.map(item=>item.id===id?{...item,status:action==="stop"?"cancelled":"running",retryable:action==="stop"}:item));};
+  const [advisorResult,setAdvisorResult]=useState(false);window.setAdvisorResult=setAdvisorResult;
   window.setSending = setSending;
   window.finishChildren = () => {setChildren(items=>items.map(item=>({...item,status:"completed",endedAt:Date.now()})));setSending(false);};
   const [draft, setDraft] = useState("");
@@ -36,10 +39,12 @@ function Fixture() {
   window.setMessageCount = setCount;
   window.setDraft = setDraft;
   window.setModel = (id) => setModel(MODEL_CATALOG.find((item) => item.id === id));
+  window.useAntigravity = () => setModel(MODEL_CATALOG.find((item) => item.provider === "antigravity"));
   const messages = Array.from({ length: count }, (_, index) => ({
     id: index + 1, session_id: 1, context: null, role: index === 0 ? "user" : "assistant",
     body: index === 0 ? "Review authentication and run the relevant tests." : "I started two subagents. Their progress is available below.",
   }));
+  if(advisorResult)messages.push({id:999,session_id:1,role:"user",body:"Advisor finding: prefer validated reads.",context:{kind:"advisor-result",advisorId:"advisor:review",completionId:"completion",title:"Security",provider:"codex",outcome:"completed"}});
   return <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink">
     <div className="flex min-h-0 shrink-0 pt-[60px] pb-3 pl-3">
       <aside data-fixture-sidebar style={{ width: sidebarWidth }} className="relative flex min-h-0 shrink-0 flex-col overflow-hidden rounded-window bg-surface p-2 shadow-card">
@@ -51,7 +56,7 @@ function Fixture() {
     <div data-chat-pane className={"min-h-0 flex-1 overflow-hidden" + (paneHidden ? " hidden" : "")}>
     <Profiler id="composer" onRender={window.recordSubagentCommit}><ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} onStopAdvisor={id=>controlAdvisor("stop",id)} onRetryAdvisor={id=>controlAdvisor("retry",id)} waitingForSubagents={true}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
@@ -64,6 +69,36 @@ function Fixture() {
 document.documentElement.classList.add("dark");
 createRoot(document.getElementById("root")).render(<DotBackground><Fixture /></DotBackground>);
 `;
+
+// Two Antigravity children as a live run of agy 1.3.0 reported them (ids, titles, prompts and rows).
+const ANTIGRAVITY_CHILDREN = [
+  {
+    id: "6615864f0d7a4cf5a4c2b0f1e7a9d311",
+    title: "Subagent One",
+    prompt: "Run 'sleep 4; cat a.txt' using run_command, then read a.txt with view_file, and report.",
+    status: "running",
+    latestActivity: "Read `a.txt`",
+    transcript: [
+      { id: "6615864f0d7a4cf5a4c2b0f1e7a9d311:1", kind: "tool", text: "Ran `sleep 4; cat a.txt`\n$ sleep 4; cat a.txt\nFile a: hello from a." },
+      { id: "step:3:0", kind: "tool", text: "Read `a.txt`" },
+    ],
+    communications: [
+      { id: "task:6615864f0d7a4cf5a4c2b0f1e7a9d311", fromId: null, toId: "6615864f0d7a4cf5a4c2b0f1e7a9d311", text: "Run 'sleep 4; cat a.txt'", at: 1 },
+    ],
+  },
+  {
+    id: "45dea2d0b8e34a7c9a0f62d1c4b7e815",
+    title: "Subagent Two",
+    prompt: "Read b.txt with view_file and run 'wc -c b.txt', and report.",
+    status: "completed",
+    latestActivity: "Finished",
+    transcript: [
+      { id: "45dea2d0b8e34a7c9a0f62d1c4b7e815:1", kind: "tool", text: "Ran `wc -c b.txt`\n$ wc -c b.txt\n      22 b.txt" },
+      { id: "step:1:0", kind: "tool", text: "Read `b.txt`" },
+      { id: "result", kind: "message", text: "Here are the exact outputs:\n\nFile b: hello from b.\n22 b.txt" },
+    ],
+  },
+];
 
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
@@ -897,6 +932,62 @@ async function browserChecks() {
     await waitFor('document.querySelectorAll("[data-subagent-row]").length===2');
     await clickLabel("Restore Review authentication");
     await waitFor('document.querySelectorAll("[data-subagent-row]").length===1');
+    await evaluate("window.setChildren([])");
+    await waitFor('!document.querySelector("[data-slot=subagent-track]")');
+    await evaluate(
+      'window.setChildren([{id:"advisor:review",source:"milagre-advisor",provider:"codex",model:"reported",title:"Security",status:"running",startedAt:Date.now(),updatedAt:Date.now(),transcript:[{id:"answer",kind:"message",text:"Advisor finding: prefer validated reads."}]}]); window.setAdvisorResult(true)',
+    );
+    await waitFor('!!document.querySelector("[data-slot=subagent-track]")');
+    if (await evaluate('!!document.querySelector("[data-slot=subagent-popover]")'))
+      await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
+    await evaluate('document.querySelector("[data-slot=subagent-track] > button").click()');
+    await waitFor('!!document.querySelector("[data-advisor-stop]")');
+    assert.ok(await evaluate('document.querySelector("[data-subagent-row]").textContent.includes("Codex advisor")'));
+    await screenshot("advisor-running");
+    await clickLabel("Stop Security");
+    await waitFor('!!document.querySelector("[data-advisor-retry]")');
+    await screenshot("advisor-interrupted");
+    await clickLabel("Retry Security");
+    assert.deepEqual(await evaluate("window.advisorActions"), [
+      { action: "stop", id: "advisor:review" },
+      { action: "retry", id: "advisor:review" },
+    ]);
+    await evaluate('document.querySelector("[data-subagent-open]").click()');
+    await waitFor('!!document.querySelector("[data-slot=subagent-transcript]")');
+    assert.ok(await evaluate('document.querySelector("[data-slot=subagent-transcript]").textContent.includes("Advisor finding")'));
+    await screenshot("advisor-output");
+    await clickLabel("Close subagents");
+    assert.ok(await evaluate('document.querySelector("[data-advisor-result]").textContent.includes("Codex advisor result: Security")'));
+    assert.equal(await evaluate('document.querySelector("[data-advisor-result]").closest("article").dataset.from'), "app");
+    await screenshot("advisor-result");
+    await evaluate("window.setAdvisorResult(false)");
+    // Antigravity's children (read from its transcripts, see antigravity-subagents.cjs) render like any other provider's.
+    await evaluate(
+      `window.useAntigravity(); window.setChildren(${JSON.stringify(ANTIGRAVITY_CHILDREN)}.map(child => ({...child, startedAt: Date.now() - 16000, updatedAt: Date.now(), ...(child.status === "completed" ? { endedAt: Date.now() } : {})})))`,
+    );
+    await waitFor('!!document.querySelector("[data-slot=subagent-track] > button")');
+    await evaluate('document.querySelector("[data-slot=subagent-popover]") || document.querySelector("[data-slot=subagent-track] > button").click()');
+    await waitFor('!!document.querySelector("[data-slot=subagent-popover]")');
+    // The list may still show the archived children from the checks above.
+    await evaluate(
+      'document.querySelector("[data-subagent-archived-toggle]")?.textContent === "Back to subagents" && document.querySelector("[data-subagent-archived-toggle]").click()',
+    );
+    await waitFor('document.querySelectorAll("[data-subagent-row]").length === 2');
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-subagent-row]")].map(row => row.textContent.trim())'), [
+      "Subagent One",
+      "Subagent Two",
+    ]);
+    assert.ok(
+      await evaluate('[...document.querySelectorAll("[data-subagent-row] path")].some(path => path.getAttribute("d").startsWith("M21.751"))'),
+      "A finished Antigravity child shows the Antigravity mark",
+    );
+    await screenshot("antigravity-subagents");
+    await evaluate('document.querySelector("[data-subagent-open]").click()');
+    await waitFor('!!document.querySelector("[data-slot=subagent-transcript]")');
+    for (const text of ["Ran `sleep 4; cat a.txt`", "Read `a.txt`", "File a: hello from a."])
+      assert.ok(await evaluate(`document.querySelector("[data-slot=subagent-transcript]").textContent.includes(${JSON.stringify(text)})`), text);
+    await screenshot("antigravity-subagent-transcript");
+    await clickLabel("Close subagents");
     await evaluate("window.setChildren([])");
     await waitFor('!document.querySelector("[data-slot=subagent-track]")');
     console.log(

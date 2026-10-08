@@ -100,7 +100,7 @@ class DiffRefresher {
   async refresh(projectPath, worktreeIds) {
     if (this.closed) return;
     const state = await this.states.get(projectPath);
-    const ids = worktreeIds ?? [...new Set(state.messages.map((message) => state.sessions[message.session_id]?.worktree_id).filter((id) => id !== undefined))];
+    const ids = worktreeIds ?? worktreesWithChats(state);
     const stats = await Promise.all(
       ids.map(async (id) => {
         const worktree = state.worktrees[id];
@@ -113,4 +113,18 @@ class DiffRefresher {
   }
 }
 
+/** The Worktrees that have a Chat with a message: from Chat summaries, or the messages of a state without them. */
+function worktreesWithChats(state) {
+  const sessions = Object.values(state.sessions ?? {});
+  if (sessions.every((session) => session.summary))
+    return [
+      ...new Set(
+        sessions
+          .filter((session) => session.summary.count > 0)
+          .map((session) => session.worktree_id)
+          .filter((id) => id !== undefined),
+      ),
+    ];
+  return [...new Set(state.messages.map((message) => state.sessions[message.session_id]?.worktree_id).filter((id) => id !== undefined))];
+}
 module.exports = { DiffRefresher };

@@ -85,11 +85,33 @@ export interface Worktree {
   sharedChat?: { linkId: string; sessionId: number };
 }
 
+/** What the chat lists need from a Chat's messages, kept on the Chat by the host (chat-summary.mjs). */
+export interface ChatSummary {
+  count: number;
+  /** The first and last message in the Project's order: when the Chat started, and its latest activity. */
+  firstId?: number;
+  lastId?: number;
+  /** The first line of the first thing the user wrote, which names a Chat that has no title. */
+  titleLine?: string;
+  /** How the last reply ended (the commit dialog's notes aren't replies). */
+  lastOutcome?: "completed" | "failed" | "cancelled";
+  /** The PRs the Chat's commands created or merged. */
+  pullRequests?: string[];
+  /** The model of the last message the user sent. */
+  lastModel?: string;
+  /** A handoff divider still preparing, by message id. */
+  openHandoff?: number;
+  /** The clientMessageId of the Chat's last few sends, so a window without messages finds the Chat its preview became. */
+  clientMessageIds?: string[];
+}
+
 export interface AgentSession {
   id: number;
   worktree_id: number;
   agent_name: string;
   status: SessionStatus;
+  /** Kept by the host from the Chat's messages; absent from an older host. */
+  summary?: ChatSummary;
   /** The agent this chat runs on now. A send on the other provider hands the chat off in place (see handoff.mjs). */
   provider?: ModelProvider;
   /** Claude session id or Codex thread id of the current `provider`, used to resume the agent's memory. */
@@ -160,6 +182,8 @@ export interface LinkPreparation {
   retainedPaths?: string[];
 }
 export interface LinkState {
+  /** From a host that keeps messages by Chat (chat-pages-v1): `messages` is empty, and the Chats on screen read their own. */
+  messagesInChats?: boolean;
   next_id: number;
   sessions: Record<string, LinkChatSession>;
   messages: ChatMessage[];
@@ -191,6 +215,15 @@ export interface ChatMessage {
   /** The host's sidecar with the long details of these steps (each marked `hasDetail`); read with the chat:message command. */
   detailFile?: string;
   operationId?: string;
+  /** On the user's answers to an agent's questions: each question with what they answered, shown as a card. */
+  answered?: AnsweredQuestion[];
+}
+
+/** One question the user answered, as their message keeps it. A typed answer to a secret question is masked. */
+export interface AnsweredQuestion {
+  header: string;
+  question: string;
+  answers: string[];
 }
 
 /** A provider switch inside a chat, shown as a divider before the message that caused it. `brief` is what the new provider was sent. */
@@ -204,7 +237,16 @@ export type HandoffContext = {
 };
 
 /** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, a handoff, or a legacy handover note. */
-export type ChatContext = LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
+export type AdvisorResultContext = {
+  kind: "advisor-result";
+  advisorId: string;
+  completionId: string;
+  title: string;
+  provider: ModelProvider;
+  outcome: "completed" | "failed" | "cancelled";
+};
+
+export type ChatContext = AdvisorResultContext | LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
 
 /**
  * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
@@ -370,6 +412,10 @@ export interface SubagentCommunication {
 
 export interface Subagent {
   id: string;
+  source?: "milagre-advisor";
+  provider?: ModelProvider;
+  model?: string;
+  retryable?: boolean;
   archived?: boolean;
   parentId?: string;
   title: string;
@@ -471,6 +517,8 @@ export interface WorktreeRequest {
 }
 
 export interface CoordinatorState {
+  /** From a host that keeps messages by Chat (chat-pages-v1): `messages` is empty, and the Chats on screen read their own. */
+  messagesInChats?: boolean;
   next_id: number;
   projects: Record<string, Project>;
   worktrees: Record<string, Worktree>;

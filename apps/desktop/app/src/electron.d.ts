@@ -27,6 +27,7 @@ import type {
   AgentCliStatus,
   AgentModels,
   AgentPorts,
+  Subagent,
   EditorInfo,
   AgentEvent,
   ChatSendRequest,
@@ -210,6 +211,7 @@ declare global {
       /** Every opened Project, seeded once from existing coordination files. */
       listNamedLinks: () => Promise<NamedProjectLink[]>;
       createNamedLink: (request: { name: string; projectIds: string[] }) => Promise<NamedProjectLink>;
+      updateNamedLink: (request: { id: string; name: string; projectIds: string[] }) => Promise<NamedProjectLink>;
       openNamedLink: (id: string) => Promise<OpenLink>;
       /** A Link's chats as saved, without opening it or preparing its worktrees. */
       readLink: (id: string) => Promise<{ link: NamedProjectLink; state: LinkState }>;
@@ -271,6 +273,8 @@ declare global {
       getCliStatus: (scopeKey?: string) => Promise<AgentCliStatus>;
       /** Runs update for the specified CLI agent and refreshes status. */
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
+      stopAdvisor: (chatId: string, id: string) => Promise<Subagent>;
+      retryAdvisor: (chatId: string, id: string) => Promise<Subagent>;
       /** Where Antigravity's install stands while `updateCli("antigravity")` runs: download bytes, then extract, validate, done. */
       onCliProgress: (callback: (progress: CliProgress) => void) => () => void;
       interruptAgent: (chatId: string) => Promise<void>;

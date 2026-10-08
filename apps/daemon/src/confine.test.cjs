@@ -570,3 +570,13 @@ test("a confined phone reads the main sync default but can't change it", async (
   await confine.checkCall("main-sync:default:read", []);
   await assert.rejects(confine.checkCall("main-sync:default:save", [true]), { status: 403, message: REFUSED });
 });
+
+test("advisor controls are allowlisted and confined to the owning Project", async (t) => {
+  const f = await fixture(t);
+  for (const method of ["advisor:stop", "advisor:retry"]) {
+    assert.ok(METHODS.has(method));
+    assert.ok(PATHS[method]);
+    const reply = await f.rpc(method, [`${f.outside}#1`, "advisor:foreign"]);
+    assert.equal(reply.status, 403);
+  }
+});

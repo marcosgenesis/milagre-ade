@@ -93,7 +93,7 @@ function reconcileState(rawState, projectName, discoveredWorktrees, options = {}
 
 // A saved running flag is not proof of a live provider after an app restart. A state with nothing to mark is returned as is.
 function markDisconnectedSubagents(state, liveSessionIds) {
-  const running = (agent) => ["running", "initializing", "waiting"].includes(agent.status);
+  const running = (agent) => agent.source !== "milagre-advisor" && ["running", "initializing", "waiting"].includes(agent.status);
   const stale = Object.entries(state.sessions).filter(([id, session]) => !liveSessionIds.has(Number(id)) && session.subagents?.some(running));
   if (!stale.length) return state;
   const sessions = { ...state.sessions };

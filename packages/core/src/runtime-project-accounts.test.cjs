@@ -63,14 +63,17 @@ async function fixture(t) {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
-  const make = () => {
+  const make = (extra = {}) => {
     const runtime = createRuntime({
+      ...extra,
       dataDir,
       cwd: projects[0],
       registryRoots: [],
       worktreeRoot: path.join(dir, "worktrees"),
       environmentReady: Promise.resolve(),
       titleModels: {},
+      agentCliStatus: async () => ({ claude: { state: "ready" }, codex: { state: "missing" } }),
+      agentModels: async () => ({ claude: [{ id: "test", efforts: [] }], codex: [] }),
       agentCli: async (provider) => (provider === "claude" ? { command: cli } : { problem: "Codex is not installed in this fixture" }),
       emit: (channel, payload) => events.push({ channel, payload }),
       createSession(provider, context) {
@@ -87,6 +90,11 @@ async function fixture(t) {
             context.emit({ type: "session-started", nativeId: this.nativeId });
             context.emit({ type: "turn-started", turnId: randomUUID() });
             return { turnId: "fixture-turn" };
+          },
+          interrupt() {
+            this.turnActive = false;
+            context.emit({ type: "turn-cancelled" });
+            return Promise.resolve();
           },
           finish() {
             this.turnActive = false;
@@ -254,4 +262,68 @@ test("cached usage resolves the requested account pair without leaking the viewe
   await runtime.openProject(projects[0]);
   assert.equal(await usage(projects[1]), 81);
   await assert.rejects(runtime.invoke("usage:cached", [path.join(dataDir, "unregistered")]));
+});
+
+test("advisors inherit a named Link's Account and both owned Worktrees", async (t) => {
+  const { make, projects, saved, save, ids, profile, created } = await fixture(t);
+  const first = make();
+  for (const project of projects) await first.openProject(project);
+  const registry = await first.invoke("project:registry");
+  const link = await first.invoke("link:create", [{ name: "Shared advice", projectIds: registry.map((project) => project.id) }]);
+  await first.close();
+  saved.scopes[`milagre-link:${link.id}`] = { claude: ids.shared };
+  await save();
+  const runtime = make();
+  await runtime.invoke("link:open", [link.id]);
+  await runtime.invoke("link:send", [
+    { linkId: link.id, operationId: randomUUID(), sessionId: null, body: "Review both", provider: "claude", model: "test", permissionMode: "full" },
+  ]);
+  await until(() => created.length === 1);
+  const tool = created[0].context.linked.tools.find((tool) => tool.name === "create_advisor");
+  const reply = await require("./linked-tools.cjs").runTool(tool, { title: "Link advisor", prompt: "Assess both", provider: "claude" });
+  assert.equal(reply.isError, false);
+  await until(() => created.length === 2 && created[1].turns.length === 1);
+  assert.equal(created[1].context.analysisOnly, true);
+  assert.equal(created[1].context.env.CLAUDE_CONFIG_DIR, profile(ids.shared));
+  assert.deepEqual(created[1].context.workspaceRoots, created[0].context.workspaceRoots);
+  assert.equal(created[1].context.workspaceRoots.length, 2);
+});
+
+test("Antigravity usage is read for, and cached apart per, the Account a Project selects", async (t) => {
+  const { make, projects, saved, save, dataDir, profile } = await fixture(t);
+  const agy = randomUUID();
+  saved.accounts.push({ id: agy, provider: "antigravity", label: "Work Google" });
+  saved.scopes[projects[0]].antigravity = agy;
+  await save();
+  const windows = (usedPercent) => [{ id: "gemini:weekly", label: "Gemini weekly", shortLabel: "wk", usedPercent, resetsAt: null }];
+  const reads = [];
+  const result = (provider, usedPercent) => ({ provider, status: "ok", windows: windows(usedPercent), updatedAt: new Date().toISOString() });
+  const runtime = make({
+    usageReaders: {
+      claude: async () => ({ provider: "claude", status: "unavailable", windows: [], updatedAt: new Date().toISOString() }),
+      codex: async () => ({ provider: "codex", status: "unavailable", windows: [], updatedAt: new Date().toISOString() }),
+      antigravity: async ({ env }) => {
+        reads.push(env.GEMINI_HOME);
+        return result("antigravity", env.GEMINI_HOME === profile(agy) ? 40 : 7);
+      },
+    },
+  });
+  for (const project of projects) await runtime.openProject(project);
+  const antigravity = (snapshot) => snapshot.providers.find((provider) => provider.provider === "antigravity");
+
+  const own = antigravity(await runtime.invoke("usage:read", [projects[0]]));
+  assert.equal(own.windows[0].usedPercent, 40);
+  assert.deepEqual(own.account, { id: agy, label: "Work Google" });
+  const inherited = antigravity(await runtime.invoke("usage:read", [projects[1]]));
+  assert.equal(inherited.windows[0].usedPercent, 7);
+  assert.equal(inherited.account.id, "default");
+  assert.deepEqual(reads, [profile(agy), path.join(dataDir, "accounts", "antigravity-default")]);
+
+  // Each selection has its own saved numbers, and the default selection keeps the original cache file.
+  assert.equal(antigravity(await runtime.invoke("usage:cached", [projects[0]])).windows[0].usedPercent, 40);
+  assert.equal(antigravity(await runtime.invoke("usage:cached", [projects[1]])).windows[0].usedPercent, 7);
+  await runtime.close();
+  const names = await fs.readdir(dataDir);
+  assert.ok(names.includes(`usage-${saved.scopes[projects[0]].claude}-default-${agy}.json`));
+  assert.ok(names.includes("usage-" + saved.selected.claude + "-default.json"));
 });

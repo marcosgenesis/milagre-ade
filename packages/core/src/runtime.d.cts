@@ -19,6 +19,7 @@ export interface RuntimeOptions {
   notifyWaiting?: (notice: AttentionNotice & { chatId: string; requestId: string }) => void;
   /** Replace the real readers, for a host that runs no real agent (the review demo). */
   readUsage?: () => Promise<{ providers: unknown[] }>;
+  usageReaders?: { claude?: () => Promise<unknown>; codex?: () => Promise<unknown>; antigravity?: (options: { env: NodeJS.ProcessEnv }) => Promise<unknown> };
   agentModels?: () => Promise<unknown>;
   agentCliStatus?: (() => Promise<unknown>) & { invalidate(provider: string): void };
   /** false: `/skill` in a prompt is sent as typed, without the skill's text. */

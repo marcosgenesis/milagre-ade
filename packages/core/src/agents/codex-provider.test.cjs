@@ -12,21 +12,31 @@ const { waitUntil } = require("./test-helpers.cjs");
 const FAKE = path.join(__dirname, "fixtures", "fake-app-server.cjs");
 const TURN = { prompt: "Hi", images: [], model: "gpt-6-sol", permissionMode: "auto" };
 
-function codex(t, { scenario = "reply", resumeId, tldrEnabled, linked, command = process.execPath, interruptGraceMs } = {}) {
+function codex(t, { scenario = "reply", resumeId, tldrEnabled, analysisOnly, linked, command = process.execPath, interruptGraceMs } = {}) {
   const events = [];
+  const requests = [];
   const session = new CodexSession({
     cwd: os.tmpdir(),
     resumeId,
     tldrEnabled,
+    analysisOnly,
     linked,
     command,
     clientVersion: "test",
     interruptGraceMs,
     emit: (event) => events.push(event),
-    createRpc: (options) => new CodexRpc({ ...options, args: [FAKE], env: { ...process.env, FAKE_SCENARIO: scenario } }),
+    createRpc: (options) => {
+      const rpc = new CodexRpc({ ...options, args: [FAKE], env: { ...process.env, FAKE_SCENARIO: scenario } });
+      const request = rpc.request.bind(rpc);
+      rpc.request = (method, params, options) => {
+        requests.push({ method, params });
+        return request(method, params, options);
+      };
+      return rpc;
+    },
   });
   t.after(() => session.close());
-  return { session, events };
+  return { session, events, requests };
 }
 const ended = (events, count = 1) => waitUntil(() => events.filter(isTerminal).length >= count);
 const received = async (session) => (await session.rpc.request("fake/received")).received;
@@ -36,6 +46,35 @@ const replyText = (events) =>
     .filter((event) => event.type === "text-delta")
     .map((event) => event.text)
     .join("");
+
+test("analysis-only Codex pins read-only policy and denies unexpected command approval", async (t) => {
+  const { session, events } = codex(t, { scenario: "approval", analysisOnly: true });
+  await session.startTurn({ ...TURN, permissionMode: "full" });
+  await ended(events);
+  assert.equal(replyText(events), "decision:decline");
+  assert.equal(
+    events.some((event) => event.type === "permission-request"),
+    false,
+  );
+  const messages = await received(session);
+  const thread = messages.find((message) => message.method === "thread/start").params;
+  assert.equal(thread.sandbox, "read-only");
+  assert.equal(thread.config.features.shell_tool, false);
+  assert.equal(thread.config.mcp_servers.personal.enabled, false);
+  assert.deepEqual(thread.environments, []);
+  assert.deepEqual(messages.find((message) => message.method === "turn/start").params.environments, []);
+  assert.deepEqual(messages.find((message) => message.method === "turn/start").params.sandboxPolicy, { type: "readOnly", networkAccess: false });
+});
+
+test("analysis-only Codex never drops restrictions when a provider rejects config", async (t) => {
+  const { session, events, requests } = codex(t, { scenario: "reject-config", analysisOnly: true });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.equal(events.at(-1).type, "turn-failed");
+  const starts = requests.filter((message) => message.method === "thread/start");
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].params.config.features.shell_tool, false);
+});
 
 test("streams a reply and keeps one thread across turns", async (t) => {
   const { session, events } = codex(t);

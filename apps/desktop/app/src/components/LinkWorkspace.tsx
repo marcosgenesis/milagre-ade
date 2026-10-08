@@ -69,6 +69,7 @@ export function LinkWorkspace({
   onSwitchProject,
   onSwitchLink,
   onLinkProject,
+  onEditLink,
   onOpenProject,
   onSettings,
   linkedWork,
@@ -90,6 +91,7 @@ export function LinkWorkspace({
   onSwitchProject: (path: string) => void;
   onSwitchLink: (id: string) => void;
   onLinkProject: () => void;
+  onEditLink: (id: string) => void;
   onOpenProject: () => void;
   onSettings: () => void;
   linkedWork: LinkedWork;
@@ -380,6 +382,7 @@ export function LinkWorkspace({
             selectedLink={{ id: opened.link.id, projects: opened.projects }}
             onSwitchLink={onSwitchLink}
             onLinkProject={onLinkProject}
+            onEditLink={onEditLink}
             onSwitchProject={onSwitchProject}
             onOpenProject={onOpenProject}
             onOpenCommands={() => setCommandsOpen(true)}
@@ -491,11 +494,17 @@ export function LinkWorkspace({
                         ? { onContinue: () => void window.milagre.resumeChat(owner, session.id).catch((error) => setError(ipcErrorMessage(error))) }
                         : undefined
                     }
+                    onStopAdvisor={(id) => {
+                      if (chatId) void window.milagre.stopAdvisor(chatId, id).catch((error) => setError(ipcErrorMessage(error)));
+                    }}
+                    onRetryAdvisor={(id) => {
+                      if (chatId) void window.milagre.retryAdvisor(chatId, id).catch((error) => setError(ipcErrorMessage(error)));
+                    }}
                     onArchiveSubagent={(id, archived) => {
-                      if (session) void window.milagre.archiveSubagent(owner, session.id, id, archived);
+                      if (session) void window.milagre.archiveSubagent(owner, session.id, id, archived).catch((error) => setError(ipcErrorMessage(error)));
                     }}
                     onArchiveFinishedSubagents={() => {
-                      if (session) void window.milagre.archiveFinishedSubagents(owner, session.id);
+                      if (session) void window.milagre.archiveFinishedSubagents(owner, session.id).catch((error) => setError(ipcErrorMessage(error)));
                     }}
                     onPermissionModeChange={(mode) => {
                       preferences.onPermissionModeChange(mode);
@@ -623,6 +632,7 @@ export function LinkWorkspace({
           commands={[
             { id: "new", label: "New Chat", group: "Actions", icon: "chat", run: () => pick(null) },
             { id: "link", label: "Link projects…", group: "Actions", icon: "folder", run: onLinkProject },
+            { id: "edit-link", label: "Edit Link…", group: "Actions", icon: "folder", run: () => onEditLink(opened.link.id) },
             ...recents.map((row) => ({ id: row.id, label: row.label, group: "Chats", icon: "chat" as const, run: () => pick(Number(row.id)) })),
             ...opened.projects.map((project) => ({
               id: project.id,

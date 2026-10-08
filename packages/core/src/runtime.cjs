@@ -14,6 +14,7 @@ const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
 const { migrateImages, withDetails } = require("./project-content.cjs");
+const { chatPage, chatSearch } = require("./chat-pages.cjs");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
@@ -23,6 +24,7 @@ const { antigravityAcp, sweepTempDirs } = require("./agents/antigravity-acp.cjs"
 const { createCliCache, inspectCli } = require("./agents/cli.cjs");
 const { runCliUpdate, linkNewestClaudeVersion } = require("./agents/cli-update.cjs");
 const { createAntigravity } = require("./agents/antigravity-install.cjs");
+const { recoverAntigravitySubagents } = require("./agents/antigravity-subagents.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
 const { failedWith, loginMessage } = require("./agents/events.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
@@ -48,7 +50,7 @@ const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree 
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { createProjectFinder } = require("./project-finder.cjs");
-const { saveProjectState, readProjectState, compactProjectDetails, stateFile } = require("./project-store.cjs");
+const { saveProjectState, readProjectState, compactProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
@@ -73,6 +75,8 @@ function createRuntime(options) {
   const background = new Set();
   let closing = false;
   let closed;
+  let advisors;
+  let advisorDelivery;
   function track(work, set = active) {
     const task = Promise.resolve().then(work);
     set.add(task);
@@ -176,27 +180,34 @@ function createRuntime(options) {
   const usageStore = createUsageStore({ file: path.join(dataDir, "usage-cache.json") });
   // A host may bring its own usage, models and CLI status (the review demo, which runs no real agent).
   const accountUsage = new Map();
+  // Tests replace single readers. Claude's and Codex's are called with no arguments; Antigravity's gets the Account's environment.
+  const readers = options.usageReaders ?? {};
   function usageForAccounts(scope) {
     const claude = accounts.selected("claude", scope),
-      codex = accounts.selected("codex", scope);
-    // Antigravity is not part of the key: it never reports usage (readAntigravityUsage), so there is nothing per
-    // Account to keep apart, and existing cache files keep their names.
-    const key = `${claude}-${codex}`;
+      codex = accounts.selected("codex", scope),
+      antigravity = accounts.selected("antigravity", scope);
+    // The default Antigravity Account adds nothing to the key, so existing cache files keep their names.
+    const key = `${claude}-${codex}${antigravity === "default" ? "" : `-${antigravity}`}`;
     if (!accountUsage.has(key)) {
-      const store = key === "default-default" ? usageStore : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
+      const store =
+        claude === "default" && codex === "default" && antigravity === "default"
+          ? usageStore
+          : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
       accountUsage.set(key, {
         key,
-        accountIds: { claude, codex },
+        accountIds: { claude, codex, antigravity },
         store,
         read: createUsageReader({
           ready: () => environmentReady,
           store,
-          readClaude: async () => {
-            const env = accounts.environment("claude", claude);
-            return env.CLAUDE_CONFIG_DIR ? readClaudeProfileUsage({ command: (await baseCli("claude")).command, env }) : readClaudeUsage();
-          },
-          readCodex: () => readCodexUsage({ env: accounts.environment("codex", codex) }),
-          readAntigravity: () => readAntigravityUsage(),
+          readClaude:
+            readers.claude ??
+            (async () => {
+              const env = accounts.environment("claude", claude);
+              return env.CLAUDE_CONFIG_DIR ? readClaudeProfileUsage({ command: (await baseCli("claude")).command, env }) : readClaudeUsage();
+            }),
+          readCodex: readers.codex ?? (() => readCodexUsage({ env: accounts.environment("codex", codex) })),
+          readAntigravity: () => (readers.antigravity ?? readAntigravityUsage)({ env: accounts.environment("antigravity", antigravity) }),
         }),
       });
     }
@@ -282,7 +293,7 @@ function createRuntime(options) {
       return reconcileState(await withWorktreeChats(projectPath, stored, discovered), projectName(projectPath), discovered, await linkStore.ownedWorktrees());
     },
     save: saveProjectState,
-    compact: compactProjectDetails,
+    compact: compactProjectState,
   });
 
   const scopeStates = createChatScopes({
@@ -478,6 +489,10 @@ function createRuntime(options) {
       seen,
       force,
       closeSession: async () => {
+        for (const gone of goneChats) {
+          await advisorDelivery.stop(gone);
+          await advisors.stopChat(gone);
+        }
         if (typeof chatId === "string") {
           await worktreeSetups.cancel(chatId);
           worktreeSetups.forget(worktreePath);
@@ -639,6 +654,8 @@ function createRuntime(options) {
     if (event.type === "turn-failed" && event.login) {
       for (const name of PROVIDERS) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
     }
+    if (["turn-completed", "turn-failed", "turn-cancelled", "permission-resolved", "question-resolved"].includes(event.type))
+      void advisorDelivery?.drain(chatId).catch((error) => console.warn("Advisor delivery failed:", error.message));
     emit("agent:event", { chatId, event, ...(state ? { state } : {}), ...(seq ? { seq } : {}) });
   }
 
@@ -719,9 +736,20 @@ function createRuntime(options) {
   }
 
   const chats = new ChatHost({
+    beforeSend: async (request) => {
+      if (request.context?.kind !== "advisor-result" && request.sessionId != null) await advisorDelivery?.resume(`${request.projectPath}#${request.sessionId}`);
+    },
+    onUnblocked: (chatId) => {
+      void advisorDelivery?.drain(chatId).catch((error) => console.warn("Advisor delivery failed:", error.message));
+    },
     states: scopeStates,
     startTurn: (request) => track(() => startAgentTurn(request), starting),
-    readSubagents: async ({ cwd, agents, projectPath }) => {
+    readSubagents: async ({ cwd, agents, projectPath, provider = "codex", nativeSessionId }) => {
+      // Antigravity's children are read from its transcripts in the chat's Account profile: no process starts.
+      if (provider === "antigravity") {
+        const cli = await agentCli("antigravity", projectPath).catch(() => null);
+        return recoverAntigravitySubagents({ home: cli?.env?.GEMINI_HOME, parentId: nativeSessionId, agents });
+      }
       const cli = await agentCli("codex", projectPath);
       return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, env: cli.env, clientVersion: version });
     },
@@ -830,9 +858,14 @@ function createRuntime(options) {
     if (!scopeStates.has(projectPath)) throw new Error("Open the project before continuing its chats.");
     return chats.resumeChat(projectPath, Number(sessionId));
   });
-  commands.handle("chat:patch", (_event, projectPath, sessionId, patch) =>
-    scopeStates.has(projectPath) ? editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined,
-  );
+  commands.handle("chat:patch", async (_event, projectPath, sessionId, patch) => {
+    if (!scopeStates.has(projectPath)) return;
+    if (patch?.archived) {
+      await advisorDelivery.stop(`${projectPath}#${sessionId}`);
+      await advisors.stopChat(`${projectPath}#${sessionId}`);
+    }
+    await editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {}));
+  });
   // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
   commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) =>
     scopeStates.has(projectPath)
@@ -851,7 +884,10 @@ function createRuntime(options) {
   async function readOpenChat(chatId = chats.openChat) {
     if (chatId && scopeStates.has(projectOfKey(chatId))) {
       await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
-      void track(() => chats.recoverSubagents(chatId), background).catch((error) => console.warn("Milagre couldn't refresh subagent outcomes:", error.message));
+      void track(async () => {
+        await advisors.reconcile(chatId);
+        await chats.recoverSubagents(chatId);
+      }, background).catch((error) => console.warn("Milagre couldn't refresh subagent outcomes:", error.message));
     }
   }
   commands.handle("chat:set-open", (_event, chatId) => {
@@ -884,6 +920,9 @@ function createRuntime(options) {
   });
 
   commands.handle("agent:interrupt", async (_event, chatId) => {
+    await existingChat("stopping advisors")(chatId);
+    await advisorDelivery.stop(chatId);
+    await advisors.stopChat(chatId);
     // A handoff still writing its brief has no agent to stop: cancelling it is the whole interrupt.
     if (await chats.cancelHandoff(chatId)) return;
     await worktreeSetups.cancel(chatId);
@@ -897,7 +936,7 @@ function createRuntime(options) {
   commands.handle("agent:answer-question", async (_event, { chatId, requestId, answers, summary } = {}) => {
     const messageId =
       answers && typeof summary === "string" && summary && typeof chatId === "string" && scopeStates.has(projectOfKey(chatId))
-        ? await chats.recordAnswers(chatId, summary)
+        ? await chats.recordAnswers(chatId, summary, { requestId, answers })
         : null;
     try {
       const accepted = await agents.answerQuestion(chatId, requestId, answers);
@@ -966,8 +1005,137 @@ function createRuntime(options) {
     chats,
     agents,
     emit,
-    extraTools: (chatId) => [...simulatorToolDefinitions(chatId, simulators), ...artifactToolDefinitions(chatId, artifacts)],
+    extraTools: (chatId) => [
+      ...simulatorToolDefinitions(chatId, simulators),
+      ...artifactToolDefinitions(chatId, artifacts),
+      ...require("./advisor-tools.cjs").advisorToolDefinitions(chatId, advisors),
+    ],
   });
+  const advisorStore = require("./advisor-store.cjs").createAdvisorStore({ dataDir });
+  const advisorTransports = new Map();
+  const advisorMcp = require("./linked-mcp-server.cjs").createLinkedMcpServer({ toolsFor: (id) => advisorTransports.get(id) ?? [] });
+  async function advisorContext(chatId) {
+    await existingChat("using advisors")(chatId);
+    const scope = projectOfKey(chatId);
+    const id = sessionIdFromKey(chatId);
+    const state = await scopeStates.get(scope);
+    const session = state.sessions[id];
+    if (session.archived) throw new Error("This Chat is archived.");
+    const execution = await scopeStates.executionContext(scope, id);
+    if (!execution.cwd) throw new Error("This Chat's Worktree is unavailable.");
+    const roots = [...new Set([execution.cwd, ...(execution.workspaceRoots ?? [])])];
+    const identities = await Promise.all(
+      roots.map(async (root) => {
+        const real = await fs.realpath(root);
+        if (real !== root) throw new Error("The advisor Worktree identity changed.");
+        const stat = await fs.stat(real);
+        return [real, stat.dev, stat.ino];
+      }),
+    );
+    const settings = chats.turnSettings(chatId) ?? {};
+    const provider = session.provider ?? settings.provider ?? "claude";
+    return {
+      ...execution,
+      roots,
+      scopeIdentity: JSON.stringify([scope, id, session.worktree_id, identities]),
+      parentProvider: provider,
+      provider,
+      model: chats.runs[chatId]?.model || require("@milagre/shared/agent-runs").lastUserModel(state, id) || settings.model,
+      settings: { ...settings, provider },
+      scope,
+      sessionId: id,
+    };
+  }
+  async function advisorProviders(chatId, pinned) {
+    const scope = projectOfKey(chatId);
+    const ids = routing.selection(scope);
+    if (pinned) ids[pinned.provider] = pinned.accountId;
+    const services = routing.services(scope, ids);
+    const [status, models, claude, codex] = await Promise.all([
+      options.agentCliStatus ? options.agentCliStatus() : services.status(),
+      options.agentModels ? options.agentModels() : services.models(),
+      routing.forAccount("claude", ids.claude),
+      routing.forAccount("codex", ids.codex),
+    ]);
+    return Object.fromEntries(
+      PROVIDERS.map((provider) => {
+        const cli = provider === "claude" ? claude : codex;
+        return [
+          provider,
+          {
+            ...cli,
+            available: !cli.problem && Boolean(cli.command) && status[provider]?.state === "ready" && Boolean(models[provider]?.length),
+            models: models[provider] ?? [],
+            problem: cli.problem ?? status[provider]?.message,
+          },
+        ];
+      }),
+    );
+  }
+  advisorDelivery = require("./advisor-delivery.cjs").createAdvisorDelivery({
+    store: advisorStore,
+    contextFor: advisorContext,
+    isBlocked: (chatId) => closing || chats.preparing.has(chatId) || Boolean(chats.runs[chatId]?.approvals.length || chats.runs[chatId]?.questions.length),
+    send: async (chatId, message, ctx) => {
+      const sent = await chats.send({
+        ...ctx.settings,
+        projectPath: ctx.scope,
+        sessionId: ctx.sessionId,
+        provider: ctx.provider,
+        model: ctx.model,
+        permissionMode: ctx.settings.permissionMode ?? "auto",
+        ...message,
+      });
+      return sent.started;
+    },
+  });
+  advisors = require("./advisors.cjs").createAdvisors({
+    store: advisorStore,
+    contextFor: advisorContext,
+    providersFor: advisorProviders,
+    publish: async (chatId, agent) => {
+      if (["initializing", "running", "waiting"].includes(agent.status)) keepAwake.turnStarted(agent.id);
+      else keepAwake.turnEnded(agent.id);
+      await chats.receive(chatId, { type: "subagent-update", agent });
+    },
+    completed: (chatId, result) => advisorDelivery.enqueue(chatId, result),
+    launch: async ({ record, context, provider, emit: send }) => {
+      const { skills } = await discoverSkills(context.cwd);
+      const referenceRoots = [...new Set(skills.map((skill) => path.dirname(skill.path)))];
+      const canvasReads = linked
+        .forChat(record.chatId)
+        .tools.filter((tool) => ["linked_overview", "read_linked_chat", "linked_git", "read_linked_file", "search_linked_files"].includes(tool.name));
+      const tools = [...require("./advisor-reads.cjs").createAdvisorReads({ roots: context.roots, referenceRoots }), ...canvasReads];
+      advisorTransports.set(record.id, tools);
+      const sessionOptions = {
+        cwd: context.cwd,
+        workspaceRoots: context.workspaceRoots,
+        workspaceInstructions: context.workspaceInstructions,
+        analysisOnly: true,
+        resumeId: record.nativeId,
+        command: provider.command,
+        env: provider.env,
+        linked: { tools, url: () => advisorMcp.url(record.id) },
+        emit: send,
+      };
+      const session = options.createSession
+        ? options.createSession(record.provider, sessionOptions)
+        : record.provider === "codex"
+          ? new CodexSession({ ...sessionOptions, clientVersion: version })
+          : new ClaudeSession(sessionOptions);
+      const close = session.close.bind(session);
+      session.close = async () => {
+        advisorTransports.delete(record.id);
+        await close();
+      };
+      return session;
+    },
+  });
+  for (const method of ["stop", "retry"])
+    commands.handle(`advisor:${method}`, async (_event, chatId, advisorId) => {
+      await existingChat("controlling advisors")(chatId);
+      return advisors[method](chatId, String(advisorId));
+    });
   const linkWorkspaces = createLinkWorkspaces({
     store: linkStore,
     registry: projectRegistry(),
@@ -1121,6 +1289,13 @@ function createRuntime(options) {
     if (!message) throw new Error("That message is no longer in this Project.");
     return withDetails(scopeStates.storageDirectory(scope), message);
   });
+  // A page of one Chat's messages, and search across a Project's Chats, for a client that doesn't hold every message.
+  const readScope = async (scope) => {
+    if (typeof scope !== "string" || (!isLinkScopeKey(scope) && !states.has(scope))) throw new Error("Open the Project before reading its messages.");
+    return scopeStates.get(scope);
+  };
+  commands.handle("chat:messages", async (_event, scope, chatId, options) => chatPage((await readScope(scope)).messages, chatId, options ?? {}));
+  commands.handle("chat:search", async (_event, scope, query, options) => chatSearch(await readScope(scope), query, options ?? {}));
   // What the phone's media check needs, without the whole state.
   commands.handle("project:chat-image", (_event, projectPath, requested) => chats.images.resolve(projectPath, requested));
   commands.handle("project:worktree-paths", async (_event, projectPath) => {
@@ -1136,6 +1311,10 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
+      await advisorDelivery.close();
+      await advisors.close();
+      await advisorMcp.close();
+      await advisorStore.close();
       await Promise.all([simulators.close(), browsers.close(), artifacts.close()]);
       await Promise.allSettled([...active]);
       accounts.close();

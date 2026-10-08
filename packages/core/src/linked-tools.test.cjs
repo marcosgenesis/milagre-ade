@@ -6,6 +6,7 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { createLinkedReads, inputSchema, linkedToolDefinitions, runTool } = require("./linked-tools.cjs");
 const { createLinkedMcpServer } = require("./linked-mcp-server.cjs");
+const { configuredHelper } = require("./git/test-helpers.cjs");
 
 async function linkedRepo(t) {
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-linked-tools-")));
@@ -44,6 +45,22 @@ async function linkedRepo(t) {
     open: () => [],
   });
   return { web, hidden, reads };
+}
+
+for (const kind of ["external diff", "textconv", "fsmonitor", "clean", "process"]) {
+  test(`linked Git never executes a configured ${kind} helper`, async (t) => {
+    const { web, reads } = await linkedRepo(t);
+    const { marker } = await configuredHelper(web, kind, "client.ts");
+    let output, error;
+    try {
+      output = await reads.git("api#1", web, kind === "fsmonitor" ? "status" : "diff");
+    } catch (caught) {
+      error = caught;
+    }
+    await assert.rejects(fs.access(marker), { code: "ENOENT" });
+    assert.equal(error, undefined);
+    assert.match(output, kind === "fsmonitor" ? /client\.ts/ : /\+export const added/);
+  });
 }
 
 test("the read tools serve the linked Worktree: overview, Chats (archived too), git, files and search", async (t) => {

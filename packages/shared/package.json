@@ -21,8 +21,10 @@
     "src/browser.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
-    "src/message-search.ts",
-    "src/agent-activity.ts"
+    "src/message-search.mjs",
+    "src/message-search.d.mts",
+    "src/agent-activity.ts",
+    "src/advisor-result.ts"
   ],
   "type": "module",
   "exports": {
@@ -31,6 +33,10 @@
       "default": "./src/prompt-skills.mjs"
     },
     "./model": "./src/model.ts",
+    "./chat-summary": {
+      "types": "./src/chat-summary.d.mts",
+      "default": "./src/chat-summary.mjs"
+    },
     "./state-patch": {
       "types": "./src/state-patch.d.mts",
       "default": "./src/state-patch.mjs"
@@ -119,12 +125,16 @@
       "default": "./src/browser-receiver.mjs"
     },
     "./message-navigation": "./src/message-navigation.ts",
-    "./message-search": "./src/message-search.ts",
+    "./message-search": {
+      "types": "./src/message-search.d.mts",
+      "default": "./src/message-search.mjs"
+    },
     "./file-syntax": {
       "types": "./src/file-syntax.d.mts",
       "default": "./src/file-syntax.mjs"
     },
-    "./agent-activity": "./src/agent-activity.ts"
+    "./agent-activity": "./src/agent-activity.ts",
+    "./advisor-result": "./src/advisor-result.ts"
   },
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",

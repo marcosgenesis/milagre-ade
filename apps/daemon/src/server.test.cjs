@@ -896,3 +896,41 @@ test("a state the client can't patch from, or a patch over the event limit, says
   assert.equal(again.version, large.payload.version);
   assert.equal(again.state.messages.at(-1).body.length, 5000);
 });
+
+test("a client that reads messages by Chat gets states without them, and each change's messages beside its patch", async (t) => {
+  const { project, client } = await fixture(t);
+  const desktop = await client();
+  const events = [];
+  desktop.on("event", (event) => events.push(event));
+  await desktop.call("daemon:state-patches", [{ messages: false }]);
+  const opened = await desktop.call("project:open", [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  const chat = `${project}#${session.id}`;
+  await desktop.call("chat:git-note", [chat, "First note"]);
+  const held = await desktop.call("state:read", [project]);
+  assert.deepEqual(held.state.messages, []);
+  assert.equal(held.state.messagesInChats, true);
+  // Replies carry states the same way: opening the Project again sends no messages either.
+  const again = await desktop.call("project:open", [project]);
+  assert.deepEqual([again.state.messages, again.state.messagesInChats], [[], true]);
+  assert.ok((await desktop.call("daemon:status")).capabilities.includes("chat-pages-v1"));
+  assert.equal(held.state.sessions[session.id].summary.count, 1);
+  const page = await desktop.call("chat:messages", [project, session.id, { turns: 5 }]);
+  assert.deepEqual(
+    page.messages.map((message) => message.body),
+    ["First note"],
+  );
+
+  await desktop.call("chat:git-note", [chat, "Second note"]);
+  const added = await waitFor(() => events.find((event) => event.channel === "project:state" && event.payload.version > held.version));
+  assert.equal("state" in added.payload, false);
+  assert.equal(JSON.stringify(added.payload.patch ?? {}).includes("Second note"), false, "messages stay out of the patch");
+  assert.deepEqual(
+    added.payload.messages.changed.map(({ message, after }) => [message.body, after]),
+    [["Second note", page.messages[0].id]],
+  );
+  assert.deepEqual(added.payload.messages.removed, []);
+  const applied = applyStatePatch(held.state, added.payload.patch);
+  assert.equal(applied.sessions[session.id].summary.count, 2);
+  assert.deepEqual((await desktop.call("chat:search", [project, "second note"]))[0].message.session_id, session.id);
+});

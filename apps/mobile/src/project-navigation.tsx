@@ -1,3 +1,4 @@
+import { chatSummary } from "@milagre/shared/chat-summary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
@@ -35,7 +36,8 @@ import { ProjectIcon, ProjectIcons } from "./project-icon";
 import { ProjectSearch } from "./project-search";
 import { chatMenu, runChatAction } from "./chat-actions";
 import { confirm } from "./confirm-store";
-import { ArchiveProgress } from "./archive-progress";
+import { ArchivingOverlay, useArchiveActivity } from "./archive-progress";
+import { clearArchiveNotice, showArchiveNotice } from "./archive";
 import { AttentionDot, useAttention } from "./attention";
 import { projectOfKey } from "@milagre/shared/agent-runs";
 import { useChatPullRequests } from "./use-chat-pull-requests";
@@ -99,7 +101,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const [show, setShow] = useState<Show>("all");
   const [page, setPage] = useState<"add" | null>(null);
   const [busy, setBusy] = useState(false);
-  const [archiving, setArchiving] = useState<Set<string>>(new Set());
+  const archives = useArchiveActivity();
   const archiveRequests = useRef(new Set<string>());
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -185,7 +187,12 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
       });
       // Like desktop's sidebar, a worktree's empty starter Chat stays out until it has a message or a turn is starting.
       const shown = marked
-        .filter(({ chat, run }) => (show === "archived") === !!chat.archived && (run || isListedChat(chat, byChat.get(chat.id)?.length || 0)))
+        .filter(
+          ({ chat, run }) =>
+            // A Chat stays in its place while its archive runs, under the progress, until the archive ends.
+            (show === "archived") === (!!chat.archived && !archives.chats.has(`${copy?.project.path}#${chat.id}`)) &&
+            (run || isListedChat(chat, chatSummary(chat, byChat.get(chat.id)).count)),
+        )
         .filter(({ mark }) => show !== "needs" || NEEDS.includes(mark))
         .filter(({ mark }) => show !== "running" || mark === "running");
       if (needle && copy)
@@ -217,7 +224,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           pending,
           worktree: pending?.newWorktree ? "New worktree" : copy?.project.state.worktrees[chat.worktree_id]?.name || "Worktree",
           prPath: !pending && !copy?.project.link ? copy?.project.state.worktrees[chat.worktree_id]?.path : undefined,
-          prRefs: copy?.project.pullRequestRefs?.[chat.id] ?? pullRequestRefs(byChat.get(chat.id) || []),
+          prRefs: chat.summary?.pullRequests ?? copy?.project.pullRequestRefs?.[chat.id] ?? pullRequestRefs(byChat.get(chat.id) || []),
           mark,
         });
       if (failures[project.path])
@@ -264,7 +271,21 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- revision invalidates rows after the session's preview cache changes.
-  }, [revision, cachedProject, currentPath, expanded, failures, query, searching, show, listed, session.snapshot, session.client?.url, pendingChats]);
+  }, [
+    revision,
+    cachedProject,
+    currentPath,
+    expanded,
+    failures,
+    query,
+    searching,
+    show,
+    listed,
+    session.snapshot,
+    session.client?.url,
+    pendingChats,
+    archives.chats,
+  ]);
 
   const prTargets = useMemo(() => {
     const byPath = new Map<string, Set<string>>();
@@ -300,16 +321,19 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     else onNavigate({ pathname: "/chat", params: { ...params, id: String(chatId) } });
   }
   // A Chat's ⋯ choice runs against its own Project's copy, which is reread afterwards. Archiving the Chat showing
-  // behind the navigation leaves it for the project list.
+  // behind the navigation leaves it for the project list as soon as the archive is confirmed; the archive then runs on
+  // the Chat's row, and nothing navigates when it ends.
   async function act(projectPath: string, chat: AgentSession, action: string) {
     const copy = projectPath === currentPath && session.snapshot ? session.snapshot : cachedProject(projectPath);
     if (!copy || !session.client) return;
     const archiveKey = `${projectPath}#${chat.id}`;
     if (archiveRequests.current.has(archiveKey)) return;
     if (action === "archive" && !chat.archived) archiveRequests.current.add(archiveKey);
+    let confirmed = false;
     setError("");
+    clearArchiveNotice();
     try {
-      const result = await runChatAction({
+      await runChatAction({
         action,
         chat,
         running: !!copy.runs.runs[`${copy.project.path}#${chat.id}`],
@@ -317,24 +341,21 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         projectPath: copy.project.path,
         state: copy.project.state,
         link: copy.project.link,
-        onConfirm: () => setArchiving((previous) => new Set(previous).add(archiveKey)),
-        refresh: () => (projectPath === currentPath ? session.refresh() : load(projectPath)),
-        expectActivity: session.expectActivity,
-        notify: (message) => {
-          if (alive.current) setError(message);
+        onConfirm: () => {
+          confirmed = true;
+          if (projectPath === currentPath && chat.id === activeChatId) onNavigate("/projects");
         },
+        // The phone may show another Project by the time the archive ends, so the list's copy is read again too.
+        refresh: () =>
+          projectPath !== currentPath ? load(projectPath) : Promise.all([session.refresh(), action === "archive" ? load(projectPath) : undefined]),
+        expectActivity: session.expectActivity,
+        notify: showArchiveNotice,
       });
-      if ((result === "hidden" || result === "removed") && projectPath === currentPath && chat.id === activeChatId) onNavigate("/projects");
     } catch (e) {
-      if (alive.current) setError((e as Error).message);
+      if (confirmed) showArchiveNotice(`Could not archive Chat: ${(e as Error).message}`);
+      else if (alive.current) setError((e as Error).message);
     } finally {
       archiveRequests.current.delete(archiveKey);
-      if (alive.current)
-        setArchiving((previous) => {
-          const next = new Set(previous);
-          next.delete(archiveKey);
-          return next;
-        });
     }
   }
   // Removing a Project takes it off the recent list, as desktop does; its folder and Chats stay on the Mac.
@@ -345,6 +366,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     }
     if (isLinkScopeKey(projectPath)) {
       if (action === "copy") await Clipboard.setStringAsync(name);
+      if (action === "edit") onNavigate({ pathname: "/link-projects", params: { linkId: projectPath.slice("milagre-link:".length) } }, true);
       return;
     }
     if (action === "copy") {
@@ -511,8 +533,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
             <Text style={s.secondary}>Opening...</Text>
           </View>
         )}
-        {archiving.size > 0 && <ArchiveProgress />}
-        {error ? <ErrorNotice message={error} /> : null}
+        {error || archives.notice ? <ErrorNotice message={error || archives.notice} /> : null}
       </View>
       <FlatList
         data={displayedRows}
@@ -551,6 +572,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                 items: [
                   { id: "new", title: "New Chat", systemImage: "square.and.pencil" },
                   { id: "copy", title: linked ? "Copy Link name" : "Copy path", systemImage: "doc.on.doc" },
+                  ...(linked ? [{ id: "edit", title: "Edit Link", systemImage: "pencil" }] : []),
                 ],
               },
               ...(!linked ? [{ items: [{ id: "remove", title: "Remove from list", systemImage: "minus.circle", destructive: true }] }] : []),
@@ -631,18 +653,26 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
             item.chat,
             copy?.project.link ? { path: copy.project.state.worktrees[item.chat.worktree_id]?.path } : copy?.project.state.worktrees[item.chat.worktree_id],
           );
+          // While it archives, the row stays put under the progress and takes no taps.
+          const archiving = archives.chats.has(`${copy?.project.path ?? item.path}#${item.chat.id}`);
           // A tap opens the Chat and a long press opens its ⋯ menu, as on desktop's sidebar.
           return (
-            <View style={[s.chat, { backgroundColor: selected ? colors.hover : "transparent" }]}>
-              <View style={{ flex: 1 }}>
+            <View pointerEvents={archiving ? "none" : "auto"} style={[s.chat, { backgroundColor: selected && !archiving ? colors.hover : "transparent" }]}>
+              <View
+                style={{ flex: 1, opacity: archiving ? 0.3 : 1 }}
+                accessibilityElementsHidden={archiving}
+                importantForAccessibility={archiving ? "no-hide-descendants" : "auto"}
+              >
                 <PullDown
                   label={`${title}${item.chat.pinned ? ", pinned" : ""}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}`}
                   title={title}
-                  sections={item.pending ? [] : menu}
+                  sections={item.pending || archiving ? [] : menu}
                   onSelect={(action) => {
-                    if (!item.pending) void act(item.path, item.chat, action);
+                    if (!item.pending && !archiving) void act(item.path, item.chat, action);
                   }}
-                  onPress={() => select(item.path, item.chat.id, item.pending)}
+                  onPress={() => {
+                    if (!archiving) select(item.path, item.chat.id, item.pending);
+                  }}
                   style={{ flex: 1 }}
                 >
                   <View style={[s.chatBody, hasPullRequests && { minHeight: 28, paddingTop: 6, paddingBottom: 0 }]}>
@@ -680,13 +710,14 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                   </ChatPullRequestChips>
                 )}
               </View>
-              {!item.pending && (
+              {!item.pending && !archiving && (
                 <PullDown label={`Actions for ${title}`} title={title} sections={menu} onSelect={(action) => void act(item.path, item.chat, action)}>
                   <View style={{ width: 40, height: 44, alignItems: "center", justifyContent: "center" }}>
                     <Icon icon={MoreHorizontalIcon} tone="ink3" size={18} />
                   </View>
                 </PullDown>
               )}
+              {archiving && <ArchivingOverlay title={title} />}
             </View>
           );
         }}

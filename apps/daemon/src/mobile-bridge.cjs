@@ -62,11 +62,14 @@ const METHODS = new Set([
   "project:registry",
   "link:list",
   "link:create",
+  "link:update",
   "link:open",
   "link:send",
   "chat:send",
   "chat:resume",
   "agent:interrupt",
+  "advisor:stop",
+  "advisor:retry",
   "agent:respond-permission",
   "accounts:scopes",
   "accounts:scope",
@@ -121,7 +124,10 @@ function projectPullRequestRefs(project) {
     list.push(message);
     messages.set(message.session_id, list);
   }
-  const refs = Object.fromEntries([...messages].map(([id, list]) => [id, pullRequestRefs(list)]).filter(([, refs]) => refs.length));
+  // A Chat's summary has its refs; only a Chat without one (an older state) is read message by message.
+  const refs = Object.fromEntries(
+    [...messages].map(([id, list]) => [id, project.state.sessions?.[id]?.summary?.pullRequests ?? pullRequestRefs(list)]).filter(([, refs]) => refs.length),
+  );
   // The same objects as last time where nothing changed, so a phone's patch carries only the Chats whose refs did.
   const stable = reconcileState(lastPullRequestRefs.get(project.path), refs);
   lastPullRequestRefs.delete(project.path);
@@ -171,7 +177,9 @@ function phoneAgent(agent) {
     slim = {
       ...agent,
       latestActivity: clip(agent.latestActivity),
-      transcript: (agent.transcript || []).slice(-TRANSCRIPT_TAIL).map((item) => ({ ...item, text: clip(item.text) })),
+      transcript: (agent.transcript || [])
+        .slice(-TRANSCRIPT_TAIL)
+        .map((item) => ({ ...item, text: agent.source === "milagre-advisor" ? item.text.slice(0, 40_000) : clip(item.text) })),
     };
     phoneAgents.set(agent, slim);
   }

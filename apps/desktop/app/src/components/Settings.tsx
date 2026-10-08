@@ -321,7 +321,7 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
         </Row>
       </Group>
       <Group title="Plan usage">
-        <Row label="Show" description="Claude and Codex plan limits">
+        <Row label="Show" description="Claude, Codex and Antigravity plan limits">
           <Select<UsageDisplay>
             label="Show usage as"
             value={settings.usageDisplay}

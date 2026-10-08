@@ -50,7 +50,7 @@ function relay(answer: (seen: Seen) => Answer = () => ({ body: '{"v":1,"result":
   const sockets: FakeSocket[] = [];
   const seen: Seen[] = [];
   const sent: Uint8Array[] = [];
-  const state = { mode: "host" as Mode, ping: 0 };
+  const state = { mode: "host" as Mode, ping: 0, names: [] as (string | null)[] };
   class FakeSocket implements RelaySocket {
     binaryType = "blob";
     onopen: (() => void) | null = null;
@@ -106,6 +106,7 @@ function relay(answer: (seen: Seen) => Answer = () => ({ body: '{"v":1,"result":
         }
         try {
           const accepted = hostAccept({ host, hello: bytes, isKnown: () => true, token: TOKEN, random });
+          state.names.push(accepted.name);
           this.channel = accepted.channel;
           // An impostor cannot read the hello, so the closest thing is a reply that was not sealed for this phone and host.
           if (state.mode === "impostor") accepted.reply[accepted.reply.length - 1] ^= 1;
@@ -550,4 +551,15 @@ test("an onLost that throws cannot skip the teardown: what was pending still fai
   fake.sockets[0].drop(1006);
   await assert.rejects(pending, { message: LOST });
   transport.close();
+});
+
+test("the hello carries the phone's name when it has one", async () => {
+  const fake = relay();
+  const named = transportFor(fake, { name: "Victor's iPhone" });
+  await named.transport.ready();
+  named.transport.close();
+  const unnamed = transportFor(fake);
+  await unnamed.transport.ready();
+  unnamed.transport.close();
+  assert.deepEqual(fake.state.names, ["Victor's iPhone", null]);
 });

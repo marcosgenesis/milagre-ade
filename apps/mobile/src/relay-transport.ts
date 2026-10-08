@@ -30,6 +30,8 @@ export type RelayTransportOptions = {
   key: string;
   token: string;
   identity: KeyPair;
+  /** What this phone calls itself; the Mac shows it in Settings › Devices. */
+  name?: string | null;
   create?: (url: string) => RelaySocket;
   random?: (n: number) => Uint8Array;
   timers?: RelayTimers;
@@ -192,7 +194,7 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
       try {
         socket = create(url);
         socket.binaryType = "arraybuffer";
-        hello = phoneHello({ phone: identity, host, token, random });
+        hello = phoneHello({ phone: identity, host, token, random, name: options.name ?? undefined });
       } catch {
         return reject(fail("lost"));
       }

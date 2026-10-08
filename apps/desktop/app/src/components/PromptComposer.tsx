@@ -19,6 +19,8 @@ import { ScrollArea } from "./primitives/ScrollArea";
 import { promptSkillParts } from "../lib/prompt-skills";
 import { PromptHighlights } from "./PromptHighlights";
 import { ContextRing } from "./ContextRing";
+import { contextWindowFor } from "../lib/model-options";
+import { formatTokens } from "./usage/format";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -84,6 +86,12 @@ const POPOVER_BOTTOM_INSET = 16;
 const POPOVER_MIN_BELOW = 220;
 
 /** Rising bars, one per level the model offers; the filled ones show how hard the agent will think. */
+/** The model's context window as the picker shows it: "1M", "272k". */
+function contextLabel(model: ModelOption) {
+  const size = contextWindowFor(model);
+  return size ? formatTokens(size) : undefined;
+}
+
 function EffortMeter({ level, total }: { level: number; total: number }) {
   return (
     <span aria-hidden className="flex h-3 items-end gap-[2px]">
@@ -470,7 +478,9 @@ export function PromptComposer({
                     className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`}
                     onClick={() => setProvider(item)}
                   >
-                    <ProviderLogo provider={item} size={14} />
+                    <span className={provider === item ? "" : "opacity-60 grayscale-[0.4]"}>
+                      <ProviderLogo provider={item} size={14} />
+                    </span>
                     {cliTabLabel(cliStatus?.[item]) ? (
                       <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span>
                     ) : (
@@ -526,6 +536,7 @@ export function PromptComposer({
                 icon={<ProviderLogo provider={model.provider} size={14} />}
                 label={model.name}
                 description={model.description}
+                meta={contextLabel(model)}
                 selected={model.id === selectedModel.id}
                 onClick={() => chooseModel(model)}
               />

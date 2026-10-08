@@ -76,6 +76,7 @@ export default function Layout() {
                     <Stack.Screen name="projects" options={{ title: "Projects" }} />
                     <Stack.Screen name="project-settings" options={{ title: "Project" }} />
                     <Stack.Screen name="link-projects" options={{ ...sheet, sheetAllowedDetents: [1] }} />
+                    <Stack.Screen name="choose-projects" options={{ ...sheet, sheetAllowedDetents: [0.6, 1], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="chat" options={{ title: "Chat" }} />
                     <Stack.Screen name="context-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                     <Stack.Screen name="permission-sheet" options={{ ...sheet, sheetAllowedDetents: [0.42, 0.6], sheetInitialDetentIndex: 0 }} />

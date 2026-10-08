@@ -81,6 +81,12 @@ The repository key fingerprint is `0AC0E3D496374278E689EC0F6605D632D39BA587`. It
 
 After a signed Windows EXE is public, validate the attached manifest with `winget validate`, test `winget install --manifest`, and submit it to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). `winget install --id Milagre.Milagre` becomes available after Microsoft accepts the submission.
 
+## In-app updates
+
+Desktop checks at launch, every five minutes, when a window regains focus, and when the computer wakes. Automatic checks are throttled to one per minute; a manual check bypasses that throttle. Checks share one pending request and leave a downloading or downloaded update intact.
+
+Downloads run in the background. A ready update opens a dismissible card with its release notes and an explicit **Install & restart** action. Dismissal keeps an update button available on every screen. Settings opens the same card before installation, which warns that restarting stops running agents. Installation saves and stops the shared host first; failed shutdown leaves the downloaded update available for retry. Normal quit never installs an update. These client checks do not change the publication schedules above.
+
 ## Runtime
 
 Windows uses a local named pipe with mutual HMAC authentication. NTFS permissions restrict its token to the current Windows SID and SYSTEM. Unauthenticated peers receive no events or commands. Unix retains its private socket transport. Windows CLI shims run through their JavaScript entry points with literal arguments; Linux setup falls back to `sh`.

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import nacl from "tweetnacl";
-import { boxKeyPair, signKeyPair, hostIdOf, phoneHello, hostAccept, phoneFinish, b64url, fromB64url } from "./relay-crypto.mjs";
+import { boxKeyPair, signKeyPair, hostIdOf, phoneHello, hostAccept, phoneFinish, b64url, fromB64url, helloName } from "./relay-crypto.mjs";
 
 const random = (n) => new Uint8Array(randomBytes(n));
 const token = "a".repeat(64);
@@ -104,4 +104,54 @@ test("a hello that is not bytes is refused as bad-hello", () => {
   for (const hello of [undefined, null, "hello", [1, 2, 3]]) {
     assert.throws(() => hostAccept({ host, hello, isKnown: () => true, token, random }), { code: "bad-hello" });
   }
+});
+
+test("a hello may name the device and say what kind it is; without a kind it is a phone", () => {
+  const { host, phone } = pair();
+  const plain = hostAccept({ host, hello: phoneHello({ phone, host: host.publicKey, token, random }).message, isKnown: () => true, token, random });
+  assert.equal(plain.kind, "phone");
+  assert.equal(plain.name, null);
+  const named = hostAccept({
+    host,
+    hello: phoneHello({ phone, host: host.publicKey, token, random, name: "  Victor's iPhone ", kind: "desktop" }).message,
+    isKnown: () => true,
+    token,
+    random,
+  });
+  assert.equal(named.kind, "desktop");
+  assert.equal(named.name, "Victor's iPhone");
+});
+
+test("a hello's name is cleaned: control and bidi characters go, 64 characters at most, blank is none", () => {
+  assert.equal(helloName("a\u0000b\u202ec\n"), "abc");
+  assert.equal(helloName("é".repeat(80)), "é".repeat(64));
+  assert.equal(helloName("x".repeat(1024)), "x".repeat(64));
+  assert.equal(helloName("👩\u200d💻 laptop"), "👩\u200d💻 laptop");
+  assert.equal(helloName("   "), null);
+  assert.equal(helloName(42), null);
+  assert.equal(helloName(undefined), null);
+});
+
+test("a hello with an unknown kind is refused as bad-hello", () => {
+  const { host, phone } = pair();
+  const { message } = phoneHello({ phone, host: host.publicKey, token, random, kind: "toaster" });
+  assert.throws(() => hostAccept({ host, hello: message, isKnown: () => true, token, random }), { code: "bad-hello" });
+});
+
+test("canPair may decide per device: one new phone is turned away while another pairs", () => {
+  const { host, phone } = pair();
+  const blocked = b64url(phone.publicKey);
+  const canPair = (key) => key !== blocked;
+  const { message } = phoneHello({ phone, host: host.publicKey, token, random });
+  assert.throws(() => hostAccept({ host, hello: message, isKnown: () => false, canPair, token, random }), { code: "unknown-phone" });
+  const other = boxKeyPair(random);
+  const accepted = hostAccept({
+    host,
+    hello: phoneHello({ phone: other, host: host.publicKey, token, random }).message,
+    isKnown: () => false,
+    canPair,
+    token,
+    random,
+  });
+  assert.equal(accepted.firstPairing, true);
 });

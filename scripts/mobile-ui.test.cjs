@@ -4837,6 +4837,8 @@ test("mobile Murilo mode shows each tool call and the notes between them in the 
       "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
       "./answer-card": { AnswerCard: "AnswerCard" },
       "./murilo-mode": { useMuriloMode: () => [murilo, () => {}] },
+      "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
+      "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
       "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
       "./theme": { hex: () => "#000" },
       "./viewer-store": { showImages() {} },

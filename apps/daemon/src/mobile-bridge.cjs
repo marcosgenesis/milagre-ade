@@ -120,6 +120,13 @@ function forPhone(project) {
   );
   return { ...project, state: { ...state, messages, sessions } };
 }
+/** A Project cut down to one new worktree and its Chats, without messages: what a phone needs from worktree:create. */
+function forNewWorktree(project, worktreeId) {
+  const state = project.state;
+  const worktree = state.worktrees?.[worktreeId];
+  const sessions = Object.fromEntries(Object.entries(state.sessions ?? {}).filter(([, session]) => session.worktree_id === worktreeId));
+  return { ...project, state: { ...state, worktrees: worktree ? { [worktreeId]: worktree } : {}, sessions, messages: [] } };
+}
 /** A drawer-only projection. Empty message bodies are metadata, never a readable transcript. */
 function forChatList(project, runs) {
   const byChat = new Map();
@@ -597,6 +604,9 @@ async function startMobileBridge({
             // The phone reads a Project through /snapshot right after opening it; the opened state would double the download.
             if (request.method === "project:open" && result && typeof result === "object") result = { path: result.path, name: result.name };
             if (request.method === "link:open" && result?.link) result = { id: result.link.id, name: result.link.name };
+            // The phone only looks up the new worktree's Chat; a large Project's whole state is tens of MB, past what a LAN socket buffers.
+            if (request.method === "worktree:create" && result?.project?.state)
+              result = { ...result, project: forNewWorktree(result.project, result.worktreeId) };
             // A Project's icon can be a full-size app icon; past this size the phone keeps its folder glyph.
             if (
               (request.method === "project:image" || request.method === "project:set-icon") &&

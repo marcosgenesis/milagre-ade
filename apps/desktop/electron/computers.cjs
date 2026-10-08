@@ -100,7 +100,7 @@ function createComputers({
   backoffMs = BACKOFF_MS,
   networkSignature = defaultNetworkSignature,
 }) {
-  const store = createComputersStore({ file: path.join(dataDir, "computers.json"), now });
+  const store = createComputersStore({ file: path.join(dataDir, "computers.json"), now, allowLocalRelay });
   const keys = createComputerKeys({ file: path.join(dataDir, "computer-keys.json"), safeStorage, random });
   const ready = store.load();
   const entries = new Map();
@@ -340,7 +340,7 @@ function createComputers({
     } catch {
       return;
     }
-    const routes = lanRoutesFrom(answer, { hostId: computer.hostId, hostKey: entry.secrets.hostKey });
+    const routes = lanRoutesFrom(answer, { hostId: computer.hostId, hostKey: entry.secrets.hostKey, allowLocalRelay });
     if (!routes || entry.stopped) return;
     await store.setLanRoutes(entry.id, routes).catch(() => {});
     changed();

@@ -68,3 +68,27 @@ test("keychain failures carry the code keys, whether it is missing, can't open t
   await assert.rejects(keys.identity(), { code: "keys" });
   await assert.rejects(fs.stat(where), { code: "ENOENT" }, "nothing written in plain text");
 });
+
+test("a save or forget that cannot be sealed leaves the keys as they were", async (t) => {
+  const where = await file(t);
+  let working = true;
+  const safeStorage = {
+    ...keychain(),
+    encryptString: (text) => {
+      if (!working) throw new Error("the keychain refused");
+      return keychain().encryptString(text);
+    },
+  };
+  const keys = createComputerKeys({ file: where, safeStorage, random });
+  await keys.save("c1", { hostKey: "K".repeat(43), token: "1".repeat(64) });
+  working = false;
+  await assert.rejects(keys.save("c2", { hostKey: "L".repeat(43), token: "2".repeat(64) }), { code: "keys" });
+  assert.equal(await keys.secretsOf("c2"), null, "a new computer's keys are not kept");
+  await assert.rejects(keys.save("c1", { hostKey: "M".repeat(43), token: "3".repeat(64) }), { code: "keys" });
+  assert.deepEqual(await keys.secretsOf("c1"), { hostKey: "K".repeat(43), token: "1".repeat(64) }, "nor are replacements");
+  await assert.rejects(keys.forget("c1"), { code: "keys" });
+  assert.deepEqual(await keys.secretsOf("c1"), { hostKey: "K".repeat(43), token: "1".repeat(64) }, "nor is a forgotten one lost");
+  working = true;
+  await keys.forget("c1");
+  assert.equal(await keys.secretsOf("c1"), null);
+});

@@ -78,14 +78,28 @@ function createComputerKeys({ file, safeStorage, random }) {
     },
     async save(id, { hostKey, token }) {
       const value = await state();
+      const before = value.computers[id];
       value.computers[id] = { hostKey, token };
-      await persist(value);
+      try {
+        await persist(value);
+      } catch (error) {
+        // What is kept in memory must be what is sealed on disk.
+        if (before === undefined) delete value.computers[id];
+        else value.computers[id] = before;
+        throw error;
+      }
     },
     async forget(id) {
       const value = await state();
       if (!(id in value.computers)) return;
+      const before = value.computers[id];
       delete value.computers[id];
-      await persist(value);
+      try {
+        await persist(value);
+      } catch (error) {
+        value.computers[id] = before;
+        throw error;
+      }
     },
   };
 }

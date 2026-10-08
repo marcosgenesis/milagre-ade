@@ -1,9 +1,8 @@
 import { useCallback, useState } from "react";
-import { LINEAR_HINT, LINEAR_TITLE, linearStatusLine, type LinearStatus } from "@milagre/shared/linear";
 import { MAIN_SYNC_HINT, MAIN_SYNC_TITLE } from "@milagre/shared/main-sync";
 import { Text, View } from "react-native";
 import { Stack, router, useFocusEffect } from "expo-router";
-import { ChartBarLineIcon, Download04Icon, MagicWand01Icon, Notification01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
+import { ChartBarLineIcon, Download04Icon, MagicWand01Icon, Notification01Icon, TestTube01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
 import { usePush } from "../push";
 import { useAppUpdates } from "../update-sheet";
 import { Icon } from "../icons";
@@ -12,7 +11,7 @@ import { ProjectIcon } from "../project-icon";
 import { ErrorNotice, ListRow, PageScroll, Toggle, styles } from "../ui";
 import { useAttentionButton } from "../attention";
 
-type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts" | "skills";
+type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts" | "skills" | "experimental";
 
 export default function SettingsScreen() {
   return (
@@ -62,37 +61,6 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
       setSyncMainError(failure instanceof Error ? failure.message : "Could not change this setting.");
     }
   }
-  // The Mac's Linear switch and connection; null until the Mac answers (an older Mac never does). Re-read on focus:
-  // the phone gets no event when the Mac connects or disconnects.
-  const [linear, setLinear] = useState<{ enabled: boolean; status: LinearStatus } | null>(null);
-  const [linearError, setLinearError] = useState("");
-  useFocusEffect(
-    useCallback(() => {
-      const client = session.client;
-      if (!client) return;
-      let live = true;
-      Promise.all([client.call<{ enabled: boolean }>("linear:enabled:read", []), client.call<LinearStatus>("linear:status", [])]).then(
-        ([value, status]) => live && setLinear({ enabled: value.enabled, status }),
-        () => live && setLinear(null),
-      );
-      return () => {
-        live = false;
-      };
-    }, [session.client]),
-  );
-  async function changeLinear(next: boolean) {
-    const client = session.client;
-    if (!client || !linear) return;
-    setLinearError("");
-    setLinear({ ...linear, enabled: next });
-    try {
-      const { enabled } = await client.call<{ enabled: boolean }>("linear:enabled:save", [next]);
-      setLinear((current) => current && { ...current, enabled });
-    } catch (failure) {
-      setLinear((current) => current && { ...current, enabled: !next });
-      setLinearError(failure instanceof Error ? failure.message : "Could not change this setting.");
-    }
-  }
   const status = updates.state.status;
   const update =
     status === "disabled"
@@ -133,6 +101,8 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
         <View style={styles.separator} />
         <ListRow compact title="Skills" leading={<Icon icon={MagicWand01Icon} tone="ink" size={20} />} onPress={() => onOpen("skills")} />
         <View style={styles.separator} />
+        <ListRow compact title="Experimental" leading={<Icon icon={TestTube01Icon} tone="ink" size={20} />} onPress={() => onOpen("experimental")} />
+        <View style={styles.separator} />
         {/* Checks now and shows the update sheet, which follows the check to Up to date or Update now. */}
         <ListRow
           compact
@@ -153,17 +123,6 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
             <Toggle title={MAIN_SYNC_TITLE} selected={syncMain} onPress={() => void changeSyncMain(!syncMain)} />
             <Text style={styles.caption}>{MAIN_SYNC_HINT}</Text>
             {syncMainError ? <ErrorNotice message={syncMainError} /> : null}
-          </View>
-        </>
-      )}
-      {session.client && linear !== null && (
-        <>
-          <Text style={[styles.label, { marginTop: 16 }]}>Experimental</Text>
-          <View style={[styles.card, { gap: 4 }]}>
-            <Toggle title={LINEAR_TITLE} selected={linear.enabled} onPress={() => void changeLinear(!linear.enabled)} />
-            <Text style={styles.caption}>{LINEAR_HINT}</Text>
-            {linear.enabled && <Text style={styles.caption}>{linearStatusLine(linear.status, "phone")}</Text>}
-            {linearError ? <ErrorNotice message={linearError} /> : null}
           </View>
         </>
       )}

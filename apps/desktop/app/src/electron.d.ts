@@ -45,6 +45,7 @@ import type {
   QuestionAnswers,
   SkillCatalog,
   UsageSnapshot,
+  LinkIssueResult,
   WorktreeRequest,
 } from "./model";
 
@@ -164,6 +165,10 @@ declare global {
       getAppVersion: () => Promise<string>;
       /** `setupNote`: why the repo's setup file was ignored. */
       createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number; setupNote?: string }>;
+      /** Links an existing worktree to a Linear issue: a Milagre-named branch with no open PR takes the issue's branch name. */
+      linkWorktreeIssue: (request: { projectPath: string; worktreeId: number; key: string }) => Promise<LinkIssueResult>;
+      /** Removes the stored issue link; the branch keeps its name. */
+      unlinkWorktreeIssue: (request: { projectPath: string; worktreeId: number }) => Promise<{ project: OpenProject & { state: CoordinatorState } }>;
       /** The folders Milagre keeps its worktrees in (the configured one and its real path). */
       getWorktreeRoots: () => Promise<string[]>;
       /** What archiving would lose from a worktree. Rejects when git can't tell. */

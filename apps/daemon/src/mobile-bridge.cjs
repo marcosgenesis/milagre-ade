@@ -107,6 +107,8 @@ const METHODS = new Set([
   "skills:list",
   "skills:read",
   "worktree:create",
+  "worktree:link-issue",
+  "worktree:unlink-issue",
   "git:diff-files",
   "git:diff-file",
   // Archive's confirm step: whether the Chat's worktree is Milagre's and what removing it would lose, then the removal,

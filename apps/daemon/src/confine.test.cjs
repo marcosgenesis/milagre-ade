@@ -102,6 +102,8 @@ const callsAt = (target, demo) => [
   ["worktree:pull-request", [target]],
   ["worktree:pull-requests", [target, ["246"]]],
   ["worktree:create", [{ projectPath: target, baseBranch: "main", prompt: "Escape" }]],
+  ["worktree:link-issue", [{ projectPath: target, worktreeId: 1, key: "ENG-1" }]],
+  ["worktree:unlink-issue", [{ projectPath: target, worktreeId: 1 }]],
   ["git:diff-files", [{ cwd: target, mode: "uncommitted" }]],
   ["git:diff-file", [{ cwd: target, mode: "uncommitted", path: "secret.png" }]],
   ["worktree:status", [target, "main"]],
@@ -585,6 +587,18 @@ test("a confined phone reads Linear issues, and only its own Project's worktree 
   const confine = createConfinement({ allowedRoot: os.tmpdir() });
   await confine.checkCall("linear:issues", [{ query: "ENG" }]);
   await assert.rejects(confine.checkCall("linear:worktree-issues", ["/not/a/project"]), { status: 403, message: REFUSED });
+});
+
+test("a confined phone links and unlinks an issue only in its own Project", async (t) => {
+  const f = await fixture(t);
+  assert.equal((await f.rpc("project:open", [f.demo])).status, 200);
+  // Linear is off in this fixture, so the call reaches the daemon and fails there: never refused by the confinement.
+  const link = await f.rpc("worktree:link-issue", [{ projectPath: f.demo, worktreeId: 1, key: "ENG-1" }]);
+  assert.notEqual(link.status, 403, JSON.stringify(link.body));
+  const unlink = await f.rpc("worktree:unlink-issue", [{ projectPath: f.demo, worktreeId: 1 }]);
+  assert.notEqual(unlink.status, 403, JSON.stringify(unlink.body));
+  assert.equal((await f.rpc("worktree:link-issue", [{ projectPath: f.outside, worktreeId: 1, key: "ENG-1" }])).status, 403);
+  assert.equal((await f.rpc("worktree:unlink-issue", [{ projectPath: f.outside, worktreeId: 1 }])).status, 403);
 });
 
 test("phones can't connect or disconnect Linear", () => {

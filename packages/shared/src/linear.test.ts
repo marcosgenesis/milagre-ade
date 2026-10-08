@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { issueChipLabel, issueFirstMessage, linearStatusLine, restoredDraft, type LinearIssue, type LinearStatus } from "./linear.ts";
+import { issueChipLabel, issueFirstMessage, LINK_PR_HINT, linearStatusLine, restoredDraft, type LinearIssue, type LinearStatus } from "./linear.ts";
 
 const connected: LinearStatus = {
   connected: true,
@@ -45,4 +45,8 @@ test("a failed send from an issue restores only what the user typed, never the i
   assert.equal(restoredDraft(message, "", true), "");
   assert.equal(restoredDraft("plain text", "plain text", false), "plain text");
   assert.equal(restoredDraft("plain text", "", false), "plain text");
+});
+
+test("a linked branch that doesn't name its issue tells the user to put the key in the PR", () => {
+  assert.equal(LINK_PR_HINT("ENG-12"), 'Add "Fixes ENG-12" to the PR description so Linear tracks it.');
 });

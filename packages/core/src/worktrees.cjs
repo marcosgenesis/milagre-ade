@@ -143,4 +143,11 @@ async function renameWorktreeBranch({ worktreePath, branch, slug }) {
   }
 }
 
-module.exports = { DEFAULT_WORKTREE_ROOT, createWorktree, issueBranch, listBranches, newSuffix, renameWorktreeBranch, slugify };
+// Gives a worktree's branch an explicit name, e.g. the branch a Linear issue names (see issueBranch). The folder keeps
+// its name. Git's refusal (the branch moved, or the name is taken) throws.
+async function moveWorktreeBranch({ worktreePath, from, to }) {
+  await client.write.checked(worktreePath, ["branch", "-m", from, to]);
+  return to;
+}
+
+module.exports = { DEFAULT_WORKTREE_ROOT, createWorktree, issueBranch, listBranches, moveWorktreeBranch, newSuffix, renameWorktreeBranch, slugify };

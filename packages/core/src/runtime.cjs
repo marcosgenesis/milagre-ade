@@ -33,7 +33,7 @@ const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
 const { writeTranscript, generateBrief, createHandoverModels } = require("./agents/handover.cjs");
 const { discoverSkills, expandSkillPrompt, readDiscoveredSkill } = require("./skills.cjs");
-const { DEFAULT_WORKTREE_ROOT, createWorktree, issueBranch, listBranches, newSuffix, renameWorktreeBranch } = require("./worktrees.cjs");
+const { DEFAULT_WORKTREE_ROOT, createWorktree, issueBranch, listBranches, moveWorktreeBranch, newSuffix, renameWorktreeBranch } = require("./worktrees.cjs");
 const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 const { previewFilesToCopy } = require("./worktree-files.cjs");
@@ -46,6 +46,7 @@ const { emptyState, reconcileState, markDisconnectedSubagents } = require("./pro
 const { migrateWorktreeChats } = require("./worktree-chats.cjs");
 const { createLinear } = require("./linear/index.cjs");
 const { createLinearIssues } = require("./linear/issues.cjs");
+const { isIssueKey } = require("./linear/links.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
@@ -671,6 +672,50 @@ function createRuntime(options) {
     // A branch named after an issue keeps that name; only a chat named from its prompt gets the Haiku name.
     if (!issue) void track(() => nameWorktree(request.projectPath, created, request.prompt ?? ""), background).catch(() => {});
     return { project: { ...project, state }, worktreeId: listed.id, ...(resolved.note ? { setupNote: resolved.note } : {}) };
+  });
+  // Links a Worktree that already exists to a Linear issue. A Milagre-named branch with no open PR takes the issue's
+  // branch name (the folder keeps its name); any other branch is left alone and only the key is stored.
+  commands.handle("worktree:link-issue", async (_event, { projectPath, worktreeId, key } = {}) => {
+    await ownProject(projectPath);
+    await environmentReady;
+    if (!isIssueKey(key)) throw new Error(`${JSON.stringify(String(key))} isn't a Linear issue key.`);
+    const issue = await readLinearIssue(key);
+    const project = await readProject(projectPath);
+    const worktree = project.state.worktrees[worktreeId];
+    if (!worktree) throw new Error("That worktree is no longer in this project.");
+    const pullRequest = await readPullRequest(worktree.path).catch(() => null);
+    if (worktree.name.startsWith("milagre/") && pullRequest?.state !== "OPEN") {
+      // The suffix that tells this worktree's branch apart stays with it when the issue's name is taken.
+      const suffix = worktree.name.match(/-([a-z0-9]+)$/)?.[1] ?? newSuffix();
+      const branch = await issueBranch({ projectPath, issue, suffix });
+      await moveWorktreeBranch({ worktreePath: worktree.path, from: worktree.name, to: branch });
+      const state = await updateProject(projectPath, (latest) => {
+        const renamed = renameWorktree(latest, { path: worktree.path, from: worktree.name, name: branch });
+        const item = renamed.worktrees[worktreeId];
+        return item ? { ...renamed, worktrees: { ...renamed.worktrees, [worktreeId]: { ...item, linearIssue: issue.key } } } : renamed;
+      });
+      emit("worktree:renamed", { projectPath, path: worktree.path, from: worktree.name, name: branch });
+      return { project: { ...project, state }, mode: "renamed", branch };
+    }
+    const state = await updateProject(projectPath, (latest) => {
+      const item = latest.worktrees[worktreeId];
+      return item ? { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: { ...item, linearIssue: issue.key } } } : latest;
+    });
+    return { project: { ...project, state }, mode: "stored", branch: worktree.name };
+  });
+  // Removes the stored issue link. The branch keeps its name: a branch that still names the issue keeps the chip.
+  commands.handle("worktree:unlink-issue", async (_event, { projectPath, worktreeId } = {}) => {
+    await ownProject(projectPath);
+    await environmentReady;
+    const project = await readProject(projectPath);
+    if (!project.state.worktrees[worktreeId]) throw new Error("That worktree is no longer in this project.");
+    const state = await updateProject(projectPath, (latest) => {
+      const item = latest.worktrees[worktreeId];
+      if (!item) return latest;
+      const { linearIssue: _unlinked, ...rest } = item;
+      return { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: rest } };
+    });
+    return { project: { ...project, state } };
   });
   // Re-reads some worktrees' diff stats at once, e.g. after a commit from the "Commit and open PR" dialog.
   commands.handle("worktree:refresh-diffs", (_event, projectPath, worktreeIds) => {

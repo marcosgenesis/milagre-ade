@@ -60,7 +60,7 @@ if (selected.electron.length) {
   // The first Electron launch on a fresh Linux runner is unreliable (see electron-warmup.cjs); spend it on a throwaway window.
   // A failed warm-up is not a failed check.
   if (process.platform === "linux" && process.env.CI)
-    spawnSync(process.execPath, [path.join(__dirname, "electron-warmup.cjs")], { cwd: root, stdio: "inherit" });
+    spawnSync(process.execPath, [path.join(__dirname, "electron-warmup.cjs")], { cwd: root, stdio: "inherit", timeout: 60_000, killSignal: "SIGKILL" });
   for (const file of selected.electron) run(file, process.execPath, [file], {}, { retryable: true });
 }
 

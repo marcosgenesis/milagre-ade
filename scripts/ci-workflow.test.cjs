@@ -58,7 +58,8 @@ test("CI runs the unit suite through the single test command, one shard per matr
     shards,
     Array.from({ length: shards.length }, (_, i) => i + 1),
   );
-  assert.ok(runs(job).includes(`npm test -- --unit --shard \${{ matrix.shard }}/${shards.length}`));
+  // The shard count comes from the matrix itself, so the two cannot drift apart.
+  assert.ok(runs(job).includes("npm test -- --unit --shard ${{ matrix.shard }}/${{ strategy.job-total }}"));
   assert.ok(!Object.values(ci.jobs).some((other) => runs(other).some((run) => /npm run test:/.test(run))), "no per-suite scripts left in CI");
 });
 
@@ -97,6 +98,7 @@ test("native tests and Electron checks run only when a PR touches desktop code; 
   assert.equal(filter.uses, "dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590");
   const desktop = YAML.parse(filter.with.filters).desktop;
   assert.ok(desktop.includes("apps/desktop/**") && desktop.includes("packages/**"));
+  assert.ok(desktop.includes(".github/actions/**"), "a change to the install action reruns the jobs that use it");
   assert.ok(!desktop.includes("apps/mobile/**"), "mobile-only PRs skip the desktop jobs");
   assert.equal(changes.outputs.desktop, "${{ github.event_name != 'pull_request' || steps.filter.outputs.desktop == 'true' }}");
   for (const name of ["native-tests", "desktop-checks"]) {
@@ -127,7 +129,11 @@ test("Electron checks run on Ubuntu under xvfb, one shard per matrix leg, with s
   );
   const run = job.steps.map((step) => step.run).find((command) => command?.includes("npm test -- --electron"));
   assert.match(run, /^xvfb-run /);
-  assert.ok(run.endsWith(`npm test -- --electron --shard \${{ matrix.shard }}/${shards.length}`), run);
+  assert.ok(run.endsWith("npm test -- --electron --shard ${{ matrix.shard }}/${{ strategy.job-total }}"), run);
+  // Every place the job names a shard (the ffmpeg lookup too) takes the count from the matrix, or the lookup picks the wrong shard.
+  const occurrences = JSON.stringify(job.steps).split("--shard ").slice(1);
+  assert.ok(occurrences.length >= 2, "the ffmpeg lookup and the test run both name the shard");
+  for (const rest of occurrences) assert.ok(rest.startsWith("${{ matrix.shard }}/${{ strategy.job-total }}"), rest.slice(0, 40));
   const upload = job.steps.find((step) => step.uses?.startsWith("actions/upload-artifact"));
   assert.equal(upload.if, "always()");
   // upload-artifact v4 rejects a second artifact with the same name in one run.
@@ -160,18 +166,25 @@ test("CI looks for dead code right after the format check", () => {
 test("CI lints the lockfile before installing and verifies signatures after", () => {
   const steps = ci.jobs["supply-chain"].steps;
   const install = steps.findIndex((step) => step.uses === `./${installAction}`);
-  assert.equal(steps[install - 1].run, "npx --yes lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity");
+  assert.equal(
+    steps[install - 1].run,
+    "npx --yes lockfile-lint@5.0.1 --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity",
+  );
   assert.equal(steps[install + 1].run, "npm audit signatures");
 });
 
 test("a cached install is keyed on the lockfile and installs with npm ci only on a miss", () => {
   const action = YAML.parse(fs.readFileSync(path.join(__dirname, "..", installAction, "action.yml"), "utf8"));
   const cache = action.runs.steps.find((step) => step.uses?.startsWith("actions/cache@"));
-  // A key without the lockfile hash would restore a stale tree after a dependency change.
-  assert.match(cache.with.key, /hashFiles\('package-lock\.json'\)/);
+  // A key without the lockfile and the mobile patches would restore a stale tree after either changes.
+  assert.match(cache.with.key, /hashFiles\('package-lock\.json', 'apps\/mobile\/patches\/\*\*'\)/);
   assert.match(cache.with.key, /runner\.os/);
-  const install = action.runs.steps.find((step) => step.run === "npm ci");
-  assert.equal(install.if, `steps.${cache.id}.outputs.cache-hit != 'true'`);
+  const steps = action.runs.steps;
+  const install = steps.findIndex((step) => step.run === "npm ci");
+  assert.equal(steps[install].if, `steps.${cache.id}.outputs.cache-hit != 'true'`);
+  // No install script runs before the lockfile's hosts and integrity hashes are checked.
+  assert.match(steps[install - 1].run, /^npx --yes lockfile-lint@\d+\.\d+\.\d+ --path package-lock\.json/);
+  assert.equal(steps[install - 1].if, steps[install].if);
 });
 
 test("PR titles must be Conventional Commits", () => {

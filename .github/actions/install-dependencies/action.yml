@@ -15,7 +15,12 @@ runs:
           node_modules
           apps/*/node_modules
           packages/*/node_modules
-        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('package-lock.json') }}
+        # The mobile postinstall applies apps/mobile/patches inside node_modules, so a patch change needs a new tree.
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('package-lock.json', 'apps/mobile/patches/**') }}
+    # Nothing installs, and no install script runs, before the lockfile is checked.
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: npx --yes lockfile-lint@5.0.1 --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity
     - if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: npm ci

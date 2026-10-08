@@ -37,6 +37,7 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
   # The JavaScript checks run as three parallel jobs; the `javascript` job below is the required check that gathers them.
   static:
     runs-on: ubuntu-latest
@@ -69,13 +70,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Check lockfile sources and integrity
-        run: npx --yes lockfile-lint --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity
+        run: npx --yes lockfile-lint@5.0.1 --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity
       - name: Install dependencies
         uses: ./.github/actions/install-dependencies
       - name: Verify package signatures
         run: npm audit signatures
   unit:
-    name: unit (${{ matrix.shard }}/2)
+    name: unit (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -88,7 +89,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/install-dependencies
       - name: Test
-        run: npm test -- --unit --shard ${{ matrix.shard }}/2
+        run: npm test -- --unit --shard ${{ matrix.shard }}/${{ strategy.job-total }}
   javascript:
     # The required check: green only when every JavaScript job passed.
     if: always()
@@ -174,10 +175,10 @@ jobs:
           case "$RESULT" in success|skipped) exit 0 ;; *) exit 1 ;; esac
   desktop-checks:
     # The Electron checks run one at a time (each boots Vite and Electron), so they are split across runners.
-    name: desktop-checks (${{ matrix.shard }}/8)
+    name: desktop-checks (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
-    timeout-minutes: 45
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -192,7 +193,7 @@ jobs:
       - name: Install display and Electron libraries
         run: |
           packages="xvfb libgbm1 libgtk-3-0t64 libnss3 libasound2t64 lsof"
-          if node scripts/test.cjs --electron --list --shard ${{ matrix.shard }}/8 | grep -q test-chat-titles; then packages="$packages ffmpeg"; fi
+          if node scripts/test.cjs --electron --list --shard ${{ matrix.shard }}/${{ strategy.job-total }} | grep -q test-chat-titles; then packages="$packages ffmpeg"; fi
           missing=$(for package in $packages; do
             dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed' || echo "$package"
           done)
@@ -205,7 +206,7 @@ jobs:
           MILAGRE_SCREENSHOT_DIR: ${{ runner.temp }}/electron-screenshots
           LIBGL_ALWAYS_SOFTWARE: "1"
           ELECTRON_ENABLE_LOGGING: "1"
-        run: xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron --shard ${{ matrix.shard }}/8
+        run: xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron --shard ${{ matrix.shard }}/${{ strategy.job-total }}
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

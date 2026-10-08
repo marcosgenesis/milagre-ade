@@ -90,10 +90,12 @@ export interface AgentSession {
   worktree_id: number;
   agent_name: string;
   status: SessionStatus;
-  /** The agent this chat is bound to once it has messages. */
+  /** The agent this chat runs on now. A send on the other provider hands the chat off in place (see handoff.mjs). */
   provider?: ModelProvider;
-  /** Claude session id or Codex thread id, used to resume the agent's memory. */
+  /** Claude session id or Codex thread id of the current `provider`, used to resume the agent's memory. */
   native_session_id?: string;
+  /** Session ids of the providers this chat is not on right now, so switching back resumes them. */
+  native_sessions?: Partial<Record<ModelProvider, string>>;
   subagents?: Subagent[];
   /** Automatic title from the first message; a manual title takes precedence. */
   generatedTitle?: string;
@@ -109,13 +111,13 @@ export interface AgentSession {
   pinned?: boolean;
   /** Where a pinned chat sits among the pinned ones, lowest first. Kept when unpinned; only read while pinned. */
   pin_order?: number;
-  /** The chat this one was handed over to, on the other provider. */
+  /** Legacy (before in-place handoff): the chat this one was handed over to, on the other provider. Read, never written. */
   handedOverTo?: number;
-  /** The chat this one was handed over from. */
+  /** Legacy (before in-place handoff): the chat this one was handed over from. Read, never written. */
   handedOverFrom?: number;
-  /** Set while the handover brief is being written; the composer waits. */
+  /** Legacy (before in-place handoff): set while the handover brief is being written; the composer waits. Read, never written. */
   handoverPending?: boolean;
-  /** The handover brief, waiting in the composer for the user to review and send. Removed with the first message. Written by the main process only. */
+  /** Legacy (before in-place handoff): the handover brief, waiting in the composer for the user to review and send. Read, never written. */
   handoverDraft?: string;
   /** Set when a quit stopped this chat's turn: when, so a stale one waits for Continue instead of resuming by itself. */
   resumeTurn?: { stoppedAt?: number };
@@ -180,7 +182,7 @@ export interface ChatMessage {
   model?: string;
   images?: ImageAttachment[];
   files?: string[];
-  /** On the first message of a handed-over chat: the brief it was sent with, ahead of `body`. */
+  /** Legacy (before in-place handoff): on the first message of a handed-over chat, the brief it was sent with, ahead of `body`. Read, never written. */
   handoverBrief?: string;
   /** How the agent turn that produced this reply ended. */
   outcome?: "completed" | "failed" | "cancelled";
@@ -189,13 +191,23 @@ export interface ChatMessage {
   operationId?: string;
 }
 
+/** A provider switch inside a chat, shown as a divider before the message that caused it. `brief` is what the new provider was sent. */
+export type HandoffContext = {
+  kind: "handoff";
+  from: { provider: ModelProvider; model?: string };
+  to: { provider: ModelProvider; model?: string };
+  status: "preparing" | "done" | "failed";
+  brief?: string;
+  transcriptPath?: string;
+};
+
+/** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, a handoff, or a legacy handover note. */
+export type ChatContext = LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
+
 /**
  * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
  * report coming back, a Negotiation's agreement, or a notice about one. `from` is the other Chat's key.
  */
-/** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, or a handover note. */
-export type ChatContext = LinkedContext | { kind: "git-action" } | "handover" | null;
-
 export type LinkedContext =
   | { kind: "delegation"; delegationId: string; from: string; fromLabel: string; negotiation?: { id: string; round: number } }
   | {
@@ -442,12 +454,6 @@ export interface ChatSendRequest {
   /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
   tldrEnabled?: boolean;
 }
-
-/** Hands a chat over to the other provider: the settings are the new chat's, `sessionId` is the chat being left. */
-export type ChatHandoverRequest = Pick<
-  ChatSendRequest,
-  "projectPath" | "provider" | "model" | "permissionMode" | "effort" | "ultracode" | "fastMode" | "replies" | "tldrEnabled"
-> & { sessionId: number };
 
 /** A code editor found on this Mac. */
 export interface EditorInfo {

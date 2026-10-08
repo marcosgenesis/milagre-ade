@@ -318,7 +318,7 @@ function createRuntime(options) {
     await chats.resumeInterrupted(projectPath, state).catch((error) => console.warn("Milagre couldn't resume a chat:", error.message));
     state = await states.get(projectPath);
     chatTitles.resume(projectPath, state);
-    void chats.recoverHandovers(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handover:", error.message));
+    void chats.recoverHandoffs(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handoff:", error.message));
     void diffs.refresh(projectPath).catch(() => {});
     return { path: projectPath, name: projectName(projectPath), state };
   }
@@ -752,14 +752,6 @@ function createRuntime(options) {
     if (!scopeStates.has(projectPath)) throw new Error("Open the project before continuing its chats.");
     return chats.resumeChat(projectPath, Number(sessionId));
   });
-  commands.handle("chat:handover", (_event, request) => {
-    if (!scopeStates.has(request?.projectPath)) throw new Error("Open the project before handing over its chats.");
-    return chats.handover(request);
-  });
-  commands.handle("chat:handover-draft", (_event, projectPath, sessionId, text) => {
-    if (!scopeStates.has(projectPath) || typeof sessionId !== "number" || typeof text !== "string") return undefined;
-    return chats.setHandoverDraft(projectPath, sessionId, text).then(() => {});
-  });
   commands.handle("chat:patch", (_event, projectPath, sessionId, patch) =>
     scopeStates.has(projectPath) ? editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined,
   );
@@ -813,6 +805,8 @@ function createRuntime(options) {
   });
 
   commands.handle("agent:interrupt", async (_event, chatId) => {
+    // A handoff still writing its brief has no agent to stop: cancelling it is the whole interrupt.
+    if (await chats.cancelHandoff(chatId)) return;
     await worktreeSetups.cancel(chatId);
     await linked.stop({ chatKey: chatId });
     await agents.interrupt(chatId);
@@ -1069,7 +1063,7 @@ function createRuntime(options) {
         await Promise.allSettled([worktreeSetups.cancelAll(), agents.closeAll()]);
         await Promise.allSettled([...starting]);
         await agents.closeAll();
-        await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
+        await Promise.allSettled([...background, ...chatTitles.pending.values()]);
       }
       while (background.size) await Promise.allSettled([...background]);
       await states.close();

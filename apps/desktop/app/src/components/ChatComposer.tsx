@@ -30,9 +30,9 @@ import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
-import { HandoverBriefChip, HandoverFromLabel, HandoverLinkBar, HandoverNote } from "./Handover";
+import { HandoffDivider } from "./Handover";
 import { LinkedMessageHeader, linkedContext } from "./LinkedMessage";
-import { otherProvider, type HandoverLinks } from "../lib/handover";
+import { isHandoff } from "@milagre/shared/handoff";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
@@ -121,9 +121,11 @@ const MessageSection = memo(function MessageSection({
   waitingStepIds = [],
   animate = false,
   onOpenChat,
+  models,
 }: {
   message: AppChatMessage;
   isUser: boolean;
+  models: ModelOption[];
   onRecommendationSelect: (option: string) => void;
   onUpdateCli?: (provider: ModelProvider) => void;
   updatingCli?: ModelProvider | null;
@@ -138,6 +140,7 @@ const MessageSection = memo(function MessageSection({
   /** Opens another Chat by key, from a message it sent across a Link. */
   onOpenChat?: (chatKey: string) => void;
 }) {
+  if (isHandoff(message)) return <HandoffDivider context={message.context} models={models} />;
   const linked = linkedContext(message);
   // A message another Chat sent sits apart from the user's own: left-aligned, with its sender over it.
   // Feedback sent from the design canvas shows as a card, not as the text the agent reads.
@@ -162,11 +165,7 @@ const MessageSection = memo(function MessageSection({
       <div
         className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : feedback ? "w-full max-w-md" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
       >
-        <Attachments
-          images={isUser ? message.images : message.images?.filter((image) => !image.sourcePath)}
-          files={message.files}
-          leading={isUser && message.handoverBrief !== undefined && <HandoverBriefChip brief={message.handoverBrief} />}
-        />
+        <Attachments images={isUser ? message.images : message.images?.filter((image) => !image.sourcePath)} files={message.files} />
         {feedback ? (
           <DesignFeedbackCard feedback={feedback} messageId={message.id} />
         ) : isUser ? (
@@ -226,6 +225,7 @@ const MessageTranscript = memo(function MessageTranscript({
   cliStatus,
   onOpenLinkedChat,
   findOpen,
+  models,
 }: Pick<
   ChatComposerProps,
   | "messages"
@@ -241,6 +241,7 @@ const MessageTranscript = memo(function MessageTranscript({
   | "cliStatus"
   | "onOpenLinkedChat"
   | "findOpen"
+  | "models"
 >) {
   const chatId = messages[0]?.session_id ?? "new";
   // The messages a chat opens with don't animate in; later ones do. A new chat's first message counts as later.
@@ -319,6 +320,7 @@ const MessageTranscript = memo(function MessageTranscript({
           waitingStepIds={message === streamingMessage ? waitingStepIds : undefined}
           animate={!message.clientMessageId && !openingIds.has(message.id)}
           onOpenChat={onOpenLinkedChat}
+          models={models}
         />
       ))}
     </>
@@ -370,16 +372,10 @@ interface ChatComposerProps {
   asking?: boolean;
   /** The model the open chat's running turn uses; the picker may already show another. */
   runModelName?: string;
+  /** The provider the open chat runs on; the picker may already show the other one. */
+  sessionProvider?: ModelProvider;
   /** The active turn's start time, independent of the chat view. */
   runStartedAt?: number;
-  lockedProvider?: ModelProvider;
-  /** Hands this chat over to the other provider in a new chat. */
-  onHandover?: (provider: ModelProvider) => void;
-  /** The chat has messages, so it can be handed over. */
-  canHandover?: boolean;
-  /** A handed-over chat's brief while it waits for the first message; `chatId` is the chat's key. */
-  handoverBrief?: { chatId: string; brief: string; onSave: (text: string) => Promise<void> };
-  handover?: HandoverLinks & { onOpen: (sessionId: number) => void };
   /** Opens the Chat a Delegation, report or agreement came from, in whichever Project it is. */
   onOpenLinkedChat?: (chatKey: string) => void;
   /** A chat a quit stopped longer ago than Milagre resumes by itself: Continue starts its turn again. */
@@ -610,12 +606,8 @@ export function ChatComposer({
   waitingStepIds,
   asking = false,
   runModelName,
+  sessionProvider,
   runStartedAt,
-  lockedProvider,
-  onHandover,
-  canHandover = false,
-  handoverBrief,
-  handover,
   onOpenLinkedChat,
   resume,
   models,
@@ -662,11 +654,7 @@ export function ChatComposer({
     requestAnimationFrame(() => root.current?.querySelector<HTMLButtonElement>("[data-slot=subagent-track] > button")?.focus());
   }, []);
   // A first message, including its preview while setup runs, opens the conversation layout.
-  const isNewChat = messages.length === 0 && !handover?.live;
-  // The note shows with the brief, until it is sent or the note is dismissed, by chat key.
-  const [dismissedNotes, setDismissedNotes] = useState<string[]>([]);
-  const noteKey = handoverBrief?.chatId;
-  const showHandoverNote = noteKey !== undefined && lockedProvider !== undefined && !dismissedNotes.includes(noteKey);
+  const isNewChat = messages.length === 0;
   const workingModelName = runModelName ?? selectedModel.name;
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -739,7 +727,6 @@ export function ChatComposer({
                 viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
               >
                 <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
-                  {handover?.from && <HandoverFromLabel from={handover.from} onOpen={handover.onOpen} />}
                   <MessageTranscript
                     findOpen={findOpen}
                     messages={messages}
@@ -754,6 +741,7 @@ export function ChatComposer({
                     updatingCli={updatingCli}
                     cliStatus={cliStatus}
                     onOpenLinkedChat={onOpenLinkedChat}
+                    models={models}
                   />
 
                   {isSending && (
@@ -761,12 +749,6 @@ export function ChatComposer({
                       <ThinkingIndicator startedAt={runStartedAt} label={waitingForSubagents ? "Waiting on subagents" : `Working with ${workingModelName}`} />
                     </div>
                   )}
-                  {handover?.pending && (
-                    <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
-                      <ThinkingIndicator showLabel label={`Preparing handover from ${handover.from?.title ?? "the previous chat"}…`} />
-                    </div>
-                  )}
-                  {handover?.to && !isSending && <HandoverLinkBar to={handover.to} onOpen={handover.onOpen} />}
                   {resume && !isSending && (
                     <div data-resume-bar className="flex w-full items-center gap-3 rounded-control border border-line px-3 py-2 text-[12px] text-ink-2">
                       <span className="min-w-0 flex-1">Milagre closed while this chat was working.</span>
@@ -822,7 +804,7 @@ export function ChatComposer({
             <SubagentTrack
               key={chatId}
               agents={subagents}
-              provider={lockedProvider ?? selectedModel.provider}
+              provider={sessionProvider ?? selectedModel.provider}
               onOpenCanvas={() => setCanvasChat(chatId)}
               onArchiveFinished={onArchiveFinishedSubagents}
               onArchive={onArchiveSubagent}
@@ -843,14 +825,6 @@ export function ChatComposer({
               />
             )}
             {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
-            {showHandoverNote && lockedProvider && (
-              <HandoverNote
-                from={otherProvider(lockedProvider)}
-                to={lockedProvider}
-                permissionMode={permissionMode}
-                onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])}
-              />
-            )}
             {approval && <div className="mb-2 w-full">{approval}</div>}
             <PromptComposer
               imageDraft={imageDraft}
@@ -861,10 +835,6 @@ export function ChatComposer({
               onStop={onStop}
               sendBlocked={sendBlocked}
               running={isSending}
-              lockedProvider={lockedProvider}
-              onHandover={onHandover}
-              canHandover={canHandover}
-              handoverBrief={handoverBrief}
               models={models}
               cliStatus={cliStatus}
               onModelPickerOpen={onModelPickerOpen}

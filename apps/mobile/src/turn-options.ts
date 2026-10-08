@@ -8,6 +8,8 @@ export type TurnPreferences = {
   effort: string;
   fastMode: boolean;
   ultracode?: boolean;
+  /** The Chat's provider when `provider` was picked as a switch; the pick only holds while the Chat is still on it. */
+  pickedOn?: ModelProvider;
   permissionMode: PermissionMode;
 };
 export const defaultPreferences: TurnPreferences = { provider: "codex", model: "", effort: "high", fastMode: false, permissionMode: "ask" };
@@ -36,4 +38,41 @@ export function sendOptions(model: MobileModel, preferences: Pick<TurnPreference
     ...(model.ultracode && preferences.ultracode ? { ultracode: true } : {}),
     permissionMode: preferences.permissionMode,
   };
+}
+
+/**
+ * Which provider and model the next send uses. A picked provider is an override that only holds while the Chat is still
+ * on the provider it was picked against; once the Chat moves (a switch done elsewhere) or the pick is spent, the Chat
+ * decides. A Chat with no provider yet (new) follows the saved preferences.
+ */
+export function turnTarget(
+  saved: TurnPreferences | undefined,
+  chatProvider: ModelProvider | undefined,
+  defaults: Pick<TurnPreferences, "provider">,
+): { provider: ModelProvider; model: string; picked: boolean } {
+  if (!chatProvider) return { provider: saved?.provider ?? defaults.provider, model: saved?.model ?? "", picked: false };
+  const picked = !!saved && saved.pickedOn === chatProvider && saved.provider !== chatProvider;
+  const provider = picked ? saved.provider : chatProvider;
+  return { provider, model: saved && saved.provider === provider ? saved.model : "", picked };
+}
+/**
+ * Preferences after a send: a pick that was carried is spent, so the Chat follows its own provider from here. A send
+ * that steered a running turn spends nothing: the turn keeps its provider, so the pick still waits for the next one.
+ */
+export function afterSend(
+  saved: TurnPreferences,
+  target: { provider: ModelProvider; picked: boolean },
+  chatProvider: ModelProvider | undefined,
+  model: string,
+  steered: boolean,
+): TurnPreferences {
+  if (steered && target.picked) return saved;
+  const { pickedOn: _spent, ...rest } = saved;
+  if (target.picked && chatProvider) return { ...rest, provider: chatProvider, model: "" };
+  return { ...rest, provider: target.provider, model };
+}
+/** Preferences after the model sheet's Done: the provider is recorded as a pick only when it differs from the Chat's. */
+export function afterSheet(draft: TurnPreferences, chatProvider: ModelProvider | undefined): TurnPreferences {
+  const { pickedOn: _old, ...rest } = draft;
+  return chatProvider && draft.provider !== chatProvider ? { ...rest, pickedOn: chatProvider } : rest;
 }

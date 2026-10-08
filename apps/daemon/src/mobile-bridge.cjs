@@ -140,8 +140,8 @@ function forChatList(project, runs) {
   }
   const sessions = Object.fromEntries(
     Object.entries(project.state.sessions).map(([id, session]) => {
-      const { subagents, handoverDraft, ...metadata } = session;
-      return [id, { ...metadata, ...(handoverDraft === undefined ? {} : { handoverDraft: "" }) }];
+      const { subagents, ...metadata } = session;
+      return [id, metadata];
     }),
   );
   // Keep listing/order and failure metadata, plus every input identity: an acknowledgement may still

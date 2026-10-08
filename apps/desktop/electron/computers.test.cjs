@@ -413,7 +413,10 @@ test("the runtime's events are passed on with the computer's id, except its conn
 test("a keychain that can't be opened refuses the computer without retrying", async (t) => {
   const mac = fakeMac();
   const { computers, state } = await paired(t, mac, { safeStorage: { ...keychain, isEncryptionAvailable: () => false } });
-  await assert.rejects(computers.add(macLink(mac), { name: "studio" }), { code: "keys", message: /lost its keys|can't keep keys/ });
+  await assert.rejects(computers.add(macLink(mac), { name: "studio" }), {
+    code: "keys",
+    message: "This Mac can't keep keys in its keychain, so it can't pair with computers.",
+  });
   assert.equal(mac.urls.length, 0);
   assert.equal(state(), undefined);
 });
@@ -526,4 +529,36 @@ test("a computer that keeps refusing is dialed less and less often, and a connec
   await computers.setEnabled(false);
   assert.ok(Date.now() - started < steps[0], "off does not wait out the backoff");
   assert.equal(mac.open().length, 0);
+});
+
+test("a keychain that can't be opened for a computer already here is shown and retried, not given up on", async (t) => {
+  const mac = fakeMac();
+  const first = await paired(t, mac);
+  await first.computers.add(macLink(mac), { name: "studio" });
+  await first.computers.close();
+  // A new launch: the keychain is locked at first.
+  let available = false;
+  const computers = createComputers({
+    dataDir: first.dataDir,
+    safeStorage: { ...keychain, isEncryptionAvailable: () => available },
+    name: () => "desk",
+    createSocket: mac.createSocket,
+    fetch: async () => ({ ok: false }),
+    reconnectMs: 10,
+    offlineAfterMs: 5000,
+    backoffMs: [10],
+    networkMs: 60_000,
+  });
+  t.after(() => computers.close());
+  await computers.loaded;
+  await computers.setEnabled(true);
+  const state = () => computers.list()[0].state;
+  await until(() => state() === "reconnecting" && computers.list()[0].message !== null, "the keychain's words");
+  assert.equal(computers.list()[0].message, "This Mac can't keep keys in its keychain, so it can't pair with computers.");
+  const opened = mac.urls.length;
+  // The keychain comes back (a prompt allowed, the login unlocked): the next retry connects.
+  available = true;
+  await until(() => state() === "online", "online once the keychain opens");
+  assert.equal(mac.urls.length, opened + 1);
+  assert.equal(computers.list()[0].message, null);
 });

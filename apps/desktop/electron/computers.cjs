@@ -25,8 +25,10 @@ const SHOWN = new Set(["full", "outdated", "kind", "bad-hello", "busy"]);
 const NOT_A_LINK = "That isn't a Milagre pairing link. Copy it from Settings › Devices on the other Mac.";
 const TUNNEL_LINK = "This link reaches its Mac through a Cloudflare tunnel, which computers can't use yet.";
 
-// A refusal retrying can't fix, or a keychain that can't open this Mac's keys (an Error with code "keys").
-const isFinal = (error) => (error instanceof PeerError && error.final) || error?.code === "keys";
+// A refusal retrying can't fix. A keychain that can't open this Mac's keys (an Error with code "keys", not a PeerError) is
+// final only while adding: a computer already here keeps retrying, as the keychain may be unlocked or allowed later.
+const isFinal = (error) => error instanceof PeerError && error.final;
+const keychainProblem = (error) => (error?.code === "keys" && !(error instanceof PeerError) ? error.message : null);
 
 const hostOf = (url) => {
   try {
@@ -298,7 +300,8 @@ function createComputers({
     }
     recovered(entry);
     const computer = store.get(entry.id);
-    entry.message = error instanceof PeerError && SHOWN.has(error.code) && computer ? computerProblem(error.code, { name: computer.name }) : null;
+    entry.message =
+      error instanceof PeerError && SHOWN.has(error.code) && computer ? computerProblem(error.code, { name: computer.name }) : keychainProblem(error);
     if (entry.state !== "reconnecting" && entry.state !== "offline") {
       entry.state = "reconnecting";
       clearTimeout(entry.offlineTimer);
@@ -499,12 +502,9 @@ function createComputers({
           });
         } catch (error) {
           const code = error instanceof PeerError ? error.code : (error?.code ?? "lost");
+          // A keychain failure is worded by the keys module; a refusal by what the computer said.
           const words =
-            code === "cancelled"
-              ? "Cancelled."
-              : error instanceof PeerError || code === "keys"
-                ? computerProblem(code, { name: pairing.name, pairing: true })
-                : error.message;
+            code === "cancelled" ? "Cancelled." : error instanceof PeerError ? computerProblem(code, { name: pairing.name, pairing: true }) : error.message;
           throw Object.assign(new Error(words), { code });
         }
         if (replaces) await removeComputer(replaces);

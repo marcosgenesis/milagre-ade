@@ -601,3 +601,9 @@ test("Codex: turn/plan/updated maps the plan to tasks and respects thread and tu
   assert.deepEqual(mapCodexNotification("turn/plan/updated", params, { ...codexState(), turnId: "t-2" }), []);
   assert.deepEqual(mapCodexNotification("turn/plan/updated", { ...params, plan: [] }, codexState()), [{ type: "tasks-updated", tasks: [] }]);
 });
+
+test("the design instructions point the agent at the bundled design skill, which exists", () => {
+  const file = /read the bundled design skill at (\S+SKILL\.md)/.exec(MILAGRE_INSTRUCTIONS)?.[1];
+  assert.ok(file, "the instructions name the skill's file");
+  assert.match(require("node:fs").readFileSync(file, "utf8"), /^name: design$/m);
+});

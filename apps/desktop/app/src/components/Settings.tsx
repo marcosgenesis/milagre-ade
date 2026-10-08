@@ -1,6 +1,7 @@
 import { showUpdateNotice } from "./UpdateNotice";
 import { ProjectAccountsGroup, ProjectAccountsSettings } from "./ProjectAccountsSettings";
 import { AccountsSettings } from "./AccountsSettings";
+import { Switch } from "./Switch";
 import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
@@ -150,23 +151,6 @@ function Row({ label, description, children }: { label: string; description?: st
   );
 }
 
-function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-label={label}
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative flex h-5 w-8 items-center rounded-full transition-colors duration-150 ${checked ? "bg-ink" : "bg-line-strong"}`}
-    >
-      <span
-        className={`absolute left-0.5 size-4 rounded-full bg-surface shadow-card transition-transform duration-150 ${checked ? "translate-x-3" : "translate-x-0"}`}
-      />
-    </button>
-  );
-}
-
 function PercentSlider({
   label,
   value,
@@ -216,7 +200,7 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
             width={280}
             value={resolveModel(models, settings.defaultModelId, providerForId(settings.defaultModelId)).id}
             onChange={(defaultModelId) => updateSettings({ defaultModelId })}
-            options={PROVIDERS.flatMap((provider) =>
+            options={PROVIDERS.filter((provider) => !settings.hiddenProviders.includes(provider)).flatMap((provider) =>
               models
                 .filter((model) => model.provider === provider)
                 .map((model) => ({

@@ -6,6 +6,7 @@ import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Attachment01Icon, FlashIcon,
 import type { AgentCliStatus, ContextUsage, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { effortCopy, PERMISSION_MODES } from "../model";
 import Tooltip from "./primitives/Tooltip";
+import { useSettings } from "../lib/settings";
 import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
@@ -147,6 +148,9 @@ export function PromptComposer({
   const effortLabel = ultracode ? "Ultracode" : effortName;
   const canUseFastMode = capability.fastMode;
   const [provider, setProvider] = useState<ModelProvider>(selectedModel.provider);
+  const { hiddenProviders } = useSettings();
+  // A hidden provider keeps its tab while the chat runs on it, so the current model stays reachable.
+  const pickerProviders = PROVIDERS.filter((item) => !hiddenProviders.includes(item) || item === selectedModel.provider);
   // The provider tab follows the selected model, which follows the open chat.
   useEffect(() => {
     setProvider(selectedModel.provider);
@@ -467,9 +471,9 @@ export function PromptComposer({
               <div
                 data-provider-tabs
                 className="grid gap-1 rounded-control bg-inset p-1"
-                style={{ gridTemplateColumns: `repeat(${PROVIDERS.length}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `repeat(${pickerProviders.length}, minmax(0, 1fr))` }}
               >
-                {PROVIDERS.map((item) => (
+                {pickerProviders.map((item) => (
                   <button
                     key={item}
                     type="button"

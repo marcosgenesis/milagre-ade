@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
-import type { PermissionMode } from "../model";
+import type { ModelProvider, PermissionMode } from "../model";
+import { PROVIDERS } from "@milagre/shared/providers";
 import type { ChatOrder } from "./chat-list";
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -41,6 +42,8 @@ export interface AppSettings {
   panelTranslucency: number;
   /** Keep the dot grid while translucent. */
   translucentDots: boolean;
+  /** Providers left out of the model picker and the default model list. */
+  hiddenProviders: ModelProvider[];
 }
 
 const STORAGE_KEY = "milagre-settings";
@@ -73,6 +76,7 @@ const DEFAULTS: AppSettings = {
   windowTranslucency: 80,
   panelTranslucency: 40,
   translucentDots: true,
+  hiddenProviders: [],
 };
 
 function load(): AppSettings {
@@ -104,6 +108,9 @@ function load(): AppSettings {
       windowTranslucency: clampTo(saved.windowTranslucency, WINDOW_TRANSLUCENCY_RANGE, DEFAULTS.windowTranslucency),
       panelTranslucency: clampTo(saved.panelTranslucency, PANEL_TRANSLUCENCY_RANGE, DEFAULTS.panelTranslucency),
       translucentDots: typeof saved.translucentDots === "boolean" ? saved.translucentDots : DEFAULTS.translucentDots,
+      hiddenProviders: Array.isArray(saved.hiddenProviders)
+        ? PROVIDERS.filter((provider) => saved.hiddenProviders!.includes(provider))
+        : DEFAULTS.hiddenProviders,
     };
   } catch {
     return DEFAULTS;

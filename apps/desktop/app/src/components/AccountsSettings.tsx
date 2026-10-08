@@ -3,6 +3,8 @@ import type { AccountsSnapshot, CliStatus, ModelProvider } from "@milagre/shared
 import type { CliProgress } from "../electron";
 import { accountType, providerName } from "@milagre/shared/providers";
 import { ProviderLogo } from "./ProviderLogo";
+import { Switch } from "./Switch";
+import { updateSettings, useSettings } from "../lib/settings";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Briefcase01Icon, UserIcon, UserMultipleIcon, CheckmarkCircle02Icon, CircleIcon, Delete02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 
@@ -98,6 +100,7 @@ export function AccountsSettings() {
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState<ModelProvider | null>(null);
   const [label, setLabel] = useState("");
+  const { hiddenProviders } = useSettings();
   const load = useCallback(async (refresh = false) => {
     try {
       setSnapshot(await window.milagre.listAccounts(refresh));
@@ -165,16 +168,31 @@ export function AccountsSettings() {
               <ProviderLogo provider={group.provider} size={20} />
               {providerName(group.provider)}
             </h2>
-            <button
-              className={button}
-              disabled={busy || signingIn}
-              onClick={() => {
-                setAdding(group.provider);
-                setLabel("");
-              }}
-            >
-              Add account
-            </button>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-[12px] text-ink-3">
+                Show in model picker
+                <Switch
+                  label={`Show ${providerName(group.provider)} in model picker`}
+                  checked={!hiddenProviders.includes(group.provider)}
+                  disabled={!hiddenProviders.includes(group.provider) && snapshot.providers.every((p) => p === group || hiddenProviders.includes(p.provider))}
+                  onChange={(show) =>
+                    updateSettings({
+                      hiddenProviders: show ? hiddenProviders.filter((p) => p !== group.provider) : [...hiddenProviders, group.provider],
+                    })
+                  }
+                />
+              </label>
+              <button
+                className={button}
+                disabled={busy || signingIn}
+                onClick={() => {
+                  setAdding(group.provider);
+                  setLabel("");
+                }}
+              >
+                Add account
+              </button>
+            </div>
           </div>
           {group.provider === "antigravity" && <AntigravityRow />}
           <div className="grid gap-2 p-3" role="group" aria-label={`${providerName(group.provider)} accounts`}>

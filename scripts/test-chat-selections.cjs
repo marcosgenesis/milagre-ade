@@ -118,36 +118,36 @@ async function browserChecks() {
     await click("Full");
     assert.equal(await evaluate(`JSON.parse(localStorage.getItem('milagre-settings')).defaultPermissionMode`), "full");
     await click("main");
-    await waitFor(`!!document.querySelector('input[placeholder="Search branches…"]')`);
-    await evaluate(`document.querySelector('input[placeholder="Search branches…"]').focus()`);
+    await waitFor(`!!document.querySelector('input[placeholder="Search worktrees"]')`);
+    await evaluate(`document.querySelector('input[placeholder="Search worktrees"]').focus()`);
     const key = (name) =>
       evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(name)}, bubbles: true, cancelable: true }))`);
     await key("ArrowDown");
-    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Down from search focuses first branch");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Down from search focuses first worktree");
     await key("ArrowDown");
-    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Down advances to next branch");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Down advances to next worktree");
     await key("ArrowUp");
-    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Up returns to previous branch");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Up returns to previous worktree");
     await key("ArrowUp");
-    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Up wraps to the last branch");
-    async function searchBranches(query) {
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Up wraps to the last worktree");
+    async function searchWorktrees(query) {
       await evaluate(`(() => {
-        const input = document.querySelector('input[placeholder="Search branches…"]');
+        const input = document.querySelector('input[placeholder="Search worktrees"]');
         input.focus();
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(query)});
         input.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
     }
-    await searchBranches("no-matching-branch");
-    await waitFor(`document.body.textContent.includes('No branches found.')`);
+    await searchWorktrees("no-matching-branch");
+    await waitFor(`document.body.textContent.includes('No worktrees found.')`);
     await key("ArrowDown");
     await key("ArrowUp");
-    await searchBranches("dev");
+    await searchWorktrees("dev");
     await waitFor(`document.querySelectorAll('[data-picker-row]').length === 1`);
     await key("ArrowDown");
     assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Navigation follows the filtered results");
     await key("Enter");
-    await waitFor(`!document.querySelector('input[placeholder="Search branches…"]')`);
+    await waitFor(`!document.querySelector('input[placeholder="Search worktrees"]')`);
     await newChat();
     await waitFor(`document.querySelector('[data-new-chat-pickers]').textContent.includes('develop')`);
     await click("Local");

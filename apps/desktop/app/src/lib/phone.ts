@@ -31,6 +31,14 @@ export function phoneLanLine(status: PhoneStatus | null): string | null {
   return `Reachable at ${status.lan.addresses.join(", ")}`;
 }
 
+/**
+ * Under the Phones list. Remove drops a phone's local and relay routes, but a phone on the Cloudflare tunnel
+ * authenticates with the shared token, so it keeps access until the token changes.
+ */
+export function cloudflarePhonesNote(status: PhoneStatus | null): string | null {
+  return status?.remote === "cloudflare" ? "Phones on your Cloudflare tunnel keep access until Reset access." : null;
+}
+
 /** Whether new phones may still pair, and for how many whole minutes (rounded up). Only a relay phone has a window. */
 export function pairingWindow(status: PhoneStatus | null, now: number): { open: boolean; minutes: number } | null {
   if (!status || status.remote !== "relay" || status.pairingUntil === undefined) return null;

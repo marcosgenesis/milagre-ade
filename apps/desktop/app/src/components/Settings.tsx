@@ -4,7 +4,7 @@ import { AccountsSettings } from "./AccountsSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -30,7 +30,7 @@ import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
-import { pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
+import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
 import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from "../lib/devices";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
@@ -441,6 +441,12 @@ function usePairedDevices() {
   const [list, setList] = useState<PairedDevice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // A list the caller already has (a removal's answer): shown at once, and an earlier read error no longer applies.
+  const replace = useCallback((devices: PairedDevice[]) => {
+    setList(devices);
+    setError(null);
+    setNow(Date.now());
+  }, []);
   useEffect(() => {
     let live = true;
     const read = () => {
@@ -465,7 +471,7 @@ function usePairedDevices() {
       window.clearInterval(timer);
     };
   }, []);
-  return { list, setList, error, now };
+  return { list, replace, error, now };
 }
 
 const SECONDARY_BUTTON =
@@ -480,6 +486,7 @@ function DeviceGroup({
   busy,
   empty,
   error,
+  footer,
   onRemove,
 }: {
   title: string;
@@ -488,6 +495,7 @@ function DeviceGroup({
   busy: boolean;
   empty?: string;
   error?: string | null;
+  footer?: string | null;
   onRemove: (key: string) => void;
 }) {
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -554,6 +562,11 @@ function DeviceGroup({
           </div>
         );
       })}
+      {footer && (
+        <p data-devices-note className="px-4 py-3 text-[12px] text-ink-3">
+          {footer}
+        </p>
+      )}
     </Group>
   );
 }
@@ -585,7 +598,7 @@ function DevicesSettings() {
     setError(null);
     window.milagre
       .removeDevice(key)
-      .then(paired.setList, (failure) => setError(ipcErrorMessage(failure)))
+      .then(paired.replace, (failure) => setError(ipcErrorMessage(failure)))
       .finally(() => setBusy(false));
   };
   const copyLink = () => {
@@ -715,7 +728,16 @@ function DevicesSettings() {
         </Group>
       )}
       {computers.length > 0 && <DeviceGroup title="Computers" devices={computers} now={paired.now} busy={busy} onRemove={removeDevice} />}
-      <DeviceGroup title="Phones" devices={phones} now={paired.now} busy={busy} empty="No phones yet" error={paired.error} onRemove={removeDevice} />
+      <DeviceGroup
+        title="Phones"
+        devices={phones}
+        now={paired.now}
+        busy={busy}
+        empty={paired.list === null ? undefined : "No phones yet"}
+        error={paired.error}
+        footer={cloudflarePhonesNote(status)}
+        onRemove={removeDevice}
+      />
       {status?.enabled && (
         <Group title="Reset">
           <Row

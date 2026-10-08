@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "./phone.ts";
+import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "./phone.ts";
 
 test("the status line says what is happening and where the phone can reach this Mac", () => {
   assert.equal(phoneStatusLine(null), "Checking…");
@@ -54,4 +54,11 @@ test("phoneLanLine says where a phone on the same network reaches this Mac", () 
     phoneLanLine({ ...on, lan: { enabled: true, addresses: [], error: "listen EADDRINUSE" } }),
     "Couldn't listen on the local network: listen EADDRINUSE",
   );
+});
+
+test("only phones on a Cloudflare tunnel get the note that Remove doesn't cut them off", () => {
+  assert.equal(cloudflarePhonesNote(null), null);
+  assert.equal(cloudflarePhonesNote({ enabled: true, state: "on", remote: "relay" }), null);
+  assert.equal(cloudflarePhonesNote({ enabled: true, state: "on", remote: "none" }), null);
+  assert.equal(cloudflarePhonesNote({ enabled: true, state: "on", remote: "cloudflare" }), "Phones on your Cloudflare tunnel keep access until Reset access.");
 });

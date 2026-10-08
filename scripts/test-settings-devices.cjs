@@ -185,6 +185,8 @@ async function browserChecks() {
     const computersShown = `[...document.querySelectorAll('h2')].some((h) => h.textContent === 'Computers')`;
     await waitFor(`document.querySelector('[data-devices-empty]')?.textContent === 'No phones yet'`);
     assert.equal(await evaluate(computersShown), false);
+    // The Cloudflare note is for a Cloudflare tunnel only (unit-tested in phone.test.ts); this host reaches phones through the relay.
+    assert.equal(await evaluate(`!!document.querySelector('[data-devices-note]')`), false);
     await hostDevices().add(phoneKey, { kind: "phone", name: "Victor's iPhone" });
     await waitFor(`document.querySelector('[data-device-row="phone"]')?.textContent.includes("Victor's iPhone")`);
     assert.equal(await evaluate(`document.querySelector('[data-device-row="phone"] [data-device-line]').textContent`), "Last seen just now");

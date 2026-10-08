@@ -17,8 +17,11 @@ const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession, recoverCodexSubagents } = require("./agents/codex-provider.cjs");
+const { AcpSession } = require("./agents/acp-session.cjs");
+const { antigravityAcp, sweepTempDirs } = require("./agents/antigravity-acp.cjs");
 const { createCliCache, inspectCli } = require("./agents/cli.cjs");
 const { runCliUpdate, linkNewestClaudeVersion } = require("./agents/cli-update.cjs");
+const { createAntigravity } = require("./agents/antigravity-install.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
 const { failedWith, loginMessage } = require("./agents/events.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
@@ -49,7 +52,7 @@ const { createRecentProjects, launchProject, rememberProject, switchTarget } = r
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
 const { createLinkedWorktrees } = require("./linked-worktrees.cjs");
-const { createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage } = require("./usage.cjs");
+const { createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage, readAntigravityUsage } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
 const { createFileSearch } = require("./project-files.cjs");
@@ -122,16 +125,23 @@ function createRuntime(options) {
     },
   };
   const { createChatSimulators, simulatorToolDefinitions } = require("./chat-simulators.cjs");
+  const existingChat = (action) => async (chatId) => {
+    const scope = projectOfKey(chatId),
+      id = sessionIdFromKey(chatId);
+    if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
+      throw new Error(`Open an existing Chat before ${action}.`);
+  };
   const simulators = createChatSimulators({
     simulators: options.simulators ?? require("./simulators.cjs").createSimulators(),
     file: path.join(dataDir, "simulator-attachments.json"),
-    validateChat: async (chatId) => {
-      const scope = projectOfKey(chatId),
-        id = sessionIdFromKey(chatId);
-      if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
-        throw new Error("Open an existing Chat before attaching a simulator.");
-    },
+    validateChat: existingChat("attaching a simulator"),
   });
+  const { createChatArtifacts, artifactToolDefinitions } = require("./chat-artifacts.cjs");
+  const artifacts = createChatArtifacts({ directory: path.join(dataDir, "artifacts"), validateChat: existingChat("showing a design") });
+  commands.handle("artifact:get", (_context, request) => artifacts.get(request));
+  commands.handle("artifact:list", (_context, request) => artifacts.list(request));
+  commands.handle("artifact:add-comments", (_context, request) => artifacts.addComments(request));
+  commands.handle("artifact:comments", (_context, request) => artifacts.comments(request));
   for (const method of ["list", "attach", "detach"])
     commands.handle(`simulator:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
@@ -168,6 +178,8 @@ function createRuntime(options) {
   function usageForAccounts(scope) {
     const claude = accounts.selected("claude", scope),
       codex = accounts.selected("codex", scope);
+    // Antigravity is not part of the key: it never reports usage (readAntigravityUsage), so there is nothing per
+    // Account to keep apart, and existing cache files keep their names.
     const key = `${claude}-${codex}`;
     if (!accountUsage.has(key)) {
       const store = key === "default-default" ? usageStore : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
@@ -183,6 +195,7 @@ function createRuntime(options) {
             return env.CLAUDE_CONFIG_DIR ? readClaudeProfileUsage({ command: (await baseCli("claude")).command, env }) : readClaudeUsage();
           },
           readCodex: () => readCodexUsage({ env: accounts.environment("codex", codex) }),
+          readAntigravity: () => readAntigravityUsage(),
         }),
       });
     }
@@ -450,6 +463,10 @@ function createRuntime(options) {
       if (others.length) throw new Error("Another chat uses this worktree now, so it is kept.");
     };
     inUse(await states.get(projectPath));
+    // The chats on this worktree go with it, and so do their designs.
+    const goneChats = Object.values((await states.get(projectPath)).sessions)
+      .filter((session) => session.worktree_id === worktree.id)
+      .map((session) => `${projectPath}#${session.id}`);
     await environmentReady;
     const result = await removeWorktree({
       path: worktreePath,
@@ -469,7 +486,10 @@ function createRuntime(options) {
     });
     // Read again, the project drops the worktree git no longer lists, with its chats.
     if (states.has(projectPath)) await readProject(projectPath);
-    if (result.removed) await pruneLinks();
+    if (result.removed) {
+      await Promise.all(goneChats.map((id) => artifacts.removeChat(id).catch(() => {})));
+      await pruneLinks();
+    }
     return result;
   }
   commands.handle("files-to-copy:read", async (_event, projectPath) => {
@@ -579,7 +599,12 @@ function createRuntime(options) {
   const agents = new SessionManager({
     createSession:
       options.createSession ??
-      ((provider, options) => (provider === "codex" ? new CodexSession({ ...options, clientVersion: version }) : new ClaudeSession(options))),
+      ((provider, options) =>
+        provider === "codex"
+          ? new CodexSession({ ...options, clientVersion: version })
+          : provider === "antigravity"
+            ? new AcpSession({ ...options, clientVersion: version, config: antigravityAcp })
+            : new ClaudeSession(options)),
     linkedFor: (chatId) => linked.forChat(chatId),
     onSessionClosed: (chatId) => keepAwake.chatClosed(chatId),
     onTurnStarted: () => ports.wake(),
@@ -612,9 +637,7 @@ function createRuntime(options) {
     const images = decodeImages(request.images);
     // expandSkills: false (the review demo) sends `/skill` as typed: the skills on this Mac are the owner's own.
     const prompt = options.expandSkills === false ? request.prompt : await expandSkillPrompt(request.cwd, request.prompt);
-    const cli =
-      agents.activeAccount(request.chatId, request.provider) ??
-      (await agentCli(request.provider === "codex" ? "codex" : "claude", projectOfKey(request.chatId)));
+    const cli = agents.activeAccount(request.chatId, request.provider) ?? (await agentCli(request.provider, projectOfKey(request.chatId)));
     // A CLI that is missing, too old or doesn't start fails the turn like any other failure, with its own message.
     if (cli.problem) {
       await chats.receive(request.chatId, failedWith(cli.problem));
@@ -632,7 +655,16 @@ function createRuntime(options) {
     const context = agents.isTurnActive(request.chatId) ? "" : await linkedContext;
     const text = [prompt, setup.note, context].filter(Boolean).join("\n\n");
     try {
-      return await agents.startTurn({ ...request, prompt: text, images, command: cli.command, env: cli.env, accountId: cli.accountId });
+      return await agents.startTurn({
+        ...request,
+        prompt: text,
+        images,
+        command: cli.command,
+        env: cli.env,
+        harness: cli.harness,
+        args: cli.args,
+        accountId: cli.accountId,
+      });
     } catch (error) {
       // A start that throws sends no event, so the hold a setup handed to this turn would never be released.
       keepAwake.turnNotStarted(request.chatId);
@@ -684,7 +716,11 @@ function createRuntime(options) {
   const worktreeSetups = new WorktreeSetups({ send: (chatId, event) => void chats.receive(chatId, event), keepAwake });
 
   // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
-  const baseCli = options.agentCli ?? createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
+  // Antigravity is downloaded by Milagre into the data directory, not found on PATH.
+  const antigravity = options.antigravity ?? createAntigravity({ dataDir });
+  // Clears what Antigravity unpacked for Milagre processes that have since exited (crashes, kills).
+  void sweepTempDirs(options.antigravityTempRoot ?? antigravityAcp.tempRoot);
+  const baseCli = options.agentCli ?? createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath(), antigravity });
   const accounts = createAccounts({
     dataDir,
     cli: baseCli,
@@ -788,7 +824,8 @@ function createRuntime(options) {
   };
   commands.handle("agent:cli-status", async (_event, scope) => agentCliStatus(await validateAccountScope(scope, true)));
   commands.handle("agent:update-cli", async (_event, provider) => {
-    const result = await runCliUpdate(provider);
+    // Antigravity's download takes a while; its phases go out as they happen.
+    const result = await runCliUpdate(provider, { antigravity, onProgress: (progress) => emit("agent:cli-progress", { provider, ...progress }) });
     agentCli.invalidate(provider);
     agentCliStatus.invalidate(provider);
     const status = await agentCliStatus();
@@ -883,7 +920,7 @@ function createRuntime(options) {
     chats,
     agents,
     emit,
-    extraTools: (chatId) => simulatorToolDefinitions(chatId, simulators),
+    extraTools: (chatId) => [...simulatorToolDefinitions(chatId, simulators), ...artifactToolDefinitions(chatId, artifacts)],
   });
   const linkWorkspaces = createLinkWorkspaces({
     store: linkStore,
@@ -1045,7 +1082,7 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
-      await Promise.all([simulators.close(), browsers.close()]);
+      await Promise.all([simulators.close(), browsers.close(), artifacts.close()]);
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();

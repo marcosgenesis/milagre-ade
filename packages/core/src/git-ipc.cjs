@@ -1,8 +1,9 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { PROVIDERS } = require("@milagre/shared/providers");
 const { createGitActions } = require("./git-actions.cjs");
 const { createGitDiff } = require("./git-diff.cjs");
-const { GENERATION_FAILED, claudeModel, codexModel, generateGitText } = require("./git-text.cjs");
+const { GENERATION_FAILED, claudeModel, codexModel, generateGitText, antigravityModel } = require("./git-text.cjs");
 
 const NOT_A_CHAT_FOLDER = "This folder isn't one of the open project's chats.";
 
@@ -49,6 +50,7 @@ function registerGitHandlers(
     models ?? {
       claude: claudeModel({ getCommand: command("claude", cwd) }),
       codex: codexModel({ getCommand: command("codex", cwd), clientVersion }),
+      antigravity: antigravityModel({ getCommand: command("antigravity", cwd), clientVersion }),
     };
 
   async function folder(cwd) {
@@ -71,7 +73,10 @@ function registerGitHandlers(
     const checked = await folder(cwd);
     try {
       const context = await actions.readTextContext({ cwd: checked, base });
-      return await generateGitText({ ...chatContext(chat), ...context }, { provider: provider === "codex" ? "codex" : "claude", models: textModels(checked) });
+      return await generateGitText(
+        { ...chatContext(chat), ...context },
+        { provider: PROVIDERS.includes(provider) ? provider : "claude", models: textModels(checked) },
+      );
     } catch {
       return { ok: false, message: GENERATION_FAILED };
     }

@@ -1,3 +1,4 @@
+const path = require("node:path");
 const { cliName } = require("@milagre/shared/providers");
 const { claudeSubagents, codexSubagents } = require("./subagents.cjs");
 /** @typedef {import("@milagre/shared/model").AgentEvent} AgentEvent */
@@ -7,7 +8,7 @@ const { isTurnEnd: isTerminal } = require("@milagre/shared/agent-runs");
 const { applyToolResult, applyToolUse, codexPlanTasks } = require("./tasks.cjs");
 const { claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep } = require("./steps.cjs");
 
-const { bundledWritingInstructions } = require("../bundled-skills.cjs");
+const { BUNDLED_SKILLS_DIRECTORY, bundledWritingInstructions } = require("../bundled-skills.cjs");
 const TLDR_INSTRUCTIONS = bundledWritingInstructions();
 const LINKS_INSTRUCTIONS = [
   "Links: the user can link this Chat's Worktree to Worktrees of other Projects on Milagre's canvas. When a turn's input starts with a <linked_worktrees> block, that is Milagre's summary of the linked side, not a message from the user.",
@@ -26,6 +27,7 @@ function milagreInstructions(tldrEnabled = true, workspaceInstructions = "") {
     "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
     LINKS_INSTRUCTIONS,
     "Simulators: use milagre simulator_list, simulator_attach and simulator_detach to manage devices for this Chat. After choosing a simulator for mobile work, attach its exact deviceId so the user can view it. The bundled simulator skill has the workflow. Discovery never attaches devices; detach leaves them running.",
+    `Designs: when the user asks to see a UI, screen, mockup or visual design, show it with milagre artifact_show as one self-contained HTML document, with the width and height of the screen it is for (390 by 844 for a phone). The Chat shows it as a card, and the user sees every design of the Chat on a canvas beside it, where they can comment on a spot or choose one; those reach you as their messages. Each comment has an id: once you have addressed one (usually by showing a revised version), resolve it with artifact_resolve_comment and a short note on what you changed. To revise a design, show it again with the same id; to offer variants, show each with its own id. Before your first design in a Chat, read the bundled design skill at ${path.join(BUNDLED_SKILLS_DIRECTORY, "design", "SKILL.md")}: it has the process.`,
     ...(workspaceInstructions ? [workspaceInstructions] : []),
   ].join("\n\n");
 }
@@ -34,9 +36,12 @@ const RESUME_FAILED_MESSAGE =
   "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
 
 // What a turn fails with when an agent's CLI can't run it. Each names the fix; the next message checks again.
+// Claude and Codex are fixed in a terminal. Antigravity is installed and signed in by Milagre itself, so its
+// instructions point at Settings, not at a shell command.
 const INSTALL_COMMANDS = { claude: "curl -fsSL https://claude.ai/install.sh | bash", codex: "npm install -g @openai/codex" };
 const UPDATE_COMMANDS = { claude: "claude update", codex: "codex update" };
 const LOGIN_COMMANDS = { claude: "claude auth login", codex: "codex login" };
+const SETTINGS_ACCOUNTS = "Milagre Settings \u2192 Accounts";
 
 // A tracing log line: "2026-10-02T00:59:00.724526Z ERROR codex_core::tools::router: error=…". The prefix says
 // nothing a reader needs.
@@ -64,19 +69,25 @@ const lastLine = (text) => readLastLine(text).line;
 const withoutPeriod = (text) => text.replace(/\.$/, "");
 
 function missingCliMessage(name) {
+  if (name === "antigravity") return `Milagre couldn't find ${cliName(name)}. Install it from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `Milagre couldn't find ${cliName(name)}. Install it with \`${INSTALL_COMMANDS[name]}\`, then send your message again.`;
 }
 
 function cliTooOldMessage(name, version, minimum) {
+  if (name === "antigravity")
+    return `Milagre needs ${cliName(name)} ${minimum} or later, and you have ${version}. Update it from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `Milagre needs ${cliName(name)} ${minimum} or later, and you have ${version}. Run \`${UPDATE_COMMANDS[name]}\` in a terminal, then send your message again.`;
 }
 
 function cliBrokenMessage(name, command, detail) {
   const reason = lastLine(detail);
+  if (name === "antigravity")
+    return `${cliName(name)} (${command}) didn't start${reason ? `: ${withoutPeriod(reason)}` : ""}. Reinstall it from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `${cliName(name)} (${command}) didn't start${reason ? `: ${withoutPeriod(reason)}` : ""}. Check that it runs in a terminal, then send your message again.`;
 }
 
 function loginMessage(name) {
+  if (name === "antigravity") return `${cliName(name)} isn't signed in. Sign in to Antigravity from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `${cliName(name)} isn't logged in. Run \`${LOGIN_COMMANDS[name]}\` in a terminal, then send your message again.`;
 }
 

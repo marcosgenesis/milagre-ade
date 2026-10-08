@@ -3,7 +3,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { chatTitle } = require("@milagre/shared/chats");
-const { claudeModel, codexModel } = require("../git-text.cjs");
+const { claudeModel, codexModel, antigravityModel } = require("../git-text.cjs");
 
 // Handing a chat off to the other provider in place: the chat as a markdown transcript on disk, and a short brief
 // for the next agent written by the previous provider's small model, sent ahead of the user's message.
@@ -141,6 +141,7 @@ function createHandoverModels({ cli, clientVersion }) {
   return {
     claude: claudeModel({ getCommand: getCommand("claude") }),
     codex: codexModel({ getCommand: getCommand("codex"), clientVersion, outputSchema: BRIEF_SCHEMA }),
+    antigravity: antigravityModel({ getCommand: getCommand("antigravity"), clientVersion, outputSchema: BRIEF_SCHEMA }),
   };
 }
 

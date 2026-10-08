@@ -1,6 +1,7 @@
 const { execCommand } = require("./command.cjs");
 const { execFile } = require("node:child_process");
 const { resolveExecutable } = require("./environment.cjs");
+const { cliName } = require("@milagre/shared/providers");
 const { cliBrokenMessage, cliTooOldMessage, lastLine, missingCliMessage } = require("./events.cjs");
 
 // Finds each agent's CLI and checks it against the oldest version Milagre supports:
@@ -8,6 +9,9 @@ const { cliBrokenMessage, cliTooOldMessage, lastLine, missingCliMessage } = requ
 //           (its package.json `claudeCodeVersion`); 2.0.77 rejects the SDK's --effort flag outright.
 //   codex   0.160.0, the first release whose model/list offers GPT-6.1 Sol (0.158.0 is where Milagre's use
 //           of the app-server protocol was verified; 0.160.0 adds no protocol change Milagre relies on).
+//   antigravity  Antigravity, which Milagre installs itself (antigravity-install.cjs). It is never asked for
+//           `--version`: the .par is a 280 MB Python archive that unpacks itself on every launch. Its version
+//           is the pinned release it was installed from, and the install validated it before activating it.
 // `--version` prints "2.1.287 (Claude Code)" and "codex-cli 0.160.0".
 const MIN_VERSIONS = { claude: "2.1.288", codex: "0.160.0" };
 const VERSION_TIMEOUT_MS = 10_000;
@@ -41,7 +45,8 @@ function runVersion(command, { execFileImpl = execFile } = {}) {
 
 // { command, version } for a CLI Milagre can run, plus `problem`, the message a turn fails with, when it is
 // missing, too old or doesn't start. A version Milagre can't read is no reason to refuse the CLI.
-async function inspectCli(name, { resolve = resolveExecutable, version = runVersion } = {}) {
+async function inspectCli(name, { resolve = resolveExecutable, version = runVersion, antigravity } = {}) {
+  if (name === "antigravity") return inspectAntigravity(antigravity);
   const command = await resolve(name);
   if (!command) return { command: null, version: null, problem: missingCliMessage(name) };
   const result = await version(command);
@@ -54,11 +59,23 @@ async function inspectCli(name, { resolve = resolveExecutable, version = runVers
     : { command, version: text, problem: cliTooOldMessage(name, text, MIN_VERSIONS[name]) };
 }
 
+// Antigravity: the install under the data directory (or MILAGRE_ANTIGRAVITY_PATH). `harness` and `args` are
+// what the session needs to start it besides `command`.
+function inspectAntigravity(antigravity) {
+  const found = antigravity?.resolve();
+  if (!found) {
+    const problem =
+      antigravity && !antigravity.supported() ? `${cliName("antigravity")} isn't available on this computer yet.` : missingCliMessage("antigravity");
+    return { command: null, version: null, problem };
+  }
+  return { command: found.command, version: found.version, harness: found.harness, args: found.args };
+}
+
 // Each CLI is inspected once per app run, after `ready` (the login environment). One with a problem is
 // inspected again on the next call, so installing, updating or fixing it needs no restart. Before that
 // second look `refresh` runs (it adds install folders created since startup to PATH), because the fix may
 // well be an installer that made a new folder.
-function createCliCache({ ready = () => undefined, inspect = inspectCli, refresh = () => undefined } = {}) {
+function createCliCache({ ready = () => undefined, inspect = inspectCli, refresh = () => undefined, antigravity } = {}) {
   const cache = new Map();
   const hadProblem = new Set();
   const check = (name) => {
@@ -68,7 +85,7 @@ function createCliCache({ ready = () => undefined, inspect = inspectCli, refresh
         .catch(() => {})
         .then(() => (hadProblem.has(name) ? refresh() : undefined))
         .catch(() => {})
-        .then(() => inspect(name))
+        .then(() => inspect(name, { antigravity }))
         .then(
           (status) => {
             if (status.problem) {

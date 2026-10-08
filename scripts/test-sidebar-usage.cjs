@@ -20,6 +20,7 @@ function Fixture() {
   const snapshot = { providers: [
     { provider: "claude", account: { id: "work", label: "Work" }, status: "ok", windows: [{ ...session, usedPercent: 0 }, { ...weekly, usedPercent: 82 }] },
     { provider: "codex", account: { id: "personal", label: "Personal", email: "victor@example.test" }, status: "ok", windows: hasSession ? [session, weekly] : [weekly], bankedResets: 3 },
+    { provider: "antigravity", status: "unavailable", windows: [], message: "Google doesn't report Antigravity quota." },
   ] };
   return <aside className="bg-surface rounded-[8px]" data-sidebar-collapsed={collapsed} style={{ width: collapsed ? 44 : 224, padding: 8, margin: 24 }}>
     <SidebarUsage usage={{ snapshot, loading: false, refresh: async () => {}, refreshIfStale: () => {} }} />

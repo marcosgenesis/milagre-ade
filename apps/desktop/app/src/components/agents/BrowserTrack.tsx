@@ -12,7 +12,8 @@ import { viewerTheme } from "./viewerTheme";
 
 /** Pages of browsers this Chat's agent started, or that were attached to this Chat. Never inferred from a URL. */
 export function BrowserTrack({ chatId }: { chatId?: string }) {
-  const api = window.milagre?.browsers;
+  // Read once: the bridge never changes while mounted, and a fresh reference each render would restart polling.
+  const [api] = useState(() => window.milagre?.browsers);
   const trigger = useRef<HTMLButtonElement>(null),
     panel = useRef<HTMLDivElement>(null);
   const panelId = useId();

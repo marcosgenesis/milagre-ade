@@ -1,4 +1,4 @@
-import { PROVIDERS, providerName } from "@milagre/shared/providers";
+import { PROVIDERS, cliName, providerName } from "@milagre/shared/providers";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -456,17 +456,21 @@ export function PromptComposer({
             className="absolute w-[360px]"
             style={anchorStyle}
             header={
-              <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
+              <div
+                data-provider-tabs
+                className="grid gap-1 rounded-control bg-inset p-1"
+                style={{ gridTemplateColumns: `repeat(${PROVIDERS.length}, minmax(0, 1fr))` }}
+              >
                 {PROVIDERS.map((item) => (
                   <button
                     key={item}
                     type="button"
-                    title={cliMessage(cliStatus?.[item]) ?? undefined}
+                    title={cliMessage(cliStatus?.[item]) ?? providerName(item)}
+                    aria-label={providerName(item)}
                     className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`}
                     onClick={() => setProvider(item)}
                   >
                     <ProviderLogo provider={item} size={14} />
-                    {providerName(item)}
                     {cliTabLabel(cliStatus?.[item]) ? (
                       <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span>
                     ) : (
@@ -490,25 +494,30 @@ export function PromptComposer({
                     ),
                   )}
                 </p>
-                {cliStatus?.[provider]?.state === "outdated" && onUpdateCli && (
-                  <div className="flex items-center justify-end pt-0.5">
-                    <button
-                      type="button"
-                      disabled={updatingCli === provider}
-                      onClick={() => onUpdateCli(provider)}
-                      className="flex items-center gap-1.5 rounded-chip border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
-                    >
-                      {updatingCli === provider ? (
-                        <>
-                          <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
-                          <span>Updating…</span>
-                        </>
-                      ) : (
-                        <span>Update {providerName(provider)}</span>
-                      )}
-                    </button>
-                  </div>
-                )}
+                {onUpdateCli &&
+                  (cliStatus?.[provider]?.state === "outdated" ||
+                    (provider === "antigravity" && ["missing", "broken"].includes(cliStatus?.[provider]?.state ?? ""))) && (
+                    <div className="flex items-center justify-end pt-0.5">
+                      <button
+                        type="button"
+                        disabled={updatingCli === provider}
+                        onClick={() => onUpdateCli(provider)}
+                        className="flex items-center gap-1.5 rounded-chip border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
+                      >
+                        {updatingCli === provider ? (
+                          <>
+                            <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                            <span>{cliStatus?.[provider]?.state === "outdated" ? "Updating…" : "Installing…"}</span>
+                          </>
+                        ) : (
+                          <span>
+                            {cliStatus?.[provider]?.state === "outdated" ? "Update" : cliStatus?.[provider]?.state === "broken" ? "Reinstall" : "Install"}{" "}
+                            {provider === "antigravity" ? cliName(provider) : providerName(provider)}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  )}
               </div>
             )}
             {modelRows.map((model) => (
@@ -662,7 +671,14 @@ export function PromptComposer({
                   setPlusOpen(false);
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder={running ? "Steer the agent…" : "Prompt or mention a file with @"}
+                placeholder={
+                  running
+                    ? // Antigravity can't be steered mid-turn (ACP has no steering); a message waits for the next turn.
+                      provider === "antigravity"
+                      ? "Queue a message for the next turn…"
+                      : "Steer the agent…"
+                    : "Prompt or mention a file with @"
+                }
                 aria-label="Prompt"
                 className={`${inputTextClass} ${expanded ? "" : "placeholder-shown:whitespace-nowrap placeholder:truncate"} ${hasSkill ? "prompt-input-highlighted" : "text-ink"} relative block min-w-0 w-full resize-none overflow-hidden bg-transparent caret-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`}
               />

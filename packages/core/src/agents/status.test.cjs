@@ -1,10 +1,20 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { cliBrokenMessage, cliTooOldMessage, loginMessage, missingCliMessage } = require("./events.cjs");
-const { READY_TTL_MS, claudeLoggedOut, cliWhenLoggedIn, codexLoggedOut, createCliStatus } = require("./status.cjs");
+const { AGENT_NAME } = require("./antigravity-install.cjs");
+const {
+  READY_TTL_MS,
+  claudeLoggedOut,
+  cliWhenLoggedIn,
+  codexLoggedOut,
+  createCliStatus,
+  antigravityLoggedOut,
+  antigravityLoggedOutAt,
+} = require("./status.cjs");
 
 const FAKE = path.join(__dirname, "fixtures", "fake-app-server.cjs");
 const fakeRpc = (scenario) => (options) => new CodexRpc({ ...options, args: [FAKE], env: { ...process.env, FAKE_SCENARIO: scenario } });
@@ -91,10 +101,10 @@ test("Codex: an account/read error, or an app-server that won't start, counts as
 
 // A stand-in for the CLI check: `statuses[name]` is the queue of answers, the last one repeating.
 function fakeCli(statuses) {
-  const asked = { claude: 0, codex: 0 };
+  const asked = { claude: 0, codex: 0, antigravity: 0 };
   const cli = async (name) => {
     asked[name] += 1;
-    const queue = statuses[name];
+    const queue = statuses[name] ?? [GOOD(name)];
     return queue.length > 1 ? queue.shift() : queue[0];
   };
   return { cli, asked };
@@ -103,8 +113,8 @@ const GOOD = (name) => ({ command: `/bin/${name}`, version: "9.9.9" });
 
 function statusFor({ statuses, loggedOut, now }) {
   const { cli, asked } = fakeCli(statuses);
-  const checked = { claude: 0, codex: 0 };
-  const flags = { claude: false, codex: false, ...loggedOut };
+  const checked = { claude: 0, codex: 0, antigravity: 0 };
+  const flags = { claude: false, codex: false, antigravity: false, ...loggedOut };
   const check = createCliStatus({
     cli,
     cwd: "/tmp",
@@ -119,6 +129,10 @@ function statusFor({ statuses, loggedOut, now }) {
         checked.codex += 1;
         return typeof flags.codex === "function" ? flags.codex() : flags.codex;
       },
+      antigravity: async () => {
+        checked.antigravity += 1;
+        return typeof flags.antigravity === "function" ? flags.antigravity() : flags.antigravity;
+      },
     },
   });
   return { check, asked, checked, flags };
@@ -130,20 +144,26 @@ test("each state, with the message a turn fails with", async () => {
   assert.deepEqual(await statusFor({ statuses: { claude: [GOOD("claude")], codex: [missing] } }).check(), {
     claude: { state: "ready" },
     codex: { state: "missing", message: missingCliMessage("codex") },
+    antigravity: { state: "ready" },
   });
   assert.deepEqual(await statusFor({ statuses: { claude: [outdated], codex: [GOOD("codex")] } }).check(), {
     claude: { state: "outdated", message: cliTooOldMessage("claude", "2.1.200", "2.1.286") },
     codex: { state: "ready" },
+    antigravity: { state: "ready" },
   });
   const broken = { command: "/bin/codex", version: null, problem: cliBrokenMessage("codex", "/bin/codex", "env: node: No such file or directory") };
   assert.deepEqual((await statusFor({ statuses: { claude: [GOOD("claude")], codex: [broken] } }).check()).codex, {
     state: "broken",
     message: cliBrokenMessage("codex", "/bin/codex", "env: node: No such file or directory"),
   });
-  assert.deepEqual(await statusFor({ statuses: { claude: [GOOD("claude")], codex: [GOOD("codex")] }, loggedOut: { claude: true, codex: true } }).check(), {
-    claude: { state: "logged-out", message: loginMessage("claude") },
-    codex: { state: "logged-out", message: loginMessage("codex") },
-  });
+  assert.deepEqual(
+    await statusFor({ statuses: { claude: [GOOD("claude")], codex: [GOOD("codex")] }, loggedOut: { claude: true, codex: true, antigravity: true } }).check(),
+    {
+      claude: { state: "logged-out", message: loginMessage("claude") },
+      codex: { state: "logged-out", message: loginMessage("codex") },
+      antigravity: { state: "logged-out", message: loginMessage("antigravity") },
+    },
+  );
 });
 
 test("the login check is not run for a CLI that doesn't run", async () => {
@@ -152,7 +172,7 @@ test("the login check is not run for a CLI that doesn't run", async () => {
     loggedOut: { claude: true, codex: true },
   });
   await check();
-  assert.deepEqual(checked, { claude: 0, codex: 0 });
+  assert.deepEqual(checked, { claude: 0, codex: 0, antigravity: 1 });
 });
 
 test("a ready status is kept for 5 minutes", async () => {
@@ -161,10 +181,10 @@ test("a ready status is kept for 5 minutes", async () => {
   await check();
   clock += READY_TTL_MS - 1;
   await check();
-  assert.deepEqual(checked, { claude: 1, codex: 1 });
+  assert.deepEqual(checked, { claude: 1, codex: 1, antigravity: 1 });
   clock += 2;
   await check();
-  assert.deepEqual(checked, { claude: 2, codex: 2 });
+  assert.deepEqual(checked, { claude: 2, codex: 2, antigravity: 2 });
   assert.equal(READY_TTL_MS, 300_000);
 });
 
@@ -194,20 +214,43 @@ test("a login check that blows up counts as ready, and so does a CLI check that 
       },
     },
   });
-  assert.deepEqual(await boom.check(), { claude: { state: "ready" }, codex: { state: "ready" } });
+  assert.deepEqual(await boom.check(), { claude: { state: "ready" }, codex: { state: "ready" }, antigravity: { state: "ready" } });
   const check = createCliStatus({
     cli: async () => {
       throw new Error("cli check failed");
     },
-    loggedOut: { claude: async () => true, codex: async () => true },
+    loggedOut: { claude: async () => true, codex: async () => true, antigravity: async () => true },
   });
-  assert.deepEqual(await check(), { claude: { state: "ready" }, codex: { state: "ready" } });
+  assert.deepEqual(await check(), { claude: { state: "ready" }, codex: { state: "ready" }, antigravity: { state: "ready" } });
 });
 
 test("concurrent callers share one lookup", async () => {
   const { check, asked } = statusFor({ statuses: { claude: [GOOD("claude")], codex: [GOOD("codex")] } });
   await Promise.all([check(), check(), check()]);
-  assert.deepEqual(asked, { claude: 1, codex: 1 });
+  assert.deepEqual(asked, { claude: 1, codex: 1, antigravity: 1 });
+});
+
+test("Antigravity is signed out when its profile has no acp_token.json, and nothing is spawned to find out", (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "milagre-antigravity-home-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  assert.equal(antigravityLoggedOutAt(home), true);
+  fs.mkdirSync(path.join(home, AGENT_NAME));
+  fs.writeFileSync(path.join(home, AGENT_NAME, "acp_token.json"), "{}");
+  assert.equal(antigravityLoggedOutAt(home), false);
+  // No profile named yet: not a reason to flag the CLI.
+  assert.equal(antigravityLoggedOutAt(undefined), false);
+});
+
+test("Antigravity's login state comes from the account's GEMINI_HOME", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "milagre-antigravity-home-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  assert.equal(await antigravityLoggedOut("/x/agy_acp_server.par", { env: { GEMINI_HOME: home } }), true);
+  assert.equal(await antigravityLoggedOut("/x/agy_acp_server.par", {}), false);
+  const check = createCliStatus({
+    cli: async (name) => ({ ...GOOD(name), env: { GEMINI_HOME: home } }),
+    loggedOut: { claude: async () => false, codex: async () => false, antigravity: antigravityLoggedOut },
+  });
+  assert.deepEqual((await check()).antigravity, { state: "logged-out", message: loginMessage("antigravity") });
 });
 
 test("a logged-out Claude is a CLI with a problem for the model lookup, so its degraded list isn't kept", async () => {
@@ -239,10 +282,10 @@ test("invalidate forgets a ready status, so the next call looks again", async ()
   const { check, checked } = statusFor({ statuses: { claude: [GOOD("claude")], codex: [GOOD("codex")] }, now: () => clock });
   await check();
   await check();
-  assert.deepEqual(checked, { claude: 1, codex: 1 });
+  assert.deepEqual(checked, { claude: 1, codex: 1, antigravity: 1 });
   check.invalidate("claude");
   await check();
-  assert.deepEqual(checked, { claude: 2, codex: 1 });
+  assert.deepEqual(checked, { claude: 2, codex: 1, antigravity: 1 });
 });
 
 test("a lookup that finishes after invalidate doesn't delete the newer entry", async () => {
@@ -254,26 +297,27 @@ test("a lookup that finishes after invalidate doesn't delete the newer entry", a
   const check = createCliStatus({
     cli: async (name) => {
       calls += 1;
-      if (calls <= 2) {
+      if (calls <= 3) {
         await gate;
         return { command: null, version: null, problem: "missing" };
       }
       return { command: `/bin/${name}`, version: "9.9.9" };
     },
     now: () => 1,
-    loggedOut: { claude: async () => false, codex: async () => false },
+    loggedOut: { claude: async () => false, codex: async () => false, antigravity: async () => false },
   });
-  // Two lookups wait at the gate (calls 1 and 2) and will end with a problem.
+  // Three lookups wait at the gate (calls 1 to 3) and will end with a problem.
   const first = check();
   await new Promise((resolve) => setImmediate(resolve));
   check.invalidate("claude");
   check.invalidate("codex");
-  // The next call starts newer lookups (calls 3 and 4), which are ready and kept.
+  check.invalidate("antigravity");
+  // The next call starts newer lookups (calls 4 to 6), which are ready and kept.
   const second = await check();
   assert.equal(second.claude.state, "ready");
-  assert.equal(calls, 4);
+  assert.equal(calls, 6);
   release();
   assert.equal((await first).claude.state, "missing");
   await check();
-  assert.equal(calls, 4, "the newer, ready entry is still kept");
+  assert.equal(calls, 6, "the newer, ready entry is still kept");
 });

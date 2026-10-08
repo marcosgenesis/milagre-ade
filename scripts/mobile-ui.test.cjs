@@ -41,6 +41,10 @@ function hookHost({ effects = false } = {}) {
       const index = cursor++;
       return (slots[index] ??= { current: initial });
     },
+    useId() {
+      const index = cursor++;
+      return (slots[index] ??= { id: `:r${index}:` }).id;
+    },
     useCallback(fn, deps) {
       const index = cursor++;
       const previous = slots[index];
@@ -105,7 +109,7 @@ function load(file, modules, extra = "") {
   });
   return exports;
 }
-const jsx = (type, props) => ({ type, props });
+const jsx = (type, props, key) => ({ type, props, key });
 const archiveProgress = load("archive-progress.tsx", {
   "react/jsx-runtime": { jsx, jsxs: jsx },
   "react-native": { Text: "Text", View: "View" },
@@ -754,6 +758,8 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => null },
     "../questions": { Approval: "Approval", Questions: "Questions" },
     "../chat-reply": { ChatReply: "ChatReply" },
+    "../design-outbox": require("../apps/mobile/src/design-outbox.ts"),
+    "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "../ui": ui,
     "../agent-controls": { AgentControls: "AgentControls", PermissionChip: "PermissionChip" },
     "../turn-options": require("../apps/mobile/src/turn-options.ts"),
@@ -4062,6 +4068,173 @@ test("mobile Ports sheet stops only this Chat's process and refuses another host
   assert.deepEqual(calls, []);
 });
 
+function artifactHost(client, pushes = [], router = { back() {} }) {
+  const react = hookHost({ effects: true }),
+    files = new Map();
+  class File {
+    constructor(_cache, name) {
+      this.uri = "file:///cache/" + name;
+    }
+    write(value) {
+      files.set(this.uri, value);
+    }
+    get exists() {
+      return files.has(this.uri);
+    }
+    delete() {
+      files.delete(this.uri);
+    }
+  }
+  const source = load(
+    "artifact.tsx",
+    {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable", TextInput: "TextInput" },
+      "expo-router": { router: { back: () => router.back(), push: (route) => pushes.push(route) } },
+      "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
+      "@expo/dom-webview": { DomWebView: "DomWebView" },
+      "expo-file-system": { File, Paths: { cache: "/cache" } },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
+      "./design-outbox": require("../apps/mobile/src/design-outbox.ts"),
+      "./session": { useSession: () => ({ client }) },
+      "./icons": { Icon: "Icon" },
+      "./ui": { CircleButton: "CircleButton", PillButton: "PillButton", colors: {}, styles: {} },
+    },
+    "\nexports.TestArtifactWebView = ArtifactWebView;\nexports.ArtifactCard = ArtifactCard;",
+  );
+  return {
+    files,
+    render(name, props) {
+      react.begin();
+      const tree = source[name](props);
+      react.flush();
+      return tree;
+    },
+    cleanup() {
+      react.cleanup();
+    },
+  };
+}
+
+test("a design card opens its Chat's design full screen; a new Chat's card can't", () => {
+  const pushes = [];
+  const h = artifactHost({ url: "mac" }, pushes);
+  const step = { id: "s1", kind: "artifact", title: "Showed `Login`", status: "done", artifact: { id: "login", version: 2, title: "Login" } };
+  const card = h.render("ArtifactCard", { step, chatId: "/p#7" });
+  card.props.onPress();
+  assert.deepEqual(JSON.parse(JSON.stringify(pushes)), [{ pathname: "/artifact-sheet", params: { hostId: "mac", chatId: "/p#7", id: "login", version: "2" } }]);
+  assert.equal(h.render("ArtifactCard", { step, chatId: "/p#new:1" }).props.disabled, true);
+});
+
+test("the design sheet loads the version it opened under the design policy, framed in a page of its own", async () => {
+  const calls = [];
+  const client = {
+    url: "mac",
+    call: async (method, args) => {
+      calls.push([method, args]);
+      if (method === "artifact:list") return [{ id: "login", version: 2, title: "Login", versions: 2, width: 390, height: 844 }];
+      return { id: "login", version: 1, latest: 2, versions: 2, title: "Login", width: 390, height: 844, html: "<html><head></head><body>hi</body></html>" };
+    },
+  };
+  const h = artifactHost(client);
+  h.render("ArtifactSheet", { hostId: "mac", chatId: "/p#7", id: "login", version: "1" });
+  await settle();
+  const tree = h.render("ArtifactSheet", { hostId: "mac", chatId: "/p#7", id: "login", version: "1" });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["artifact:list", [{ chatId: "/p#7" }]],
+    ["artifact:get", [{ chatId: "/p#7", id: "login", version: 1 }]],
+  ]);
+  const view = find(tree, (node) => node.props?.html);
+  assert.ok(view, "the design shows once loaded");
+  const web = artifactHost(client);
+  web.render("TestArtifactWebView", { html: view.props.html });
+  const frame = find(web.render("TestArtifactWebView", { html: view.props.html }), (node) => node.type === "DomWebView");
+  assert.ok(frame);
+  assert.equal(frame.props.useExpoModulesBridge, false);
+  // A page with no script of its own, framing the design in a sandbox that can't navigate away; removed when done.
+  const page = web.files.get(frame.props.source.uri);
+  assert.match(page, /frame-src 'none'/);
+  assert.match(
+    page,
+    /<iframe sandbox="allow-scripts"[^>]* srcdoc="<!doctype html><meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src 'none'/,
+  );
+  assert.doesNotMatch(page.replace(/srcdoc="[^"]*"/, ""), /<script/);
+  web.cleanup();
+  assert.equal(web.files.size, 0);
+  h.cleanup();
+});
+
+test("on the design sheet, choosing and commenting wait for Send, which hands one message to the Chat", async () => {
+  const outbox = require("../apps/mobile/src/design-outbox.ts");
+  let backs = 0;
+  const recorded = [];
+  const client = {
+    url: "mac",
+    call: async (method, args) => {
+      if (method === "artifact:add-comments") recorded.push(...args[0].comments);
+      return method === "artifact:list"
+        ? [{ id: "home", version: 1, title: "Home", versions: 1, width: 390, height: 844 }]
+        : { id: "home", version: 1, latest: 1, versions: 1, title: "Home", width: 390, height: 844, html: "<p>home</p>" };
+    },
+  };
+  const h = artifactHost(client, [], { back: () => backs++ });
+  const props = { hostId: "mac", chatId: "/p#7", id: "home", version: "1" };
+  h.render("ArtifactSheet", props);
+  await settle();
+  let tree = h.render("ArtifactSheet", props);
+  assert.ok(!find(tree, (node) => (node.props?.title ?? "").startsWith("Send")), "nothing to send yet");
+  find(tree, (node) => node.props?.title === "Choose").props.onPress();
+  tree = h.render("ArtifactSheet", props);
+  assert.equal(outbox.peekDesignMessage("mac|/p#7"), null, "choosing alone sends nothing");
+  assert.ok(find(tree, (node) => node.props?.title === "Chosen ✓"));
+  find(tree, (node) => node.props?.title === "Comment").props.onPress();
+  tree = h.render("ArtifactSheet", props);
+  find(tree, (node) => node.type === "TextInput").props.onChangeText("Bigger title");
+  tree = h.render("ArtifactSheet", props);
+  find(tree, (node) => node.props?.title === "Done").props.onPress();
+  tree = h.render("ArtifactSheet", props);
+  find(tree, (node) => node.props?.title === "Send 2").props.onPress();
+  await settle();
+  const message = outbox.peekDesignMessage("mac|/p#7");
+  const id = /\(comment ([a-f0-9]{8})\)/.exec(message.text)?.[1];
+  assert.equal(
+    message.text,
+    `I chose the design "Home" (home, version 1). Continue from this one.\n\nA comment on the designs:\n\n1. (comment ${id}) On the design "Home" (home, version 1): Bigger title\n\nRevise them with artifact_show and keep their ids. Once you have addressed a comment, resolve it with artifact_resolve_comment and its comment id.`,
+  );
+  assert.equal(recorded.length, 0, "the comments are recorded only once the message went");
+  assert.ok(outbox.peekDesignMessage("mac|/p#7"), "it waits until it is sent");
+  outbox.designMessageSent("mac|/p#7", message);
+  await settle();
+  assert.deepEqual(
+    recorded.map((comment) => [comment.id, comment.text]),
+    [[id, "Bigger title"]],
+  );
+  assert.equal(outbox.peekDesignMessage("mac|/p#7"), null, "a message is sent once");
+  assert.equal(backs, 1);
+  h.cleanup();
+});
+
+test("feedback from the designs shows as a card of the choice and each comment", () => {
+  const h = artifactHost({ url: "mac" });
+  const { parseDesignFeedback, designFeedbackMessage } = require("../packages/shared/src/artifact.ts");
+  const home = { id: "home", version: 2, title: "Home" };
+  const feedback = parseDesignFeedback(designFeedbackMessage({ choice: home, comments: [{ design: home, x: 0.5, y: 0.2, text: "Bigger title" }] }));
+  const tree = h.render("DesignFeedbackCard", { feedback });
+  const texts = [];
+  const walk = (node) => {
+    if (typeof node === "string" || typeof node === "number") texts.push(String(node));
+    else if (Array.isArray(node)) node.forEach(walk);
+    else if (node?.props) walk(node.props.children);
+  };
+  walk(tree);
+  const all = texts.join("|");
+  assert.match(all, /Chose \|?Home/);
+  assert.match(all, /Bigger title/);
+  assert.doesNotMatch(all, /artifact_show/, "the agent's instructions stay out of sight");
+});
+
 test("a reply shows the thinking it wrote nothing after, once it waits on a question or ends, not while working", () => {
   const react = { memo: (fn) => fn, useCallback: (fn) => fn, useEffect() {}, useRef: () => ({}), useState: (value) => [value, () => {}] };
   const { ChatReply } = load("chat-reply.tsx", {
@@ -4077,6 +4250,8 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     "./icons": { Icon: "Icon" },
     "./activity-item": { ActivityTitle: "ActivityTitle" },
     "./tool-row": { ToolRow: "ToolRow" },
+    "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
+    "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "./theme": { hex: () => "#000" },
     "./viewer-store": { showImages() {} },
     "./ui": { colors: {}, styles: { card: {}, row: {}, muted: {} } },

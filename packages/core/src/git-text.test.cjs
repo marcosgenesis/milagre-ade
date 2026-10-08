@@ -1,7 +1,20 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { EventEmitter } = require("node:events");
-const { DIFF_LIMIT, GENERATION_FAILED, buildGitTextPrompt, claudeModel, codexModel, generateGitText, parseGitText, repeatsSubject } = require("./git-text.cjs");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const {
+  DIFF_LIMIT,
+  GENERATION_FAILED,
+  buildGitTextPrompt,
+  claudeModel,
+  codexModel,
+  generateGitText,
+  antigravityModel,
+  parseGitText,
+  repeatsSubject,
+} = require("./git-text.cjs");
 
 const INPUT = {
   diff: "diff --git a/cart.js b/cart.js\n-old\n+new\n",
@@ -180,6 +193,28 @@ test("generateGitText asks the chat's own agent first", async () => {
     calls.map((call) => call.name),
     ["claude", "codex"],
   );
+});
+
+test("generateGitText tries the chat's own agent, then the others in picker order", async () => {
+  const asked = [];
+  const model = (name, reply) => async () => {
+    asked.push(name);
+    if (reply === null) throw new Error(`${name} unavailable`);
+    return reply;
+  };
+  const models = { codex: model("codex", null), claude: model("claude", null), antigravity: model("antigravity", REPLY) };
+  assert.equal((await generateGitText(INPUT, { provider: "antigravity", models })).provider, "antigravity");
+  assert.deepEqual(asked, ["antigravity"]);
+  asked.length = 0;
+  assert.equal((await generateGitText(INPUT, { provider: "claude", models })).provider, "antigravity");
+  assert.deepEqual(asked, ["claude", "codex", "antigravity"]);
+  asked.length = 0;
+  assert.equal(
+    (await generateGitText(INPUT, { provider: "antigravity", models: { ...models, antigravity: model("antigravity", null), claude: model("claude", REPLY) } }))
+      .provider,
+    "claude",
+  );
+  assert.deepEqual(asked, ["antigravity", "codex", "claude"]);
 });
 
 test("generateGitText falls back to the other agent when the first can't answer", async () => {
@@ -398,4 +433,52 @@ test("a naming timeout during CLI discovery never starts a late Codex process", 
   });
   await assert.rejects(call({ system: "", prompt: "", signal: controller.signal }), { name: "AbortError" });
   assert.equal(created, false);
+});
+
+const FAKE_ACP = path.join(__dirname, "agents", "fixtures", "fake-acp-agent.cjs");
+const TEXT_ROOT = path.join(os.tmpdir(), "milagre-antigravity");
+const leftovers = () =>
+  [...(fs.existsSync(TEXT_ROOT) ? fs.readdirSync(TEXT_ROOT) : []), ...fs.readdirSync(os.tmpdir())]
+    .filter((name) => /^(text-|milagre-antigravity-text-)/.test(name))
+    .sort();
+const fakeAntigravity = (scenario, extra = {}) =>
+  antigravityModel({ getCommand: async () => ({ command: process.execPath, args: [FAKE_ACP], env: { ...process.env, FAKE_SCENARIO: scenario } }), ...extra });
+
+test("antigravityModel runs one prompt in an empty temporary folder with no tools and returns the JSON from the reply", async () => {
+  const before = leftovers();
+  const reply = await fakeAntigravity("json", { model: "gemini-pro-agent" })({ system: "Name the chat.", prompt: "fix login" });
+  const value = JSON.parse(reply);
+  assert.equal(value.title, "Fix mobile login redirect");
+  assert.equal(value.model, "gemini-pro-agent");
+  assert.deepEqual(value.mcpServers, []);
+  assert.match(path.basename(value.cwd), /^milagre-antigravity-text-/);
+  assert.equal(fs.existsSync(value.cwd), false);
+  assert.deepEqual(leftovers(), before);
+});
+
+test("antigravityModel asks Gemini 3.8 Flash at Low, by the id the session offers for it", async () => {
+  const value = JSON.parse(await fakeAntigravity("json")({ system: "s", prompt: "p" }));
+  assert.equal(value.model, "flash-lite-agent");
+});
+
+test("antigravityModel falls back to the session's model when the fast one is refused", async () => {
+  const value = JSON.parse(await fakeAntigravity("json", { model: "nope" })({ system: "s", prompt: "p" }));
+  assert.equal(value.model, "gemini-3.8-flash-high");
+});
+
+test("antigravityModel turns down every permission request", async () => {
+  const value = JSON.parse(await fakeAntigravity("json-permission")({ system: "s", prompt: "p" }));
+  assert.equal(value.picked, "deny");
+});
+
+test("antigravityModel reports a signed-out agent, a missing install and an abort as errors", async () => {
+  await assert.rejects(fakeAntigravity("logged-out")({ system: "s", prompt: "p" }), /isn't signed in/);
+  await assert.rejects(antigravityModel({ getCommand: async () => null })({ system: "s", prompt: "p" }), /isn't installed/);
+  const before = leftovers();
+  const controller = new AbortController();
+  const pending = fakeAntigravity("stubborn")({ system: "s", prompt: "p", signal: controller.signal });
+  setTimeout(() => controller.abort(), 500);
+  await assert.rejects(pending);
+  assert.deepEqual(leftovers(), before);
+  await assert.rejects(fakeAntigravity("crash")({ system: "s", prompt: "p" }));
 });

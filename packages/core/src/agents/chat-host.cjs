@@ -1,7 +1,16 @@
 const { ChatImages } = require("../chat-images.cjs");
 const { storeImages } = require("../project-content.cjs");
 const { ipcErrorMessage } = require("@milagre/shared/result");
-const { applyAgentEvent, chatKey, isTurnEnd, lastUserModel, projectOfKey, recordAnswers, sessionIdFromKey } = require("@milagre/shared/agent-runs");
+const {
+  answeredQuestions,
+  applyAgentEvent,
+  chatKey,
+  isTurnEnd,
+  lastUserModel,
+  projectOfKey,
+  recordAnswers,
+  sessionIdFromKey,
+} = require("@milagre/shared/agent-runs");
 const { archiveFinishedSubagents, patchSession } = require("@milagre/shared/project-edits");
 const { catchUpStart, handoffKind, isHandoff, lastTurnProvider } = require("@milagre/shared/handoff");
 const { renderTranscript } = require("./handover.cjs");
@@ -267,44 +276,30 @@ class ChatHost {
   }
 
   /**
-   * Saves the user's answers to a question as their message, after the reply streamed so far, and tells the
-   * windows with an "answers-sent" event. Resolves with the message's id, or null when there's nothing to save.
+   * Shows the user's answers to a question as their message, after the reply streamed so far, and tells the windows
+   * with an "answers-sent" event, before anything is written: the answers go to the agent at once, and the save follows
+   * (a failed one stays dirty and is tried again). `answered` comes from the run's request, for the answer card.
+   * Resolves with the message's id, or null when there's nothing to show.
    */
-  async recordAnswers(chatId, body) {
+  async recordAnswers(chatId, body, { requestId, answers } = {}) {
     const projectPath = projectOfKey(chatId);
-    let pendingId = null;
-    await this.states.update(projectPath, (latest) => {
-      const sessionId = sessionIdFromKey(chatId);
-      const run = this.runs[chatId];
-      if (!latest.sessions[sessionId] || !run || !body) return latest;
-      pendingId = latest.next_id;
-      return {
-        ...latest,
-        next_id: pendingId + 1,
-        messages: [...latest.messages, { id: pendingId, session_id: sessionId, body, role: "user", context: null, model: run.model }],
-      };
-    });
-    if (pendingId === null) return null;
-    try {
-      await this.states.flush(projectPath);
-    } catch (error) {
-      await this.takeBack(chatId, pendingId);
-      throw error;
-    }
     let messageId = null;
     let seq;
     let added = [];
-    const { state } = await this.states.update(projectPath, (latest) => {
-      const withoutPending = { ...latest, messages: latest.messages.filter((message) => message.id !== pendingId) };
-      const result = recordAnswers(withoutPending, this.runs, projectPath, chatId, body);
-      added = result.state.messages.slice(withoutPending.messages.length).filter((message) => message.role === "assistant");
+    const { state, changed } = await this.states.update(projectPath, (latest) => {
+      const request = this.runs[chatId]?.questions.find((item) => item.requestId === requestId);
+      const result = recordAnswers(latest, this.runs, projectPath, chatId, body, answeredQuestions(request, answers));
+      if (result.messageId === null) return latest;
+      added = result.state.messages.slice(latest.messages.length).filter((message) => message.role === "assistant");
       this.runs = result.runs;
       messageId = result.messageId;
       seq = ++this.seq;
       return result.state;
     });
+    if (!changed || messageId === null) return null;
     // No disk await between the current mutation and publication.
     this.publish(chatId, { type: "answers-sent" }, state, seq);
+    void this.states.flush(projectPath).catch((error) => console.warn("Milagre couldn't save the answers:", error.message));
     await this.captureImages(projectPath, state, added);
     return messageId;
   }

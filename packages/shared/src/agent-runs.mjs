@@ -323,15 +323,38 @@ export function splitRunForSteer(state, runs, projectPath, chatId) {
  * steering message), so the answers sit between what the agent asked and what it does next.
  * `messageId` is the new message's id, so it can be taken back if the answers don't reach the agent.
  */
-export function recordAnswers(state, runs, projectPath, chatId, body) {
+export function recordAnswers(state, runs, projectPath, chatId, body, answered) {
   const sessionId = sessionIdFromKey(chatId);
   const run = runs[chatId];
   if (!chatInProject(projectPath, chatId) || !state.sessions[sessionId] || !run || !body) return { state, runs, messageId: null };
   const split = splitRunForSteer(state, runs, projectPath, chatId);
-  const message = { id: split.state.next_id, session_id: sessionId, body, context: null, role: "user", model: run.model };
+  const message = {
+    id: split.state.next_id,
+    session_id: sessionId,
+    body,
+    context: null,
+    role: "user",
+    model: run.model,
+    ...(answered?.length ? { answered } : {}),
+  };
   return {
     state: { ...split.state, next_id: message.id + 1, messages: [...split.state.messages, message] },
     runs: applyRunEvent(runs, chatId, { type: "answers-sent" }),
     messageId: message.id,
   };
+}
+
+/**
+ * The answers to a question request as the user's message keeps them, for its answer card: each question with what
+ * was answered, in the request's order. A typed answer to a secret question is masked; null when nothing was answered.
+ */
+export function answeredQuestions(request, answers) {
+  if (!request || !answers) return null;
+  const answered = request.questions.flatMap((question) => {
+    const values = Array.isArray(answers[question.id]) ? answers[question.id] : [];
+    if (!values.length) return [];
+    const shown = values.map((value) => (question.secret && !question.options.some((option) => option.label === value) ? "••••••" : value));
+    return [{ header: question.header, question: question.question, answers: shown }];
+  });
+  return answered.length ? answered : null;
 }

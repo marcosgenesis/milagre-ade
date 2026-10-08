@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  AnsweredQuestion,
   AgentTask,
   ChatStep,
   ContextUsage,
@@ -7,6 +8,7 @@ import type {
   TranscriptState,
   PermissionDecision,
   PermissionRequest,
+  QuestionAnswers,
   QuestionRequest,
 } from "./model.ts";
 
@@ -60,4 +62,6 @@ export function recordAnswers<T extends TranscriptState>(
   projectPath: string,
   chatId: string,
   body: string,
+  answered?: AnsweredQuestion[] | null,
 ): { state: T; runs: AgentRuns; messageId: number | null };
+export function answeredQuestions(request: QuestionRequest | undefined, answers: QuestionAnswers | null): AnsweredQuestion[] | null;

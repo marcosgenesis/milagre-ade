@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEvent, ChatStep, CoordinatorState, PermissionRequest, QuestionRequest } from "./model.ts";
-import { applyAgentEvent, capOutput, chatInProject, chatKey, recordAnswers, sessionIdFromKey, splitRunForSteer, startRun } from "./agent-runs.mjs";
+import {
+  answeredQuestions,
+  applyAgentEvent,
+  capOutput,
+  chatInProject,
+  chatKey,
+  recordAnswers,
+  sessionIdFromKey,
+  splitRunForSteer,
+  startRun,
+} from "./agent-runs.mjs";
 import type { AgentRuns } from "./agent-runs.mjs";
 
 const PROJECT = "/work/app";
@@ -601,4 +611,21 @@ test("tasks survive a steering split and go with the run when the turn ends", ()
   assert.deepEqual(split.runs[key(1)].tasks, tasks);
   const ended = applyAgentEvent(split.state, split.runs, PROJECT, key(1), { type: "turn-completed" });
   assert.equal(ended.runs[key(1)], undefined);
+});
+
+test("answers keep each question with what was picked or typed, in the request's order, with typed secrets masked", () => {
+  const request: QuestionRequest = {
+    requestId: "q",
+    questions: [
+      { id: "a", header: "Color", question: "Which color?", options: [{ label: "Red", description: "" }], multiSelect: false, allowOther: true, secret: false },
+      { id: "b", header: "Token", question: "Your token?", options: [{ label: "Skip", description: "" }], multiSelect: false, allowOther: true, secret: true },
+    ],
+  };
+  assert.deepEqual(answeredQuestions(request, { b: ["abc123"], a: ["Red", "teal"] }), [
+    { header: "Color", question: "Which color?", answers: ["Red", "teal"] },
+    { header: "Token", question: "Your token?", answers: ["••••••"] },
+  ]);
+  assert.deepEqual(answeredQuestions(request, { b: ["Skip"] }), [{ header: "Token", question: "Your token?", answers: ["Skip"] }]);
+  assert.equal(answeredQuestions(request, null), null);
+  assert.equal(answeredQuestions(undefined, { a: ["Red"] }), null);
 });

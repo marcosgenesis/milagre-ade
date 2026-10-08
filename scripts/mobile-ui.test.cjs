@@ -4591,11 +4591,22 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     "./activity-item": { ActivityTitle: "ActivityTitle" },
     "./tool-row": { ToolRow: "ToolRow" },
     "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
+    "./answer-card": { AnswerCard: "AnswerCard" },
     "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "./theme": { hex: () => "#000" },
     "./viewer-store": { showImages() {} },
     "./ui": { colors: {}, styles: { card: {}, row: {}, muted: {} } },
   });
+  // Answers to the agent's questions show as a card, not as the summary text.
+  const answered = [{ header: "Color", question: "Which color?", answers: ["Red"] }];
+  const answerTree = ChatReply({
+    message: { id: 1, session_id: 1, body: "Red", context: null, role: "user", answered },
+    onActivity() {},
+    media: (path) => path,
+  });
+  const findType = (node, type) =>
+    Array.isArray(node) ? node.some((child) => findType(child, type)) : !!node?.props && (node.type === type || findType(node.props.children, type));
+  assert.ok(findType(answerTree, "AnswerCard"));
   const conclusion = "T3 Code tries every route in parallel.";
   const steps = [
     { id: "t1", kind: "thinking", title: "Thought", status: "done", detail: "Looking.", offset: 9 },

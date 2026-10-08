@@ -267,13 +267,25 @@ function connectDesktop({ relayUrl, identity, token = TOKEN, key = boxKeyPair(ra
     messages,
     frames,
     error: null,
-    /** Resolves with the channel, or with { error } when the Mac refused the hello. */
-    async hello() {
+    notices: [],
+    /** Resolves with the channel, or with { error } when the Mac refused the hello. Waits through pending notices (Allow). */
+    async hello({ ms = 5000 } = {}) {
       await opened;
       const { message, ephemeral } = phoneHello({ phone: key, host: identity.box.publicKey, token, random, name, kind: "desktop" });
       const reply = await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("Timed out waiting for the hello's reply")), 5000);
+        let timer;
+        const arm = () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => reject(new Error("Timed out waiting for the hello's reply")), ms);
+        };
+        arm();
         onReply = (bytes) => {
+          // A computer's first hello waits for Allow; the Mac says so, and again every few seconds.
+          if (bytes[0] === 0x05) {
+            desktop.notices.push(JSON.parse(new TextDecoder().decode(bytes.subarray(1))));
+            arm();
+            return;
+          }
           clearTimeout(timer);
           onReply = null;
           resolve(bytes);

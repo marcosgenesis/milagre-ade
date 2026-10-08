@@ -1,4 +1,5 @@
-import { ProjectAccountsSettings } from "./ProjectAccountsSettings";
+import { showUpdateNotice } from "./UpdateNotice";
+import { ProjectAccountsGroup, ProjectAccountsSettings } from "./ProjectAccountsSettings";
 import { AccountsSettings } from "./AccountsSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
@@ -611,8 +612,10 @@ function updateDescription(update: UpdateState | null): string {
       return `Downloading ${update.version ? `Milagre ${update.version}` : "update"}… ${Math.round(update.progress)}%`;
     case "downloaded":
       return `${update.version ? `Milagre ${update.version}` : "The update"} is ready to install.`;
+    case "installing":
+      return "Saving your work and restarting Milagre.";
     case "error":
-      return "Couldn't check for updates. Try again.";
+      return update.error ?? "Couldn't check for updates. Try again.";
     case "unavailable":
       return "Update checks are available in the installed app.";
     default:
@@ -658,11 +661,11 @@ export function AboutSettings({ update }: { update: UpdateState | null }) {
       <Row label="Updates" description={updateDescription(update)}>
         <button
           type="button"
-          disabled={update?.status === "checking" || update?.status === "downloading" || update?.status === "unavailable"}
-          onClick={() => void (update?.status === "downloaded" ? window.milagre.installUpdate() : window.milagre.checkForUpdates())}
+          disabled={update?.status === "checking" || update?.status === "downloading" || update?.status === "unavailable" || update?.status === "installing"}
+          onClick={() => void (update?.status === "downloaded" ? showUpdateNotice() : window.milagre.checkForUpdates())}
           className="rounded-control border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover disabled:cursor-default disabled:opacity-50"
         >
-          {update?.status === "downloaded" ? "Update and restart" : "Check for updates"}
+          {update?.status === "installing" ? "Restarting…" : update?.status === "downloaded" ? "Install & restart" : "Check for updates"}
         </button>
       </Row>
       {electron && (
@@ -1009,7 +1012,7 @@ function ShowInSidebarSetting({ project }: { project: SettingsProject }) {
   );
 }
 
-function ProjectSettings({ project }: { project: SettingsProject }) {
+function ProjectSettings({ project, onManageAccounts }: { project: SettingsProject; onManageAccounts: () => void }) {
   return (
     <>
       <Group title="Appearance">
@@ -1018,6 +1021,7 @@ function ProjectSettings({ project }: { project: SettingsProject }) {
       <Group title="Sidebar">
         <ShowInSidebarSetting project={project} />
       </Group>
+      <ProjectAccountsGroup projectPath={project.path} onManageAccounts={onManageAccounts} />
       <Group title="New worktrees">
         <FilesToCopy projectPath={project.path} />
         <SetupCommand projectPath={project.path} />
@@ -1060,7 +1064,7 @@ export function SettingsPanel({
           ))}
         {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}
-        {section === "project" && project && <ProjectSettings key={project.path} project={project} />}
+        {section === "project" && project && <ProjectSettings key={project.path} project={project} onManageAccounts={() => onSectionChange?.("accounts")} />}
       </div>
     </ScrollArea>
   );

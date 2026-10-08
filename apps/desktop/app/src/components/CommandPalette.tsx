@@ -1,7 +1,17 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, BubbleChatIcon, CodeIcon, Copy01Icon, FolderOpenIcon, GitBranchIcon, Search01Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import {
+  Add01Icon,
+  BubbleChatIcon,
+  BubbleChatSearchIcon,
+  CodeIcon,
+  Copy01Icon,
+  FolderOpenIcon,
+  GitBranchIcon,
+  Search01Icon,
+  Settings01Icon,
+} from "@hugeicons/core-free-icons";
 import { filterCommands, type Command } from "../lib/commands";
 import { useShortcutHints } from "../lib/shortcut-hints";
 import { ScrollArea } from "./primitives/ScrollArea";
@@ -17,9 +27,33 @@ const icons = {
   copy: Copy01Icon,
   unread: BubbleChatIcon,
   search: Search01Icon,
+  message: BubbleChatSearchIcon,
 };
 
-export function CommandPalette({ commands, onClose, onError }: { commands: Command[]; onClose: () => void; onError: (message: string) => void }) {
+function Label({ command }: { command: Command }) {
+  if (!command.highlight) return command.label;
+  const [start, end] = command.highlight;
+  return (
+    <>
+      {command.label.slice(0, start)}
+      <mark className="bg-transparent font-semibold text-ink">{command.label.slice(start, end)}</mark>
+      {command.label.slice(end)}
+    </>
+  );
+}
+
+/** `searchMessages` runs only when no command, chat or project matches, so a chat's own words are the fallback. */
+export function CommandPalette({
+  commands,
+  searchMessages,
+  onClose,
+  onError,
+}: {
+  commands: Command[];
+  searchMessages?: (query: string) => Command[];
+  onClose: () => void;
+  onError: (message: string) => void;
+}) {
   const [query, setQuery] = useState("");
   const showHints = useShortcutHints();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -28,7 +62,8 @@ export function CommandPalette({ commands, onClose, onError }: { commands: Comma
   const executing = useRef(false);
   const animation = useRef<Animation | null>(null);
   const listId = useId();
-  const results = filterCommands(commands, query);
+  const matches = filterCommands(commands, query);
+  const results = matches.length || !searchMessages ? matches : searchMessages(query);
   const selected = results.find((command) => command.id === selectedId) ?? results[0];
   const selectedIndex = selected ? results.indexOf(selected) : -1;
 
@@ -138,7 +173,7 @@ export function CommandPalette({ commands, onClose, onError }: { commands: Comma
         <input
           ref={input}
           role="combobox"
-          aria-label="Search commands, chats, and projects"
+          aria-label="Search commands, chats, projects, and messages"
           aria-autocomplete="list"
           aria-expanded="true"
           aria-controls={listId}
@@ -173,7 +208,9 @@ export function CommandPalette({ commands, onClose, onError }: { commands: Comma
                   className={`flex cursor-default items-center gap-3 rounded-[6px] px-2.5 py-2 text-[13px] ${command.id === selected?.id ? "bg-hover-2" : ""}`}
                 >
                   <HugeiconsIcon icon={icons[command.icon]} size={17} strokeWidth={1.8} className="shrink-0 text-ink-3" />
-                  <span className="min-w-0 flex-1 truncate">{command.label}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    <Label command={command} />
+                  </span>
                   {command.detail && <span className="max-w-[45%] truncate text-[11px] text-ink-3">{command.detail}</span>}
                   {showHints && command.shortcut && <ShortcutKeys shortcut={command.shortcut} />}
                 </div>

@@ -632,29 +632,31 @@ a:focus-visible .animated-underline::after {
   display: none;
 }
 
-/* Blur builds across the whole overlay toward the window edge. */
+/* The top of a scrolled chat, under the window-drag strip. Blur and tint build across the whole overlay, so the
+ * text softens gradually and is fully blurred only at the window edge. */
 .chat-top-blur {
-  --blur-edge: 0.5px;
   --blur-dir: to top;
   --blur-start: 0%;
   --blur-end: 100%;
 }
 .chat-top-blur > :last-child {
-  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 12%, transparent), transparent);
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 55%, transparent), transparent);
 }
 .chat-top-blur[data-busy] > :last-child {
-  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 20%, transparent), transparent);
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 80%, transparent), transparent);
 }
 
 /* The bottom mirrors the top: blur and tint grow gradually toward the composer. */
 .chat-bottom-blur {
-  --blur-edge: 0.5px;
   --blur-dir: to bottom;
   --blur-start: 0%;
   --blur-end: 100%;
 }
 .chat-bottom-blur > :last-child {
-  background: linear-gradient(to top, color-mix(in oklab, var(--page) 12%, transparent), transparent);
+  background: linear-gradient(to top, color-mix(in oklab, var(--page) 55%, transparent), transparent);
+}
+.chat-bottom-blur[data-busy] > :last-child {
+  background: linear-gradient(to top, color-mix(in oklab, var(--page) 80%, transparent), transparent);
 }
 
 /* Messages far off screen skip layout and paint; the size of the last render stands in, so scrolling stays steady.

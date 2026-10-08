@@ -756,6 +756,10 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../ui": ui,
     "../agent-controls": { AgentControls: "AgentControls", PermissionChip: "PermissionChip" },
     "../turn-options": require("../apps/mobile/src/turn-options.ts"),
+    "../handoff-sides": require("../apps/mobile/src/handoff-sides.ts"),
+    "../handoff-divider": { HandoffDivider: "HandoffDivider" },
+    "../handoff-brief-store": { showBrief() {} },
+    "@milagre/shared/handoff": require("@milagre/shared/handoff"),
     "../archive": require("../apps/mobile/src/archive.ts"),
     "../confirm-store": { confirmSheet: (...args) => alert(...args) },
   });
@@ -1109,6 +1113,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "@hugeicons/core-free-icons": {},
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     "@milagre/shared/chats": { ...require("@milagre/shared/chats"), isListedChat: () => true },
+    "@milagre/shared/message-search": require("@milagre/shared/message-search"),
     "./session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
     "./indicators": { chatMark: () => "idle" },
     "./status-indicators": { ChatMarkIcon: "ChatMarkIcon" },
@@ -1223,6 +1228,29 @@ test("the sidebar filter shows archived, running or waiting Chats across Project
   assert.equal(nav.filter().props.sections[0].items.find((item) => item.id === "archived").checked, true);
   nav.filter().props.onSelect("running");
   assert.equal(ids(), "[]", "chatMark is idle in this host, so nothing is running");
+});
+
+test("a chat search with no matching title lists matching messages, and a tap opens their Chat", () => {
+  const nav = navigationHost(deferred().promise);
+  nav.state.project.state.sessions[3] = { id: 3, title: "Relay work" };
+  nav.state.project.state.messages = [{ id: 7, session_id: 3, body: "Deploy the relay with wrangler, then check /health" }];
+  const search = () => find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats");
+  search().props.onChangeText("wranglr");
+  const data = nav.rows().props.data;
+  assert.equal(
+    JSON.stringify(data.filter((item) => item.kind === "section" || item.kind === "message").map((item) => item.name ?? item.snippet)),
+    JSON.stringify(["Messages", "Deploy the relay with wrangler, then check /health"]),
+  );
+  const message = nav.row("message");
+  assert.equal(message.props.accessibilityLabel, "Deploy the relay with wrangler, then check /health, in Relay work");
+  message.props.onPress();
+  assert.equal(JSON.stringify(nav.routes), JSON.stringify([{ pathname: "/chat", params: { projectPath: "/last", hostId: "mac", id: "3" } }]));
+  search().props.onChangeText("relay");
+  assert.equal(
+    nav.rows().props.data.some((item) => item.kind === "message"),
+    false,
+    "a Chat title match keeps messages out",
+  );
 });
 
 test("a sidebar Project can be removed from the list after confirming", async () => {
@@ -3475,7 +3503,7 @@ for (const provider of ["claude", "codex"])
     const { ProjectAccountsSection } = load("project-accounts-section.tsx", {
       react,
       "react/jsx-runtime": { jsx, jsxs: jsx },
-      "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable", StyleSheet: { hairlineWidth: 1 } },
       "@hugeicons/core-free-icons": {},
       "@milagre/shared/providers": require("@milagre/shared/providers"),
       "./session": { useSession: () => session },
@@ -3484,9 +3512,18 @@ for (const provider of ["claude", "codex"])
       "./ui": { ListRow: "ListRow", PageScroll: "PageScroll", PullDown: "PullDown", colors: {}, styles: {} },
       "expo-router": { router: { push() {} } },
     });
+    // Renders nested function components in place, sharing one hook host in a stable order.
+    const expand = (node) =>
+      Array.isArray(node)
+        ? node.map(expand)
+        : node && typeof node.type === "function"
+          ? expand(node.type(node.props))
+          : node?.props?.children !== undefined
+            ? { ...node, props: { ...node.props, children: expand(node.props.children) } }
+            : node;
     const render = () => {
       react.begin();
-      return ProjectAccountsSection().type();
+      return expand(ProjectAccountsSection());
     };
     const settle = () => new Promise((resolve) => setImmediate(resolve));
     try {
@@ -3498,14 +3535,19 @@ for (const provider of ["claude", "codex"])
       assert.ok(menu(), "Provider selector loads for the current Project");
       const items = menu().props.sections.flatMap((s) => s.items);
       assert.equal(items.find((i) => i.id === "out").disabled, true);
-      assert.equal(items.find((i) => i.id === "gone").disabled, true);
       assert.equal(
-        find(render(), (n) => n.props.title === "Re-authenticate: Removed account"),
+        items.find((i) => i.id === "gone"),
         undefined,
+        "Removed accounts are not offered",
       );
       assert.equal(
-        find(render(), (n) => n.props.title === "Re-authenticate: default@example.test"),
+        find(render(), (n) => n.props.title === "Re-authenticate"),
         undefined,
+        "A ready account needs no sign-in",
+      );
+      assert.ok(
+        find(render(), (n) => n.type === "Text" && n.props.children === "Default"),
+        "Inherited account is tagged Default",
       );
       assert.match(items.find((i) => i.id === "__default__").title, /default@example.test/);
       menu().props.onSelect("work");
@@ -3516,7 +3558,11 @@ for (const provider of ["claude", "codex"])
       assert.ok(calls.some((c) => c[0] === "accounts:assign" && c[3] === null));
       assert.ok(calls.some((c) => c[0] === "refreshProviders"));
       assert.equal(find(render(), (n) => n.type === "ListRow" && n.props.title === "Project").props.leading.props.path, "/p");
-      find(render(), (n) => n.props.title === "Re-authenticate: Expired").props.onPress();
+      // An assignment that later signed out offers Re-authenticate for that account only.
+      menu().props.onSelect("out");
+      await settle();
+      render();
+      find(render(), (n) => n.props.title === "Re-authenticate").props.onPress();
       find(render(), (n) => n.props.title === "Project").props.onPress();
       find(render(), (n) => n.props.title === "Linked work").props.onPress();
       render();
@@ -3857,4 +3903,38 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     markdown(ChatReply({ ...props, message: { id: 1, session_id: 1, role: "assistant", body: "Checking. Done.", steps: [{ ...steps[2], offset: 0 }] } })),
     ["Checking. Done."],
   );
+});
+
+test("mobile usage identifies the account by email, falls back to its label, and accepts older hosts", () => {
+  const { ProviderRows } = load(
+    "usage-section.tsx",
+    {
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      react: {},
+      "react-native": { Text: "Text", View: "View" },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/providers": { providerName: () => "Codex" },
+      "@milagre/shared/usage": { formatUpdatedAgo: () => "Updated just now" },
+      "./icons": {},
+      "./ui": { colors: {}, styles: {} },
+      "./session": {},
+      "./use-usage": {},
+    },
+    "\nexport { ProviderRows };\n",
+  );
+  const provider = { provider: "codex", status: "ok", windows: [], updatedAt: new Date().toISOString() };
+  for (const account of [
+    { id: "work", label: "Work", email: "work@example.test" },
+    { id: "work", label: "Work" },
+  ]) {
+    const tree = ProviderRows({ provider: { ...provider, account }, now: Date.now() });
+    const label = find(tree, (node) => node.type === "Text" && node.props.children === (account.email || account.label));
+    assert.ok(label, "The account identity is visible");
+    assert.equal(label.props.selectable, true);
+    assert.equal(
+      find(tree, (node) => node.type === "Text" && node.props.children === "Codex"),
+      undefined,
+    );
+  }
+  assert.doesNotThrow(() => ProviderRows({ provider, now: Date.now() }));
 });

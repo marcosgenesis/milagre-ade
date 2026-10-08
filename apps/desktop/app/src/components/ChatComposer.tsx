@@ -325,6 +325,8 @@ interface ChatComposerProps {
   /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
   findOpen?: boolean;
   findSignal?: number;
+  /** Text the find bar fills in when `findSignal` changes, e.g. the words a ⌘K message result matched. */
+  findSeed?: string;
   onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
@@ -628,6 +630,7 @@ export function ChatComposer({
   newChatError,
   findOpen = false,
   findSignal = 0,
+  findSeed,
   onFindClose,
   notice,
   onDismissNotice,
@@ -688,7 +691,7 @@ export function ChatComposer({
             <ProgressiveBlurLayers />
           </div>
         )}
-        {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
+        {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} seed={findSeed} onClose={onFindClose} />}
         {!isNewChat && (
           <div className="relative flex min-h-0 flex-1 flex-col">
             <MessageScroller

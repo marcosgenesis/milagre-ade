@@ -1,3 +1,4 @@
+import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { LinkWorkspace } from "./components/LinkWorkspace";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
@@ -78,13 +79,14 @@ import { EditorLinks, Notice } from "./components/editor-links";
 // Notice above is editor-links' toast; this is the dismissable notice card.
 import { Notice as NoticeCard } from "./components/Notice";
 import { openInEditor } from "./lib/editors";
-import type { RuntimeConnection, UpdateState } from "./electron";
+import type { RuntimeConnection } from "./electron";
 import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
+import { messageCommands } from "./lib/message-commands";
 import type { RecentProject } from "./lib/project-list";
 import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
@@ -328,7 +330,7 @@ function App() {
   const [hostConnection, setHostConnection] = useState<RuntimeConnection>({ connected: true });
   const [restartingHost, setRestartingHost] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
-  const [update, setUpdate] = useState<UpdateState | null>(null);
+  const update = useAppUpdates();
   const [gitDialog, setGitDialog] = useState<{
     sessionId: number;
     worktreeId: number;
@@ -388,13 +390,6 @@ function App() {
       off?.();
       snapshotOff?.();
     };
-  }, []);
-
-  useEffect(() => {
-    let unsubscribe = () => {};
-    window.milagre.getUpdateState().then(setUpdate);
-    unsubscribe = window.milagre.onUpdateState(setUpdate);
-    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -1225,14 +1220,33 @@ function App() {
   // The find bar belongs to one open chat; ⌘F again while it is open refocuses and selects its text.
   const [findOpen, setFindOpen] = useState(false);
   const [findSignal, setFindSignal] = useState(0);
+  // Text the find bar starts with, from a ⌘K message result; ⌘F clears it.
+  const [findSeed, setFindSeed] = useState<string | undefined>();
   const findRef = useRef({ open: false, canOpen: false });
   findRef.current = { open: findOpen, canOpen: view === "chat" && messages.length > 0 };
-  function openFind() {
+  function openFind(seed?: string) {
     if (!findRef.current.canOpen) return;
+    setFindSeed(seed);
     setFindOpen(true);
     setFindSignal((current) => current + 1);
   }
   useEffect(() => setFindOpen(false), [selectedSession?.id, view]);
+  // A ⌘K message result opens its chat first; the find bar opens once that chat's messages are on screen.
+  const pendingFind = useRef<{ sessionId: number; term: string } | null>(null);
+  useEffect(() => {
+    const pending = pendingFind.current;
+    if (!pending || view !== "chat" || selectedSession?.id !== pending.sessionId || !messages.length) return;
+    pendingFind.current = null;
+    openFind(pending.term);
+  }, [selectedSession?.id, view, messages.length]);
+  function openMessage(sessionId: number, term: string) {
+    if (view === "chat" && selectedSession?.id === sessionId) {
+      openFind(term);
+      return;
+    }
+    pendingFind.current = { sessionId, term };
+    openChat(sessionId);
+  }
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
@@ -1692,14 +1706,6 @@ function App() {
             onOpen={openChatByKey}
           />
         )}
-        {update?.status === "downloaded" && (
-          <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
-            <span>Milagre {update.version} is ready to update.</span>
-            <button className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700" onClick={() => void window.milagre.installUpdate()}>
-              Update and restart
-            </button>
-          </div>
-        )}
         <div
           className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
           onAnimationEnd={(event) => {
@@ -1892,6 +1898,7 @@ function App() {
                   newChatError={newChatError}
                   findOpen={findOpen}
                   findSignal={findSignal}
+                  findSeed={findSeed}
                   onFindClose={() => setFindOpen(false)}
                   notice={notice}
                   onDismissNotice={() => setNotice(null)}
@@ -1931,7 +1938,16 @@ function App() {
           </ChangesPanelSlot>
         </div>
         {linkDialog}
-        {commandPaletteOpen && <CommandPalette commands={buildCommands(project)} onClose={() => setCommandPaletteOpen(false)} onError={setNotice} />}
+        {commandPaletteOpen && (
+          <CommandPalette
+            commands={buildCommands(project)}
+            searchMessages={(query) =>
+              messageCommands(sidebarState?.messages ?? NO_MESSAGES, query, new Map(chats.map((chat) => [Number(chat.id), chat.label])), openMessage)
+            }
+            onClose={() => setCommandPaletteOpen(false)}
+            onError={setNotice}
+          />
+        )}
         {gitDialog && (
           <GitActionsDialog
             key={gitDialog.sessionId}
@@ -1989,4 +2005,10 @@ function App() {
   );
 }
 
-export default App;
+export default function AppWithUpdates() {
+  return (
+    <UpdateShell>
+      <App />
+    </UpdateShell>
+  );
+}

@@ -21,6 +21,11 @@ const CLOSE_BY_HOST = 1000;
 const CLOSE_HOST_OFFLINE = 4404;
 const CLOSE_ROOM_FULL = 4429;
 const DESKTOP_PEER = "desktop-peer-v1";
+// A paired Mac is not trusted like the local daemon: a paged reply may not announce more than MAX_PAGES pages nor run
+// past MAX_PAGED_CHARS in all. The daemon holds at most 64 Mi characters of pages at once (server.cjs PAGES_BUDGET_CHARS)
+// in pages of up to 1 Mi, so these have headroom over any real reply.
+const MAX_PAGES = 1024;
+const MAX_PAGED_CHARS = 128 * 1024 * 1024;
 // Refusals that retrying can't change: the computer must be paired again (or its keys found).
 const FINAL = new Set(["denied", "unknown-phone", "reset", "bad-token", "kind", "bad-host", "keys"]);
 const decoder = new TextDecoder();
@@ -73,10 +78,17 @@ async function connectPeer({
   random = defaultRandom,
   createSocket = defaultSocket,
   timeoutMs = 30_000,
+  maxPagedChars = MAX_PAGED_CHARS,
 }) {
   if (signal?.aborted) throw new PeerError("cancelled");
-  const host = fromB64url(hostKey);
-  const hello = phoneHello({ phone: identity, host, token, random, name, kind: "desktop" });
+  let host, hello;
+  try {
+    host = fromB64url(hostKey);
+    hello = phoneHello({ phone: identity, host, token, random, name, kind: "desktop" });
+  } catch {
+    // A malformed pinned key or identity: this Mac's stored keys for the computer are unusable.
+    throw new PeerError("keys");
+  }
   const socket = createSocket(`${url.replace(/\/+$/, "")}/v1/phone?id=${encodeURIComponent(hostId)}`);
   socket.binaryType = "arraybuffer";
   const client = Object.assign(new EventEmitter(), {
@@ -173,9 +185,16 @@ async function connectPeer({
   }
   // A response too large for one frame (a big Project's state) arrives as pages, read one at a time in order.
   async function readPages({ pageId, pageCount }) {
-    if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw new Error("The daemon sent an invalid paged response");
+    if (!Number.isSafeInteger(pageCount) || pageCount < 1 || pageCount > MAX_PAGES) throw new Error("The daemon sent an invalid paged response");
     const parts = [];
-    for (let index = 0; index < pageCount; index++) parts.push(await client.call("daemon:result-page", [pageId, index]));
+    let chars = 0;
+    for (let index = 0; index < pageCount; index++) {
+      const part = await client.call("daemon:result-page", [pageId, index]);
+      if (typeof part !== "string") throw new Error("The daemon sent an invalid paged response");
+      chars += part.length;
+      if (chars > maxPagedChars) throw new Error("The daemon's paged response is too large");
+      parts.push(part);
+    }
     return JSON.parse(parts.join(""));
   }
 
@@ -268,6 +287,8 @@ async function connectPeer({
     throw new PeerError("outdated");
   }
   client.status = status;
+  // The signal only cancels the attempt; once connected, aborting it must not close the live client.
+  signal?.removeEventListener("abort", cancel);
   return client;
 }
 

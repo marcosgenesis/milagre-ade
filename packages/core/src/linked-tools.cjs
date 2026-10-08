@@ -305,7 +305,7 @@ function inputSchema(definition) {
 /** Runs a definition with arguments checked against its input; failures come back as the tool's error text. */
 async function runTool(definition, args) {
   try {
-    const parsed = z.object(definition.input).parse(args ?? {});
+    const parsed = (definition.strict ? z.strictObject(definition.input) : z.object(definition.input)).parse(args ?? {});
     return { text: String(await definition.run(parsed)), isError: false };
   } catch (error) {
     const text =

@@ -216,13 +216,14 @@ function fakeSdk(script) {
   return { calls, loadSdk: async () => ({ query }) };
 }
 
-function claude(t, { script = scripts.reply, resumeId, tldrEnabled, command = "/usr/local/bin/claude", interruptGraceMs } = {}) {
+function claude(t, { script = scripts.reply, resumeId, tldrEnabled, analysisOnly, command = "/usr/local/bin/claude", interruptGraceMs } = {}) {
   const sdk = fakeSdk(script);
   const events = [];
   const session = new ClaudeSession({
     cwd: "/repo",
     resumeId,
     tldrEnabled,
+    analysisOnly,
     command,
     emit: (event) => events.push(event),
     loadSdk: sdk.loadSdk,
@@ -232,6 +233,27 @@ function claude(t, { script = scripts.reply, resumeId, tldrEnabled, command = "/
   return { session, events, calls: sdk.calls };
 }
 const ended = (events, count = 1) => waitUntil(() => events.filter(isTerminal).length >= count);
+
+test("analysis-only Claude denies shell tools and cannot switch to Full", async (t) => {
+  const { session, events, calls } = claude(t, { analysisOnly: true, script: scripts.runsTools });
+  await session.startTurn({ ...TURN, permissionMode: "full" });
+  await ended(events);
+  assert.equal(calls.options.permissionMode, "dontAsk");
+  assert.deepEqual(calls.options.tools, []);
+  assert.deepEqual(calls.options.settingSources, []);
+  assert.equal(calls.options.strictMcpConfig, true);
+  assert.equal(
+    events.some((event) => event.type === "permission-request"),
+    false,
+  );
+  const denied = events.find((event) => event.type === "step-completed" && event.id === "tool-1");
+  assert.equal(denied.status, "failed");
+  assert.match(denied.detail, /analysis-only/);
+  await session.setPermissionMode("full");
+  await session.startTurn({ ...TURN, permissionMode: "full" });
+  await ended(events, 2);
+  assert.equal(calls.modes.includes("bypassPermissions"), false);
+});
 
 test("starts with Milagre's options and streams a reply", async (t) => {
   const { session, events, calls } = claude(t);

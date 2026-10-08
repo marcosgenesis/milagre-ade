@@ -7,6 +7,7 @@ const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, is
 const { PendingPermissions, claudeRequest, claudeResult, insideRoot, insideWorkspace } = require("./permissions.cjs");
 const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
 const { runTool } = require("../linked-tools.cjs");
+const { advisorPolicy, ANALYSIS_INSTRUCTIONS } = require("./advisor-policy.cjs");
 
 // Milagre permission mode -> Claude Code permission mode. In Ask (`default`) Claude Code checks with
 // the user, through canUseTool, before edits and commands its rules don't already allow.
@@ -93,6 +94,7 @@ class ClaudeSession {
     workspaceRoots,
     workspaceInstructions,
     tldrEnabled = true,
+    analysisOnly = false,
     linked = null,
     loadSdk = () => import("@anthropic-ai/claude-agent-sdk"),
     spawnImpl = spawn,
@@ -107,6 +109,7 @@ class ClaudeSession {
       workspaceRoots,
       workspaceInstructions,
       tldrEnabled,
+      analysisOnly,
       linked,
       loadSdk,
       spawnImpl,
@@ -170,14 +173,14 @@ class ClaudeSession {
     Object.assign(this.state, { turnId, hasText: false });
     this.permissions.setMode(permissionMode);
     try {
-      if (!this.query) await this.start(model, CLAUDE_MODES[permissionMode] ?? "default", effort, ultracode, fastMode);
+      if (!this.query) await this.start(model, this.analysisOnly ? "dontAsk" : (CLAUDE_MODES[permissionMode] ?? "default"), effort, ultracode, fastMode);
       if (!this.closed) {
         if (model !== this.model) {
           await this.query.setModel(model);
           this.model = model;
         }
         // The user may have switched modes while Claude Code was starting.
-        const mode = CLAUDE_MODES[this.permissions.mode] ?? "default";
+        const mode = this.analysisOnly ? "dontAsk" : (CLAUDE_MODES[this.permissions.mode] ?? "default");
         if (mode !== this.mode) {
           await this.query.setPermissionMode(mode);
           this.mode = mode;
@@ -288,10 +291,17 @@ class ClaudeSession {
         forwardSubagentText: true,
         pathToClaudeCodeExecutable: this.command,
         settingSources: ["user", "project", "local"],
-        systemPrompt: { type: "preset", preset: "claude_code", append: milagreInstructions(this.tldrEnabled, this.workspaceInstructions) },
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: [milagreInstructions(this.tldrEnabled, this.workspaceInstructions), this.analysisOnly ? ANALYSIS_INSTRUCTIONS : ""]
+            .filter(Boolean)
+            .join("\n\n"),
+        },
         ...(this.linked?.tools.length ? linkedOptions(this.linked.tools, sdk) : {}),
         canUseTool: (toolName, input, options) =>
           toolName === "AskUserQuestion" ? this.askQuestion(input, options) : this.askPermission(toolName, input, options),
+        ...(this.analysisOnly ? advisorPolicy("claude", this.linked?.tools ?? []) : {}),
         ...(this.resumeId ? { resume: this.resumeId } : {}),
         // Own the process so close() can stop Claude Code and everything it started.
         spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
@@ -364,6 +374,7 @@ class ClaudeSession {
   // The user switched modes, possibly mid-turn: Claude Code stops asking for what the new mode allows,
   // and the waiting cards it allows are answered (see PendingPermissions).
   async setPermissionMode(permissionMode) {
+    if (this.analysisOnly) return;
     this.permissions.setMode(permissionMode);
     const mode = CLAUDE_MODES[permissionMode] ?? "default";
     if (!this.query || this.closed || mode === this.mode) return;

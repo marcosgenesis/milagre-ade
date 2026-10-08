@@ -10,16 +10,17 @@ type Pool = {
 };
 const pools = new WeakMap<Client, Pool>();
 // Keep slow GitHub lookups out of the capacity used by snapshots and sends.
-export function readPullRequest(client: Client, path: string, active: () => boolean): Promise<PullRequest | null | undefined> {
+export function readPullRequest(client: Client, path: string, active: () => boolean, ref?: string): Promise<PullRequest | null | undefined> {
   let pool = pools.get(client);
   if (!pool) {
     pool = { running: 0, queue: [], pending: new Map(), cache: new Map() };
     pools.set(client, pool);
   }
   const state = pool;
-  const cached = state.cache.get(path);
-  if (cached && Date.now() - cached.at < 30000) return Promise.resolve(cached.value);
-  const pending = state.pending.get(path);
+  const key = JSON.stringify([path, ref]);
+  const cached = state.cache.get(key);
+  if (cached && (Date.now() - cached.at < 30000 || (ref && cached.value?.state === "MERGED"))) return Promise.resolve(cached.value);
+  const pending = state.pending.get(key);
   if (pending) {
     pending.job.active.push(active);
     return pending.promise;
@@ -47,24 +48,26 @@ export function readPullRequest(client: Client, path: string, active: () => bool
   const job: Job = {
     active: [active],
     skip: () => {
-      state.pending.delete(path);
+      state.pending.delete(key);
       resolve(undefined);
     },
     start: async () => {
       try {
-        const value = await client.call<PullRequest | null>("worktree:pull-request", [path]);
+        const value = ref
+          ? ((await client.call<(PullRequest | null)[]>("worktree:pull-requests", [path, [ref]]))[0] ?? null)
+          : await client.call<PullRequest | null>("worktree:pull-request", [path]);
         // Bound retained status for long sessions across many Projects.
         if (state.cache.size >= 200) state.cache.delete(state.cache.keys().next().value!);
-        state.cache.set(path, { at: Date.now(), value });
+        state.cache.set(key, { at: Date.now(), value });
         resolve(value);
       } catch (error) {
         reject(error);
       } finally {
-        state.pending.delete(path);
+        state.pending.delete(key);
       }
     },
   };
-  state.pending.set(path, { promise, job });
+  state.pending.set(key, { promise, job });
   state.queue.push(job);
   drain();
   return promise;

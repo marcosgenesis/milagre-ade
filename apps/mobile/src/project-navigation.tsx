@@ -20,9 +20,9 @@ import {
   UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { comparePins, isListedChat, pendingChatSessionId, withPendingChat } from "@milagre/shared/chats";
+import { chatMarkTone, chatPullRequests, comparePins, isListedChat, pendingChatSessionId, pullRequestRefs, withPendingChat } from "@milagre/shared/chats";
 import { searchMessages } from "@milagre/shared/message-search";
-import type { AgentSession } from "@milagre/shared/model";
+import type { AgentSession, PullRequest } from "@milagre/shared/model";
 import type { RegisteredProject } from "./client";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
 import { usePendingChats, useSession, type MobilePendingChat } from "./session";
@@ -38,12 +38,23 @@ import { confirm } from "./confirm-store";
 import { ArchiveProgress } from "./archive-progress";
 import { AttentionDot, useAttention } from "./attention";
 import { projectOfKey } from "@milagre/shared/agent-runs";
+import { useChatPullRequests } from "./use-chat-pull-requests";
+import { ChatPullRequestChips } from "./chat-pull-request-chips";
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
   | { kind: "project"; name: string; expanded: boolean; members?: RegisteredProject[] }
   | { kind: "section"; name: string }
-  | { kind: "chat"; chat: AgentSession; worktree: string; mark: ChatMark; pending?: MobilePendingChat }
+  | {
+      kind: "chat";
+      chat: AgentSession;
+      worktree: string;
+      mark: ChatMark;
+      pending?: MobilePendingChat;
+      prPath?: string;
+      prRefs?: string[];
+      pullRequests?: PullRequest[];
+    }
   | { kind: "message"; chat: AgentSession; title: string; snippet: string; highlight: [number, number] }
   | { kind: "notice"; message: string; failed?: boolean }
 );
@@ -205,6 +216,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           chat,
           pending,
           worktree: pending?.newWorktree ? "New worktree" : copy?.project.state.worktrees[chat.worktree_id]?.name || "Worktree",
+          prPath: !pending && !copy?.project.link ? copy?.project.state.worktrees[chat.worktree_id]?.path : undefined,
+          prRefs: copy?.project.pullRequestRefs?.[chat.id] ?? pullRequestRefs(byChat.get(chat.id) || []),
           mark,
         });
       if (failures[project.path])
@@ -252,6 +265,23 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- revision invalidates rows after the session's preview cache changes.
   }, [revision, cachedProject, currentPath, expanded, failures, query, searching, show, listed, session.snapshot, session.client?.url, pendingChats]);
+
+  const prTargets = useMemo(() => {
+    const byPath = new Map<string, Set<string>>();
+    for (const row of rows) {
+      if (row.kind !== "chat" || !row.prPath) continue;
+      const refs = byPath.get(row.prPath) || new Set<string>();
+      for (const ref of row.prRefs || []) refs.add(ref);
+      byPath.set(row.prPath, refs);
+    }
+    return [...byPath].map(([path, refs]) => ({ path, refs: [...refs] }));
+  }, [rows]);
+  const prStatus = useChatPullRequests(session.client, prTargets);
+  const displayedRows = rows.map((row) => {
+    if (row.kind !== "chat") return row;
+    const status = row.prPath ? prStatus[row.prPath] : undefined;
+    return { ...row, pullRequests: chatPullRequests(row.prRefs || [], status?.found || {}, status?.branch) };
+  });
 
   // Choosing a Chat or a new Chat goes there at once; the Chat loads the Project behind the splash mark, so nothing
   // waits here.
@@ -485,7 +515,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         {error ? <ErrorNotice message={error} /> : null}
       </View>
       <FlatList
-        data={rows}
+        data={displayedRows}
         keyExtractor={(row) => row.key}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -594,6 +624,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
             );
           const title = item.chat.title || item.chat.generatedTitle || "New Chat";
           const selected = currentPath === item.path && activeChatId === item.chat.id;
+          const tone = chatMarkTone(item.mark);
+          const hasPullRequests = !!item.pullRequests?.length;
           const copy = item.path === currentPath && session.snapshot ? session.snapshot : cachedProject(item.path);
           const menu = chatMenu(
             item.chat,
@@ -602,42 +634,52 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           // A tap opens the Chat and a long press opens its ⋯ menu, as on desktop's sidebar.
           return (
             <View style={[s.chat, { backgroundColor: selected ? colors.hover : "transparent" }]}>
-              <PullDown
-                label={`${title}${item.chat.pinned ? ", pinned" : ""}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}`}
-                title={title}
-                sections={item.pending ? [] : menu}
-                onSelect={(action) => {
-                  if (!item.pending) void act(item.path, item.chat, action);
-                }}
-                onPress={() => select(item.path, item.chat.id, item.pending)}
-                style={{ flex: 1 }}
-              >
-                <View style={s.chatBody}>
-                  <ChatMarkIcon mark={item.mark} />
-                  <View style={{ flex: 1, gap: 5 }}>
-                    <Text numberOfLines={2} style={[s.chatTitle, item.mark === "unread" && { fontWeight: "600" }]}>
-                      {title}
-                    </Text>
-                    <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
-                      {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
-                      {!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}
-                      <Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>
-                        {copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : item.worktree}
+              <View style={{ flex: 1 }}>
+                <PullDown
+                  label={`${title}${item.chat.pinned ? ", pinned" : ""}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}`}
+                  title={title}
+                  sections={item.pending ? [] : menu}
+                  onSelect={(action) => {
+                    if (!item.pending) void act(item.path, item.chat, action);
+                  }}
+                  onPress={() => select(item.path, item.chat.id, item.pending)}
+                  style={{ flex: 1 }}
+                >
+                  <View style={[s.chatBody, hasPullRequests && { minHeight: 28, paddingTop: 6, paddingBottom: 0 }]}>
+                    <ChatMarkIcon mark={item.mark} />
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text
+                        numberOfLines={hasPullRequests ? 1 : 2}
+                        style={[s.chatTitle, { color: item.chat.unread || selected ? colors.ink : colors.ink2, fontWeight: item.chat.unread ? "600" : "500" }]}
+                      >
+                        {title}
                       </Text>
-                      {!!labels[item.mark] && (
-                        <Text
-                          style={[
-                            s.detail,
-                            { color: item.mark === "failed" ? colors.red : item.mark === "question" || item.mark === "waiting" ? colors.orange : colors.ink2 },
-                          ]}
-                        >
-                          {labels[item.mark]}
-                        </Text>
+                      {!hasPullRequests && (
+                        <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
+                          {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
+                          {!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}
+                          <Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>
+                            {copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : item.worktree}
+                          </Text>
+                          {!!labels[item.mark] && (
+                            <Text style={[s.detail, { color: tone === "accent" ? colors.accentInk : colors[tone] }]}>{labels[item.mark]}</Text>
+                          )}
+                        </View>
                       )}
                     </View>
                   </View>
-                </View>
-              </PullDown>
+                </PullDown>
+                {hasPullRequests && (
+                  <ChatPullRequestChips pullRequests={item.pullRequests || []}>
+                    {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
+                    {!!labels[item.mark] && (
+                      <Text numberOfLines={1} style={[s.detail, { flexShrink: 1, color: tone === "accent" ? colors.accentInk : colors[tone] }]}>
+                        {labels[item.mark]}
+                      </Text>
+                    )}
+                  </ChatPullRequestChips>
+                )}
+              </View>
               {!item.pending && (
                 <PullDown label={`Actions for ${title}`} title={title} sections={menu} onSelect={(action) => void act(item.path, item.chat, action)}>
                   <View style={{ width: 40, height: 44, alignItems: "center", justifyContent: "center" }}>
@@ -679,7 +721,7 @@ const s = StyleSheet.create({
   project: { flexDirection: "row", alignItems: "center", marginTop: 12 },
   projectTitle: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 8 },
   chat: { flexDirection: "row", alignItems: "center", marginVertical: 2, borderRadius: 8, borderCurve: "continuous" },
-  chatBody: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 64, paddingLeft: 12, paddingVertical: 12 },
+  chatBody: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingLeft: 12, paddingVertical: 8 },
   filter: { width: 44, height: 44, borderRadius: 10, borderCurve: "continuous", alignItems: "center", justifyContent: "center" },
   chatTitle: { color: colors.ink, fontSize: 15, lineHeight: 20 },
   notice: { minHeight: 44, justifyContent: "center", paddingLeft: 42, paddingRight: 12 },

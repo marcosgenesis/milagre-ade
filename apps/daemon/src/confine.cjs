@@ -109,6 +109,7 @@ const PATHS = Object.freeze({
   "chat:archive-subagent": ([projectPath]) => [projectPath],
   "chat:archive-finished-subagents": ([projectPath]) => [projectPath],
   "worktree:pull-request": ([worktreePath]) => [worktreePath],
+  "worktree:pull-requests": ([worktreePath]) => [worktreePath],
   "project:branches": ([projectPath]) => [projectPath],
   "attachment:preview": ([file]) => [attached(file)],
   // A null Project (user skills only) is refused: confined, the phone sees no user skills.

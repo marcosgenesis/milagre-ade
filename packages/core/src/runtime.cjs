@@ -575,7 +575,7 @@ function createRuntime(options) {
   });
   commands.handle("worktree:pull-requests", async (_event, worktreePath, refs) => {
     await environmentReady;
-    return readPullRequests(worktreePath, refs);
+    return (options.readPullRequests ?? readPullRequests)(worktreePath, refs);
   });
   // While any chat's turn or a new worktree's setup runs the Mac stays awake (the screen can still sleep).
   // On until the renderer pushes the saved setting.

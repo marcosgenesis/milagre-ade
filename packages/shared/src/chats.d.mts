@@ -1,4 +1,9 @@
 import type { AgentSession, LinkChatSession, ChatMessage, CoordinatorState, ImageAttachment, ModelProvider } from "./model.ts";
+export { pullRequestRefs, pullRequestRefsCache, chatPullRequests, type PullRequestRef } from "./chat-pull-requests.mjs";
+
+export function chatMarkTone(
+  mark: "question" | "waiting" | "delegated" | "interrupted" | "running" | "failed" | "unread" | "idle",
+): "accent" | "orange" | "red" | "ink3";
 
 export function chatTitle(session: AgentSession | LinkChatSession, messages: ChatMessage[]): string;
 export function isHandoverChat(session: AgentSession | LinkChatSession | undefined): boolean;

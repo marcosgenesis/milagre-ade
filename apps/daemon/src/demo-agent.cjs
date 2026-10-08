@@ -164,6 +164,9 @@ function demoRuntimeOptions({ cwd, worktreeRoot, copy } = {}) {
     readPullRequest: async () => {
       throw new Error(NO_PULL_REQUESTS);
     },
+    readPullRequests: async () => {
+      throw new Error(NO_PULL_REQUESTS);
+    },
   };
 }
 

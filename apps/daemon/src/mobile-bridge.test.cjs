@@ -13,6 +13,32 @@ const { forPhone, runsForPhone, startMobileBridge } = require("./mobile-bridge.c
 const { connect } = require("./client.cjs");
 const { demoRuntimeOptions } = require("./demo-agent.cjs");
 
+test("phone projections preserve PR references without shell output", () => {
+  const { forChatList } = require("./mobile-bridge.cjs");
+  const project = {
+    state: {
+      sessions: { 1: { id: 1 } },
+      messages: [
+        { id: 1, session_id: 1, body: "Open a PR", role: "user" },
+        {
+          id: 2,
+          session_id: 1,
+          body: "",
+          role: "assistant",
+          steps: [{ kind: "shell", status: "done", detail: "$ gh pr create --fill\nhttps://github.com/example/project/pull/246" }],
+        },
+        { id: 3, session_id: 1, body: "Next", role: "user" },
+      ],
+      tasks: {},
+    },
+  };
+  for (const copy of [forPhone(project), forChatList(project, { runs: {} }).project]) {
+    assert.deepEqual(copy.pullRequestRefs, { 1: ["https://github.com/example/project/pull/246"] });
+    assert.ok(copy.state.messages.every((message) => !message.steps?.some((step) => step.detail?.includes("gh pr create"))));
+  }
+  assert.equal(project.pullRequestRefs, undefined, "projection metadata does not change stored state");
+});
+
 async function fixture(t, { runtimeOptions = {}, bridgeOptions = {} } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-mobile-")));
   const dataDir = path.join(root, "profile");

@@ -45,11 +45,15 @@ export function useTerminalHeight() {
   return useSyncExternalStore(subscribe, () => state.height);
 }
 
+/** Sizes the panel as it is dragged; `saveTerminalHeight` keeps the size it was dropped at. */
 export function setTerminalHeight(height: number) {
   const next = Math.max(TERMINAL_HEIGHT.min, Math.round(height));
   if (next === state.height) return;
   set({ ...state, height: next });
-  globalThis.localStorage?.setItem(TERMINAL_HEIGHT_KEY, String(next));
+}
+
+export function saveTerminalHeight() {
+  globalThis.localStorage?.setItem(TERMINAL_HEIGHT_KEY, String(state.height));
 }
 
 /** Takes the host's list. The shown Terminal stays if it still runs, else the newest one is shown; with none left the panel closes. */

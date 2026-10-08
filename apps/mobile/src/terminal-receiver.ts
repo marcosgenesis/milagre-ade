@@ -11,7 +11,9 @@ export type TerminalViewMessage =
   | { channel: "milagre-terminal"; event: "ready"; cols: number; rows: number }
   | { channel: "milagre-terminal"; event: "input"; data: string }
   | { channel: "milagre-terminal"; event: "resize"; cols: number; rows: number }
-  | { channel: "milagre-terminal"; event: "ctrl-used" };
+  | { channel: "milagre-terminal"; event: "ctrl-used" }
+  /** xterm has parsed the output sent with this id. */
+  | { channel: "milagre-terminal"; event: "wrote"; id: number };
 
 const ANSI = {
   light: [
@@ -78,7 +80,8 @@ export const scriptValue = (value: unknown) =>
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
 
-// Runs in the WebView. The host's output arrives through terminalWrite/terminalReset; keys go back as `input`. A held
+// Runs in the WebView. The host's output arrives through terminalWrite/terminalReset, each answered with `wrote` once
+// xterm has parsed it, so the app reads no faster than the page draws; keys go back as `input`. A held
 // Ctrl (the key bar's) turns the next letter into its control character, as a hardware keyboard's Ctrl would.
 const SCRIPT = `
 (function () {
@@ -104,8 +107,9 @@ const SCRIPT = `
   term.onResize(function (size) { post({ event: "resize", cols: size.cols, rows: size.rows }); });
   var refit = function () { try { fit.fit(); } catch (error) {} };
   new ResizeObserver(refit).observe(element);
-  window.terminalWrite = function (data) { term.write(data); };
-  window.terminalReset = function (data) { term.reset(); term.write(data); };
+  var wrote = function (id) { return function () { post({ event: "wrote", id: id }); }; };
+  window.terminalWrite = function (data, id) { term.write(data, wrote(id)); };
+  window.terminalReset = function (data, id) { term.reset(); term.write(data, wrote(id)); };
   window.terminalTheme = function (theme) { term.options.theme = theme; document.body.style.background = theme.background; };
   window.terminalFocus = function () { term.focus(); };
   window.terminalCtrl = function (held) { ctrl = held; };

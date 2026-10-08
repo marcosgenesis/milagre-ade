@@ -115,6 +115,23 @@ test("reads return output after the viewer's offset, and all kept output to a ne
   assert.deepEqual([late.data, late.reset], ["hello world!", true]);
 });
 
+test("a read limit hands output over in order, a reset gets the newest part, and no cut splits a character", async (t) => {
+  const f = fixture(t, { maxBufferChars: 14_000 });
+  const { id } = await f.terminals.open({ chatId: "/p#1" });
+  f.ptys[0].emit("a".repeat(4095) + "😀" + "b".repeat(5000));
+  const first = await f.terminals.read({ terminalId: id, after: 0, limit: 4096 });
+  assert.deepEqual([first.data, first.offset, first.reset, first.ended], ["a".repeat(4095), 4095, false, false]);
+  const rest = await f.terminals.read({ terminalId: id, after: first.offset, limit: 8192 });
+  assert.deepEqual([rest.data, rest.offset], ["😀" + "b".repeat(5000), 9097]);
+  f.ptys[0].emit("c".repeat(4000));
+  const behind = await f.terminals.read({ terminalId: id, after: 0, limit: 4096 });
+  assert.equal(behind.reset, false, "after 0 is still kept, so the viewer reads on in order");
+  f.ptys[0].emit("d".repeat(4000));
+  const late = await f.terminals.read({ terminalId: id, after: 1, limit: 4096 });
+  assert.deepEqual([late.reset, late.data, late.offset], [true, "c".repeat(96) + "d".repeat(4000), 17_097]);
+  await assert.rejects(f.terminals.read({ terminalId: id, after: 0, limit: 10 }), /Invalid Terminal read/);
+});
+
 test("a read waits for output instead of returning nothing at once", async (t) => {
   const f = fixture(t, { readWaitMs: 5000 });
   const { id } = await f.terminals.open({ chatId: "/p#1" });

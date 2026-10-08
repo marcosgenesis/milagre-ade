@@ -92,8 +92,15 @@ Paired desktops use the phone's routes (relay room and LAN on 8798) and its cryp
 
 - The hello's inner JSON gains `kind: "desktop"` and `name`. No `kind` means phone, so existing phones keep working.
 - After `hostAccept`, a desktop channel stops speaking HTTP-over-channel. Its messages are `t: "rpc"` (one daemon
-  request), `t: "evt"` (one pushed event) and `t: "part"` (a piece of a frame larger than 768 KiB, reassembled in order
-  by `id` and index, capped at the daemon's 16 MiB frame limit).
+  request), `t: "evt"` (one daemon frame: a reply, an error or a pushed event) and `t: "part"`. A frame over 768 KiB
+  travels as 512 KiB base64 pieces (a 768 KiB piece would pass the relay's 1 MiB cap once encoded), reassembled in
+  order by `id` and index, capped at the daemon's 16 MiB frame limit.
+- A known device keeps the kind it paired as: a phone key saying `desktop`, or a computer key with no kind, is refused
+  with `reason: "kind"`. With confined phone access (`allowedRoot`, the review demo) the Mac never hosts desktops.
+- The deny set filters events too: a paired desktop never receives `phone:*` events (`phone:status` carries the
+  pairing link and token).
+- A desktop learns the Mac's LAN addresses with a new `peer:routes` method, since `phone:routes` lives in the phone
+  bridge and `phone:*` is denied.
 - The channel opens a virtual connection with `acceptConnection` and the desktop policy, and closes it when the channel
   closes.
 - Pairing still happens only through the relay inside the 10-minute window; the LAN still refuses unknown keys.
@@ -199,8 +206,9 @@ deletes its folder.
 - Unit: frame splitting and reassembly (order, gaps, the 16 MiB cap), the deny set, the devices store migration and
   remove, hello `kind` handling (missing kind is a phone).
 - Daemon: the existing socket tests unchanged; a virtual connection gets events, patches and result pages the same way.
-- End to end: two throwaway daemons with separate data folders and a local relay (as in the relay e2e), a paired
-  desktop that lists Projects, sends a message, gets the reply, and is refused `devices:remove`.
+- End to end: a throwaway daemon and a local relay (as in the relay e2e), with a raw desktop client from the test kit
+  until PR 3 brings the real one: it pairs, reads `daemon:status`, gets a state change as an event, round-trips a
+  frame large enough to travel in parts, uses the LAN route, and is refused `devices:remove`.
 - Electron checks: `test-sidebar-computers.cjs` (merged list, second line only with two computers, offline dimming,
   popover and gear) and `test-add-computer.cjs` (paste, found computer, errors), against a fake remote runtime.
 - Manual: this Mac and a second Mac (or a second user account) on the same network and apart, with the phone still

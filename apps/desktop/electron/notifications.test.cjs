@@ -154,7 +154,7 @@ test("Dock counts distinct waiting or unread chats, survives project changes, an
 
 test("a first phone pairing is announced even while Milagre has focus, and its click opens Settings › Devices", () => {
   const { notifier, shown, opened } = setup({ focused: true });
-  assert.equal(notifier.notifyPhonePaired(), true);
+  assert.equal(notifier.notifyDevicePaired(), true);
   assert.equal(shown.length, 1);
   assert.equal(shown[0].visible, true);
   assert.equal(shown[0].options.title, "New phone paired");
@@ -162,7 +162,20 @@ test("a first phone pairing is announced even while Milagre has focus, and its c
   shown[0].emit("click");
   assert.deepEqual(opened, ["settings:phone"]);
   // A second pairing replaces the first notice.
-  notifier.notifyPhonePaired();
+  notifier.notifyDevicePaired();
   assert.equal(shown[0].closed, true);
   assert.equal(shown[1].visible, true);
+});
+
+test("a computer's first pairing says another Mac can now drive this one, and its click opens Settings › Devices", () => {
+  const { notifier, shown, opened } = setup();
+  assert.equal(notifier.notifyDevicePaired("computer"), true);
+  assert.equal(shown[0].options.title, "New computer paired");
+  assert.equal(shown[0].options.body, "Another Mac can now drive your agents on this Mac. If it wasn't you, remove it in Settings → Devices.");
+  shown[0].emit("click");
+  assert.deepEqual(opened, ["settings:phone"]);
+  // One pairing notice at a time, whatever paired.
+  notifier.notifyDevicePaired("phone");
+  assert.equal(shown[0].closed, true);
+  assert.equal(shown[1].options.title, "New phone paired");
 });

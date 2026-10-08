@@ -1,6 +1,7 @@
 // Run with node scripts/test-mobile-terminal.cjs. Loads the phone's Terminal page (apps/mobile/src/terminal-receiver.ts)
 // in Chromium, standing in for the WebView: its messages go to a real shell through the same follower the phone uses,
-// and the host's output comes back through the page's window functions. Checks typing, the held Ctrl and the theme.
+// and the host's output comes back through the page's window functions, each read waiting for the page's `wrote` as the
+// phone's does. Checks typing, the held Ctrl, a flood read in limited pieces and the theme.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -34,6 +35,16 @@ async function electronChecks() {
   const messages = [];
   let follower = null;
   const call = (script) => void window.webContents.executeJavaScript(`${script};true;`);
+  // As the phone does it (apps/mobile/src/terminal.tsx): each write settles when the page answers `wrote` with its id.
+  const unwritten = new Map();
+  let writeId = 0;
+  let reads = 0;
+  const draw = (name, data) =>
+    new Promise((resolve) => {
+      const id = ++writeId;
+      unwritten.set(id, resolve);
+      call(`window.${name}(${JSON.stringify(data)},${id})`);
+    });
   const opened = await terminals.open({ chatId: "/phone#1" });
   ipcMain.on("terminal-view", (_event, raw) => {
     const message = JSON.parse(raw);
@@ -42,13 +53,25 @@ async function electronChecks() {
     if (message.event === "ready") {
       follower = followTerminal({
         terminalId: opened.id,
-        api: terminals,
-        write: (data) => call(`window.terminalWrite(${JSON.stringify(data)})`),
-        reset: (data) => call(`window.terminalReset(${JSON.stringify(data)})`),
+        api: {
+          read: (request) => {
+            reads++;
+            return terminals.read(request);
+          },
+          input: terminals.input,
+          resize: terminals.resize,
+        },
+        write: (data) => draw("terminalWrite", data),
+        reset: (data) => draw("terminalReset", data),
+        readLimit: 64 * 1024,
       });
       follower.resize(message.cols, message.rows);
     } else if (message.event === "input") follower?.send(message.data);
     else if (message.event === "resize") follower?.resize(message.cols, message.rows);
+    else if (message.event === "wrote") {
+      unwritten.get(message.id)?.();
+      unwritten.delete(message.id);
+    }
   });
   const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR;
   async function screenshot(name) {
@@ -98,10 +121,18 @@ async function electronChecks() {
     await waitFor(async () => !(await terminals.list({ chatId: "/phone#1" })).terminals[0].busy, "sleep stopped by Ctrl+C");
     await type("echo after-ctrl\r");
     await waitFor(async () => (await shown()).includes("after-ctrl"), "typing works after Ctrl");
+    // A flood comes in limited reads, each after the page parsed the last, and the Terminal answers again after it.
+    reads = 0;
+    await type("seq 1 100000; echo flood-$((1+1))\r");
+    await waitFor(async () => (await shown()).includes("flood-2"), "the end of a 600 KB flood");
+    assert.ok(reads >= 6, `The flood came in ${reads} reads; 64 KB reads take at least 6`);
+    assert.equal(unwritten.size, 0, "Every write was answered");
+    await type("echo after-flood\r");
+    await waitFor(async () => (await shown()).includes("after-flood"), "typing works after a flood");
     await screenshot("mobile-terminal-dark");
     await evaluate(`window.terminalTheme(${JSON.stringify(themes.light)})`);
     await screenshot("mobile-terminal-light");
-    console.log("PASS: the phone's Terminal page fits the PTY, runs commands, Ctrl+C stops a command and the theme switches");
+    console.log("PASS: the phone's Terminal page fits the PTY, runs commands, Ctrl+C stops a command, a flood arrives in limited reads and the theme switches");
     follower?.stop();
     await terminals.dispose();
     app.exit(0);

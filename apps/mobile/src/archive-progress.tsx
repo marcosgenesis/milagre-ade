@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { archiveActivity, subscribeArchiveActivity } from "./archive";
-import { LoadingLogo } from "./loading-logo";
+import { SpinnerRing } from "./icons";
 import { colors, styles } from "./ui";
 
 /** Which Chats are archiving and the last archive notice, kept across screens. */
@@ -18,13 +18,13 @@ export function ArchiveProgress() {
       accessibilityLiveRegion="polite"
       style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 8 }}
     >
-      <LoadingLogo size={22} />
+      <SpinnerRing size={14} />
       <Text style={styles.muted}>Archiving...</Text>
     </View>
   );
 }
 
-/** Sits over a Chat's row while it archives; the row itself fades and takes no taps until the archive ends. */
+/** Desktop's archiving pill: a SpinnerRing and "Archiving..." over a Chat's row while it archives; the row itself fades and takes no taps until the archive ends. */
 export function ArchivingOverlay({ title }: { title: string }) {
   return (
     <View
@@ -35,7 +35,7 @@ export function ArchivingOverlay({ title }: { title: string }) {
       style={[StyleSheet.absoluteFill, s.overlay]}
     >
       <View style={s.pill}>
-        <LoadingLogo size={16} />
+        <SpinnerRing size={12} />
         <Text style={s.label}>Archiving...</Text>
       </View>
     </View>
@@ -48,12 +48,12 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    height: 30,
-    paddingHorizontal: 12,
-    borderRadius: 15,
+    height: 24,
+    paddingHorizontal: 10,
+    borderRadius: 12,
     backgroundColor: colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.line,
   },
-  label: { color: colors.ink, fontSize: 13, fontWeight: "500" },
+  label: { color: colors.ink, fontSize: 12, fontWeight: "500" },
 });

@@ -1,4 +1,4 @@
-import { PROVIDERS, cliName, providerName } from "@milagre/shared/providers";
+import { cliName, pickerProviders, providerName } from "@milagre/shared/providers";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -215,6 +215,7 @@ export function PromptComposer({
         ? commands.filter((command) => `${command.name.slice(1)} ${command.desc}`.toLowerCase().includes(tokenQuery))
         : [];
   const providerNotice = cliNotice(cliStatus?.[provider]);
+  const providerTabs = pickerProviders(cliStatus, selectedModel.provider, provider);
   const modelRows = models.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
   const canStop = running && Boolean(onStop);
   const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0;
@@ -467,9 +468,9 @@ export function PromptComposer({
               <div
                 data-provider-tabs
                 className="grid gap-1 rounded-control bg-inset p-1"
-                style={{ gridTemplateColumns: `repeat(${PROVIDERS.length}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `repeat(${providerTabs.length}, minmax(0, 1fr))` }}
               >
-                {PROVIDERS.map((item) => (
+                {providerTabs.map((item) => (
                   <button
                     key={item}
                     type="button"

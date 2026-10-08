@@ -583,9 +583,15 @@ function createRuntime(options) {
     const settings = await projectSettings().get(projectPath);
     // Brings main up to its remote first, when the user asked for it. Never throws: a skipped or failed sync
     // leaves main as it was and the Worktree starts from it as before.
-    if ((await projectSettings().getMainSync(projectPath)).enabled) await syncMain(projectPath);
+    const synced = (await projectSettings().getMainSync(projectPath)).enabled ? await syncMain(projectPath) : null;
     // The files are copied into the folder git just made; the rename that follows only changes the branch, so the path holds.
-    const created = await createWorktree({ ...request, root: worktreeRoot(), copyPatterns: settings.filesToCopy });
+    const created = await createWorktree({
+      ...request,
+      root: worktreeRoot(),
+      copyPatterns: settings.filesToCopy,
+      // The sync already fetched main's upstream (or timed out trying): don't wait on it a second time.
+      fetched: synced?.branch === baseBranch,
+    });
     if (created.copy?.notes.length) console.warn("Milagre worktree file copy:", created.copy.notes.join(" "));
     // The setup command runs before the chat's first turn (see agent:start-turn).
     const resolved = await resolveSetupCommand(projectPath, settings.setupCommand);

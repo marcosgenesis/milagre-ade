@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { syncMainBranch } = require("./main-sync.cjs");
+const { createGit } = require("./git/client.cjs");
 
 const ID = ["-c", "user.name=Milagre", "-c", "user.email=milagre@example.com"];
 const gitIn =
@@ -156,4 +157,28 @@ test("a folder that isn't a repository resolves instead of throwing", async (t) 
   const result = await syncMainBranch(root);
   assert.equal(result.outcome, "skipped");
   assert.equal(result.message, "No local main branch");
+});
+
+test("main in the middle of a rebase is left alone, and the rebase can still finish", async (t) => {
+  const { project, git, behind } = await fixture(t);
+  execFileSync("git", ["-C", project, ...ID, "rebase", "-i", "--root"], {
+    env: { ...process.env, GIT_SEQUENCE_EDITOR: "sed -i.bak -e s/^pick/edit/" },
+    stdio: "ignore",
+  });
+  const result = await syncMainBranch(project);
+  assert.equal(result.outcome, "skipped");
+  assert.equal(result.message, "main is in the middle of a rebase or bisect");
+  assert.equal(git("rev-parse", "main"), behind);
+  git("rebase", "--continue");
+  assert.equal(git("branch", "--show-current"), "main");
+});
+
+test("a failed checkout lookup fails instead of moving main", async (t) => {
+  const { project, git, behind } = await fixture(t, { onWork: true });
+  const real = createGit();
+  const out = (cwd, args) => (args.includes("--format=%(worktreepath)") ? Promise.resolve(null) : real.read.out(cwd, args));
+  const client = { ...real, read: { ...real.read, out } };
+  const result = await syncMainBranch(project, { client });
+  assert.equal(result.outcome, "failed");
+  assert.equal(git("rev-parse", "main"), behind);
 });

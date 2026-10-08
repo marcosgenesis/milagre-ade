@@ -58,8 +58,10 @@ Steps:
    (`merge-base --is-ancestor`): `skipped`, "<name> has commits that aren't on <remote>".
 5. **Find the checkout.** `git for-each-ref --format=%(worktreepath) refs/heads/<name>` names the Worktree that
    has the branch checked out, or nothing.
-6. **Not checked out anywhere:** `git update-ref refs/heads/<name> <new> <old>`. The old value makes it a
-   compare-and-swap, so a commit that lands in between makes it fail (`skipped`, "<name> moved during sync").
+6. **Not checked out anywhere:** `git fetch . refs/remotes/<tracking>:refs/heads/<name>`. Fetching from the
+   repository itself only fast-forwards, and git refuses it while the branch is checked out anywhere, including a
+   rebase or bisect that started from it, when HEAD is detached and step 5 names no checkout (`skipped`, "<name> is
+   in the middle of a rebase or bisect"). A failed lookup in step 5 is `failed`, never "not checked out".
 7. **Checked out:** in that Worktree, `git status --porcelain=v1 --untracked-files=no` must be empty and no
    merge, rebase, cherry-pick or bisect may be in progress (check for `MERGE_HEAD`, `rebase-merge`,
    `rebase-apply`, `CHERRY_PICK_HEAD`, `BISECT_LOG` in its git dir). Otherwise `skipped`, "The main checkout has
@@ -77,9 +79,10 @@ a sync runs awaits that promise instead of starting another one.
 
 ### Interaction with `resolveStartRef`
 
-`resolveStartRef` stays as is. After a successful sync, local `main` equals `origin/main`, its fetch is a cheap
-no-op, and its ancestor check returns the tracking ref, which points at the same commit. When sync is off or
-skipped, behavior is exactly today's.
+When a sync ran for main and the new Worktree's base is main, `createWorktree` gets `fetched: true` and
+`resolveStartRef` skips its own fetch of the same upstream, so a hanging remote costs one network timeout, not two.
+Its ancestor check then picks the tracking ref as before. When sync is off, or the base is another branch, behavior is
+exactly today's.
 
 ## Settings
 

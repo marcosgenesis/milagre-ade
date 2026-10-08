@@ -69,11 +69,15 @@ async function syncMainBranch(projectPath, { client = createGit(), now = Date.no
 
     // Which Worktree has the branch checked out, if any. A detached Worktree never matches, whatever its folder is called.
     const checkout = await client.read.out(projectPath, ["for-each-ref", "--format=%(worktreepath)", local]);
+    // null is a failed lookup, not "checked out nowhere": moving the ref then could leave a checkout behind its HEAD.
+    if (checkout === null) return result("failed", { message: `Could not tell where ${branch} is checked out`, commit: short(before) });
     if (!checkout) {
-      // The old value makes this a compare-and-swap: a commit that lands in between makes it fail.
-      const moved = await client.write.run(projectPath, ["update-ref", "-m", "milagre: sync main branch", local, after, before]);
-      if (!moved.ok) return result("skipped", { message: `${branch} moved during sync`, commit: short(before) });
-      return result("updated", { commit: short(after) });
+      // Fetching from this repository into the branch only ever fast-forwards, and git refuses it while the
+      // branch is checked out anywhere, including a rebase or bisect that started from it (HEAD is detached then).
+      const moved = await client.write.run(projectPath, ["fetch", "--quiet", ".", `refs/remotes/${tracking}:${local}`]);
+      if (moved.ok) return result("updated", { commit: short(after) });
+      const message = /refusing to fetch into/i.test(moved.message) ? `${branch} is in the middle of a rebase or bisect` : `${branch} moved during sync`;
+      return result("skipped", { message, commit: short(before) });
     }
     const where = path.resolve(checkout) === path.resolve(projectPath) ? "The main checkout" : path.basename(checkout);
     const busy = await operationInProgress(client, checkout);

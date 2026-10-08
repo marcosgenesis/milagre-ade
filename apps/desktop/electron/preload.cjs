@@ -175,6 +175,7 @@ const bridge = {
   readState: (scope) => ipcRenderer.invoke("state:read", scope),
   readChatMessages: (scope, chatId, options) => ipcRenderer.invoke("chat:messages", scope, chatId, options),
   searchChats: (scope, query, options) => ipcRenderer.invoke("chat:search", scope, query, options),
+  readSubagent: (scope, chatId, agentId) => ipcRenderer.invoke("chat:subagent", scope, chatId, agentId),
   listAccountScopes: () => ipcRenderer.invoke("accounts:scopes"),
   getProjectAccounts: (scopeKey, refresh) => ipcRenderer.invoke("accounts:scope", scopeKey, refresh),
   assignProjectAccount: (scopeKey, provider, accountId) => ipcRenderer.invoke("accounts:assign", scopeKey, provider, accountId),

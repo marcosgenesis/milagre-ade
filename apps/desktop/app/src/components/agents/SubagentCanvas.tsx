@@ -27,6 +27,7 @@ type Gesture = { pointerId: number; start: Point; origin: Point; nodeId?: string
 
 /** Keep the arrangement while switching between the chat and its canvas. */
 export const SubagentCanvas = memo(function SubagentCanvas({
+  chatKey,
   opened,
   agents,
   working,
@@ -36,6 +37,8 @@ export const SubagentCanvas = memo(function SubagentCanvas({
   onStop,
   onRetry,
 }: {
+  /** The Chat the subagents belong to (see SubagentTranscript). */
+  chatKey?: string | null;
   opened: boolean;
   agents: Subagent[];
   working: boolean;
@@ -481,7 +484,7 @@ export const SubagentCanvas = memo(function SubagentCanvas({
             </button>
           </header>
           <ScrollArea>
-            <SubagentTranscript agent={inspectedAgent} onStop={onStop} onRetry={onRetry} />
+            <SubagentTranscript chatKey={chatKey} agent={inspectedAgent} onStop={onStop} onRetry={onRetry} />
           </ScrollArea>
         </aside>
       )}

@@ -990,8 +990,36 @@ async function browserChecks() {
     await clickLabel("Close subagents");
     await evaluate("window.setChildren([])");
     await waitFor('!document.querySelector("[data-slot=subagent-track]")');
+    // A host that sends only the end of each transcript (subagent-tails-v1): the panel reads the whole one once, then
+    // follows the tails of later updates without reading it again.
+    await evaluate(`(() => {
+      const entry = (n) => ({ id: "e" + n, kind: "message", text: "Long entry " + n });
+      const child = (count) => ({ id: "long", title: "Long child", status: "running", startedAt: Date.now() - 5000, updatedAt: Date.now(),
+        transcript: Array.from({ length: count }, (_, index) => entry(index + 1)) });
+      const tail = (count) => { const whole = child(count); return { ...whole, transcript: whole.transcript.slice(-4), transcriptLength: count }; };
+      window.subagentReads = [];
+      window.milagre = { ...window.milagre, readSubagent: async (scope, chatId, agentId) => { window.subagentReads.push([scope, chatId, agentId]); return child(30); } };
+      window.tailOf = tail;
+      window.setChildren([tail(30)]);
+    })()`);
+    await waitFor('!!document.querySelector("[data-slot=subagent-track] > button")');
+    await evaluate('document.querySelector("[data-slot=subagent-popover]") || document.querySelector("[data-slot=subagent-track] > button").click()');
+    await waitFor('!!document.querySelector("[data-subagent-open]")');
+    await evaluate('document.querySelector("[data-subagent-open]").click()');
+    await waitFor('[...document.querySelectorAll("[data-slot=subagent-transcript] > div.min-w-0")].length === 30');
+    assert.deepEqual(await evaluate("window.subagentReads"), [["/fixture", 1, "long"]]);
+    await evaluate("window.setChildren([window.tailOf(31)])");
+    await waitFor('[...document.querySelectorAll("[data-slot=subagent-transcript] > div.min-w-0")].length === 31');
+    const shown = await evaluate('[...document.querySelectorAll("[data-slot=subagent-transcript] > div.min-w-0")].map(row => row.textContent)');
+    assert.equal(shown[0], "Long entry 1");
+    assert.equal(shown.at(-1), "Long entry 31");
+    assert.equal(await evaluate("window.subagentReads.length"), 1, "A tail that follows on doesn't read the transcript again");
+    await screenshot("subagent-transcript-tails");
+    await clickLabel("Close subagents");
+    await evaluate("window.setChildren([])");
+    await waitFor('!document.querySelector("[data-slot=subagent-track]")');
     console.log(
-      "PASS: embedded canvas, drag/pan/zoom, collision pushes, keyboard transcript, persistent layout, sequential arrivals, stable names, dead/sleeping/angry states, message/pointer gaze, reduced motion, compact layout, and original subagent list/archive/transcript checks",
+      "PASS: embedded canvas, drag/pan/zoom, collision pushes, keyboard transcript, persistent layout, sequential arrivals, stable names, dead/sleeping/angry states, message/pointer gaze, reduced motion, compact layout, original subagent list/archive/transcript checks, and whole transcripts from a host that sends tails",
     );
     app.exit(0);
   } catch (error) {

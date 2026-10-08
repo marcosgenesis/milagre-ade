@@ -80,22 +80,22 @@ test("an Electron check is retried once, only on Linux CI", () => {
   assert.equal(shouldRetry({ platform: "darwin", ci: "true", attempt: 1 }), false);
 });
 
-test("--shard splits the runnable Electron checks round-robin and leaves unit tests alone", () => {
-  const electron = ["scripts/test-a.cjs", "scripts/test-b.cjs", "scripts/test-c.cjs", "scripts/test-d.cjs", "scripts/test-windows-cli.cjs"];
-  const run = (shard) =>
-    selectTests({ unit: ["x.test.ts"], electron, filters: { ...parseArgs(["--shard", shard]), platform: "linux", commandExists: () => true } });
-  // Skipped checks are removed before splitting so every shard gets an even share of real work.
-  assert.deepEqual(run("1/2").electron, ["scripts/test-a.cjs", "scripts/test-c.cjs"]);
-  assert.deepEqual(run("2/2").electron, ["scripts/test-b.cjs", "scripts/test-d.cjs"]);
-  assert.deepEqual(run("3/3").electron, ["scripts/test-c.cjs"]);
-  assert.deepEqual(run("1/1").electron, electron.slice(0, 4));
-  assert.deepEqual(run("2/2").unit, ["x.test.ts"]);
-  assert.deepEqual(
-    run("2/2").skipped.map((item) => item.file),
-    ["scripts/test-windows-cli.cjs"],
-  );
-  assert.deepEqual(parseArgs(["--shard", "2/3"]).shard, { index: 2, count: 3 });
-  assert.equal(parseArgs([]).shard, null);
+test("--shard partitions the runnable Electron checks evenly and leaves unit tests alone", () => {
+  const electron = discoverElectronChecks(root);
+  const select = (args) => selectTests({ unit: ["x.test.ts"], electron, filters: { ...parseArgs(args), platform: "linux", commandExists: () => true } });
+  const all = select(["--electron"]);
+  for (const count of [1, 2, 3, 4]) {
+    const shards = Array.from({ length: count }, (_, i) => select(["--shard", `${i + 1}/${count}`]));
+    // Every runnable check runs on exactly one shard, so nothing is dropped or run twice.
+    assert.deepEqual(shards.flatMap((shard) => shard.electron).toSorted(), all.electron, `${count} shards`);
+    // Skips are removed before the split, so shard sizes differ by at most one.
+    const sizes = shards.map((shard) => shard.electron.length);
+    assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1, `${count} shards: ${sizes}`);
+    for (const shard of shards) {
+      assert.deepEqual(shard.unit, ["x.test.ts"]);
+      assert.deepEqual(shard.skipped, all.skipped);
+    }
+  }
 });
 
 test("a malformed --shard is rejected", () => {

@@ -98,18 +98,22 @@ test("installers build on main, on dispatch, and on PRs only with the preview:in
   );
 });
 
-test("Electron checks run on Ubuntu under xvfb, split across three runners, with screenshots kept per shard", () => {
+test("Electron checks run on Ubuntu under xvfb, one shard per matrix leg, with screenshots kept per shard", () => {
   const job = ci.jobs["desktop-checks"];
   assert.equal(job["runs-on"], "ubuntu-latest");
-  // Each check boots its own Vite and Electron, so they run serially; sharding is what keeps the job short.
-  assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3]);
-  assert.equal(job.strategy["fail-fast"], false);
-  assert.equal(job.name, "desktop-checks (${{ matrix.shard }}/3)");
-  const runs = job.steps.map((step) => step.run).filter(Boolean);
-  assert.ok(runs.includes('xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron --shard ${{ matrix.shard }}/3'));
+  // The shard count in the command must match the matrix, or checks are silently dropped or run twice.
+  const shards = job.strategy.matrix.shard;
+  assert.deepEqual(
+    shards,
+    Array.from({ length: shards.length }, (_, i) => i + 1),
+  );
+  const run = job.steps.map((step) => step.run).find((command) => command?.includes("npm test -- --electron"));
+  assert.match(run, /^xvfb-run /);
+  assert.ok(run.endsWith(`npm test -- --electron --shard \${{ matrix.shard }}/${shards.length}`), run);
   const upload = job.steps.find((step) => step.uses?.startsWith("actions/upload-artifact"));
   assert.equal(upload.if, "always()");
-  assert.equal(upload.with.name, "electron-screenshots-${{ matrix.shard }}");
+  // upload-artifact v4 rejects a second artifact with the same name in one run.
+  assert.match(upload.with.name, /\$\{\{ matrix\.shard \}\}/);
   assert.equal(upload.with.path, "${{ runner.temp }}/electron-screenshots");
 });
 

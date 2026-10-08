@@ -292,4 +292,4 @@ async function connectPeer({
   return client;
 }
 
-module.exports = { connectPeer, PeerError, MAX_PAGES, MAX_PAGED_CHARS };
+module.exports = { connectPeer, PeerError };

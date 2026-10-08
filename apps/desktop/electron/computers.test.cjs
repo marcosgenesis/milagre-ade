@@ -24,7 +24,8 @@ const link = ({ relay = "wss://relay.milagre.cloud", host = HOST, name = "studio
 
 async function setup(t, { saved } = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "computers-"));
-  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  // A write that was in flight when the test ended may land after the first attempt; rm tries again.
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }));
   if (saved) await fs.writeFile(path.join(dataDir, "computers.json"), JSON.stringify(saved), { mode: 0o600 });
   const changes = [];
   const computers = createComputers({
@@ -209,7 +210,8 @@ async function until(check, label, ms = 3000) {
 
 async function paired(t, mac, options = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "computers-"));
-  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  // A write that was in flight when the test ended may land after the first attempt; rm tries again.
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }));
   const changes = [];
   const events = [];
   const probed = [];

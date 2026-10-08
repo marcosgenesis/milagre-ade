@@ -1,7 +1,6 @@
 const { isLinkScopeKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { ensureDaemon, compatibleClient, HOST_GONE } = require("@milagre/daemon/bootstrap");
 const { projectOfKey } = require("@milagre/shared/agent-runs");
-const { MAX_PAGES, MAX_PAGED_CHARS } = require("./peer-client.cjs");
 
 // A host from before result pages still works; it only fails on very large Projects, as it always did. The window
 // offers to restart it (see restartHost).
@@ -13,6 +12,11 @@ const MAX_HELD = 10_000;
 // delay doubling from reconnectMs each time. Past that the window says it couldn't, and reconnects keep only connecting.
 const START_ATTEMPTS = 3;
 const RESTARTED_HOST = "Milagre's background host stopped unexpectedly, so it was started again.";
+// A paired computer's snapshot may announce at most this many pages and run to this many characters in all: the same
+// limits peer-client.cjs holds its paged replies to (not required from there, which would pull the whole peer client
+// into this file's type check).
+const MAX_PAGES = 1024;
+const MAX_PAGED_CHARS = 128 * 1024 * 1024;
 // A host that has them sends what changed in a state event, not the whole state; the window applies it (state-events.ts).
 const STATE_PATCHES = "state-patches-v1";
 // A host that keeps messages by Chat sends states without them; the window reads each Chat's own (chat-messages.ts).

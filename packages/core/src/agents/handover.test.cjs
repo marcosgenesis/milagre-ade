@@ -3,7 +3,7 @@ const test = require("node:test");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { renderTranscript, transcriptPath, writeTranscript, generateBrief, TRANSCRIPT_LIMIT } = require("./handover.cjs");
+const { renderTranscript, transcriptPath, writeTranscript, generateBrief, createHandoverModels, TRANSCRIPT_LIMIT } = require("./handover.cjs");
 
 const state = {
   worktrees: { 1: { id: 1, name: "main", path: "/repo" } },
@@ -208,4 +208,23 @@ test("an outer abort signal aborts the model call", async () => {
   const settled = await Promise.race([pending.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 500))]);
   assert.equal(settled, true);
   assert.equal(seen.aborted, true);
+});
+
+test("handover models cover all three providers; Antigravity writes the brief through its agent", async () => {
+  const fake = path.join(__dirname, "fixtures", "fake-acp-agent.cjs");
+  const models = createHandoverModels({
+    cli: async (provider) =>
+      provider === "antigravity"
+        ? { command: process.execPath, args: [fake], env: { ...process.env, FAKE_SCENARIO: "json-permission" } }
+        : { problem: "missing" },
+    clientVersion: "1.0.0",
+  });
+  assert.deepEqual(Object.keys(models).toSorted(), ["antigravity", "claude", "codex"]);
+  // The fake answers with JSON that isn't a brief: the minimal brief takes its place.
+  const brief = await generateBrief(
+    { transcript: "T", transcriptPath: "/x/3.md", provider: "antigravity", lastUserMessage: "go", changedFiles: async () => ["a.ts"] },
+    { models, timeoutMs: 20_000 },
+  );
+  assert.match(brief, /ran on Antigravity/);
+  assert.match(brief, /Its summary couldn't be written/);
 });

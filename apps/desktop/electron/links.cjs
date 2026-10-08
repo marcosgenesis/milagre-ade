@@ -35,6 +35,13 @@ function guardNavigation(webContents, { appUrl, openExternal }) {
     event.preventDefault();
     leave(url);
   });
+  // will-navigate is the main frame's alone. An embedded frame (a design, the simulator viewer) stays on the document
+  // the app gave it: a design that sets location to a remote page would show that page inside the app, without the
+  // policy its srcdoc carried.
+  webContents.on("will-frame-navigate", (event) => {
+    if (event.isMainFrame || isAppUrl(event.url, appUrl) || /^about:(srcdoc|blank)$/.test(event.url)) return;
+    event.preventDefault();
+  });
 }
 
 module.exports = { externalUrl, guardNavigation };

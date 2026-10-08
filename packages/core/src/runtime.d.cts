@@ -2,6 +2,7 @@ import type { AgentEvent, OpenProject } from "@milagre/shared/model";
 import type { AttentionNotice } from "@milagre/shared/attention";
 import type { KeepAwake } from "./keep-awake.cjs";
 import type { Simulators } from "./simulators.cjs";
+import type { Browsers } from "./browsers.cjs";
 /** Host-facing runtime boundary. Provider adapters remain internal to core. */
 export interface RuntimeOptions {
   dataDir: string;
@@ -11,6 +12,7 @@ export interface RuntimeOptions {
   environmentReady?: Promise<unknown>;
   keepAwake?: KeepAwake;
   simulators?: Simulators;
+  browsers?: Browsers;
   isFocused?: () => boolean;
   emit?: (channel: string, payload: unknown) => void;
   observeAgentEvent?: (chatId: string, event: AgentEvent) => void;
@@ -27,7 +29,7 @@ export interface RuntimeOptions {
 export interface Runtime {
   readonly methods: readonly string[];
   invoke(method: string, args?: unknown[], context?: { clientId: string } | null): Promise<unknown>;
-  /** Drop viewer capabilities owned by a disconnected authenticated client. */
+  /** Drop simulator and browser viewer capabilities owned by a disconnected authenticated client. */
   disconnect(clientId: string): Promise<void>;
   /** `takeNotice` (default true): a desktop window's open, which takes the restored-chats notice. */
   openProject(projectPath: string, options?: { takeNotice?: boolean }): Promise<OpenProject>;

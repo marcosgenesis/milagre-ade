@@ -11,6 +11,7 @@ import {
   PencilEdit02Icon,
   Search01Icon,
   Wrench01Icon,
+  PaintBoardIcon,
 } from "@hugeicons/core-free-icons";
 import type { ChatStep, StepKind } from "../../model";
 import { fileSpanIndex } from "../../lib/file-links";
@@ -31,6 +32,7 @@ const KIND_ICONS: Record<StepKind, IconData> = {
   thinking: AiBrain01Icon,
   setup: CommandLineIcon,
   image: Image01Icon,
+  artifact: PaintBoardIcon,
 };
 // Commands show as a terminal session ("$ command", then output), edits as diffs.
 const DETAIL_FENCES: Partial<Record<StepKind, string>> = { shell: "console", setup: "console", edit: "diff" };

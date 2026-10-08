@@ -46,6 +46,7 @@ export default function Tooltip({
   align = "start",
   side = "top",
   wrap = false,
+  compactHint = false,
   className = "",
   children,
 }: {
@@ -56,6 +57,8 @@ export default function Tooltip({
   side?: "top" | "bottom";
   /** Lets a long label break onto more lines instead of running past the window. */
   wrap?: boolean;
+  /** For a row of icon buttons too close for full hints: smaller keys, just under its button instead of over it. */
+  compactHint?: boolean;
   /** Extra classes for the trigger wrapper, e.g. to position it. */
   className?: string;
   children: ReactNode;
@@ -116,10 +119,11 @@ export default function Tooltip({
           <ShortcutKeys
             ref={hintRef}
             shortcut={hint!}
+            compact={compactHint}
             aria-hidden="true"
             className="pointer-events-none fixed z-[70]"
             style={{
-              top: hintRect.top + hintRect.height / 2,
+              top: compactHint ? hintRect.bottom + 12 : hintRect.top + hintRect.height / 2,
               left: hintRect.width > 80 ? hintRect.right - 22 : hintRect.left + hintRect.width / 2,
               transform: "translate(-50%, -50%)",
             }}

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 /**
  * The one way a transient surface (a picker, menu or anchored popover) closes: a pointer press anywhere
- * outside it, or the window losing focus. Escape is the caller's, since it also decides where focus goes.
+ * outside it, or the window losing focus to anything but an iframe inside it. Escape is the caller's, since it also decides where focus goes.
  * Listens in the capture phase so a handler that stops propagation (the terminal, a drag surface) can't
  * keep it open. `inside` decides what counts as the surface: its panel and its trigger, so the trigger's
  * own click still toggles it.
@@ -27,7 +27,16 @@ export function useDismiss(open: boolean, close: () => void, inside: (target: El
       if (event.target instanceof Element && latest.current.inside(event.target)) return;
       (latest.current.follow ?? latest.current.close)();
     };
-    const dismiss = () => latest.current.close();
+    // Focus moving into an embedded viewer (a simulator or browser iframe in the panel) blurs the window too; that stays inside.
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const dismiss = () => {
+      clearTimeout(pending);
+      pending = setTimeout(() => {
+        const active = document.activeElement;
+        if (active instanceof HTMLIFrameElement && latest.current.inside(active)) return;
+        latest.current.close();
+      }, 0);
+    };
     document.addEventListener("pointerdown", outside, true);
     document.addEventListener("scroll", moved, true);
     window.addEventListener("resize", moved);
@@ -39,6 +48,7 @@ export function useDismiss(open: boolean, close: () => void, inside: (target: El
       document.removeEventListener("scroll", moved, true);
       window.removeEventListener("resize", moved);
       window.removeEventListener("blur", dismiss);
+      clearTimeout(pending);
       openCount -= 1;
       if (openCount === 0) document.documentElement.toggleAttribute("data-popover-open", false);
     };

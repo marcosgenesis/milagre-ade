@@ -506,3 +506,27 @@ test("Milagre's own tools ask through the chat's approval cards and read its per
   added[0].answer("deny");
   assert.equal(await decision, "deny");
 });
+
+test("an Antigravity session's models are recorded for its account once the turn has started", async () => {
+  const { listAntigravityModels, forgetAntigravityModels } = require("./models.cjs");
+  forgetAntigravityModels();
+  const { manager, created } = harness();
+  const base = { chatId: "/p#1", provider: "antigravity", cwd: "/w", command: "/agy", prompt: "hi", accountId: "acct" };
+  const first = manager.startTurn(base);
+  await first;
+  created[0].models = [
+    { value: "gemini-new-high", name: "Gemini New (High)" },
+    { value: "gemini-new-low", name: "Gemini New (Low)" },
+  ];
+  created[0].currentModel = "gemini-new-low";
+  await manager.startTurn(base);
+  assert.deepEqual(
+    listAntigravityModels({ accountId: "acct" }).map(({ id, efforts, defaultEffort }) => ({ id, efforts, defaultEffort })),
+    [{ id: "gemini-new", efforts: ["low", "high"], defaultEffort: "low" }],
+  );
+  assert.notDeepEqual(
+    listAntigravityModels({ accountId: "other" }).map((model) => model.id),
+    ["gemini-new"],
+  );
+  forgetAntigravityModels();
+});

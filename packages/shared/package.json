@@ -17,7 +17,9 @@
     "src/diff-layout.ts",
     "src/usage.ts",
     "src/simulator.ts",
+    "src/browser.ts",
     "src/message-navigation.ts",
+    "src/artifact.ts",
     "src/message-search.ts",
     "src/agent-activity.ts"
   ],
@@ -96,9 +98,15 @@
     "./usage": "./src/usage.ts",
     "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
+    "./artifact": "./src/artifact.ts",
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
       "default": "./src/simulator-receiver.mjs"
+    },
+    "./browser": "./src/browser.ts",
+    "./browser-receiver": {
+      "types": "./src/browser-receiver.d.mts",
+      "default": "./src/browser-receiver.mjs"
     },
     "./message-navigation": "./src/message-navigation.ts",
     "./message-search": "./src/message-search.ts",

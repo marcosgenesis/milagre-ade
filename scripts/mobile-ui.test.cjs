@@ -41,6 +41,10 @@ function hookHost({ effects = false } = {}) {
       const index = cursor++;
       return (slots[index] ??= { current: initial });
     },
+    useId() {
+      const index = cursor++;
+      return (slots[index] ??= { id: `:r${index}:` }).id;
+    },
     useCallback(fn, deps) {
       const index = cursor++;
       const previous = slots[index];
@@ -105,7 +109,7 @@ function load(file, modules, extra = "") {
   });
   return exports;
 }
-const jsx = (type, props) => ({ type, props });
+const jsx = (type, props, key) => ({ type, props, key });
 const archiveProgress = load("archive-progress.tsx", {
   "react/jsx-runtime": { jsx, jsxs: jsx },
   "react-native": { Text: "Text", View: "View" },
@@ -311,15 +315,50 @@ function markdownHost({ media, basePath } = {}) {
     return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
   }
   return {
-    render(text) {
+    render(text, streaming = false) {
       react.begin();
-      return expand(Markdown({ text, media, basePath }));
+      return expand(Markdown({ text, streaming, media, basePath }));
     },
     routes,
     links,
     viewer,
   };
 }
+
+test("plain URLs in mobile replies render as links and open the exact address", async () => {
+  for (const streaming of [false, true]) {
+    for (const [text, url] of [
+      ["The fix is in PR #289: https://github.com/the-ptf/milagre-ade/pull/289. It fixes both banners.", "https://github.com/the-ptf/milagre-ade/pull/289"],
+      ["See (https://example.org/a_(b)).", "https://example.org/a_(b)"],
+      ["Visit www.example.org or ask me later.", "http://www.example.org"],
+      ["Email hello@example.org.", "mailto:hello@example.org"],
+      ["[Pull request](https://github.com/the-ptf/milagre-ade/pull/289)", "https://github.com/the-ptf/milagre-ade/pull/289"],
+    ]) {
+      const screen = markdownHost();
+      const link = find(screen.render(text, streaming), (node) => node.props?.accessibilityRole === "link");
+      assert.ok(link, `Missing link in ${text} (streaming: ${streaming})`);
+      assert.ok(link.props.style.some((style) => style.textDecorationLine === "underline"));
+      await link.props.onPress();
+      assert.deepEqual(screen.links, [url]);
+    }
+  }
+});
+
+test("mobile replies keep code URLs and unsafe links inert", () => {
+  for (const text of [
+    "`https://example.org`",
+    "```text\nhttps://example.org\n```",
+    "[local](file:///etc/passwd)",
+    "[command](javascript:alert(1))",
+    "[pair](milagre-local://connect)",
+  ]) {
+    assert.equal(
+      find(markdownHost().render(text), (node) => node.props?.accessibilityRole === "link"),
+      undefined,
+      text,
+    );
+  }
+});
 
 test("Markdown screenshot links render image previews outside Text and open the image viewer", () => {
   const screen = markdownHost();
@@ -717,6 +756,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../context-ring": { ContextRing: "ContextRing" },
     "../theme": { hex: () => ({ surface: "#ffffff" }) },
     "../simulator": { SimulatorChip: "SimulatorChip" },
+    "../browser": { BrowserChip: "BrowserChip" },
     "../ports": { PortsChip: "PortsChip" },
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
@@ -753,6 +793,8 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => null },
     "../questions": { Approval: "Approval", Questions: "Questions" },
     "../chat-reply": { ChatReply: "ChatReply" },
+    "../design-outbox": require("../apps/mobile/src/design-outbox.ts"),
+    "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "../ui": ui,
     "../agent-controls": { AgentControls: "AgentControls", PermissionChip: "PermissionChip" },
     "../turn-options": require("../apps/mobile/src/turn-options.ts"),
@@ -3059,6 +3101,208 @@ test("simulator sheet preserves its native header and bounds chooser/viewer cont
   }
 });
 
+function browserHost(client) {
+  const react = hookHost({ effects: true }),
+    files = new Map(),
+    listeners = new Set(),
+    pushed = [],
+    writes = [];
+  const native = {
+    useColorScheme: () => "light",
+    Text: "Text",
+    View: "View",
+    Pressable: "Pressable",
+    AppState: {
+      currentState: "active",
+      addEventListener(_name, fn) {
+        listeners.add(fn);
+        return {
+          remove() {
+            listeners.delete(fn);
+          },
+        };
+      },
+    },
+  };
+  class File {
+    constructor(_cache, name) {
+      this.uri = "file:///cache/" + name;
+    }
+    write(value, options) {
+      files.set(this.uri, value);
+      writes.push([this.uri, options?.encoding ?? "utf8"]);
+    }
+    get exists() {
+      return files.has(this.uri);
+    }
+    delete() {
+      files.delete(this.uri);
+    }
+  }
+  const source = load(
+    "browser.tsx",
+    {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": native,
+      "expo-router": {
+        router: {
+          back() {},
+          push(value) {
+            pushed.push(value);
+          },
+        },
+        useFocusEffect: (fn) => react.effect(fn, [fn]),
+      },
+      "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 34 }) },
+      "@expo/dom-webview": { DomWebView: "DomWebView" },
+      "expo-file-system": { File, Paths: { cache: "/cache" } },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/browser-receiver": require("../packages/shared/src/browser-receiver.mjs"),
+      "./session": { useSession: () => ({ client }) },
+      "./icons": { Icon: "Icon" },
+      "./theme": {
+        hex: () => ({ page: "#fafafb", surface: "#ffffff", ink: "#1f2124", ink2: "#62656b", line: "#ecedef", hover: "#f4f5f6", accent: "#0285ff" }),
+      },
+      "./ui": { CircleButton: "CircleButton", PageScroll: "PageScroll", PillButton: "PillButton", colors: {}, styles: {} },
+    },
+    "\nexports.TestBrowserWebView = BrowserWebView;",
+  );
+  return {
+    source,
+    files,
+    writes,
+    pushed,
+    background() {
+      native.AppState.currentState = "background";
+      for (const fn of listeners) fn("background");
+    },
+    render(name, props) {
+      react.begin();
+      const tree = source[name](props);
+      react.flush();
+      return tree;
+    },
+    cleanup() {
+      react.cleanup();
+    },
+  };
+}
+const BROWSER_PAGE = { id: "browser-1:" + "A".repeat(32), title: "Login", url: "https://example.com/login", browser: "Chrome 141", source: "agent" };
+
+test("mobile browser pill lists only this Chat and hides when there is nothing to show or attach", async (t) => {
+  for (const [list, visible] of [
+    [{ supported: true, targets: [], others: [] }, false],
+    [{ supported: true, targets: [BROWSER_PAGE], others: [] }, true],
+    [{ supported: true, targets: [], others: [{ id: "b", browser: "Chrome 141", pages: 1, title: "Mine" }] }, true],
+  ]) {
+    const calls = [];
+    const h = browserHost({
+      url: "mac",
+      call: async (method, args) => {
+        calls.push([method, args]);
+        return list;
+      },
+    });
+    t.after(() => h.cleanup());
+    h.render("BrowserChip", { chatId: "/p#1" });
+    await settle();
+    const tree = h.render("BrowserChip", { chatId: "/p#1" });
+    assert.equal(!!tree, visible);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["browser:list", [{ chatId: "/p#1" }]]]);
+    if (visible) {
+      tree.props.onPress();
+      assert.deepEqual(JSON.parse(JSON.stringify(h.pushed[0])), { pathname: "/browser-sheet", params: { hostId: "mac", chatId: "/p#1" } });
+    }
+    h.cleanup();
+  }
+  const h = browserHost({
+    url: "mac",
+    call: async () => {
+      throw new Error("unexpected");
+    },
+  });
+  assert.equal(h.render("BrowserChip", {}), null, "a new Chat has no agent yet");
+  h.cleanup();
+});
+
+test("mobile browser sheet opens a sole page directly, lists several, and attaches explicitly", async (t) => {
+  const other = { id: "b", browser: "Chrome 141", pages: 2, title: "Mine" };
+  for (const [list, direct] of [
+    [{ supported: true, targets: [BROWSER_PAGE], others: [] }, true],
+    [{ supported: true, targets: [BROWSER_PAGE, { ...BROWSER_PAGE, id: "browser-1:" + "B".repeat(32) }], others: [other] }, false],
+  ]) {
+    const calls = [];
+    const h = browserHost({
+      url: "mac",
+      call: async (method, args) => {
+        calls.push([method, args]);
+        return method === "browser:attach"
+          ? { ...list, targets: [...list.targets, { ...BROWSER_PAGE, id: "b:" + "C".repeat(32), source: "attached" }], others: [] }
+          : list;
+      },
+    });
+    t.after(() => h.cleanup());
+    h.render("BrowserSheet", { hostId: "mac", chatId: "/p#1" });
+    await settle();
+    const tree = h.render("BrowserSheet", { hostId: "mac", chatId: "/p#1" });
+    assert.equal(tree.props.style.paddingBottom, 34, "controls clear the phone home indicator");
+    const [header, body] = tree.props.children;
+    assert.equal(header.props.collapsable, false);
+    assert.equal(body.props.collapsable, false);
+    assert.equal(!!find(body, (node) => node.props?.targetId === BROWSER_PAGE.id), direct);
+    assert.deepEqual(
+      calls.map(([method]) => method),
+      ["browser:list"],
+      "listing starts no capture",
+    );
+    if (!direct) {
+      const attach = find(body, (node) => node.type === "PillButton" && node.props.title === "Attach");
+      attach.props.onPress();
+      await settle();
+      assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ["browser:attach", [{ chatId: "/p#1", browserId: "b" }]]);
+    }
+    h.cleanup();
+  }
+});
+
+test("mobile browser frames are written to local files; only their address enters the WebView", async () => {
+  const injected = [];
+  const client = {
+    call: async (method) =>
+      method === "browser:open"
+        ? { viewerId: "viewer", target: BROWSER_PAGE }
+        : method === "browser:frame"
+          ? { sequence: 7, data: "anBlZw==", viewport: { width: 800, height: 600 }, generation: 1 }
+          : null,
+  };
+  const h = browserHost(client);
+  h.render("TestBrowserWebView", { client, chatId: "/p#1", targetId: BROWSER_PAGE.id, onPage() {} });
+  await settle();
+  const tree = h.render("TestBrowserWebView", { client, chatId: "/p#1", targetId: BROWSER_PAGE.id, onPage() {} });
+  assert.equal(tree.type, "DomWebView");
+  assert.equal(tree.props.useExpoModulesBridge, false);
+  assert.match(h.files.get(tree.props.source.uri), /milagre-browser/);
+  tree.props.ref.current = { injectJavaScript: (value) => injected.push(value) };
+  tree.props.onMessage({
+    nativeEvent: { data: JSON.stringify({ channel: "milagre-browser", id: 1, method: "open", args: { chatId: "/p#1", targetId: BROWSER_PAGE.id } }) },
+  });
+  await settle();
+  tree.props.onMessage({
+    nativeEvent: { data: JSON.stringify({ channel: "milagre-browser", id: 2, method: "frame", args: { viewerId: "viewer", after: 0 } }) },
+  });
+  await settle();
+  const reply = injected.find((script) => script.includes('"id":2'));
+  assert.ok(reply.includes("file:///cache/browser-"), "the WebView gets a file address");
+  assert.ok(!reply.includes("anBlZw=="), "frame bytes stay out of injected script");
+  assert.deepEqual(h.writes.at(-1)[1], "base64");
+  h.background();
+  await settle();
+  assert.ok(injected.some((script) => script.includes("browserDispose")));
+  h.cleanup();
+  assert.equal(h.files.size, 0, "the viewer page and frames are deleted");
+});
+
 for (const provider of ["claude", "codex"])
   test(`mobile Accounts selects by tapping the row and manages accounts through its menu (${provider})`, async () => {
     const react = hookHost({ effects: true });
@@ -3859,6 +4103,174 @@ test("mobile Ports sheet stops only this Chat's process and refuses another host
   assert.deepEqual(calls, []);
 });
 
+function artifactHost(client, pushes = [], router = { back() {} }) {
+  const react = hookHost({ effects: true }),
+    files = new Map();
+  class File {
+    constructor(_cache, name) {
+      this.uri = "file:///cache/" + name;
+    }
+    write(value) {
+      files.set(this.uri, value);
+    }
+    get exists() {
+      return files.has(this.uri);
+    }
+    delete() {
+      files.delete(this.uri);
+    }
+  }
+  const source = load(
+    "artifact.tsx",
+    {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable", TextInput: "TextInput" },
+      "expo-router": { router: { back: () => router.back(), push: (route) => pushes.push(route) } },
+      "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
+      "react-native-keyboard-controller": { KeyboardAvoidingView: "KeyboardAvoidingView" },
+      "@expo/dom-webview": { DomWebView: "DomWebView" },
+      "expo-file-system": { File, Paths: { cache: "/cache" } },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
+      "./design-outbox": require("../apps/mobile/src/design-outbox.ts"),
+      "./session": { useSession: () => ({ client }) },
+      "./icons": { Icon: "Icon" },
+      "./ui": { CircleButton: "CircleButton", PillButton: "PillButton", colors: {}, styles: {} },
+    },
+    "\nexports.TestArtifactWebView = ArtifactWebView;\nexports.ArtifactCard = ArtifactCard;",
+  );
+  return {
+    files,
+    render(name, props) {
+      react.begin();
+      const tree = source[name](props);
+      react.flush();
+      return tree;
+    },
+    cleanup() {
+      react.cleanup();
+    },
+  };
+}
+
+test("a design card opens its Chat's design full screen; a new Chat's card can't", () => {
+  const pushes = [];
+  const h = artifactHost({ url: "mac" }, pushes);
+  const step = { id: "s1", kind: "artifact", title: "Showed `Login`", status: "done", artifact: { id: "login", version: 2, title: "Login" } };
+  const card = h.render("ArtifactCard", { step, chatId: "/p#7" });
+  card.props.onPress();
+  assert.deepEqual(JSON.parse(JSON.stringify(pushes)), [{ pathname: "/artifact-sheet", params: { hostId: "mac", chatId: "/p#7", id: "login", version: "2" } }]);
+  assert.equal(h.render("ArtifactCard", { step, chatId: "/p#new:1" }).props.disabled, true);
+});
+
+test("the design sheet loads the version it opened under the design policy, framed in a page of its own", async () => {
+  const calls = [];
+  const client = {
+    url: "mac",
+    call: async (method, args) => {
+      calls.push([method, args]);
+      if (method === "artifact:list") return [{ id: "login", version: 2, title: "Login", versions: 2, width: 390, height: 844 }];
+      return { id: "login", version: 1, latest: 2, versions: 2, title: "Login", width: 390, height: 844, html: "<html><head></head><body>hi</body></html>" };
+    },
+  };
+  const h = artifactHost(client);
+  h.render("ArtifactSheet", { hostId: "mac", chatId: "/p#7", id: "login", version: "1" });
+  await settle();
+  const tree = h.render("ArtifactSheet", { hostId: "mac", chatId: "/p#7", id: "login", version: "1" });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["artifact:list", [{ chatId: "/p#7" }]],
+    ["artifact:get", [{ chatId: "/p#7", id: "login", version: 1 }]],
+  ]);
+  const view = find(tree, (node) => node.props?.html);
+  assert.ok(view, "the design shows once loaded");
+  const web = artifactHost(client);
+  web.render("TestArtifactWebView", { html: view.props.html });
+  const frame = find(web.render("TestArtifactWebView", { html: view.props.html }), (node) => node.type === "DomWebView");
+  assert.ok(frame);
+  assert.equal(frame.props.useExpoModulesBridge, false);
+  // A page with no script of its own, framing the design in a sandbox that can't navigate away; removed when done.
+  const page = web.files.get(frame.props.source.uri);
+  assert.match(page, /frame-src 'none'/);
+  assert.match(
+    page,
+    /<iframe sandbox="allow-scripts"[^>]* srcdoc="<!doctype html><meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src 'none'/,
+  );
+  assert.doesNotMatch(page.replace(/srcdoc="[^"]*"/, ""), /<script/);
+  web.cleanup();
+  assert.equal(web.files.size, 0);
+  h.cleanup();
+});
+
+test("on the design sheet, choosing and commenting wait for Send, which hands one message to the Chat", async () => {
+  const outbox = require("../apps/mobile/src/design-outbox.ts");
+  let backs = 0;
+  const recorded = [];
+  const client = {
+    url: "mac",
+    call: async (method, args) => {
+      if (method === "artifact:add-comments") recorded.push(...args[0].comments);
+      return method === "artifact:list"
+        ? [{ id: "home", version: 1, title: "Home", versions: 1, width: 390, height: 844 }]
+        : { id: "home", version: 1, latest: 1, versions: 1, title: "Home", width: 390, height: 844, html: "<p>home</p>" };
+    },
+  };
+  const h = artifactHost(client, [], { back: () => backs++ });
+  const props = { hostId: "mac", chatId: "/p#7", id: "home", version: "1" };
+  h.render("ArtifactSheet", props);
+  await settle();
+  let tree = h.render("ArtifactSheet", props);
+  assert.ok(!find(tree, (node) => (node.props?.title ?? "").startsWith("Send")), "nothing to send yet");
+  find(tree, (node) => node.props?.title === "Choose").props.onPress();
+  tree = h.render("ArtifactSheet", props);
+  assert.equal(outbox.peekDesignMessage("mac|/p#7"), null, "choosing alone sends nothing");
+  assert.ok(find(tree, (node) => node.props?.title === "Chosen ✓"));
+  find(tree, (node) => node.props?.title === "Comment").props.onPress();
+  tree = h.render("ArtifactSheet", props);
+  find(tree, (node) => node.type === "TextInput").props.onChangeText("Bigger title");
+  tree = h.render("ArtifactSheet", props);
+  find(tree, (node) => node.props?.title === "Done").props.onPress();
+  tree = h.render("ArtifactSheet", props);
+  find(tree, (node) => node.props?.title === "Send 2").props.onPress();
+  await settle();
+  const message = outbox.peekDesignMessage("mac|/p#7");
+  const id = /\(comment ([a-f0-9]{8})\)/.exec(message.text)?.[1];
+  assert.equal(
+    message.text,
+    `I chose the design "Home" (home, version 1). Continue from this one.\n\nA comment on the designs:\n\n1. (comment ${id}) On the design "Home" (home, version 1): Bigger title\n\nRevise them with artifact_show and keep their ids. Once you have addressed a comment, resolve it with artifact_resolve_comment and its comment id.`,
+  );
+  assert.equal(recorded.length, 0, "the comments are recorded only once the message went");
+  assert.ok(outbox.peekDesignMessage("mac|/p#7"), "it waits until it is sent");
+  outbox.designMessageSent("mac|/p#7", message);
+  await settle();
+  assert.deepEqual(
+    recorded.map((comment) => [comment.id, comment.text]),
+    [[id, "Bigger title"]],
+  );
+  assert.equal(outbox.peekDesignMessage("mac|/p#7"), null, "a message is sent once");
+  assert.equal(backs, 1);
+  h.cleanup();
+});
+
+test("feedback from the designs shows as a card of the choice and each comment", () => {
+  const h = artifactHost({ url: "mac" });
+  const { parseDesignFeedback, designFeedbackMessage } = require("../packages/shared/src/artifact.ts");
+  const home = { id: "home", version: 2, title: "Home" };
+  const feedback = parseDesignFeedback(designFeedbackMessage({ choice: home, comments: [{ design: home, x: 0.5, y: 0.2, text: "Bigger title" }] }));
+  const tree = h.render("DesignFeedbackCard", { feedback });
+  const texts = [];
+  const walk = (node) => {
+    if (typeof node === "string" || typeof node === "number") texts.push(String(node));
+    else if (Array.isArray(node)) node.forEach(walk);
+    else if (node?.props) walk(node.props.children);
+  };
+  walk(tree);
+  const all = texts.join("|");
+  assert.match(all, /Chose \|?Home/);
+  assert.match(all, /Bigger title/);
+  assert.doesNotMatch(all, /artifact_show/, "the agent's instructions stay out of sight");
+});
+
 test("a reply shows the thinking it wrote nothing after, once it waits on a question or ends, not while working", () => {
   const react = { memo: (fn) => fn, useCallback: (fn) => fn, useEffect() {}, useRef: () => ({}), useState: (value) => [value, () => {}] };
   const { ChatReply } = load("chat-reply.tsx", {
@@ -3874,6 +4286,8 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     "./icons": { Icon: "Icon" },
     "./activity-item": { ActivityTitle: "ActivityTitle" },
     "./tool-row": { ToolRow: "ToolRow" },
+    "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
+    "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "./theme": { hex: () => "#000" },
     "./viewer-store": { showImages() {} },
     "./ui": { colors: {}, styles: { card: {}, row: {}, muted: {} } },

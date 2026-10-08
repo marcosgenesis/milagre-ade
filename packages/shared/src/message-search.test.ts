@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { editDistance, searchMessages } from "./message-search.ts";
+import { editDistance, searchMessages } from "./message-search.mjs";
 
 const message = (id: number, body: string, session_id = 1) => ({ id, session_id, body });
 const messages = [

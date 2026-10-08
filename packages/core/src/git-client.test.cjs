@@ -11,13 +11,13 @@ const nulListing = "worktree /home/me/my shop\0HEAD abc\0branch refs/heads/main\
 const lineListing =
   "worktree /home/me/my shop\nHEAD abc\nbranch refs/heads/main\n\nworktree /home/me/worktrees/cart\nHEAD def\ndetached\nprunable gitdir file points to non-existent location\n\n";
 
-function oldGit(calls) {
+function oldGit(calls, stderr = "error: unknown switch `z'\nusage: git worktree list [-v | --porcelain [-z]]\n") {
   return createGit({
     execFile(_command, args, _options, done) {
       calls.push(args);
       if (args.includes("-z")) {
         const error = Object.assign(new Error("exit 129"), { code: 129 });
-        done(error, "", "error: unknown switch `z'\nusage: git worktree list [-v | --porcelain [-z]]\n");
+        done(error, "", stderr);
       } else done(null, lineListing, "");
     },
   });
@@ -37,6 +37,16 @@ test("worktree list falls back to newline records on Git before 2.36 and matches
   // The failing -z form is tried once per process, then remembered.
   assert.equal(calls.filter((args) => args.includes("-z")).length, 1);
   assert.equal(calls.length, 3);
+});
+
+test("worktree list falls back on Git's usage-error exit code when its message is localized", async () => {
+  const calls = [];
+  const git = oldGit(calls, "erro: chave desconhecida `z'\nuso: git worktree list [-v | --porcelain [-z]]\n");
+  assert.deepEqual(
+    (await git.worktreeList("/home/me/my shop")).map((entry) => entry.path),
+    WORKTREES,
+  );
+  assert.equal(calls.length, 2);
 });
 
 test("worktree list still reports unrelated Git failures", async () => {

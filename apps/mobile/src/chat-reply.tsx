@@ -208,9 +208,10 @@ export const ChatReply = memo(function ChatReply({
   const steps = run?.steps ?? message?.steps ?? [];
   const reply = replyActivity(text, steps);
   const waiting = !!(run?.approvals.length || run?.questions.length);
-  const answer = reply.answer || (!run ? unspokenThought(reply.activity, reply.answer) : "");
   // Feedback sent from the design sheet or canvas shows as a card, not as the text the agent reads.
   const feedback = message?.role === "user" ? parseDesignFeedback(text) : null;
+  // What the agent concluded only in thinking, once the turn ends or stops on a question.
+  const thought = !run || run.questions.length ? unspokenThought(text, steps) : "";
   if (message?.role === "user")
     return (
       <View style={{ alignSelf: "flex-end", alignItems: "flex-end", gap: 6, maxWidth: "88%" }}>
@@ -257,7 +258,12 @@ export const ChatReply = memo(function ChatReply({
         </View>
       ))}
       <ArtifactCards steps={reply.artifacts} chatId={chatId} chosen={designChoice} />
-      {!!answer && <Markdown text={answer} streaming={!!run} media={savedMedia} basePath={basePath} />}
+      {!!reply.answer.trim() && <Markdown text={reply.answer} streaming={!!run} media={savedMedia} basePath={basePath} />}
+      {!!thought && (
+        <View style={{ opacity: 0.75 }}>
+          <Markdown text={thought} media={savedMedia} basePath={basePath} />
+        </View>
+      )}
       {run?.tasks?.length ? (
         <View style={[styles.card, { gap: 8 }]}>
           {run.tasks.map((task) => (

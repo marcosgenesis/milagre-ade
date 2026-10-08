@@ -5,7 +5,9 @@ export type Command = {
   detail?: string;
   keywords?: string;
   shortcut?: string;
-  icon: "chat" | "add" | "folder" | "settings" | "git" | "editor" | "copy" | "unread" | "search";
+  /** The matched text inside `label`, bolded in the palette. */
+  highlight?: [start: number, end: number];
+  icon: "chat" | "add" | "folder" | "settings" | "git" | "editor" | "copy" | "unread" | "search" | "message";
   run: () => void | Promise<unknown>;
 };
 

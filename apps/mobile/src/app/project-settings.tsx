@@ -5,6 +5,7 @@ import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { useSession } from "../session";
 import { ProjectIcon, setProjectImage } from "../project-icon";
+import { ProjectAccountsGroup } from "../project-accounts-section";
 import { ErrorNotice, PageScroll, PillButton, Toggle, styles } from "../ui";
 
 // Same size as desktop's: the icon is shown small everywhere, and the computer keeps it under 450 KB.
@@ -76,6 +77,9 @@ export default function ProjectSettingsScreen() {
           <Text style={styles.caption}>Hide a Project you only use through a Link. It also leaves the sidebar on your Mac when that shows every Project.</Text>
         </View>
         {error ? <ErrorNotice message={error} /> : null}
+        <View style={{ marginTop: 16 }}>
+          <ProjectAccountsGroup path={path} />
+        </View>
       </PageScroll>
     </>
   );

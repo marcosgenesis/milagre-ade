@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Reanimated from "react-native-reanimated";
-import { Alert, Image, Keyboard, Linking, Pressable, Text, View } from "react-native";
+import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { LiquidGlassView } from "@sbaiahmed1/react-native-blur";
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -45,6 +46,7 @@ import { useOpenProject } from "../use-open-project";
 import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from "../ui";
 import { PromptField } from "../prompt-field";
 import { ContextRing } from "../context-ring";
+import { hex } from "../theme";
 import { archiveFromPhone } from "../archive";
 import { confirmSheet } from "../confirm-store";
 import { randomUUID } from "expo-crypto";
@@ -60,6 +62,7 @@ export default function ChatScreen() {
   const composer = useComposer();
   const pendingStore = usePendingChats();
   const insets = useSafeAreaInsets();
+  const scheme = useColorScheme();
   const [actionBusy, setBusy] = useState(false);
   const sendingRef = useRef(false);
   const [picking, setPicking] = useState(false);
@@ -767,8 +770,8 @@ export default function ChatScreen() {
         </KeyboardChatScrollView>
         {/* The transcript blurs and fades under the transparent header, as under the composer. iOS's own soft edge can't
         find this scroll view (it only follows each view's first child), so the blur is drawn here. It ends where the
-        transcript's top padding does and is at full strength behind the title, so the title stays readable. */}
-        <EdgeFade edge="top" height={insets.top + 84} ramp={36} />
+        transcript's top padding does and gradually strengthens toward the status bar. */}
+        <EdgeFade edge="top" height={insets.top + 84} />
         <AttentionPill projectPath={project.path} />
         <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
         <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
@@ -822,11 +825,12 @@ export default function ChatScreen() {
             ) : (
               <View
                 style={{
-                  backgroundColor: colors.surface,
+                  backgroundColor: "transparent",
                   borderWidth: 1,
                   borderColor: colors.lineStrong,
                   borderRadius: 24,
                   borderCurve: "continuous",
+                  overflow: "hidden",
                   paddingTop: 8,
                   paddingHorizontal: 8,
                   paddingBottom: 6,
@@ -834,6 +838,13 @@ export default function ChatScreen() {
                   boxShadow: "0 4px 20px #0000000f",
                 }}
               >
+                <LiquidGlassView
+                  pointerEvents="none"
+                  glassType="clear"
+                  isInteractive={false}
+                  reducedTransparencyFallbackColor={hex(scheme).surface}
+                  style={[StyleSheet.absoluteFill, { borderRadius: 24, borderCurve: "continuous" }]}
+                />
                 {!params.id && !project.link && (
                   <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
                     <PullDown

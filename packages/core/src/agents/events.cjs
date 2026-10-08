@@ -22,7 +22,7 @@ function milagreInstructions(tldrEnabled = true, workspaceInstructions = "") {
     tldrEnabled
       ? TLDR_INSTRUCTIONS
       : "Automatic TLDR writing is disabled in Settings. Do not carry forward previously applied automatic TLDR rules. Explicit /tldr requests and the user's own writing preferences still apply.",
-    "Milagre folds your thinking away and the user rarely opens it. Anything they need to read (an answer, findings, the reason behind a question) goes in your reply text, written before you ask a question or end the turn.",
+    "Milagre folds your thinking away and the user rarely opens it. Anything they need to read (an answer, findings, the reason behind a question) goes in your reply text, written before you ask a question or end the turn. Never leave a summary or a conclusion meant for the user only in your thinking: if you catch yourself drafting one there, write it as reply text before the next tool call.",
     "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
     LINKS_INSTRUCTIONS,
     "Simulators: use milagre simulator_list, simulator_attach and simulator_detach to manage devices for this Chat. After choosing a simulator for mobile work, attach its exact deviceId so the user can view it. The bundled simulator skill has the workflow. Discovery never attaches devices; detach leaves them running.",
@@ -195,6 +195,18 @@ function mapClaudeMessage(message, state) {
       if (tasks) events.push({ type: "tasks-updated", tasks });
     }
   }
+  // Claude Code records some task notifications in the transcript without asking the model, and ends
+  // that turn with a result of its own: no model call, no text, and no message of ours. It isn't the
+  // end of the turn Milagre is running (on resume it lands just before the user's message is read).
+  if (
+    message.type === "result" &&
+    message.subtype === "success" &&
+    !message.is_error &&
+    message.num_turns === 0 &&
+    !message.result &&
+    !message.user_message_uuids?.length
+  )
+    return events;
   if (message.type === "result") {
     // The window size only arrives with a result, so the first turn shows its usage when it ends.
     const windows = Object.values(message.modelUsage ?? {}).map((usage) => usage?.contextWindow ?? 0);

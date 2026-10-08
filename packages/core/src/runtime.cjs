@@ -170,6 +170,7 @@ function createRuntime(options) {
       const store = key === "default-default" ? usageStore : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
       accountUsage.set(key, {
         key,
+        accountIds: { claude, codex },
         store,
         read: createUsageReader({
           ready: () => environmentReady,
@@ -183,6 +184,23 @@ function createRuntime(options) {
       });
     }
     return accountUsage.get(key);
+  }
+
+  async function usageWithAccounts(usage, snapshot) {
+    const identities = await accounts.list();
+    return {
+      ...snapshot,
+      accountKey: usage.key,
+      providers: snapshot.providers.map((provider) => {
+        // Use the IDs captured for this read, even if a selection changed while it was pending.
+        const id = usage.accountIds[provider.provider];
+        const account = identities.providers.find((group) => group.provider === provider.provider)?.accounts.find((entry) => entry.id === id);
+        return {
+          ...provider,
+          account: { id, label: account?.label || "Removed account", ...(account?.email ? { email: account.email } : {}) },
+        };
+      }),
+    };
   }
 
   async function discoverWorktrees(projectPath) {
@@ -708,12 +726,12 @@ function createRuntime(options) {
     if (options.readUsage) return options.readUsage();
     await environmentReady;
     const usage = usageForAccounts(scope);
-    return { ...(await usage.read()), accountKey: usage.key };
+    return usageWithAccounts(usage, await usage.read());
   });
   commands.handle("usage:cached", async (_event, scope) => {
     scope = await validateAccountScope(scope, true);
     const usage = usageForAccounts(scope);
-    return { ...cachedSnapshot(usage.store, Date.now()), accountKey: usage.key };
+    return usageWithAccounts(usage, cachedSnapshot(usage.store, Date.now()));
   });
 
   // The "Commit and open PR" dialog: Milagre runs git and gh itself, in the chat's folder, once the login

@@ -195,7 +195,7 @@ function ScopeHeader({
         aria-expanded={open}
         aria-label={`${open ? "Collapse" : "Expand"} ${name}`}
         onClick={onToggle}
-        className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-[8px] pl-2 pr-[68px] text-left hover:bg-hover-2"
+        className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-[8px] pl-2 pr-[60px] text-left hover:bg-hover-2"
       >
         <span className="relative flex size-5 shrink-0 items-center justify-center text-ink">
           <span className="flex items-center justify-center transition-opacity duration-100 group-hover/scope:opacity-0 group-has-[[data-scope-toggle]:focus-visible]/scope:opacity-0">
@@ -214,7 +214,7 @@ function ScopeHeader({
         </span>
         {attention && <AttentionDot />}
       </button>
-      <div className="absolute right-0 flex items-center">
+      <div className="absolute right-1 flex items-center gap-0.5">
         {menu.length > 0 && <ScopeMenuButton name={name} items={menu} />}
         <Tooltip label="New chat" shortcut={current ? "⌘N" : undefined} align="end">
           <button
@@ -222,9 +222,9 @@ function ScopeHeader({
             data-scope-action
             aria-label={current ? "New chat" : `New chat in ${name}`}
             onClick={onNewChat}
-            className={`${CHATS_HEADER_BUTTON} ${current ? "" : "opacity-0 group-hover/scope:opacity-100 focus-visible:opacity-100"}`}
+            className={`${SCOPE_HEADER_BUTTON} ${current ? "" : "opacity-0 group-hover/scope:opacity-100 focus-visible:opacity-100"}`}
           >
-            <IconPlusMedium size={16} />
+            <IconPlusMedium size={14} />
           </button>
         </Tooltip>
       </div>
@@ -283,9 +283,9 @@ function ScopeMenuButton({ name, items }: { name: string; items: ScopeMenuItem[]
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => (open ? close() : openMenu())}
-          className={`${CHATS_HEADER_BUTTON} ${open ? "opacity-100" : "opacity-0 group-hover/scope:opacity-100 focus-visible:opacity-100"}`}
+          className={`${SCOPE_HEADER_BUTTON} ${open ? "opacity-100" : "opacity-0 group-hover/scope:opacity-100 focus-visible:opacity-100"}`}
         >
-          <HugeIcon icon={MoreVerticalIcon} size={16} />
+          <HugeIcon icon={MoreVerticalIcon} size={14} />
         </button>
       </Tooltip>
       {open &&
@@ -376,6 +376,10 @@ function readSidebarWidth() {
 
 // Narrower than this, the sidebar collapses on its own so the chat keeps its room. It can still be expanded.
 const AUTO_COLLAPSE_QUERY = "(max-width: 1024px)";
+
+// The + and ⋯ on a Project's header: smaller than the row, so their hover fill doesn't read as a second row.
+const SCOPE_HEADER_BUTTON =
+  "flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover-2 hover:text-ink active:scale-[0.96]";
 
 const CHATS_HEADER_BUTTON =
   "flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-[background-color,color,transform] duration-150 hover:bg-hover-2 hover:text-ink active:scale-[0.96]";

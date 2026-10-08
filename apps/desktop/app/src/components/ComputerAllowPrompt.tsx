@@ -16,18 +16,19 @@ export function ComputerAllowPrompt() {
   // Tied to the request it came from, so it goes with that request.
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+  // How many devices:pending events arrived. The event is the newer word: an answer's own reply that lands after one is stale.
+  const heardCount = useRef(0);
   useEffect(() => {
     let live = true;
-    let heard = false;
     const off = window.milagre.onDevicesPending((payload) => {
-      heard = true;
+      heardCount.current += 1;
       setRequests(Array.isArray(payload?.requests) ? payload.requests : []);
     });
     // A host from before Allow has no devices:pending; nothing ever asks there.
     void (async () => {
       try {
         const list = await window.milagre.listPendingDevices();
-        if (live && !heard) setRequests(list ?? []);
+        if (live && !heardCount.current) setRequests(list ?? []);
       } catch {}
     })();
     return () => {
@@ -48,8 +49,10 @@ export function ComputerAllowPrompt() {
     if (!request || busy) return;
     setBusy(true);
     setFailure(null);
+    const heardBefore = heardCount.current;
     try {
-      setRequests(await (allow ? window.milagre.allowDevice(request.key) : window.milagre.denyDevice(request.key)));
+      const left = await (allow ? window.milagre.allowDevice(request.key) : window.milagre.denyDevice(request.key));
+      if (heardCount.current === heardBefore) setRequests(left);
     } catch (cause) {
       setFailure({ key: request.key, message: ipcErrorMessage(cause) });
       // Most often the computer gave up meanwhile: show what is still waiting.

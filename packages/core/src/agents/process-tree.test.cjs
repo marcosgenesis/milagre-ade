@@ -47,6 +47,38 @@ test("killTree stops the rest of the group after its leader already exited", { t
   await waitUntil(() => !isAlive(grandchildPid));
 });
 
+test("killTree with descendants stops a grandchild that leads its own process group", { timeout: 45000, skip: process.platform === "win32" }, async (t) => {
+  // Antigravity's harness starts each command in a group of its own, outside the agent's.
+  const script =
+    'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
+  const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  const grandchildPid = Number(String(await waitForOutput(child)).trim());
+  t.after(async () => {
+    await killTree(child);
+    if (isAlive(grandchildPid)) process.kill(grandchildPid, "SIGKILL");
+  });
+  assert.ok(isAlive(grandchildPid));
+
+  await killTree(child, { graceMs: 500, descendants: true });
+
+  assert.ok(child.exitCode !== null || child.signalCode !== null);
+  await waitUntil(() => !isAlive(grandchildPid));
+});
+
+test("killTree without descendants leaves a grandchild in its own group alone", { timeout: 45000, skip: process.platform === "win32" }, async (t) => {
+  const script =
+    'const { spawn } = require("node:child_process"); const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" }); console.log(String(grandchild.pid)); setInterval(() => {}, 1000);';
+  const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  const grandchildPid = Number(String(await waitForOutput(child)).trim());
+  t.after(() => {
+    if (isAlive(grandchildPid)) process.kill(grandchildPid, "SIGKILL");
+  });
+
+  await killTree(child, { graceMs: 500 });
+
+  assert.ok(isAlive(grandchildPid));
+});
+
 test("killTree resolves for a process that already exited", { timeout: 30000 }, async (t) => {
   const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
   t.after(() => killTree(child));

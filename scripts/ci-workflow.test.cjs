@@ -180,7 +180,10 @@ test("a cached install is keyed on the lockfile and installs with npm ci only on
   assert.match(cache.with.key, /hashFiles\('package-lock\.json', 'apps\/mobile\/patches\/\*\*'\)/);
   assert.match(cache.with.key, /runner\.os/);
   const steps = action.runs.steps;
-  const install = steps.findIndex((step) => step.run === "npm ci");
+  const install = steps.findIndex((step) => step.run?.startsWith("npm ci"));
+  // The download cache is only for misses: a warm run restores node_modules and nothing else.
+  for (const step of steps.filter((step) => /actions\/cache\/(restore|save)@/.test(step.uses ?? "")))
+    assert.match(step.if, new RegExp(`^steps\\.${cache.id}\\.outputs\\.cache-hit != 'true'`));
   assert.equal(steps[install].if, `steps.${cache.id}.outputs.cache-hit != 'true'`);
   // No install script runs before the lockfile's hosts and integrity hashes are checked.
   assert.match(steps[install - 1].run, /^npx --yes lockfile-lint@\d+\.\d+\.\d+ --path package-lock\.json/);

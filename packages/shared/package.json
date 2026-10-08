@@ -18,6 +18,7 @@
     "src/diff-layout.ts",
     "src/usage.ts",
     "src/main-sync.ts",
+    "src/linear.ts",
     "src/simulator.ts",
     "src/browser.ts",
     "src/terminal.ts",
@@ -112,6 +113,14 @@
       "types": "./src/peer-frames.d.mts",
       "default": "./src/peer-frames.mjs"
     },
+    "./pairing-link": {
+      "types": "./src/pairing-link.d.mts",
+      "default": "./src/pairing-link.mjs"
+    },
+    "./route-supervisor": {
+      "types": "./src/route-supervisor.d.mts",
+      "default": "./src/route-supervisor.mjs"
+    },
     "./model-options": "./src/model-options.ts",
     "./model-copy": "./src/model-copy.ts",
     "./provider-logos": "./src/provider-logos.ts",
@@ -127,6 +136,7 @@
     "./diff-layout": "./src/diff-layout.ts",
     "./usage": "./src/usage.ts",
     "./main-sync": "./src/main-sync.ts",
+    "./linear": "./src/linear.ts",
     "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
     "./artifact": "./src/artifact.ts",

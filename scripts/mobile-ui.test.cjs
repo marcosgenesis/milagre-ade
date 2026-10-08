@@ -4970,6 +4970,110 @@ test("mobile main sync switch re-reads the Mac's default on focus and shows a re
   assert.equal(find(render(), (n) => n.type === "ErrorNotice").props.message, "This demo computer only opens its demo project.");
 });
 
+test("mobile Settings opens Experimental as its own page, like desktop's section", () => {
+  const opened = [];
+  const { SettingsView } = load("app/settings.tsx", {
+    react: { useState: (value) => [value, () => {}], useCallback: (fn) => fn },
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect() {} },
+    "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client: null }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../push": { usePush: () => ({}) },
+    "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
+    "../icons": { Icon: "Icon" },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../attention": { useAttentionButton: () => [true, () => {}] },
+  });
+  const tree = SettingsView({ onOpen: (page) => opened.push(page) });
+  assert.equal(
+    find(tree, (n) => n.props?.title === "Linear"),
+    undefined,
+    "the Linear switch lives on the Experimental page",
+  );
+  find(tree, (n) => n.type === "ListRow" && n.props.title === "Experimental").props.onPress();
+  assert.deepEqual(opened, ["experimental"]);
+  const { default: Screen } = load("app/experimental.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "expo-router": { Stack: { Screen: "Screen" } },
+    "../ui": { PageScroll: "PageScroll" },
+    "../experimental-section": { ExperimentalSection: "ExperimentalSection" },
+  });
+  const page = Screen();
+  assert.equal(find(page, (n) => n.type === "Screen").props.options.title, "Experimental");
+  assert.ok(find(page, (n) => n.type === "ExperimentalSection"));
+});
+
+test("mobile Experimental page shows the Mac's Linear switch and status, re-read on focus", async () => {
+  const react = hookHost();
+  const focused = [];
+  let status = { connected: false };
+  const saves = [];
+  const client = {
+    async call(method, args) {
+      if (method === "linear:enabled:read") return { enabled: true };
+      if (method === "linear:status") return status;
+      if (method === "linear:enabled:save") {
+        saves.push(args[0]);
+        return { enabled: args[0] };
+      }
+      throw new Error(`unexpected ${method}`);
+    },
+  };
+  const modules = (session) => ({
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/linear": {
+      LINEAR_TITLE: "Linear",
+      LINEAR_HINT: "hint",
+      linearStatusLine: (value, where) => (value.connected ? "Connected as Victor to Acme" : `not connected on ${where}`),
+    },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { useFocusEffect: (fn) => focused.push(fn) },
+    "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
+    "./session": { useSession: () => session },
+    "./ui": { ErrorNotice: "ErrorNotice", Toggle: "Toggle", styles: {} },
+  });
+  const { ExperimentalSection } = load("experimental-section.tsx", modules({ client }));
+  const render = () => {
+    react.begin();
+    return ExperimentalSection();
+  };
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const text = (tree, value) => find(tree, (n) => n.type === "Text" && n.props.children === value);
+  render();
+  focused.at(-1)();
+  await settle();
+  let tree = render();
+  assert.equal(find(tree, (n) => n.props?.title === "Linear").props.selected, true);
+  assert.ok(text(tree, "not connected on phone"));
+  // Connected on the Mac while the phone was elsewhere: coming back to the page shows it.
+  status = { connected: true };
+  focused.at(-1)();
+  await settle();
+  tree = render();
+  assert.ok(text(tree, "Connected as Victor to Acme"));
+  find(tree, (n) => n.props?.title === "Linear").props.onPress();
+  await settle();
+  assert.deepEqual(saves, [false]);
+  assert.equal(text(render(), "Connected as Victor to Acme"), undefined, "the status hides while the switch is off");
+
+  const offline = load("experimental-section.tsx", modules({ client: null })).ExperimentalSection;
+  react.begin();
+  const empty = offline();
+  assert.ok(text(empty, "Connect to a Mac to change its experimental features."));
+  assert.ok(
+    find(empty, (n) => n.props?.title === "Murilo mode"),
+    "Murilo mode is this phone's own switch and shows without a Mac",
+  );
+  assert.equal(
+    find(empty, (n) => n.props?.title === "Linear"),
+    undefined,
+  );
+});
+
 test("mobile advisor Stop and Retry call the owning Chat and show failures without hiding records", async () => {
   const host = subagentsHost({
     call: async () => {

@@ -1,4 +1,5 @@
 import type { MainSyncSettings, MainSyncStatus } from "@milagre/shared/main-sync";
+import type { LinearStatus } from "@milagre/shared/linear";
 import type {
   ProjectAccountScope,
   ProjectAccountsSnapshot,
@@ -99,6 +100,9 @@ export type PairedDevice = {
   route: "lan" | "relay" | null;
 };
 
+/** A computer pairing with this Mac for the first time, waiting for Allow in its window (devices:pending). */
+export type PendingComputer = { key: string; name: string | null; at: number };
+
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 
@@ -189,6 +193,13 @@ declare global {
       saveMainSyncDefault: (value: boolean) => Promise<{ syncMain: boolean }>;
       /** A main branch sync finished, before a new Worktree. */
       onMainSyncStatus: (callback: (status: MainSyncStatus) => void) => () => void;
+      readLinearStatus: () => Promise<LinearStatus>;
+      /** Opens Linear in the browser and resolves once the Mac is connected. A second call replaces a waiting one. */
+      connectLinear: () => Promise<LinearStatus>;
+      disconnectLinear: () => Promise<LinearStatus>;
+      readLinearEnabled: () => Promise<{ enabled: boolean }>;
+      saveLinearEnabled: (value: boolean) => Promise<{ enabled: boolean }>;
+      onLinearStatusChanged: (callback: (status: LinearStatus) => void) => () => void;
       /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Re-reads the given worktrees' diff stats in the main process, e.g. after a commit from the "Commit and open PR" dialog. */
@@ -342,6 +353,13 @@ declare global {
       listDevices: () => Promise<PairedDevice[]>;
       /** Forgets one and closes its connections; resolves with the devices left. */
       removeDevice: (key: string) => Promise<PairedDevice[]>;
+      /** Computers waiting for Allow, oldest first. */
+      listPendingDevices: () => Promise<PendingComputer[]>;
+      /** Lets a waiting computer pair; resolves with the ones still waiting. */
+      allowDevice: (key: string) => Promise<PendingComputer[]>;
+      /** Turns a waiting computer away; resolves with the ones still waiting. */
+      denyDevice: (key: string) => Promise<PendingComputer[]>;
+      onDevicesPending: (callback: (payload: { requests: PendingComputer[] }) => void) => () => void;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
       listAccounts: (refresh?: boolean) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
       accountAction: (

@@ -92,6 +92,16 @@ const bridge = {
     ipcRenderer.on("main-sync:status", listener);
     return () => ipcRenderer.removeListener("main-sync:status", listener);
   },
+  readLinearStatus: () => ipcRenderer.invoke("linear:status"),
+  connectLinear: () => ipcRenderer.invoke("linear:connect"),
+  disconnectLinear: () => ipcRenderer.invoke("linear:disconnect"),
+  readLinearEnabled: () => ipcRenderer.invoke("linear:enabled:read"),
+  saveLinearEnabled: (value) => ipcRenderer.invoke("linear:enabled:save", value),
+  onLinearStatusChanged: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("linear:status-changed", listener);
+    return () => ipcRenderer.removeListener("linear:status-changed", listener);
+  },
   onWorktreeRenamed: (callback) => {
     const listener = (_event, rename) => callback(rename);
     ipcRenderer.on("worktree:renamed", listener);
@@ -222,6 +232,14 @@ const bridge = {
   openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
   listDevices: () => ipcRenderer.invoke("devices:list"),
   removeDevice: (key) => ipcRenderer.invoke("devices:remove", key),
+  listPendingDevices: () => ipcRenderer.invoke("devices:pending"),
+  allowDevice: (key) => ipcRenderer.invoke("devices:allow", key),
+  denyDevice: (key) => ipcRenderer.invoke("devices:deny", key),
+  onDevicesPending: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("devices:pending", listener);
+    return () => ipcRenderer.removeListener("devices:pending", listener);
+  },
   onPhoneStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("phone:status", listener);

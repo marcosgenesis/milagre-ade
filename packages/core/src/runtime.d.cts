@@ -26,6 +26,15 @@ export interface RuntimeOptions {
   expandSkills?: boolean;
   /** worktree:pull-request; the default asks `gh`. */
   readPullRequest?: (worktreePath: string) => Promise<unknown>;
+  /** The Linear connection; tests point it at a fake Linear and a fake browser. */
+  linear?: {
+    clientId?: string;
+    apiBase?: string;
+    port?: number;
+    timeoutMs?: number;
+    fetchImpl?: typeof fetch;
+    openBrowser?: (url: string) => void;
+  };
 }
 export interface Runtime {
   readonly methods: readonly string[];

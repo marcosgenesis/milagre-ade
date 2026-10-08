@@ -44,6 +44,7 @@ const { registerGitHandlers } = require("./git-ipc.cjs");
 const { createPullRequestReader, readPullRequests } = require("./pull-request.cjs");
 const { emptyState, reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { migrateWorktreeChats } = require("./worktree-chats.cjs");
+const { createLinear } = require("./linear/index.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
@@ -853,6 +854,14 @@ function createRuntime(options) {
       return pending;
     });
 
+  // The Mac's Linear connection. Phones read it and the Experimental switch; only the Mac connects (mobile-bridge.cjs).
+  const linear = createLinear({ dataDir, ...options.linear, changed: () => emit("linear:status-changed", linear.status()) });
+  commands.handle("linear:status", () => linear.status());
+  commands.handle("linear:connect", () => linear.connect());
+  commands.handle("linear:disconnect", () => linear.disconnect());
+  commands.handle("linear:enabled:read", () => ({ enabled: linear.enabled() }));
+  commands.handle("linear:enabled:save", (_event, value) => ({ enabled: linear.setEnabled(value === true) }));
+
   const chatTitles = new ChatTitles({
     states: scopeStates,
     update: updateProject,
@@ -1367,6 +1376,8 @@ function createRuntime(options) {
       await advisorStore.close();
       // Ending the Terminals first also answers their pending reads, which the wait for accepted commands includes.
       await Promise.all([simulators.close(), browsers.close(), artifacts.close(), terminals.dispose()]);
+      // A waiting Linear sign-in is an accepted command too: end it, or the wait below lasts until its timeout.
+      await linear.dispose();
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();
@@ -1426,6 +1437,8 @@ function createRuntime(options) {
         return readOpenChat(view ? view.chatId : chats.openChat);
       }),
     flush: async () => {
+      // A waiting Linear sign-in is an accepted command, but its window is gone when this runs on quit: end it.
+      await linear.dispose();
       await Promise.allSettled([...active]);
       await scopeStates.flush();
       await usageStore.idle();

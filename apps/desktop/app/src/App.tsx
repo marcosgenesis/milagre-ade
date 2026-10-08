@@ -1,4 +1,5 @@
 import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
+import { ComputerAllowPrompt } from "./components/ComputerAllowPrompt";
 import { LinkWorkspace } from "./components/LinkWorkspace";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
@@ -2220,6 +2221,8 @@ export default function AppWithUpdates() {
   return (
     <UpdateShell>
       <App />
+      {/* Beside the app, so it asks whatever screen is open, Settings and Links included. */}
+      <ComputerAllowPrompt />
     </UpdateShell>
   );
 }

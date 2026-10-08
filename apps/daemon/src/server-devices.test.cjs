@@ -79,3 +79,64 @@ test("devices:list and devices:remove are desktop methods over the saved devices
   assert.deepEqual(await desktop.call("devices:list"), []);
   await assert.rejects(desktop.call("devices:remove", ["nope"]), /device key/);
 });
+
+/** A daemon whose relay host is a stand-in that only records its options, and this Mac's window connected to it. */
+async function withRelays(t) {
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-devices-")));
+  const relays = [];
+  const daemon = await startDaemon({
+    dataDir,
+    version: "test",
+    phoneOptions: {
+      localPort: 0,
+      lanPort: null,
+      startRelay: (options) => {
+        relays.push(options);
+        return { close: async () => {}, status: () => "online" };
+      },
+    },
+    runtimeOptions: {
+      cwd: dataDir,
+      environmentReady: Promise.resolve(),
+      titleModels: {},
+      agentCli: Object.assign(async () => ({ command: null }), { invalidate() {} }),
+    },
+  });
+  const desktop = await connect({ dataDir });
+  t.after(async () => {
+    desktop.close();
+    await daemon.close();
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+  return { desktop, relays };
+}
+
+test("a computer waiting for Allow reaches this Mac's window as devices:pending, answered by devices:allow and devices:deny", async (t) => {
+  const { desktop, relays } = await withRelays(t);
+  const heard = [];
+  desktop.on("event", ({ channel, payload }) => {
+    if (channel === "devices:pending") heard.push(payload.requests);
+  });
+  const methods = (await desktop.call("daemon:status")).methods;
+  for (const method of ["devices:pending", "devices:allow", "devices:deny"]) assert.ok(methods.includes(method), method);
+  assert.deepEqual(await desktop.call("devices:pending"), []);
+  await desktop.call("phone:set-enabled", [true]);
+  await waitFor(async () => (await desktop.call("phone:status")).state === "on");
+  const ask = (key, name) => relays[0].allowComputer({ key, name, signal: new AbortController().signal, waiting() {} });
+  const studio = ask("s".repeat(43), "studio");
+  const lab = ask("l".repeat(43), "lab");
+  await waitFor(() => heard.at(-1)?.length === 2);
+  assert.deepEqual(
+    (await desktop.call("devices:pending")).map((request) => request.name),
+    ["studio", "lab"],
+  );
+  assert.deepEqual(
+    (await desktop.call("devices:allow", ["s".repeat(43)])).map((request) => request.name),
+    ["lab"],
+  );
+  assert.equal(await studio, "allowed");
+  assert.deepEqual(await desktop.call("devices:deny", ["l".repeat(43)]), []);
+  assert.equal(await lab, "denied");
+  await waitFor(() => heard.at(-1)?.length === 0);
+  await assert.rejects(desktop.call("devices:allow", ["s".repeat(43)]), /no longer waiting/);
+});

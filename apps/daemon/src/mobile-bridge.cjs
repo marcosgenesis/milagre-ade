@@ -8,9 +8,12 @@ const { pipeline } = require("node:stream/promises");
 const { randomUUID, createHash } = require("node:crypto");
 const zlib = require("node:zlib");
 const { WebSocketServer, WebSocket } = require("ws");
-const { chatInProject } = require("@milagre/shared/agent-runs");
+const { applyAgentEvent, chatInProject, projectOfKey } = require("@milagre/shared/agent-runs");
+const { applyStatePatch, diffState } = require("@milagre/shared/state-patch");
+const { reconcileState } = require("@milagre/shared/reconcile");
 const { isLinkScopeKey, scopeFromKey } = require("@milagre/shared/chat-scopes");
 const { chatsNeedingAttention } = require("@milagre/shared/attention");
+const { pullRequestRefs } = require("@milagre/shared/chats");
 const { connect } = require("./client.cjs");
 const { createConfinement } = require("./confine.cjs");
 
@@ -40,6 +43,14 @@ const METHODS = new Set([
   "simulator:control",
   "simulator:input",
   "simulator:close",
+  "browser:list",
+  "browser:attach",
+  "browser:open",
+  "browser:frame",
+  "browser:status",
+  "browser:control",
+  "browser:input",
+  "browser:close",
   "artifact:get",
   "artifact:list",
   "artifact:add-comments",
@@ -75,6 +86,7 @@ const METHODS = new Set([
   "chat:archive-finished-subagents",
   "attachment:preview",
   "worktree:pull-request",
+  "worktree:pull-requests",
   "project:branches",
   "skills:list",
   "skills:read",
@@ -100,33 +112,77 @@ const TRANSCRIPT_TEXT = 600;
  * /message. A reply keeps the detail of its last thinking step, which it can show in place of an answer; each subagent
  * keeps the start of its last few transcript entries.
  */
+function projectPullRequestRefs(project) {
+  const messages = new Map();
+  for (const message of project.state.messages) {
+    const list = messages.get(message.session_id) || [];
+    list.push(message);
+    messages.set(message.session_id, list);
+  }
+  const refs = Object.fromEntries([...messages].map(([id, list]) => [id, pullRequestRefs(list)]).filter(([, refs]) => refs.length));
+  // The same objects as last time where nothing changed, so a phone's patch carries only the Chats whose refs did.
+  const stable = reconcileState(lastPullRequestRefs.get(project.path), refs);
+  lastPullRequestRefs.delete(project.path);
+  lastPullRequestRefs.set(project.path, stable);
+  if (lastPullRequestRefs.size > 16) lastPullRequestRefs.delete(lastPullRequestRefs.keys().next().value);
+  return stable;
+}
+const lastPullRequestRefs = new Map();
+
 function forPhone(project) {
   const state = project?.state;
   if (!state) return project;
-  const slimSteps = (steps) => {
-    const thought = steps.findLastIndex((step) => step.kind === "thinking" && step.detail?.trim());
-    return steps.map((step, index) => (step.detail && index !== thought ? { ...step, detail: undefined, hasDetail: true } : step));
-  };
-  const messages = state.messages.map((message) => (message.steps?.some((step) => step.detail) ? { ...message, steps: slimSteps(message.steps) } : message));
-  const clip = (text) => (typeof text === "string" && text.length > TRANSCRIPT_TEXT ? `${text.slice(0, TRANSCRIPT_TEXT)}…` : text);
-  const sessions = Object.fromEntries(
-    Object.entries(state.sessions).map(([id, session]) => [
-      id,
-      session.subagents?.length
-        ? {
-            ...session,
-            subagents: session.subagents.map((agent) => ({
-              ...agent,
-              latestActivity: clip(agent.latestActivity),
-              transcript: (agent.transcript || [])
-                .slice(-TRANSCRIPT_TAIL)
-                .map((item) => ({ ...item, text: agent.source === "milagre-advisor" ? item.text.slice(0, 40_000) : clip(item.text) })),
-            })),
-          }
-        : session,
-    ]),
-  );
-  return { ...project, state: { ...state, messages, sessions } };
+  const messages = state.messages.map(phoneMessage);
+  const sessions = Object.fromEntries(Object.entries(state.sessions).map(([id, session]) => [id, phoneSession(session)]));
+  return { ...project, pullRequestRefs: projectPullRequestRefs(project), state: { ...state, messages, sessions } };
+}
+// The slim copy of each message and session is kept for as long as the state holds it. A new state shares what didn't
+// change with the one before, so its phone copy does too: two snapshots then differ only where the state changed, and
+// the second can go to the phone as a patch (see /snapshot).
+const phoneMessages = new WeakMap();
+const phoneSessions = new WeakMap();
+const phoneAgents = new WeakMap();
+const clip = (text) => (typeof text === "string" && text.length > TRANSCRIPT_TEXT ? `${text.slice(0, TRANSCRIPT_TEXT)}…` : text);
+function phoneMessage(message) {
+  if (!message.steps?.some((step) => step.detail)) return message;
+  let slim = phoneMessages.get(message);
+  if (!slim) {
+    const thought = message.steps.findLastIndex((step) => step.kind === "thinking" && step.detail?.trim());
+    const steps = message.steps.map((step, index) => (step.detail && index !== thought ? { ...step, detail: undefined, hasDetail: true } : step));
+    slim = { ...message, steps };
+    phoneMessages.set(message, slim);
+  }
+  return slim;
+}
+function phoneSession(session) {
+  if (!session.subagents?.length) return session;
+  let slim = phoneSessions.get(session);
+  if (!slim) {
+    slim = { ...session, subagents: session.subagents.map(phoneAgent) };
+    phoneSessions.set(session, slim);
+  }
+  return slim;
+}
+function phoneAgent(agent) {
+  let slim = phoneAgents.get(agent);
+  if (!slim) {
+    slim = {
+      ...agent,
+      latestActivity: clip(agent.latestActivity),
+      transcript: (agent.transcript || [])
+        .slice(-TRANSCRIPT_TAIL)
+        .map((item) => ({ ...item, text: agent.source === "milagre-advisor" ? item.text.slice(0, 40_000) : clip(item.text) })),
+    };
+    phoneAgents.set(agent, slim);
+  }
+  return slim;
+}
+/** A Project cut down to one new worktree and its Chats, without messages: what a phone needs from worktree:create. */
+function forNewWorktree(project, worktreeId) {
+  const state = project.state;
+  const worktree = state.worktrees?.[worktreeId];
+  const sessions = Object.fromEntries(Object.entries(state.sessions ?? {}).filter(([, session]) => session.worktree_id === worktreeId));
+  return { ...project, state: { ...state, worktrees: worktree ? { [worktreeId]: worktree } : {}, sessions, messages: [] } };
 }
 /** A drawer-only projection. Empty message bodies are metadata, never a readable transcript. */
 function forChatList(project, runs) {
@@ -168,7 +224,11 @@ function forChatList(project, runs) {
       },
     ]),
   );
-  return { previewOnly: true, project: { ...project, state: { ...project.state, sessions, messages, tasks: {} } }, runs: { ...runs, runs: marks } };
+  return {
+    previewOnly: true,
+    project: { ...project, pullRequestRefs: projectPullRequestRefs(project), state: { ...project.state, sessions, messages, tasks: {} } },
+    runs: { ...runs, runs: marks },
+  };
 }
 
 // Steps at the end of a streaming turn, and any still running, keep this much of the end of their output.
@@ -283,11 +343,65 @@ async function startMobileBridge({
   let uploadTurn = Promise.resolve();
   const expected = Buffer.from(`Bearer ${token}`);
   const client = await connect({ dataDir });
+  // The bridge only needs to know a state changed, so it takes patches: the host then encodes no whole state for it.
+  await client.call("daemon:state-patches").catch(() => {});
   const validScope = (owner) => typeof owner === "string" && (isLinkScopeKey(owner) || path.isAbsolute(owner));
+  // The Projects phones opened lately, kept current from the host's state patches (and subagent updates, which carry
+  // none), so a phone's snapshot doesn't read and parse the whole state from the host each time. A missed patch drops
+  // the Project, and the next snapshot reads it again.
+  const HELD_PROJECTS = 4;
+  const heldProjects = new Map();
+  async function heldProject(owner) {
+    let held = heldProjects.get(owner);
+    if (!held) {
+      const { state, version, epoch, ...rest } = await client.call("state:read", [owner]);
+      held = { epoch, version, project: { ...rest, state } };
+      heldProjects.set(owner, held);
+      if (heldProjects.size > HELD_PROJECTS) heldProjects.delete(heldProjects.keys().next().value);
+    } else {
+      heldProjects.delete(owner);
+      heldProjects.set(owner, held);
+    }
+    return held.project;
+  }
+  function followState(channel, payload) {
+    const owner =
+      channel === "project:state" ? payload?.path : channel === "agent:event" && typeof payload?.chatId === "string" ? projectOfKey(payload.chatId) : null;
+    const held = typeof owner === "string" ? heldProjects.get(owner) : undefined;
+    if (!held) return;
+    const state = held.project.state;
+    if (typeof payload.version === "number") {
+      if (payload.resync || payload.epoch !== held.epoch || payload.base !== held.version) heldProjects.delete(owner);
+      else Object.assign(held, { version: payload.version, project: { ...held.project, state: applyStatePatch(state, payload.patch) } });
+    } else if (payload.state) heldProjects.delete(owner);
+    else if (payload.event?.type === "subagent-update")
+      held.project = { ...held.project, state: applyAgentEvent(state, {}, owner, payload.chatId, payload.event).state };
+  }
+  // The last snapshots sent for each Project, by number, so the next one can go as a patch on the one a phone holds
+  // (X-Milagre-Snapshot-Since: "<epoch>:<number>", or "none"). The numbers start again with each bridge.
+  const SNAPSHOT_HISTORY = 8;
+  const snapshotEpoch = randomUUID();
+  const sentSnapshots = new Map();
+  function numberSnapshot(owner, result, since) {
+    let sent = sentSnapshots.get(owner);
+    if (!sent) sentSnapshots.set(owner, (sent = { last: 0, versions: new Map() }));
+    const version = ++sent.last;
+    sent.versions.set(version, result);
+    if (sent.versions.size > SNAPSHOT_HISTORY) sent.versions.delete(sent.versions.keys().next().value);
+    const [epoch, held] = since.split(":");
+    const base = epoch === snapshotEpoch ? sent.versions.get(Number(held)) : undefined;
+    if (base) {
+      const patch = diffState(base, result, 6);
+      // A patch that rewrites most of it (a reconnect after many changes) is no smaller than the snapshot.
+      if (JSON.stringify(patch ?? null).length < 64 * 1024 || JSON.stringify(patch).length < JSON.stringify(result).length / 2)
+        return { epoch: snapshotEpoch, version, base: Number(held), patch };
+    }
+    return { epoch: snapshotEpoch, version, snapshot: result };
+  }
   async function readScope(owner) {
     await confine?.check(owner);
     if (!validScope(owner)) throw failure(400, "Choose a valid Project or Link");
-    if (!isLinkScopeKey(owner)) return { project: await client.call("project:snapshot", [owner]) };
+    if (!isLinkScopeKey(owner)) return { project: await heldProject(owner) };
     const id = scopeFromKey(owner).linkId;
     const [link, projects] = await Promise.all([client.call("link:snapshot", [id]), client.call("project:registry")]);
     return {
@@ -376,6 +490,7 @@ async function startMobileBridge({
     live.add(entry);
   }
   client.on("event", ({ channel, payload } = {}) => {
+    followState(channel, payload);
     for (const entry of live) {
       if (channel === "accounts:changed" && !confine) signal(entry, "accounts", 0);
       if (
@@ -386,8 +501,8 @@ async function startMobileBridge({
       else if (channel === "agent:event" && typeof payload?.chatId === "string" && chatInProject(entry.projectPath, payload.chatId)) {
         // A turn's end (or a steer) saves its reply as the run goes away: one prompt snapshot shows both, where a runs
         // fetch first would hide the reply until the Project caught up. Subagents live only in the Project state.
-        // A large Project's state is left out of the event (stateTooLarge); the turn's end still needs the snapshot.
-        if (payload.state || payload.stateTooLarge) signal(entry, "project", LIVE_DELAY.runs);
+        // The state can come whole, as a patch (version), or left out (stateTooLarge); the turn's end needs the snapshot.
+        if (payload.state || payload.stateTooLarge || typeof payload.version === "number") signal(entry, "project", LIVE_DELAY.runs);
         else signal(entry, payload.event?.type === "subagent-update" ? "project" : "runs");
       }
     }
@@ -498,11 +613,15 @@ async function startMobileBridge({
           const projectPath = target.searchParams.get("projectPath");
           const [scope, runs] = await Promise.all([readScope(projectPath), client.call("chat:runs")]);
           const slim = scope.link ? { link: forPhone(scope.link) } : { project: forPhone(scope.project) };
-          const result =
-            !scope.link && target.searchParams.get("view") === "chats"
-              ? forChatList(scope.project, projectRuns(runs, projectPath))
-              : { ...slim, runs: runsForPhone(projectRuns(runs, projectPath)) };
-          reply(200, { result }, { etag: true });
+          if (!scope.link && target.searchParams.get("view") === "chats") {
+            reply(200, { result: forChatList(scope.project, projectRuns(runs, projectPath)) }, { etag: true });
+            return;
+          }
+          const result = { ...slim, runs: runsForPhone(projectRuns(runs, projectPath)) };
+          // An app that says what it holds gets the snapshot numbered, and as a patch on that one when it can.
+          const since = req.headers["x-milagre-snapshot-since"];
+          if (typeof since !== "string") reply(200, { result }, { etag: true });
+          else reply(200, { result: numberSnapshot(projectPath, result, since) });
           return;
         }
         // What a live "runs" signal fetches: a few kilobytes, where the snapshot can run to megabytes.
@@ -520,9 +639,17 @@ async function startMobileBridge({
           return;
         }
         if (req.method === "GET" && target.pathname === "/message") {
-          const scope = await readScope(target.searchParams.get("projectPath"));
-          const message = (scope.link ?? scope.project).state.messages.find((item) => item.id === Number(target.searchParams.get("id")));
-          if (!message) throw failure(404, "That message is no longer in this Project.");
+          // One message with its tool output read back from its sidecar, without encoding the whole state to find it.
+          const owner = target.searchParams.get("projectPath");
+          await confine?.check(owner);
+          if (!validScope(owner)) throw failure(400, "Choose a valid Project or Link");
+          let message;
+          try {
+            message = await client.call("chat:message", [owner, Number(target.searchParams.get("id"))]);
+          } catch (error) {
+            if (/no longer in this Project/.test(error.message)) throw failure(404, "That message is no longer in this Project.");
+            throw error;
+          }
           reply(200, { result: message });
           return;
         } else if (req.method === "POST" && ["/rpc", "/attachments"].includes(target.pathname)) {
@@ -605,6 +732,9 @@ async function startMobileBridge({
             // The phone reads a Project through /snapshot right after opening it; the opened state would double the download.
             if (request.method === "project:open" && result && typeof result === "object") result = { path: result.path, name: result.name };
             if (request.method === "link:open" && result?.link) result = { id: result.link.id, name: result.link.name };
+            // The phone only looks up the new worktree's Chat; a large Project's whole state is tens of MB, past what a LAN socket buffers.
+            if (request.method === "worktree:create" && result?.project?.state)
+              result = { ...result, project: forNewWorktree(result.project, result.worktreeId) };
             // A Project's icon can be a full-size app icon; past this size the phone keeps its folder glyph.
             if (
               (request.method === "project:image" || request.method === "project:set-icon") &&

@@ -228,3 +228,44 @@ test("an edit made during a slow save is flushed after it with no overlapping wr
   assert.deepEqual(saved, [1, 2]);
   assert.equal(max, 1);
 });
+
+test("a compaction runs on the state read and on each change, and the slim state is the one kept and saved", async () => {
+  const saves = [];
+  const calls = [];
+  const states = new ProjectStates({
+    read: async () => ({ count: 0, heavy: true }),
+    save: async (_projectPath, state) => saves.push(state),
+    compact: async (projectPath, next, previous) => {
+      calls.push({ projectPath, previous: previous?.count ?? null });
+      return next.heavy ? { ...next, heavy: false } : next;
+    },
+  });
+  assert.deepEqual(await states.get("/a"), { count: 0, heavy: false });
+  await states.update("/a", (state) => ({ ...state, count: 1, heavy: true }));
+  await states.flush();
+  assert.deepEqual(calls, [
+    { projectPath: "/a", previous: null },
+    { projectPath: "/a", previous: 0 },
+  ]);
+  assert.deepEqual(await states.get("/a"), { count: 1, heavy: false });
+  assert.deepEqual(saves, [{ count: 1, heavy: false }]);
+});
+
+test("a compaction that fails keeps the change as it is", async () => {
+  const states = new ProjectStates({
+    read: async () => ({ count: 0 }),
+    save: async () => {},
+    compact: async (_projectPath, next) => {
+      if (next.count) throw new Error("disk full");
+      return next;
+    },
+  });
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const result = await states.update("/a", bump);
+    assert.deepEqual(result, { state: { count: 1 }, changed: true });
+  } finally {
+    console.warn = warn;
+  }
+});

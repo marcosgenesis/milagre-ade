@@ -1,5 +1,6 @@
 import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
+import { BrowserTrack } from "./agents/BrowserTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
@@ -39,6 +40,7 @@ import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
 import { StepRow } from "./agents/StepRow";
+import { StepDetailsMessage, StepDetailsScope } from "./agents/step-details";
 import { ActivityBlock } from "./agents/ActivityBlock";
 import { GeneratedImage } from "./agents/GeneratedImage";
 import { Markdown, StreamingMarkdown } from "./markdown/Markdown";
@@ -182,7 +184,9 @@ const MessageSection = memo(function MessageSection({
           ) : null
         ) : recommendation ? (
           <>
-            <ReplyContent body={recommendation.intro} steps={steps} streaming={false} waitingStepIds={waitingStepIds} />
+            <StepDetailsMessage id={message.id}>
+              <ReplyContent body={recommendation.intro} steps={steps} streaming={false} waitingStepIds={waitingStepIds} />
+            </StepDetailsMessage>
             <div className={recommendation.intro ? "mt-2" : undefined}>
               <RecommendationCard
                 question={recommendation.question}
@@ -192,7 +196,9 @@ const MessageSection = memo(function MessageSection({
             </div>
           </>
         ) : (
-          <ReplyContent body={message.body} steps={steps} streaming={streaming} asking={asking} waitingStepIds={waitingStepIds} />
+          <StepDetailsMessage id={message.id}>
+            <ReplyContent body={message.body} steps={steps} streaming={streaming} asking={asking} waitingStepIds={waitingStepIds} />
+          </StepDetailsMessage>
         )}
         {showUpdateButton && outdatedProvider && onUpdateCli && (
           <div className="mt-2.5 flex items-center gap-2">
@@ -347,6 +353,8 @@ interface ChatComposerProps {
   onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
+  /** The Project or Link (scope key) the messages belong to, for step output the host keeps out of the state. */
+  messageScope?: string;
   messages: AppChatMessage[];
   /** Unsaved input appears below the reply still streaming while the backend prepares the send. */
   pendingMessageId?: number;
@@ -374,6 +382,8 @@ interface ChatComposerProps {
   contextUsage?: ContextUsage;
   /** The ports the chat's commands listen on, shown as a pill beside the to-do list. */
   ports?: AgentPort[];
+  /** The runtime's key for this Chat (`projectPath#id`), which browser ownership is recorded under. */
+  agentChatId?: string;
   /** Stops the command listening on one of the chat's ports. */
   onStopPort?: (pid: number) => Promise<unknown>;
   /** Steps of the running turn whose approval card is open. */
@@ -552,13 +562,14 @@ function NewChatHeader({
           )}
           {menu === "branch" && (
             <PickerPanel
-              title={isolation === "local" ? "Choose a branch" : "Branch from"}
+              title={isolation === "local" ? "Choose a worktree" : "Branch from"}
               query={query}
               onQueryChange={setQuery}
-              placeholder="Search branches…"
-              emptyLabel="No branches found."
+              placeholder={isolation === "local" ? "Search worktrees" : "Search branches"}
+              searchPlacement="bottom"
+              emptyLabel={isolation === "local" ? "No worktrees found." : "No branches found."}
               isEmpty={branchRows.length === 0}
-              className="absolute top-[calc(100%+0.375rem)] w-[320px]"
+              className="absolute top-[calc(100%+0.375rem)] w-[420px] max-w-[calc(100vw-2rem)]"
               style={popoverStyle}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
@@ -574,6 +585,7 @@ function NewChatHeader({
                   label={row.name}
                   description={row.description}
                   selected={row.selected}
+                  wrapLabel
                   onClick={() => {
                     row.choose();
                     close();
@@ -594,6 +606,7 @@ export function ChatComposer({
   scopeKind,
   imageDraft,
   projectPath,
+  messageScope,
   messages,
   pendingMessageId,
   draft,
@@ -614,6 +627,7 @@ export function ChatComposer({
   tasks,
   contextUsage,
   ports,
+  agentChatId,
   onStopPort,
   waitingStepIds,
   asking = false,
@@ -743,22 +757,24 @@ export function ChatComposer({
                 viewportProps={{ onScroll: (event) => setScrolled(event.currentTarget.scrollTop > 4) }}
               >
                 <div className="chat-column mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3 px-3 pt-12 pb-4">
-                  <MessageTranscript
-                    findOpen={findOpen}
-                    messages={messages}
-                    pendingMessageId={pendingMessageId}
-                    isSending={isSending}
-                    streamingText={streamingText}
-                    streamingSteps={streamingSteps}
-                    asking={asking}
-                    waitingStepIds={waitingStepIds}
-                    onRecommendationSelect={onRecommendationSelect}
-                    onUpdateCli={onUpdateCli}
-                    updatingCli={updatingCli}
-                    cliStatus={cliStatus}
-                    onOpenLinkedChat={onOpenLinkedChat}
-                    models={models}
-                  />
+                  <StepDetailsScope scope={messageScope}>
+                    <MessageTranscript
+                      findOpen={findOpen}
+                      messages={messages}
+                      pendingMessageId={pendingMessageId}
+                      isSending={isSending}
+                      streamingText={streamingText}
+                      streamingSteps={streamingSteps}
+                      asking={asking}
+                      waitingStepIds={waitingStepIds}
+                      onRecommendationSelect={onRecommendationSelect}
+                      onUpdateCli={onUpdateCli}
+                      updatingCli={updatingCli}
+                      cliStatus={cliStatus}
+                      onOpenLinkedChat={onOpenLinkedChat}
+                      models={models}
+                    />
+                  </StepDetailsScope>
 
                   {isSending && (
                     <div className="w-full" style={{ animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" }}>
@@ -814,6 +830,7 @@ export function ChatComposer({
             )}
             <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
             <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
+            <BrowserTrack key={`browser-${agentChatId ?? chatId}`} chatId={agentChatId} />
             {!isNewChat && typeof chatId === "number" && chatId > 0 && projectPath && (
               <SimulatorTrack key={`simulator-${projectPath}-${chatId}`} chatId={`${projectPath}#${chatId}`} />
             )}

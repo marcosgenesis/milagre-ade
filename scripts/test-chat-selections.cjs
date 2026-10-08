@@ -64,9 +64,17 @@ async function browserChecks() {
     throw Error(`Timed out: ${source}`);
   }
   async function click(text) {
-    const expr = `[...document.querySelectorAll('button')].find(el => el.textContent.includes(${JSON.stringify(text)}))`;
+    // Provider tabs show only a logo; they are found by their label.
+    const expr = `[...document.querySelectorAll('button')].find(el => el.getAttribute("aria-label") === ${JSON.stringify(text)} || el.textContent.includes(${JSON.stringify(text)}))`;
     await waitFor(`!!(${expr})`);
     await evaluate(`(${expr}).click()`);
+  }
+  async function shot(name) {
+    const dir = process.env.MILAGRE_SCREENSHOT_DIR;
+    if (!dir) return;
+    require("node:fs").mkdirSync(dir, { recursive: true });
+    await delay(300);
+    require("node:fs").writeFileSync(path.join(dir, name + ".png"), (await window.webContents.capturePage()).toPNG());
   }
   const newChat = () => evaluate(`document.querySelector('[aria-label="New chat"]').click()`);
   const modelIs = (name) => waitFor(`[...document.querySelectorAll('[data-promptbar] button')].some(el => el.textContent === ${JSON.stringify(name)})`);
@@ -78,6 +86,30 @@ async function browserChecks() {
     await evaluate(`window.changeDefaults({ defaultModelId: "gpt-6-sol" })`);
     await modelIs("GPT-6-Sol");
     await click("GPT-6-Sol");
+    await shot("composer-provider-tabs");
+    await click("Antigravity");
+    await waitFor(`document.body.textContent.includes("Gemini 3.8 Flash")`);
+    // One row per model family; the thinking levels are efforts, not rows.
+    const rows = JSON.parse(await evaluate(`JSON.stringify([...document.querySelectorAll('[data-picker-row]')].map(el => el.textContent))`));
+    const families = rows.filter((text) => text.startsWith("Gemini"));
+    assert.equal(families.length, 4, rows.join(" | "));
+    assert.equal(
+      families.some((text) => /\((High|Medium|Low)\)/.test(text)),
+      false,
+      rows.join(" | "),
+    );
+    await shot("composer-antigravity-models");
+    await click("Gemini 3.1 Pro");
+    await modelIs("Gemini 3.1 Pro");
+    await evaluate(`document.querySelector('[data-promptbar] [aria-label^="Thinking effort"]').click()`);
+    await waitFor(`document.body.textContent.includes("Thinking effort")`);
+    const levels = JSON.parse(await evaluate(`JSON.stringify([...document.querySelectorAll('[data-picker-row]')].map(el => el.textContent))`));
+    assert.equal(levels.length, 2, levels.join(" | "));
+    assert.match(levels[0], /^Low/);
+    assert.match(levels[1], /^High/);
+    await shot("composer-antigravity-effort");
+    await evaluate(`document.querySelector('[data-promptbar] [aria-label^="Thinking effort"]').click()`);
+    await click("Gemini 3.1 Pro");
     await click("Claude");
     await click("Opus 5.5");
     await modelIs("Opus 5.5");
@@ -86,36 +118,36 @@ async function browserChecks() {
     await click("Full");
     assert.equal(await evaluate(`JSON.parse(localStorage.getItem('milagre-settings')).defaultPermissionMode`), "full");
     await click("main");
-    await waitFor(`!!document.querySelector('input[placeholder="Search branches…"]')`);
-    await evaluate(`document.querySelector('input[placeholder="Search branches…"]').focus()`);
+    await waitFor(`!!document.querySelector('input[placeholder="Search worktrees"]')`);
+    await evaluate(`document.querySelector('input[placeholder="Search worktrees"]').focus()`);
     const key = (name) =>
       evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(name)}, bubbles: true, cancelable: true }))`);
     await key("ArrowDown");
-    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Down from search focuses first branch");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Down from search focuses first worktree");
     await key("ArrowDown");
-    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Down advances to next branch");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Down advances to next worktree");
     await key("ArrowUp");
-    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Up returns to previous branch");
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('main')`), true, "Up returns to previous worktree");
     await key("ArrowUp");
-    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Up wraps to the last branch");
-    async function searchBranches(query) {
+    assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Up wraps to the last worktree");
+    async function searchWorktrees(query) {
       await evaluate(`(() => {
-        const input = document.querySelector('input[placeholder="Search branches…"]');
+        const input = document.querySelector('input[placeholder="Search worktrees"]');
         input.focus();
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(query)});
         input.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
     }
-    await searchBranches("no-matching-branch");
-    await waitFor(`document.body.textContent.includes('No branches found.')`);
+    await searchWorktrees("no-matching-branch");
+    await waitFor(`document.body.textContent.includes('No worktrees found.')`);
     await key("ArrowDown");
     await key("ArrowUp");
-    await searchBranches("dev");
+    await searchWorktrees("dev");
     await waitFor(`document.querySelectorAll('[data-picker-row]').length === 1`);
     await key("ArrowDown");
     assert.equal(await evaluate(`document.activeElement.textContent.includes('develop')`), true, "Navigation follows the filtered results");
     await key("Enter");
-    await waitFor(`!document.querySelector('input[placeholder="Search branches…"]')`);
+    await waitFor(`!document.querySelector('input[placeholder="Search worktrees"]')`);
     await newChat();
     await waitFor(`document.querySelector('[data-new-chat-pickers]').textContent.includes('develop')`);
     await click("Local");

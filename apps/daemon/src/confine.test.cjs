@@ -99,6 +99,7 @@ const callsAt = (target, demo) => [
   ["agent:answer-question", [{ chatId: `${target}#1`, requestId: "x", answers: { next: ["A"] }, summary: "A" }]],
   ["agent:set-permission-mode", [{ chatId: `${target}#1`, mode: "auto" }]],
   ["worktree:pull-request", [target]],
+  ["worktree:pull-requests", [target, ["246"]]],
   ["worktree:create", [{ projectPath: target, baseBranch: "main", prompt: "Escape" }]],
   ["git:diff-files", [{ cwd: target, mode: "uncommitted" }]],
   ["git:diff-file", [{ cwd: target, mode: "uncommitted", path: "secret.png" }]],
@@ -294,7 +295,7 @@ test("a confined phone gets no worktree root outside its folder", async (t) => {
 
 test("the demo daemon reports only the demo agent, whichever provider the phone picks", async (t) => {
   const f = await fixture(t);
-  assert.deepEqual((await f.rpc("agent:models")).body.result, { codex: [DEMO_MODEL], claude: null });
+  assert.deepEqual((await f.rpc("agent:models")).body.result, { codex: [DEMO_MODEL], claude: null, antigravity: null });
   const status = (await f.rpc("agent:cli-status")).body.result;
   assert.deepEqual(status.codex, { state: "ready" });
   assert.equal(status.claude.state, "missing");
@@ -479,7 +480,11 @@ test("the demo sends /skill as typed and never asks gh about pull requests", asy
     if (expandSkills) assert.match(prompts[0], /PRIVATE SKILL TEXT/, "the control: a runtime that expands skills");
     else assert.equal(prompts[0], "/some-skill approval");
     await f.rpc("agent:interrupt", [`${f.demo}#${chat.id}`]);
-    if (!expandSkills) assert.deepEqual(await f.rpc("worktree:pull-request", [f.demo]), { status: 409, body: { v: 1, error: { message: NO_PULL_REQUESTS } } });
+    if (!expandSkills) {
+      const blocked = { status: 409, body: { v: 1, error: { message: NO_PULL_REQUESTS } } };
+      assert.deepEqual(await f.rpc("worktree:pull-request", [f.demo]), blocked);
+      assert.deepEqual(await f.rpc("worktree:pull-requests", [f.demo, ["246"]]), blocked);
+    }
   }
 });
 

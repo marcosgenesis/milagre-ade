@@ -1,5 +1,7 @@
 const { execFile } = require("node:child_process");
 const { CodexRpc } = require("./codex-rpc.cjs");
+const { PROVIDERS } = require("@milagre/shared/providers");
+const { hasToken } = require("./antigravity-install.cjs");
 const { loginMessage } = require("./events.cjs");
 
 // What the model picker shows about each agent's CLI: { state, message? }, where state is
@@ -9,6 +11,7 @@ const { loginMessage } = require("./events.cjs");
 //   broken     found, but `--version` doesn't run   (cli.cjs)
 //   logged-out Claude: `claude auth status` says "loggedIn": false
 //              Codex: account/read answers { account: null, requiresOpenaiAuth: true }
+//              Antigravity: the account's GEMINI_HOME has no antigravity-acp/acp_token.json (nothing is spawned)
 // `message` is the same text a turn fails with. The login check never blocks anything: a check that fails
 // in any other way counts as ready. A ready status is kept for READY_TTL_MS; a problem is looked at again
 // on every call, so fixing it needs neither a restart nor waiting.
@@ -66,6 +69,13 @@ async function codexLoggedOut(command, { cwd, env, clientVersion = "0.0.0", crea
   }
 }
 
+// Antigravity is signed in when its profile directory holds the token file; a profile that has never
+// signed in has none. Without a GEMINI_HOME the account isn't known yet, and that is no reason to flag it.
+function antigravityLoggedOutAt(home) {
+  return typeof home === "string" && home !== "" && !hasToken(home);
+}
+const antigravityLoggedOut = async (_command, { env } = {}) => antigravityLoggedOutAt(env?.GEMINI_HOME);
+
 // The state cli.cjs's check implies, or null when the CLI runs.
 function cliState(status) {
   if (!status.problem) return null;
@@ -77,17 +87,22 @@ async function inspect(name, { cli, loggedOut, cwd, clientVersion }) {
   const status = await cli(name);
   const state = cliState(status);
   if (state) return { state, message: status.problem };
-  const out =
-    name === "codex"
-      ? await loggedOut.codex(status.command, { cwd, clientVersion, ...(status.env ? { env: status.env } : {}) })
-      : await loggedOut.claude(status.command, status.env ? { env: status.env } : {});
+  const env = status.env ? { env: status.env } : {};
+  const out = name === "codex" ? await loggedOut.codex(status.command, { cwd, clientVersion, ...env }) : await loggedOut[name](status.command, env);
   return out ? { state: "logged-out", message: loginMessage(name) } : { state: "ready" };
 }
 
 /**
- * `() => Promise<{ claude: CliStatus, codex: CliStatus }>`. Waits for the login environment (through `cli`).
+ * `() => Promise<{ [provider]: CliStatus }>`, one entry per provider. Waits for the login environment (through `cli`).
  */
-function createCliStatus({ cli, cwd, clientVersion, now = Date.now, ttlMs = READY_TTL_MS, loggedOut = { claude: claudeLoggedOut, codex: codexLoggedOut } }) {
+function createCliStatus({
+  cli,
+  cwd,
+  clientVersion,
+  now = Date.now,
+  ttlMs = READY_TTL_MS,
+  loggedOut = { claude: claudeLoggedOut, codex: codexLoggedOut, antigravity: antigravityLoggedOut },
+}) {
   const cache = new Map();
   function lookup(name) {
     const cached = cache.get(name);
@@ -106,8 +121,8 @@ function createCliStatus({ cli, cwd, clientVersion, now = Date.now, ttlMs = READ
     return entry.promise;
   }
   const check = async () => {
-    const [claude, codex] = await Promise.all([lookup("claude"), lookup("codex")]);
-    return { claude, codex };
+    const states = await Promise.all(PROVIDERS.map(lookup));
+    return Object.fromEntries(PROVIDERS.map((name, index) => [name, states[index]]));
   };
   // A turn just failed with this provider's login message: a status kept as ready is out of date.
   check.invalidate = (name) => {
@@ -130,4 +145,4 @@ function cliWhenLoggedIn(cli, status, names = ["claude"]) {
   };
 }
 
-module.exports = { READY_TTL_MS, claudeLoggedOut, cliWhenLoggedIn, codexLoggedOut, createCliStatus };
+module.exports = { READY_TTL_MS, claudeLoggedOut, cliWhenLoggedIn, codexLoggedOut, createCliStatus, antigravityLoggedOut, antigravityLoggedOutAt };

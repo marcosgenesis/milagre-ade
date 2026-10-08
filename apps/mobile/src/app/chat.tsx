@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Reanimated from "react-native-reanimated";
 import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
 import { LiquidGlassView } from "@sbaiahmed1/react-native-blur";
-import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
+import type { NavigationProp } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Add01Icon,
@@ -14,7 +15,6 @@ import {
   GitForkIcon,
   LaptopIcon,
   StopIcon,
-  UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
 import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
@@ -28,6 +28,7 @@ import { pickAttachments } from "../attachment-picker";
 import { appendAttachments, attachmentPrompt, prepareAttachments } from "../attachments";
 import { PullRequestAction, SubagentChip, usePullRequest } from "../status-indicators";
 import { SimulatorChip } from "../simulator";
+import { BrowserChip } from "../browser";
 import { PortsChip } from "../ports";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { ChatReply } from "../chat-reply";
@@ -62,6 +63,7 @@ import { AttentionPill } from "../attention";
 const PAGE = 40;
 
 export default function ChatScreen() {
+  const navigation = useNavigation<NavigationProp<{ chat: { worktreeId?: string } }, "chat">>();
   const params = useLocalSearchParams<{ id?: string; worktreeId?: string; projectPath?: string; hostId?: string }>();
   const session = useSession();
   const composer = useComposer();
@@ -811,6 +813,7 @@ export default function ChatScreen() {
                   <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />
                 )}
                 <View style={{ flex: 1 }} />
+                <BrowserChip chatId={params.id ? chatId : undefined} />
                 {params.id && Number(params.id) > 0 && <PortsChip key={`ports-${chatId}`} chatId={chatId} />}
                 {params.id && Number(params.id) > 0 && <SimulatorChip key={chatId} chatId={chatId} />}
                 {agents.length > 0 && <SubagentChip agents={agents} onPress={() => headerAction("agents")} />}
@@ -871,17 +874,26 @@ export default function ChatScreen() {
                       nativeTrigger={{
                         title: isolation === "local" ? "Local" : "New worktree",
                         systemImage: isolation === "local" ? "laptopcomputer" : "arrow.triangle.branch",
+                        icon: isolation === "local" ? "laptop" : "fork",
                         disabled: targetDisabled,
                       }}
                       sections={[
                         {
                           title: "Isolation",
                           items: [
-                            { id: "local", title: "Local", systemImage: "laptopcomputer", checked: isolation === "local", disabled: targetDisabled },
+                            {
+                              id: "local",
+                              title: "Local",
+                              systemImage: "laptopcomputer",
+                              icon: "laptop",
+                              checked: isolation === "local",
+                              disabled: targetDisabled,
+                            },
                             {
                               id: "worktree",
                               title: "New worktree",
                               systemImage: "arrow.triangle.branch",
+                              icon: "fork",
                               checked: isolation === "worktree",
                               disabled: targetDisabled,
                             },
@@ -904,15 +916,19 @@ export default function ChatScreen() {
                       >
                         <Icon icon={isolation === "local" ? LaptopIcon : GitForkIcon} tone="ink2" size={14} />
                         <Text style={styles.label}>{isolation === "local" ? "Local" : "New worktree"}</Text>
-                        <Icon icon={UnfoldMoreIcon} tone="ink3" size={13} />
+                        <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
                       </View>
                     </PullDown>
                     <PullDown
                       label="Choose branch"
+                      searchable={{
+                        placeholder: newWorktree ? "Search branches" : "Search worktrees",
+                        emptyLabel: newWorktree ? "No branches found." : "No worktrees found.",
+                      }}
                       nativeTrigger={{ title: branchName, systemImage: "arrow.triangle.branch", disabled: branchDisabled, maxWidth: 180 }}
                       sections={[
                         {
-                          title: newWorktree ? "Branch from" : "Choose a branch",
+                          title: newWorktree ? "Branch from" : "Choose a worktree",
                           items: newWorktree
                             ? (branches?.items || []).map((item) => ({
                                 id: item,
@@ -924,6 +940,7 @@ export default function ChatScreen() {
                             : Object.values(project.state.worktrees).map((item) => ({
                                 id: String(item.id),
                                 title: item.name,
+                                subtitle: item.path?.split("/").filter(Boolean).pop(),
                                 checked: item.id === worktreeId,
                                 systemImage: "arrow.triangle.branch",
                                 disabled: targetDisabled,
@@ -933,7 +950,7 @@ export default function ChatScreen() {
                       onSelect={(id) => {
                         if (!branchDisabled) {
                           if (newWorktree) setBaseBranch(id);
-                          else router.setParams({ worktreeId: id });
+                          else navigation.setParams({ worktreeId: id });
                         }
                       }}
                     >
@@ -952,7 +969,7 @@ export default function ChatScreen() {
                         <Text numberOfLines={1} style={[styles.label, { flexShrink: 1 }]}>
                           {branchName}
                         </Text>
-                        <Icon icon={UnfoldMoreIcon} tone="ink3" size={13} />
+                        <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
                       </View>
                     </PullDown>
                   </View>

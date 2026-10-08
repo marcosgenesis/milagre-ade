@@ -1,0 +1,11 @@
+import type { ChatStep, PullRequest } from "./model.ts";
+
+export type PullRequestRef = string;
+type Messages = Array<{ steps?: ChatStep[] }>;
+export function pullRequestRefs(messages: Messages): PullRequestRef[];
+export function pullRequestRefsCache(): (key: string, messages: Messages) => PullRequestRef[];
+export function chatPullRequests(
+  refs: PullRequestRef[],
+  found: Record<PullRequestRef, PullRequest | null | undefined>,
+  branch: PullRequest | undefined,
+): PullRequest[];

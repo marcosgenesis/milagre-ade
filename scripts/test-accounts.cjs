@@ -7,13 +7,23 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { SettingsPanel, SettingsNav } from '/src/components/Settings';
 import '/src/styles.css';
-let snapshot = { providers: ['claude', 'codex'].map(provider => ({ provider, selectedId: 'default', accounts: [
+let snapshot = { providers: ['claude', 'codex', 'antigravity'].map(provider => ({ provider, selectedId: 'default', accounts: [
   { id: 'default', provider, label: 'Connected CLI account', email: 'personal@example.test', plan: 'pro', state: 'ready' },
   { id: 'work', provider, label: 'Work', email: 'work@example.test', plan: 'team', state: 'ready' },
   { id: 'business', provider, label: 'Business', email: 'business@example.test', plan: provider === 'claude' ? 'self_serve_business_polite' : 'business', state: 'ready' },
 ] })) };
 window.calls = [];
+window.cli = { state: 'missing' };
+window.progressListener = null;
 window.milagre = {
+ getCliStatus: async () => ({ antigravity: window.cli }),
+ onCliProgress: (callback) => { window.progressListener = callback; return () => {}; },
+ updateCli: async (provider) => {
+   window.calls.push({action:'install', provider});
+   await new Promise(resolve => { window.finishInstall = resolve; });
+   window.cli = { state: 'ready' };
+   return { ok: true, version: '1.3.0' };
+ },
  listAccounts: async () => structuredClone(snapshot),
  listRecentProjects: async () => [],
  onAccountsChanged: () => () => {},
@@ -57,12 +67,26 @@ async function browserChecks() {
     await win.loadURL(process.argv[2]);
     await waitFor(`document.body.textContent.includes('personal@example.test')`);
     await shot("accounts");
+    // Antigravity installs from the Antigravity group, with the download's progress.
+    await waitFor(
+      `!!document.querySelector('[data-antigravity-row]') && document.querySelector('[data-antigravity-row]').textContent.includes('Not installed')`,
+    );
+    await shot("antigravity-install");
+    await click("Install");
+    await waitFor(`window.calls.some(c=>c.action==='install' && c.provider==='antigravity')`);
+    await evaluate(`window.progressListener({provider:'antigravity',phase:'download',received:46137344,total:111456962})`);
+    await waitFor(`document.querySelector('[data-antigravity-row]').textContent.includes('Downloading 44 of 106 MB')`);
+    assert.equal(await evaluate(`document.querySelector('[data-antigravity-row] [role=progressbar]').getAttribute('aria-valuenow')`), "41");
+    await shot("antigravity-downloading");
+    await evaluate(`window.finishInstall()`);
+    await waitFor(`document.querySelector('[data-antigravity-row]').textContent.includes('Installed.')`);
+    await shot("antigravity-installed");
     assert.equal(await evaluate(`!!document.querySelector('[role=radio][aria-label="work@example.test"]')`), true, "Account row is directly selectable");
     await evaluate(`document.querySelector('[role=radio][aria-label="work@example.test"]').click()`);
     await waitFor(`window.calls.some(c=>c.action==='select' && c.provider==='claude' && c.value==='work')`);
-    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Team account"]').length`), 2);
-    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Business account"]').length`), 2);
-    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Personal account"]').length`), 2);
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Team account"]').length`), 3);
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Business account"]').length`), 3);
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Personal account"]').length`), 3);
     assert.equal(await evaluate(`document.body.textContent.includes('self_serve_business_polite')`), false);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('[role=radio][aria-label="work@example.test"]')).cursor`), "pointer");
     await shot("selected-account");
@@ -71,7 +95,7 @@ async function browserChecks() {
     assert.equal(await evaluate(`window.calls.filter(c=>c.action==='select').length`), 1);
     await click("Cancel");
     await click("Remove");
-    await waitFor(`document.querySelectorAll('[role=radio][aria-label="work@example.test"]').length===1`);
+    await waitFor(`document.querySelectorAll('[role=radio][aria-label="work@example.test"]').length===2`);
     await click("Add account");
     await evaluate(
       `(()=>{const input=document.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Second account');input.dispatchEvent(new Event('input',{bubbles:true}));})()`,
@@ -82,7 +106,7 @@ async function browserChecks() {
     await shot("signing-in");
     await click("Cancel");
     await waitFor(`document.body.textContent.includes('Not signed in')`);
-    assert.deepEqual(await evaluate("window.calls.map(c=>c.action)"), ["select", "login", "cancel", "remove", "add", "cancel"]);
+    assert.deepEqual(await evaluate("window.calls.map(c=>c.action)"), ["install", "select", "login", "cancel", "remove", "add", "cancel"]);
     console.log("PASS: Account rows switch directly; re-authenticate, remove, add and cancel work without selecting incidentally.");
     app.exit(0);
   } catch (error) {

@@ -6,9 +6,15 @@ import type {
   LinkState,
   LinkSendRequest,
   TranscriptState,
+  ChatMessage,
 } from "@milagre/shared/model";
 import type { Result } from "@milagre/shared/result";
+import type { StatePatch } from "@milagre/shared/state-patch";
+
+/** On a state event from a host that sends patches: what changed since the state numbered `base`, or `resync`. */
+type StateNumbering = { patch?: StatePatch; base?: number; version?: number; epoch?: string; resync?: boolean };
 import type { SimulatorApi } from "@milagre/shared/simulator";
+import type { BrowserApi } from "@milagre/shared/browser";
 import type { ArtifactApi } from "@milagre/shared/artifact";
 
 import type { AgentRuns } from "./lib/agent-runs";
@@ -99,10 +105,15 @@ export type CanvasSnapshot = {
   states: { path: string; state: CoordinatorState }[];
 };
 
+export type CliProgress =
+  | { provider: ModelProvider; phase: "download"; received: number; total: number }
+  | { provider: ModelProvider; phase: "extract" | "validate" | "done" };
+
 declare global {
   interface Window {
     milagre: {
       simulators: SimulatorApi;
+      browsers: BrowserApi;
       artifacts: ArtifactApi;
       getRuntimeConnection: () => Promise<RuntimeConnection>;
       /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
@@ -195,7 +206,8 @@ declare global {
       /** A Link's chats as saved, without opening it or preparing its worktrees. */
       readLink: (id: string) => Promise<{ link: NamedProjectLink; state: LinkState }>;
       sendLinkMessage: (request: LinkSendRequest) => Promise<{ sessionId: number }>;
-      onLinkState: (callback: (update: { linkId: string; state: LinkState }) => void) => () => void;
+      /** Raw from the host: a whole state, or a patch (see StateNumbering). Listen through state-events.ts instead. */
+      onLinkState: (callback: (update: { linkId: string; state?: LinkState } & StateNumbering) => void) => () => void;
       listProjects: () => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
       setProjectPosition: (
         id: string,
@@ -220,7 +232,8 @@ declare global {
       /** A project's state changed in the main process, its only writer. Changes made by agent events come with the event instead. */
       retryQuit: () => Promise<void>;
       onQuitFailed: (callback: (message: string) => void) => () => void;
-      onProjectState: (callback: (update: { path: string; state: CoordinatorState }) => void) => () => void;
+      /** Raw from the host: a whole state, or a patch (see StateNumbering). Listen through state-events.ts instead. */
+      onProjectState: (callback: (update: { path: string; state?: CoordinatorState } & StateNumbering) => void) => () => void;
       /** Saves a message in its chat (a new one when `sessionId` is null), then starts or steers the chat's turn. */
       sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;
       /** Continues a chat a quit stopped mid-turn, on its saved options. Resolves false when it has nothing to continue. */
@@ -235,6 +248,8 @@ declare global {
       setOpenChat: (chatId: string | null) => Promise<void>;
       /** The turns streaming now, in every project, and the number of the last agent event they hold. */
       getRuns: () => Promise<{ runs: AgentRuns; seq: number }>;
+      /** One saved message of a Project or Link (scope key), with the long step details the state leaves out. */
+      getMessage: (scope: string, id: number) => Promise<ChatMessage>;
       respondToPermission: (chatId: string, requestId: string, decision: PermissionDecision) => Promise<boolean>;
       /** Sends the answers to a question card, or dismisses it (null). False when the question is gone. */
       answerQuestion: (chatId: string, requestId: string, answers: QuestionAnswers | null, summary?: string) => Promise<boolean>;
@@ -250,9 +265,16 @@ declare global {
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
       stopAdvisor: (chatId: string, id: string) => Promise<Subagent>;
       retryAdvisor: (chatId: string, id: string) => Promise<Subagent>;
+      /** Where Antigravity's install stands while `updateCli("antigravity")` runs: download bytes, then extract, validate, done. */
+      onCliProgress: (callback: (progress: CliProgress) => void) => () => void;
       interruptAgent: (chatId: string) => Promise<void>;
       /** An agent event, with its project's new state when the event changed it, and its number once it's folded into the main process's runs (see getRuns). */
-      onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState | LinkState; seq?: number }) => void) => () => void;
+      /** Raw from the host; an event's state can come as a patch (see StateNumbering). For the state, listen through state-events.ts. */
+      onAgentEvent: (
+        callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState | LinkState; seq?: number } & StateNumbering) => void,
+      ) => () => void;
+      /** A Project's or Link's (scope key) state and its number, for applying the host's state patches. */
+      readState: (scope: string) => Promise<{ state: CoordinatorState | LinkState; version: number; epoch: string }>;
       /** Every chat's listening ports now, by chat key. */
       getAgentPorts: () => Promise<AgentPorts>;
       /** Stops the command listening on one of a chat's ports; false when the chat's list doesn't show that pid. */

@@ -347,7 +347,8 @@ async function main() {
     } finally {
       owner.release();
     }
-    const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
+    // Messages are saved in chats.db (ADR-0007): read the state the way the app does.
+    const saved = await require("@milagre/core/project-store").readProjectState(project);
     assert.deepEqual(saved.messages, state.messages, "Launching and quitting must preserve the transcript");
   } finally {
     await fs.rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });

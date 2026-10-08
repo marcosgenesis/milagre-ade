@@ -315,15 +315,50 @@ function markdownHost({ media, basePath } = {}) {
     return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
   }
   return {
-    render(text) {
+    render(text, streaming = false) {
       react.begin();
-      return expand(Markdown({ text, media, basePath }));
+      return expand(Markdown({ text, streaming, media, basePath }));
     },
     routes,
     links,
     viewer,
   };
 }
+
+test("plain URLs in mobile replies render as links and open the exact address", async () => {
+  for (const streaming of [false, true]) {
+    for (const [text, url] of [
+      ["The fix is in PR #289: https://github.com/the-ptf/milagre-ade/pull/289. It fixes both banners.", "https://github.com/the-ptf/milagre-ade/pull/289"],
+      ["See (https://example.org/a_(b)).", "https://example.org/a_(b)"],
+      ["Visit www.example.org or ask me later.", "http://www.example.org"],
+      ["Email hello@example.org.", "mailto:hello@example.org"],
+      ["[Pull request](https://github.com/the-ptf/milagre-ade/pull/289)", "https://github.com/the-ptf/milagre-ade/pull/289"],
+    ]) {
+      const screen = markdownHost();
+      const link = find(screen.render(text, streaming), (node) => node.props?.accessibilityRole === "link");
+      assert.ok(link, `Missing link in ${text} (streaming: ${streaming})`);
+      assert.ok(link.props.style.some((style) => style.textDecorationLine === "underline"));
+      await link.props.onPress();
+      assert.deepEqual(screen.links, [url]);
+    }
+  }
+});
+
+test("mobile replies keep code URLs and unsafe links inert", () => {
+  for (const text of [
+    "`https://example.org`",
+    "```text\nhttps://example.org\n```",
+    "[local](file:///etc/passwd)",
+    "[command](javascript:alert(1))",
+    "[pair](milagre-local://connect)",
+  ]) {
+    assert.equal(
+      find(markdownHost().render(text), (node) => node.props?.accessibilityRole === "link"),
+      undefined,
+      text,
+    );
+  }
+});
 
 test("Markdown screenshot links render image previews outside Text and open the image viewer", () => {
   const screen = markdownHost();
@@ -722,6 +757,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../context-ring": { ContextRing: "ContextRing" },
     "../theme": { hex: () => ({ surface: "#ffffff" }) },
     "../simulator": { SimulatorChip: "SimulatorChip" },
+    "../browser": { BrowserChip: "BrowserChip" },
     "../ports": { PortsChip: "PortsChip" },
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
@@ -730,6 +766,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
       Redirect: "Redirect",
       Stack: { Screen: "Screen", Toolbar: Object.assign(() => null, { Menu: "ToolbarMenu", MenuAction: "ToolbarMenuAction", Button: "ToolbarButton" }) },
       router,
+      useNavigation: () => ({ setParams: (values) => Object.assign(params, values) }),
       useLocalSearchParams: () => params,
       useFocusEffect: (fn) => react.effect(fn, [fn]),
     },
@@ -1068,7 +1105,7 @@ test("launch restoration shows the splash animation while the saved Chat opens",
   assert.ok(find(tree, (node) => node.props.accessibilityRole === "progressbar" && node.props.accessibilityLabel === "Reopening your Chat..."));
 });
 
-function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [] } = {}) {
+function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId } = {}) {
   const react = hookHost();
   const routes = [];
   const secondaryRoutes = [];
@@ -1098,6 +1135,17 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     ...extra,
   };
   const native = { Alert: { alert, prompt() {} } };
+  const external = [];
+  const { ChatPullRequestChips } = load("chat-pull-request-chips.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Pressable: "Pressable", Text: "Text", View: "View" },
+    "expo-linking": { openURL: async (url) => external.push(url) },
+    "@hugeicons/core-free-icons": {},
+    "@milagre/shared/chats": require("@milagre/shared/chats"),
+    "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "./icons": { Icon: "Icon" },
+    "./ui": { PullDown: "PullDown", colors: { ink2: "ink2", green: "green", purple: "purple", red: "red", orange: "orange" } },
+  });
   // Confirmations use the real sheet store, shown through the host's alert in the order the sheet would list them.
   const confirmStore = load("confirm-store.ts", {});
   confirmStore.setConfirmPresenter(() => {
@@ -1123,11 +1171,17 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "@milagre/shared/chats": { ...require("@milagre/shared/chats"), isListedChat: () => true },
     "@milagre/shared/message-search": require("@milagre/shared/message-search"),
     "./session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
-    "./indicators": { chatMark: () => "idle" },
+    "./indicators": require("../apps/mobile/src/indicators.ts"),
     "./status-indicators": { ChatMarkIcon: "ChatMarkIcon" },
+    "./use-chat-pull-requests": { useChatPullRequests: () => ({}) },
+    "./chat-pull-request-chips": { ChatPullRequestChips },
     "./icons": { Icon: "Icon", SpinnerRing: "SpinnerRing" },
     "./loading-logo": { LoadingLogo: "LoadingLogo" },
-    "./ui": { ...Object.fromEntries(["ErrorNotice", "Field", "IconButton", "PillButton", "PullDown"].map((name) => [name, name])), colors: {}, styles: {} },
+    "./ui": {
+      ...Object.fromEntries(["ErrorNotice", "Field", "IconButton", "PillButton", "PullDown"].map((name) => [name, name])),
+      colors: { ink: "ink", ink2: "ink2", accent: "accent", accentInk: "accentInk", orange: "orange", red: "red" },
+      styles: {},
+    },
     "./archive-progress": archiveProgress,
     "./attention": { AttentionDot: "AttentionDot", useAttention: () => [] },
     "@milagre/shared/agent-runs": { projectOfKey: (key) => key.slice(0, key.lastIndexOf("#")) },
@@ -1150,6 +1204,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const render = () => {
     react.begin();
     const tree = ProjectNavigation({
+      activeChatId,
       onNavigate: (route, secondary) => {
         routes.push(route);
         secondaryRoutes.push(secondary);
@@ -1166,8 +1221,147 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const open = (node) => find(node, (child) => child.type === "PullDown" && child.props.onPress);
   const more = (node) => find(node, (child) => child.type === "PullDown" && !child.props.onPress);
   const filter = () => find(render(), (node) => node.type === "PullDown" && node.props.label === "Filter Chats");
-  return { state, session, routes, secondaryRoutes, opened, calls, render, rows, row, open, more, filter };
+  return { state, session, routes, secondaryRoutes, opened, calls, external, render, rows, row, open, more, filter };
 }
+
+test("mobile chat rows keep unread emphasis during a running turn and match desktop read title contrast", () => {
+  const nav = navigationHost(Promise.resolve());
+  const titleStyle = () => Object.assign({}, ...find(nav.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.style);
+  assert.equal(titleStyle().color, "ink2", "read, inactive Chats use the secondary ink");
+  nav.state.project.state.sessions[3].unread = true;
+  nav.state.runs.runs["/last#3"] = { questions: [], approvals: [] };
+  assert.equal(titleStyle().color, "ink");
+  assert.equal(titleStyle().fontWeight, "600", "running does not hide unread title emphasis");
+  const active = navigationHost(Promise.resolve(), { activeChatId: 3 });
+  assert.equal(Object.assign({}, ...find(active.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.style).color, "ink");
+});
+
+test("mobile chat status labels use the same tone as their status icons", () => {
+  const nav = navigationHost(Promise.resolve());
+  const list = nav.rows();
+  const item = list.props.data.find((row) => row.kind === "chat");
+  for (const [mark, label, color] of [
+    ["running", "Running", "accentInk"],
+    ["question", "Needs reply", "accentInk"],
+    ["waiting", "Needs approval", "orange"],
+    ["interrupted", "Interrupted", "orange"],
+    ["failed", "Failed", "red"],
+    ["unread", "Unread", "accentInk"],
+  ]) {
+    const row = list.props.renderItem({ item: { ...item, mark } });
+    const status = find(row, (node) => node.type === "Text" && node.props.children === label);
+    assert.equal(Object.assign({}, ...status.props.style).color, color, label);
+  }
+});
+
+test("mobile chat rows show clickable PR numbers with desktop status colors", async () => {
+  const nav = navigationHost(Promise.resolve());
+  const list = nav.rows();
+  const item = list.props.data.find((row) => row.kind === "chat");
+  for (const [extra, tone, label] of [
+    [{}, "green", ""],
+    [{ state: "MERGED" }, "purple", ""],
+    [{ hasConflicts: true }, "red", "Conflicts"],
+    [{ isBehind: true }, "orange", "Out of date"],
+    [{ checks: "running" }, "orange", "CI running"],
+    [{ readyToMerge: true }, "green", "Ready"],
+  ]) {
+    const pr = { number: 246, title: "Fix Chat colors", url: "https://github.com/example/project/pull/246", state: "OPEN", ...extra };
+    const row = list.props.renderItem({ item: { ...item, pullRequests: [pr] } });
+    assert.equal(
+      find(row, (node) => node.type === "Text" && node.props.children === item.worktree),
+      undefined,
+      "PR replaces the branch line",
+    );
+    const chipsNode = find(row, (node) => typeof node.type === "function" && node.props.pullRequests);
+    const chips = chipsNode?.type(chipsNode.props);
+    const chip = find(chips, (node) => node.type === "Pressable" && node.props.accessibilityRole === "link");
+    assert.ok(chip, "a PR has its own tap target outside the Chat tap target");
+    assert.ok(find(chip, (node) => node.type === "Text" && node.props.children.includes(246)));
+    assert.equal(find(chip, (node) => node.type === "Icon").props.tone, tone);
+    if (label) assert.ok(find(chip, (node) => node.type === "Text" && node.props.children === label));
+    await chip.props.onPress({ stopPropagation() {} });
+    assert.equal(nav.external.at(-1), pr.url);
+    assert.equal(nav.routes.length, 0, "opening a PR does not navigate to the Chat");
+  }
+  const plain = list.props.renderItem({ item: { ...item, pullRequests: [] } });
+  assert.ok(
+    find(plain, (node) => node.type === "Text" && node.props.children === item.worktree),
+    "Chats without PRs keep their branch name",
+  );
+  const prs = [246, 247, 248].map((number) => ({ number, title: `PR ${number}`, url: `https://github.com/example/project/pull/${number}`, state: "OPEN" }));
+  const multi = list.props.renderItem({ item: { ...item, pullRequests: prs, mark: "running" } });
+  const component = find(multi, (node) => typeof node.type === "function" && node.props.pullRequests);
+  const chips = component.type(component.props);
+  assert.equal(
+    find(chips, (node) => node.type === "Text" && Array.isArray(node.props.children) && node.props.children.includes(248)),
+    undefined,
+    "extra PRs do not create another line",
+  );
+  const more = find(chips, (node) => node.type === "PullDown");
+  assert.ok(more, "extra PRs remain available in a menu");
+  more.props.onSelect(prs[2].url);
+  assert.equal(nav.external.at(-1), prs[2].url);
+  assert.ok(
+    find(chips, (node) => node.type === "Text" && node.props.children === "Running"),
+    "PR rows keep the Chat status on their second line",
+  );
+});
+
+test("mobile list PR lookups combine branch and historical statuses and stop while backgrounded", async () => {
+  const react = hookHost();
+  const app = {
+    currentState: "active",
+    addEventListener: (_event, fn) => (
+      (listener = fn),
+      {
+        remove() {
+          listener = null;
+        },
+      }
+    ),
+  };
+  let listener;
+  const called = [];
+  const client = {
+    call: async (method, args) => {
+      called.push([method, args]);
+      const pr = { number: method === "worktree:pull-request" ? 248 : 246, state: method === "worktree:pull-request" ? "OPEN" : "MERGED" };
+      return method === "worktree:pull-request" ? pr : [pr];
+    },
+  };
+  const { useChatPullRequests } = load("use-chat-pull-requests.ts", {
+    react,
+    "expo-router": { useFocusEffect: (fn) => react.effect(fn, [fn]) },
+    "react-native": { AppState: app },
+    "./pr-status": require("../apps/mobile/src/pr-status.ts"),
+  });
+  let targets = [{ path: "/w", refs: ["246"] }];
+  const render = () => {
+    react.begin();
+    return useChatPullRequests(client, targets);
+  };
+  render();
+  react.flush();
+  await new Promise((resolve) => setImmediate(resolve));
+  const status = render()["/w"];
+  assert.equal(status.branch.number, 248);
+  assert.equal(status.found["246"].number, 246);
+  assert.deepEqual(called, [
+    ["worktree:pull-request", ["/w"]],
+    ["worktree:pull-requests", ["/w", ["246"]]],
+  ]);
+  app.currentState = "background";
+  targets = [{ path: "/next", refs: [] }];
+  render();
+  react.flush();
+  assert.equal(called.length, 2, "backgrounded lists do not start GitHub requests");
+  app.currentState = "active";
+  listener();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(render()["/next"].branch.number, 248, "foreground resumes PR lookup");
+  react.cleanup();
+});
 
 test("a sidebar Chat opens at once, leaving its Project to load in the Chat", () => {
   const nav = navigationHost(deferred().promise);
@@ -1345,7 +1539,10 @@ function pullDownHost() {
   const modifiers = new Proxy({}, { get: (_, name) => (name === "shapes" ? { rectangle: () => "rectangle" } : (value) => ({ name, value })) });
   const { PullDown } = load("ui.tsx", {
     react: { forwardRef: (fn) => fn },
-    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react/jsx-runtime": {
+      jsx: (type, props, key) => (typeof type === "function" && type.name === "NativeMenuSection" ? type(props) : jsx(type, props, key)),
+      jsxs: (type, props, key) => (typeof type === "function" && type.name === "NativeMenuSection" ? type(props) : jsx(type, props, key)),
+    },
     "react-native": {
       Platform: { OS: "ios" },
       Keyboard: { dismiss() {} },
@@ -1356,7 +1553,7 @@ function pullDownHost() {
     },
     "@expo/ui": {},
     "@expo/ui/swift-ui": Object.fromEntries(
-      ["Button", "Host", "Menu", "Picker", "Section", "Text", "Toggle", "HStack", "Image", "Rectangle"].map((name) => [name, `IOS${name}`]),
+      ["Button", "Host", "Menu", "Picker", "Section", "Text", "Toggle", "HStack", "Image", "Label", "Rectangle"].map((name) => [name, `IOS${name}`]),
     ),
     "@expo/ui/swift-ui/modifiers": modifiers,
     "@expo/ui/community/menu": { MenuView: "MenuView" },
@@ -1365,6 +1562,8 @@ function pullDownHost() {
     "./theme": { colors: { ink2: "#aaa", ink3: "#666" }, fonts: { mono: "monospace" } },
     "./icons": { Icon: "Icon" },
     "./confirm-store": { confirmSheet: (...args) => sheets.push(args) },
+    "./choice-store": require("../apps/mobile/src/choice-store.ts"),
+    "./native-picker-icon": { NativePickerIcon: "NativePickerIcon" },
   });
   return { PullDown, sheets };
 }
@@ -1424,6 +1623,140 @@ test("header switchers keep the shared native overlay without hosting React view
   t.mock.timers.tick(250);
   assert.deepEqual(selected, ["other"]);
   assert.equal(sheets.length, 0);
+});
+
+test("isolation uses desktop artwork inside SwiftUI labels and preserves delayed selection", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { PullDown } = pullDownHost();
+  const screen = chatHost();
+  const trigger = find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose isolation");
+  const rendered = PullDown(trigger.props);
+  const menu = find(rendered, (node) => node.type === "IOSMenu");
+  const labels = [];
+  find(menu, (node) => {
+    if (node.type === "IOSLabel") labels.push(node);
+    return false;
+  });
+  assert.deepEqual(
+    Array.from(labels, (node) => node.props.title),
+    ["Local", "New worktree"],
+  );
+  assert.deepEqual(
+    Array.from(labels, (node) => node.props.icon.props.name),
+    ["laptop", "fork"],
+  );
+  assert.equal(
+    find(menu.props.label, (node) => node.type === "View"),
+    undefined,
+    "React views stay outside SwiftUI",
+  );
+  assert.equal(menu.props.label.type, "IOSRectangle", "the desktop SVG trigger stays outside SwiftUI");
+  const choices = find(menu, (node) => node.type === "IOSPicker");
+  assert.equal(choices.props.selection, "local");
+  choices.props.onSelectionChange("worktree");
+  assert.equal(find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose isolation").props.nativeTrigger.title, "Local");
+  t.mock.timers.tick(250);
+  assert.equal(find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose isolation").props.nativeTrigger.title, "New worktree");
+});
+
+test("the branch picker opens searchable choices while short action menus remain native", () => {
+  const { PullDown } = pullDownHost();
+  const choices = require("../apps/mobile/src/choice-store.ts");
+  const screen = chatHost();
+  const trigger = find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose branch");
+  assert.equal(trigger.props.searchable.placeholder, "Search worktrees");
+  const rendered = PullDown(trigger.props);
+  assert.equal(
+    find(rendered, (node) => node.type === "IOSMenu"),
+    undefined,
+  );
+  rendered.props.onPress();
+  const entry = choices.currentChoice();
+  assert.equal(entry.title, "Choose a worktree");
+  assert.equal(entry.items[0].title, "main");
+  entry.choose(null);
+});
+
+test("choosing a worktree updates the Chat route while the picker route is still leaving", () => {
+  const screen = chatHost();
+  const picker = find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose branch");
+  screen.router.setParams = () => {
+    throw new Error("global params target the sheet");
+  };
+  picker.props.onSelect("2");
+  assert.equal(screen.params.worktreeId, "2");
+});
+
+test("searching the choice sheet filters full names and selection applies only after dismissal", () => {
+  const choices = require("../apps/mobile/src/choice-store.ts");
+  const picks = [];
+  const longName = "milagre/resolve-pr-246-conflicts-and-mj8k";
+  choices.showChoiceSheet({
+    title: "Branch from",
+    placeholder: "Search branches",
+    emptyLabel: "No branches found.",
+    items: [
+      { id: "main", title: "main", checked: true },
+      { id: longName, title: longName },
+    ],
+    onSelect: (id) => picks.push(id),
+  });
+  const react = hookHost();
+  react.useEffect = react.effect;
+  let closed = 0;
+  const { default: Screen } = load("app/choice-sheet.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { FlatList: "FlatList", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { hairlineWidth: 1 } },
+    "expo-router": {
+      router: {
+        back() {
+          closed++;
+        },
+      },
+      Stack: {
+        Title: "StackTitle",
+        SearchBar: "SearchBar",
+        Toolbar: Object.assign(function Toolbar() {}, { Button: "ToolbarButton", SearchBarSlot: "SearchBarSlot" }),
+      },
+    },
+    "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 20 }) },
+    "@hugeicons/core-free-icons": {},
+    "../choice-store": choices,
+    "../icons": { Icon: "Icon" },
+    "../ui": { CircleButton: "CircleButton", Field: "Field", colors: {}, styles: {} },
+    "../theme": { fonts: { mono: "mono" } },
+  });
+  const render = () => {
+    react.begin();
+    const tree = Screen();
+    react.flush();
+    return tree;
+  };
+  const list = () => find(render(), (node) => node.type === "FlatList");
+  const field = () => find(render(), (node) => node.type === "SearchBar");
+  assert.equal(find(render(), (node) => node.type === "StackTitle").props.children, "Branch from");
+  assert.equal(field().props.placement, "integrated");
+  assert.equal(field().props.obscureBackground, false, "filtered rows remain tappable during search");
+  assert.equal(find(render(), (node) => node.type?.name === "Toolbar" && node.props.placement === "bottom").props.children.type, "SearchBarSlot");
+  assert.equal(list().props.data.length, 2);
+  field().props.onChangeText({ nativeEvent: { text: "  RESOLVE-PR-246  " } });
+  assert.equal(list().props.data.length, 1);
+  const row = list().props.renderItem({ item: list().props.data[0] });
+  assert.equal(row.props.accessibilityLabel, longName);
+  assert.equal(find(row, (node) => node.type === "Text").props.numberOfLines, undefined, "the full name can wrap");
+  field().props.onChangeText({ nativeEvent: { text: "missing" } });
+  assert.equal(list().props.data.length, 0);
+  assert.equal(list().props.ListEmptyComponent.props.children, "No branches found.");
+  field().props.onCancelButtonPress();
+  assert.equal(list().props.data.length, 2, "native cancel restores the complete list");
+  field().props.onChangeText({ nativeEvent: { text: "resolve" } });
+  row.props.onPress();
+  row.props.onPress();
+  assert.equal(closed, 1);
+  assert.deepEqual(picks, [], "route updates wait for the native sheet to leave");
+  react.cleanup();
+  assert.deepEqual(picks, [longName]);
 });
 
 // A Project with one Chat (5) in a Milagre worktree that holds an uncommitted file, its turn running.
@@ -3067,6 +3400,208 @@ test("simulator sheet preserves its native header and bounds chooser/viewer cont
   }
 });
 
+function browserHost(client) {
+  const react = hookHost({ effects: true }),
+    files = new Map(),
+    listeners = new Set(),
+    pushed = [],
+    writes = [];
+  const native = {
+    useColorScheme: () => "light",
+    Text: "Text",
+    View: "View",
+    Pressable: "Pressable",
+    AppState: {
+      currentState: "active",
+      addEventListener(_name, fn) {
+        listeners.add(fn);
+        return {
+          remove() {
+            listeners.delete(fn);
+          },
+        };
+      },
+    },
+  };
+  class File {
+    constructor(_cache, name) {
+      this.uri = "file:///cache/" + name;
+    }
+    write(value, options) {
+      files.set(this.uri, value);
+      writes.push([this.uri, options?.encoding ?? "utf8"]);
+    }
+    get exists() {
+      return files.has(this.uri);
+    }
+    delete() {
+      files.delete(this.uri);
+    }
+  }
+  const source = load(
+    "browser.tsx",
+    {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": native,
+      "expo-router": {
+        router: {
+          back() {},
+          push(value) {
+            pushed.push(value);
+          },
+        },
+        useFocusEffect: (fn) => react.effect(fn, [fn]),
+      },
+      "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 34 }) },
+      "@expo/dom-webview": { DomWebView: "DomWebView" },
+      "expo-file-system": { File, Paths: { cache: "/cache" } },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/browser-receiver": require("../packages/shared/src/browser-receiver.mjs"),
+      "./session": { useSession: () => ({ client }) },
+      "./icons": { Icon: "Icon" },
+      "./theme": {
+        hex: () => ({ page: "#fafafb", surface: "#ffffff", ink: "#1f2124", ink2: "#62656b", line: "#ecedef", hover: "#f4f5f6", accent: "#0285ff" }),
+      },
+      "./ui": { CircleButton: "CircleButton", PageScroll: "PageScroll", PillButton: "PillButton", colors: {}, styles: {} },
+    },
+    "\nexports.TestBrowserWebView = BrowserWebView;",
+  );
+  return {
+    source,
+    files,
+    writes,
+    pushed,
+    background() {
+      native.AppState.currentState = "background";
+      for (const fn of listeners) fn("background");
+    },
+    render(name, props) {
+      react.begin();
+      const tree = source[name](props);
+      react.flush();
+      return tree;
+    },
+    cleanup() {
+      react.cleanup();
+    },
+  };
+}
+const BROWSER_PAGE = { id: "browser-1:" + "A".repeat(32), title: "Login", url: "https://example.com/login", browser: "Chrome 141", source: "agent" };
+
+test("mobile browser pill lists only this Chat and hides when there is nothing to show or attach", async (t) => {
+  for (const [list, visible] of [
+    [{ supported: true, targets: [], others: [] }, false],
+    [{ supported: true, targets: [BROWSER_PAGE], others: [] }, true],
+    [{ supported: true, targets: [], others: [{ id: "b", browser: "Chrome 141", pages: 1, title: "Mine" }] }, true],
+  ]) {
+    const calls = [];
+    const h = browserHost({
+      url: "mac",
+      call: async (method, args) => {
+        calls.push([method, args]);
+        return list;
+      },
+    });
+    t.after(() => h.cleanup());
+    h.render("BrowserChip", { chatId: "/p#1" });
+    await settle();
+    const tree = h.render("BrowserChip", { chatId: "/p#1" });
+    assert.equal(!!tree, visible);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["browser:list", [{ chatId: "/p#1" }]]]);
+    if (visible) {
+      tree.props.onPress();
+      assert.deepEqual(JSON.parse(JSON.stringify(h.pushed[0])), { pathname: "/browser-sheet", params: { hostId: "mac", chatId: "/p#1" } });
+    }
+    h.cleanup();
+  }
+  const h = browserHost({
+    url: "mac",
+    call: async () => {
+      throw new Error("unexpected");
+    },
+  });
+  assert.equal(h.render("BrowserChip", {}), null, "a new Chat has no agent yet");
+  h.cleanup();
+});
+
+test("mobile browser sheet opens a sole page directly, lists several, and attaches explicitly", async (t) => {
+  const other = { id: "b", browser: "Chrome 141", pages: 2, title: "Mine" };
+  for (const [list, direct] of [
+    [{ supported: true, targets: [BROWSER_PAGE], others: [] }, true],
+    [{ supported: true, targets: [BROWSER_PAGE, { ...BROWSER_PAGE, id: "browser-1:" + "B".repeat(32) }], others: [other] }, false],
+  ]) {
+    const calls = [];
+    const h = browserHost({
+      url: "mac",
+      call: async (method, args) => {
+        calls.push([method, args]);
+        return method === "browser:attach"
+          ? { ...list, targets: [...list.targets, { ...BROWSER_PAGE, id: "b:" + "C".repeat(32), source: "attached" }], others: [] }
+          : list;
+      },
+    });
+    t.after(() => h.cleanup());
+    h.render("BrowserSheet", { hostId: "mac", chatId: "/p#1" });
+    await settle();
+    const tree = h.render("BrowserSheet", { hostId: "mac", chatId: "/p#1" });
+    assert.equal(tree.props.style.paddingBottom, 34, "controls clear the phone home indicator");
+    const [header, body] = tree.props.children;
+    assert.equal(header.props.collapsable, false);
+    assert.equal(body.props.collapsable, false);
+    assert.equal(!!find(body, (node) => node.props?.targetId === BROWSER_PAGE.id), direct);
+    assert.deepEqual(
+      calls.map(([method]) => method),
+      ["browser:list"],
+      "listing starts no capture",
+    );
+    if (!direct) {
+      const attach = find(body, (node) => node.type === "PillButton" && node.props.title === "Attach");
+      attach.props.onPress();
+      await settle();
+      assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ["browser:attach", [{ chatId: "/p#1", browserId: "b" }]]);
+    }
+    h.cleanup();
+  }
+});
+
+test("mobile browser frames are written to local files; only their address enters the WebView", async () => {
+  const injected = [];
+  const client = {
+    call: async (method) =>
+      method === "browser:open"
+        ? { viewerId: "viewer", target: BROWSER_PAGE }
+        : method === "browser:frame"
+          ? { sequence: 7, data: "anBlZw==", viewport: { width: 800, height: 600 }, generation: 1 }
+          : null,
+  };
+  const h = browserHost(client);
+  h.render("TestBrowserWebView", { client, chatId: "/p#1", targetId: BROWSER_PAGE.id, onPage() {} });
+  await settle();
+  const tree = h.render("TestBrowserWebView", { client, chatId: "/p#1", targetId: BROWSER_PAGE.id, onPage() {} });
+  assert.equal(tree.type, "DomWebView");
+  assert.equal(tree.props.useExpoModulesBridge, false);
+  assert.match(h.files.get(tree.props.source.uri), /milagre-browser/);
+  tree.props.ref.current = { injectJavaScript: (value) => injected.push(value) };
+  tree.props.onMessage({
+    nativeEvent: { data: JSON.stringify({ channel: "milagre-browser", id: 1, method: "open", args: { chatId: "/p#1", targetId: BROWSER_PAGE.id } }) },
+  });
+  await settle();
+  tree.props.onMessage({
+    nativeEvent: { data: JSON.stringify({ channel: "milagre-browser", id: 2, method: "frame", args: { viewerId: "viewer", after: 0 } }) },
+  });
+  await settle();
+  const reply = injected.find((script) => script.includes('"id":2'));
+  assert.ok(reply.includes("file:///cache/browser-"), "the WebView gets a file address");
+  assert.ok(!reply.includes("anBlZw=="), "frame bytes stay out of injected script");
+  assert.deepEqual(h.writes.at(-1)[1], "base64");
+  h.background();
+  await settle();
+  assert.ok(injected.some((script) => script.includes("browserDispose")));
+  h.cleanup();
+  assert.equal(h.files.size, 0, "the viewer page and frames are deleted");
+});
+
 for (const provider of ["claude", "codex"])
   test(`mobile Accounts selects by tapping the row and manages accounts through its menu (${provider})`, async () => {
     const react = hookHost({ effects: true });
@@ -3892,6 +4427,7 @@ function artifactHost(client, pushes = [], router = { back() {} }) {
       "react-native": { Text: "Text", View: "View", Pressable: "Pressable", TextInput: "TextInput" },
       "expo-router": { router: { back: () => router.back(), push: (route) => pushes.push(route) } },
       "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
+      "react-native-keyboard-controller": { KeyboardAvoidingView: "KeyboardAvoidingView" },
       "@expo/dom-webview": { DomWebView: "DomWebView" },
       "expo-file-system": { File, Paths: { cache: "/cache" } },
       "@hugeicons/core-free-icons": {},

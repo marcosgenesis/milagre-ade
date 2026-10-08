@@ -17,6 +17,7 @@
     "src/diff-layout.ts",
     "src/usage.ts",
     "src/simulator.ts",
+    "src/browser.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
     "src/message-search.ts",
@@ -30,6 +31,10 @@
       "default": "./src/prompt-skills.mjs"
     },
     "./model": "./src/model.ts",
+    "./state-patch": {
+      "types": "./src/state-patch.d.mts",
+      "default": "./src/state-patch.mjs"
+    },
     "./chat-scopes": {
       "types": "./src/chat-scopes.d.mts",
       "default": "./src/chat-scopes.mjs"
@@ -58,6 +63,10 @@
     "./attention": {
       "types": "./src/attention.d.mts",
       "default": "./src/attention.mjs"
+    },
+    "./antigravity-models": {
+      "types": "./src/antigravity-models.d.mts",
+      "default": "./src/antigravity-models.mjs"
     },
     "./providers": {
       "types": "./src/providers.d.mts",
@@ -102,6 +111,11 @@
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
       "default": "./src/simulator-receiver.mjs"
+    },
+    "./browser": "./src/browser.ts",
+    "./browser-receiver": {
+      "types": "./src/browser-receiver.d.mts",
+      "default": "./src/browser-receiver.mjs"
     },
     "./message-navigation": "./src/message-navigation.ts",
     "./message-search": "./src/message-search.ts",

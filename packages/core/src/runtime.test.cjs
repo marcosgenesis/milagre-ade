@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { readProjectState: readSavedState } = require("./project-store.cjs");
 const test = require("node:test");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -152,7 +153,7 @@ test("a turn waiting for CLI discovery cannot create an agent after shutdown beg
   discovery.resolve({ command: "/fake/codex" });
   await closing;
   assert.equal(created, 0);
-  const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
+  const saved = await readSavedState(project);
   assert.equal(saved.messages[0].body, "Pending start");
   assert.ok(saved.sessions[session.id].resumeTurn);
 });
@@ -249,7 +250,7 @@ test("Chat edits still report a disk failure while streaming writes are deferred
   }
   fail = false;
   await runtime.close();
-  assert.equal(JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8")).sessions[session.id].title, "Keep my title");
+  assert.equal((await readSavedState(project)).sessions[session.id].title, "Keep my title");
 });
 
 test("a failed Worktree discovery preserves existing Chats and disk state", async (t) => {
@@ -577,7 +578,8 @@ test("attachment preview command serves Worktree files and saved external attach
   await first.invoke("chat:patch", [project, Number(Object.keys(opened.state.sessions)[0]), { title: "Attachments" }]);
   await first.close();
   const stored = path.join(project, ".milagre/coordination.json");
-  const state = JSON.parse(await fs.readFile(stored, "utf8"));
+  // Written back with the messages inline, as an older file has them; the next read takes them from there.
+  const state = await readSavedState(project);
   state.messages.push({
     id: state.next_id++,
     session_id: Number(Object.keys(opened.state.sessions)[0]),

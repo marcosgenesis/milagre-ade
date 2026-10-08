@@ -1,11 +1,20 @@
 import type { ChatMessage, CoordinatorState, NamedProjectLink, OpenLink } from "@milagre/shared/model";
 import { isLinkScopeKey, scopeKey } from "@milagre/shared/chat-scopes";
+import { applyStatePatch } from "@milagre/shared/state-patch";
+import type { StatePatch } from "@milagre/shared/state-patch";
 import { phoneSnapshot } from "./chat-scope.ts";
 import type { AgentRuns } from "@milagre/shared/agent-runs";
 import { openLive, type Live, type LiveOptions } from "./live.ts";
 import type { RelayTransport } from "./relay-transport.ts";
 
-export type OpenProject = { path: string; name: string; state: CoordinatorState; link?: OpenLink };
+export type OpenProject = {
+  path: string;
+  name: string;
+  state: CoordinatorState;
+  link?: OpenLink;
+  /** Derived before the host removes shell output from phone snapshots. Absent on older hosts. */
+  pullRequestRefs?: Record<number, string[]>;
+};
 /** A Project's streaming turns; `seq` numbers the last event they hold. */
 export type Runs = { runs: AgentRuns; seq?: number };
 export type Snapshot = { project: OpenProject; runs: Runs; previewOnly?: false };
@@ -157,6 +166,33 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
   const token = host.token.trim();
   // The last snapshot per route and its ETag: an unchanged Project answers 304 instead of megabytes.
   const cached = new Map<string, { etag: string; value: unknown }>();
+  // Per Project, the last snapshot the host numbered: the next one comes as a patch on it, a few hundred bytes where a
+  // large Project's snapshot runs to megabytes. A host that doesn't number snapshots answers with the whole one.
+  const numbered = new Map<string, { epoch: string; version: number; value: SnapshotAnswer }>();
+  type SnapshotAnswer = Snapshot | { link: OpenLink; runs: Runs };
+  type NumberedAnswer = { epoch: string; version: number } & ({ base: number; patch?: StatePatch } | { snapshot: SnapshotAnswer });
+  async function readSnapshot(owner: string): Promise<SnapshotAnswer> {
+    const held = numbered.get(owner);
+    // In a header, so the route stays the one an older host answers with an ETag (and a 304 when nothing changed).
+    const since = held ? `${held.epoch}:${held.version}` : "none";
+    const answer = await request<SnapshotAnswer | NumberedAnswer>(`/snapshot?projectPath=${encodeURIComponent(owner)}`, undefined, timeoutMs, {
+      "X-Milagre-Snapshot-Since": since,
+    });
+    if (!("epoch" in answer) || typeof answer.version !== "number") {
+      numbered.delete(owner);
+      return answer as SnapshotAnswer;
+    }
+    let value: SnapshotAnswer;
+    if ("snapshot" in answer) value = answer.snapshot;
+    else if (held && answer.epoch === held.epoch && answer.base === held.version) value = applyStatePatch(held.value, answer.patch);
+    else {
+      // A patch on a snapshot this app no longer holds: ask for the whole one.
+      numbered.delete(owner);
+      return readSnapshot(owner);
+    }
+    numbered.set(owner, { epoch: answer.epoch, version: answer.version, value });
+    return value;
+  }
   const auth = { Authorization: `Bearer ${token}`, ...(access ? { "CF-Access-Client-Id": access.id, "CF-Access-Client-Secret": access.secret } : {}) };
   const lanView = runtime?.lan?.({ id: url, token });
   const lanNow = () => lanView?.current() ?? null;
@@ -191,10 +227,10 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     }
   }
 
-  function request<T>(route: string, body?: unknown, deadlineMs = timeoutMs): Promise<T> {
+  function request<T>(route: string, body?: unknown, deadlineMs = timeoutMs, extraHeaders: Record<string, string> = {}): Promise<T> {
     return timed(deadlineMs, async (signal) => {
       const previous = body === undefined ? cached.get(route) : undefined;
-      const headers = { "Content-Type": "application/json", ...(previous ? { "If-None-Match": previous.etag } : {}) };
+      const headers = { "Content-Type": "application/json", ...extraHeaders, ...(previous ? { "If-None-Match": previous.etag } : {}) };
       const sent = body === undefined ? undefined : JSON.stringify(body);
       let response: Answer;
       const through = carrier();
@@ -311,9 +347,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
         { v: 1, method: link ? "link:open" : "project:open", args: [link ? owner.slice("milagre-link:".length) : owner] },
         link ? Math.max(timeoutMs, 330000) : timeoutMs,
       );
-      return phoneSnapshot(
-        await request<Snapshot | { link: OpenLink; runs: Runs }>("/snapshot?projectPath=" + encodeURIComponent(link ? owner : (opened.path ?? owner))),
-      );
+      return phoneSnapshot(await readSnapshot(link ? owner : (opened.path ?? owner)));
     },
     upload: (projectPath: string, name: string, base64: string) => request<{ path: string; name: string }>("/attachments", { projectPath, name, base64 }),
     // Git fetches, worktree setup and removing a worktree get the same deadline as the desktop daemon client.
@@ -327,8 +361,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
       relay || lanNow() ? relayImage(projectPath, path) : media(projectPath, path),
     /** One message with its tools' full output; the snapshot leaves that out. */
     message: (projectPath: string, id: number) => request<ChatMessage>(`/message?projectPath=${encodeURIComponent(projectPath)}&id=${id}`),
-    snapshot: async (projectPath: string) =>
-      phoneSnapshot(await request<Snapshot | { link: OpenLink; runs: Runs }>("/snapshot?projectPath=" + encodeURIComponent(projectPath))),
+    snapshot: async (projectPath: string) => phoneSnapshot(await readSnapshot(projectPath)),
     preview: (projectPath: string) => request<ProjectPreview | Snapshot>("/snapshot?projectPath=" + encodeURIComponent(projectPath) + "&view=chats"),
     /** Just the Project's streaming turns: what a live "runs" signal fetches instead of the whole snapshot. */
     runs: (projectPath: string) => request<Runs>("/runs?projectPath=" + encodeURIComponent(projectPath)),

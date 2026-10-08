@@ -15,6 +15,16 @@ const bridge = {
     input: (request) => ipcRenderer.invoke("simulator:input", request),
     close: (request) => ipcRenderer.invoke("simulator:close", request),
   },
+  browsers: {
+    list: (request) => ipcRenderer.invoke("browser:list", request),
+    attach: (request) => ipcRenderer.invoke("browser:attach", request),
+    open: (request) => ipcRenderer.invoke("browser:open", request),
+    frame: (request) => ipcRenderer.invoke("browser:frame", request),
+    status: (request) => ipcRenderer.invoke("browser:status", request),
+    control: (request) => ipcRenderer.invoke("browser:control", request),
+    input: (request) => ipcRenderer.invoke("browser:input", request),
+    close: (request) => ipcRenderer.invoke("browser:close", request),
+  },
   artifacts: {
     get: (request) => ipcRenderer.invoke("artifact:get", request),
     list: (request) => ipcRenderer.invoke("artifact:list", request),
@@ -131,6 +141,8 @@ const bridge = {
   addGitNote: (chatId, body) => ipcRenderer.invoke("chat:git-note", chatId, body),
   setOpenChat: (chatId) => ipcRenderer.invoke("chat:set-open", chatId),
   getRuns: () => ipcRenderer.invoke("chat:runs"),
+  getMessage: (scope, id) => ipcRenderer.invoke("chat:message", scope, id),
+  readState: (scope) => ipcRenderer.invoke("state:read", scope),
   listAccountScopes: () => ipcRenderer.invoke("accounts:scopes"),
   getProjectAccounts: (scopeKey, refresh) => ipcRenderer.invoke("accounts:scope", scopeKey, refresh),
   assignProjectAccount: (scopeKey, provider, accountId) => ipcRenderer.invoke("accounts:assign", scopeKey, provider, accountId),
@@ -139,6 +151,11 @@ const bridge = {
   updateCli: (provider) => ipcRenderer.invoke("agent:update-cli", provider),
   stopAdvisor: (chatId, id) => ipcRenderer.invoke("advisor:stop", chatId, id),
   retryAdvisor: (chatId, id) => ipcRenderer.invoke("advisor:retry", chatId, id),
+  onCliProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on("agent:cli-progress", listener);
+    return () => ipcRenderer.removeListener("agent:cli-progress", listener);
+  },
   interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
   respondToPermission: (chatId, requestId, decision) => ipcRenderer.invoke("agent:respond-permission", { chatId, requestId, decision }),
   answerQuestion: (chatId, requestId, answers, summary) => ipcRenderer.invoke("agent:answer-question", { chatId, requestId, answers, summary }),

@@ -13,6 +13,32 @@ const { forPhone, runsForPhone, startMobileBridge } = require("./mobile-bridge.c
 const { connect } = require("./client.cjs");
 const { demoRuntimeOptions } = require("./demo-agent.cjs");
 
+test("phone projections preserve PR references without shell output", () => {
+  const { forChatList } = require("./mobile-bridge.cjs");
+  const project = {
+    state: {
+      sessions: { 1: { id: 1 } },
+      messages: [
+        { id: 1, session_id: 1, body: "Open a PR", role: "user" },
+        {
+          id: 2,
+          session_id: 1,
+          body: "",
+          role: "assistant",
+          steps: [{ kind: "shell", status: "done", detail: "$ gh pr create --fill\nhttps://github.com/example/project/pull/246" }],
+        },
+        { id: 3, session_id: 1, body: "Next", role: "user" },
+      ],
+      tasks: {},
+    },
+  };
+  for (const copy of [forPhone(project), forChatList(project, { runs: {} }).project]) {
+    assert.deepEqual(copy.pullRequestRefs, { 1: ["https://github.com/example/project/pull/246"] });
+    assert.ok(copy.state.messages.every((message) => !message.steps?.some((step) => step.detail?.includes("gh pr create"))));
+  }
+  assert.equal(project.pullRequestRefs, undefined, "projection metadata does not change stored state");
+});
+
 async function fixture(t, { runtimeOptions = {}, bridgeOptions = {} } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-mobile-")));
   const dataDir = path.join(root, "profile");
@@ -262,6 +288,12 @@ test("mobile can manage Chat metadata and create Worktrees, and read changes onl
   assert.equal(created.status, 200);
   const result = (await created.json()).result;
   assert.ok(result.project.state.worktrees[result.worktreeId]);
+  // Only the new worktree and its Chat travel back: a large Project's whole state is too big for the phone's socket.
+  assert.deepEqual(Object.keys(result.project.state.worktrees), [String(result.worktreeId)]);
+  assert.deepEqual(result.project.state.messages, []);
+  assert.ok(Object.values(result.project.state.sessions).length >= 1);
+  assert.ok(Object.values(result.project.state.sessions).every((session) => session.worktree_id === result.worktreeId));
+  assert.equal(result.project.state.sessions[chat.id], undefined, "the main checkout's Chat stays out");
   await fs.writeFile(path.join(project, "mobile.txt"), "A change from the computer\n");
   const files = (await (await rpc("git:diff-files", [{ cwd: project, mode: "uncommitted" }])).json()).result;
   assert.ok(files.files.some((file) => file.path === "mobile.txt"));
@@ -927,7 +959,7 @@ test("a Project over 16 MB reaches the phone: its snapshot, tool output on deman
     }),
   );
   assert.equal((await rpc("project:open", [project])).status, 200);
-  // The daemon reads the whole state in pages; the phone gets it without tool output, and asks for one message's.
+  // The daemon moves the long tool output to sidecars; the phone gets the state without it, and asks for one message's.
   const snapshot = (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result;
   assert.equal(snapshot.project.state.messages.length, 900);
   assert.equal(snapshot.project.state.messages[0].steps[0].hasDetail, true);
@@ -1126,4 +1158,49 @@ test("account assignment changes notify live phones independently of Project sta
   assert.equal(result.status, 200);
   await until(() => phone.messages.includes("accounts") && phone.messages.includes("project"));
   assert.equal(phone.messages.filter((type) => type === "accounts").length, 1);
+});
+
+test("an app that says what snapshot it holds gets the next one as a patch, kept current from the host's patches", async (t) => {
+  const { applyStatePatch } = require("@milagre/shared/state-patch");
+  const { project, request, rpc } = await fixture(t);
+  assert.equal((await rpc("project:open", [project])).status, 200);
+  const snapshot = async (since) =>
+    (await (await request("/snapshot?projectPath=" + encodeURIComponent(project), { headers: { "x-milagre-snapshot-since": since } })).json()).result;
+  const first = await snapshot("none");
+  assert.equal(typeof first.epoch, "string");
+  const session = Object.values(first.snapshot.project.state.sessions)[0];
+  assert.equal(first.snapshot.project.path, project);
+  assert.equal(first.snapshot.project.state.sessions[session.id].id, session.id);
+
+  assert.equal((await rpc("chat:patch", [project, session.id, { title: "From the phone" }])).status, 200);
+  const deadline = Date.now() + 2000;
+  let next;
+  // The bridge follows the change from the host's patch; the phone's snapshot shows it once that arrives.
+  do next = await snapshot(`${first.epoch}:${first.version}`);
+  while (
+    applyStatePatch(first.snapshot, next.patch).project.state.sessions[session.id].title !== "From the phone" &&
+    Date.now() < deadline &&
+    (await delay(20), true)
+  );
+  assert.equal(next.base, first.version);
+  assert.equal("snapshot" in next, false);
+  assert.ok(JSON.stringify(next).length < 2000, "a renamed chat is a small patch");
+  const patched = applyStatePatch(first.snapshot, next.patch);
+  assert.equal(patched.project.state.sessions[session.id].title, "From the phone");
+  assert.deepEqual(patched.project, (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result.project);
+
+  // A number this bridge never gave, or no header at all, gets a whole snapshot.
+  assert.ok("snapshot" in (await snapshot("another-bridge:3")));
+  assert.equal("epoch" in (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result, false);
+});
+
+test("the phone's copy of a state keeps what didn't change, so snapshots share it", () => {
+  const message = { id: 1, session_id: 1, body: "x", steps: [{ id: "s", kind: "shell", title: "Ran", status: "done", detail: "$ ls" }] };
+  const session = { id: 1, subagents: [{ id: "a", transcript: [{ id: "t", text: "hi" }] }] };
+  const state = { sessions: { 1: session }, messages: [message] };
+  const first = forPhone({ path: "/p", state });
+  const second = forPhone({ path: "/p", state: { ...state, messages: [...state.messages, { id: 2, session_id: 1, body: "y" }] } });
+  assert.equal(second.state.messages[0], first.state.messages[0]);
+  assert.equal(second.state.sessions[1], first.state.sessions[1]);
+  assert.equal(first.state.messages[0].steps[0].hasDetail, true, "tool output is still left out");
 });

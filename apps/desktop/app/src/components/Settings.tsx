@@ -15,6 +15,7 @@ import {
   SecurityCheckIcon,
   Settings01Icon,
   SmartphoneIcon,
+  TestTube01Icon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
 import type { FilesToCopy as FilesToCopyResult, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
@@ -44,7 +45,7 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "phone" | "about" | "project";
+export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "phone" | "experimental" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
@@ -53,6 +54,7 @@ const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> =
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
   { key: "skills", label: "Skills", icon: MagicWand01Icon },
   { key: "phone", label: "Phone", icon: SmartphoneIcon },
+  { key: "experimental", label: "Experimental", icon: TestTube01Icon },
   { key: "about", label: "About", icon: InformationCircleIcon },
 ];
 
@@ -180,6 +182,24 @@ function PercentSlider({
   );
 }
 
+function ExperimentalSettings() {
+  const settings = useSettings();
+  return (
+    <Group title="Beta">
+      <Row
+        label="Every project in the sidebar"
+        description="Lists each project and Link with its chats, so a chat in another project opens in place. Replaces the project menu at the top of the sidebar. Hide a project in its own settings."
+      >
+        <Switch
+          label="Every project in the sidebar"
+          checked={settings.sidebarAllProjects}
+          onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })}
+        />
+      </Row>
+    </Group>
+  );
+}
+
 function GeneralSettings({ models }: { models: ModelOption[] }) {
   const settings = useSettings();
   const { editors, editor } = useEditors();
@@ -224,7 +244,7 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
         </Row>
         <Row
           label="TLDR writing"
-          description="Shape Claude and Codex updates and replies with /tldr. Applies on the next turn after the current reply finishes."
+          description="Shape Claude, Codex and Antigravity updates and replies with /tldr. Applies on the next turn after the current reply finishes."
         >
           <Switch label="TLDR writing" checked={settings.tldrEnabled} onChange={(tldrEnabled) => updateSettings({ tldrEnabled })} />
         </Row>
@@ -267,9 +287,6 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
               { value: "recent", label: "Latest message first" },
             ]}
           />
-        </Row>
-        <Row label="Show every project" description="List each project and Link with its chats. Hide a project in its own settings.">
-          <Switch label="Show every project" checked={settings.sidebarAllProjects} onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })} />
         </Row>
       </Group>
       <Group title="Editor">
@@ -1063,6 +1080,7 @@ export function SettingsPanel({
             <p className="mt-6 text-[13px] text-ink-3">Open a project to see its skills.</p>
           ))}
         {section === "phone" && <PhoneSettings />}
+        {section === "experimental" && <ExperimentalSettings />}
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && project && <ProjectSettings key={project.path} project={project} onManageAccounts={() => onSectionChange?.("accounts")} />}
       </div>

@@ -101,14 +101,20 @@ async function compactSubagents(projectPath, state, tracker = {}) {
         subagents.push(agent);
         continue;
       }
-      const bytes = JSON.stringify(agent.transcript);
-      const hash = digest(bytes);
+      // States are replaced, never changed in place: a transcript array already hashed is the same transcript.
+      let bytes = null;
+      let hash = transcriptDigests.get(agent.transcript);
+      if (!hash) {
+        bytes = JSON.stringify(agent.transcript);
+        hash = digest(bytes);
+        transcriptDigests.set(agent.transcript, hash);
+      }
       const key = `${id}/${agent.id}`;
       // A remembered digest is trusted only while its file is still there (one readdir per save, not a stat per agent).
       if (known?.get(key) === hash) existing ??= new Set(await fs.readdir(path.join(projectPath, ".milagre", "subagents")).catch(() => []));
       if (known?.get(key) !== hash || !existing.has(`${hash}.json`)) {
         directory ??= await contentDirectory(projectPath, "subagents");
-        await writeContent(projectPath, "subagents", bytes, "json", directory);
+        await writeContent(projectPath, "subagents", (bytes ??= JSON.stringify(agent.transcript)), "json", directory);
         tracker.wrote = true;
       }
       next?.set(key, hash);
@@ -127,6 +133,98 @@ async function compactSubagents(projectPath, state, tracker = {}) {
   return { ...state, sessions };
 }
 
+// Tool output is most of a large Project's state (17.7 of 22.8 MB in one), and every change to the state re-encodes it
+// for the save, the windows and the phone. A finished message keeps a step's detail inline only when it is short, or
+// when the app reads it without opening the step: the last thinking step (shown in place of a missing answer) and a
+// command that opened or merged a PR (the chat's PR list). The rest goes to one content-addressed sidecar per message,
+// read back when a step is opened.
+const INLINE_DETAIL = 1024;
+const PR_COMMAND = /\bgh\s+pr\s+(create|merge)\b/;
+const keepsDetail = (step, index, thought) =>
+  step.detail.length <= INLINE_DETAIL || index === thought || (step.kind === "shell" && PR_COMMAND.test(step.detail));
+const isDetails = (value) => value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every((detail) => typeof detail === "string");
+
+async function readDetailFile(directory, name) {
+  if (typeof name !== "string" || !SIDECAR.test(name)) throw new Error("Invalid details reference");
+  const file = await fs.realpath(path.join(directory, name));
+  if (!inside(directory, file)) throw new Error("Invalid details path");
+  const bytes = await fs.readFile(file);
+  if (digest(bytes) + ".json" !== name) throw new Error("Invalid details hash");
+  const details = JSON.parse(bytes);
+  if (!isDetails(details)) throw new Error("Invalid details");
+  return details;
+}
+
+/**
+ * Moves long step details of finished messages into `.milagre/details`, leaving `hasDetail` on each step and the
+ * sidecar's name on the message. `previous` (optional) lists messages already compacted, so an update only looks at
+ * the ones it added. Sets `tracker.wrote` when a sidecar was written. Returns `state` itself when nothing moved.
+ */
+async function compactDetails(projectPath, state, { previous, tracker = {} } = {}) {
+  const known = previous ? new Set(previous) : null;
+  let directory;
+  let changed = false;
+  const messages = [];
+  for (const message of state.messages ?? []) {
+    const steps = known?.has(message) ? null : message.steps;
+    const thought = steps?.findLastIndex((step) => step.kind === "thinking" && step.detail?.trim()) ?? -1;
+    if (!steps?.some((step, index) => typeof step.detail === "string" && step.status !== "running" && !keepsDetail(step, index, thought))) {
+      messages.push(message);
+      continue;
+    }
+    directory ??= await contentDirectory(projectPath, "details");
+    // A message saved before with a sidecar keeps what that sidecar holds; one that can't be read stays inline as it is.
+    const details = message.detailFile ? await readDetailFile(directory, message.detailFile).catch(() => null) : {};
+    if (!details) {
+      messages.push(message);
+      continue;
+    }
+    const slim = steps.map((step, index) => {
+      if (typeof step.detail !== "string" || step.status === "running" || keepsDetail(step, index, thought)) return step;
+      details[step.id] = step.detail;
+      const { detail: _moved, ...rest } = step;
+      return { ...rest, hasDetail: true };
+    });
+    const bytes = JSON.stringify(details);
+    await writeContent(projectPath, "details", bytes, "json", directory);
+    tracker.wrote = true;
+    messages.push({ ...message, steps: slim, detailFile: `${digest(bytes)}.json` });
+    changed = true;
+  }
+  return changed ? { ...state, messages } : state;
+}
+
+/** The message with the details its sidecar holds back in its steps; the message as it is when there is none to read. */
+async function withDetails(projectPath, message) {
+  if (!message?.detailFile) return message;
+  let details;
+  try {
+    details = await readDetailFile(await contentDirectory(projectPath, "details"), message.detailFile);
+  } catch {
+    return message;
+  }
+  const { detailFile: _file, ...rest } = message;
+  return {
+    ...rest,
+    steps: (message.steps ?? []).map(({ hasDetail, ...step }) =>
+      typeof details[step.id] === "string" ? { ...step, detail: details[step.id] } : hasDetail ? { ...step, hasDetail } : step,
+    ),
+  };
+}
+
+/** Every message's details back inline, for a state about to move to another Project's file. */
+async function restoreDetails(projectPath, state) {
+  if (!state.messages?.some((message) => message.detailFile)) return state;
+  return { ...state, messages: await Promise.all(state.messages.map((message) => withDetails(projectPath, message))) };
+}
+
+/** Every details sidecar a saved state points at. */
+function referencedDetails(state) {
+  return new Set((state.messages ?? []).map((message) => message.detailFile).filter((name) => typeof name === "string"));
+}
+
+const transcriptDigests = new WeakMap();
+
 /** Every sidecar a saved state points at, current and superseded. */
 function referencedSidecars(state) {
   const refs = new Set();
@@ -141,11 +239,20 @@ function referencedSidecars(state) {
  * durably written. Touches only content-addressed *.json files directly inside the Project's own
  * .milagre/subagents; one younger than `minAgeMs` may belong to a save still in flight, so it stays.
  */
-async function sweepSubagentContent(projectPath, referenced, { minAgeMs = 0, now = Date.now } = {}) {
+async function sweepSubagentContent(projectPath, referenced, options) {
+  return sweepContent(projectPath, "subagents", referenced, options);
+}
+
+/** The same sweep for `.milagre/details`. */
+async function sweepDetailContent(projectPath, referenced, options) {
+  return sweepContent(projectPath, "details", referenced, options);
+}
+
+async function sweepContent(projectPath, folder, referenced, { minAgeMs = 0, now = Date.now } = {}) {
   try {
     const root = await fs.realpath(projectPath);
     const metadata = path.join(root, ".milagre");
-    const directory = path.join(metadata, "subagents");
+    const directory = path.join(metadata, folder);
     let real;
     try {
       real = await fs.realpath(directory);
@@ -220,4 +327,17 @@ async function hydrateSubagents(projectPath, state) {
   );
   return state;
 }
-module.exports = { storeImages, migrateImages, compactSubagents, hydrateSubagents, referencedSidecars, sweepSubagentContent };
+module.exports = {
+  storeImages,
+  migrateImages,
+  compactSubagents,
+  hydrateSubagents,
+  referencedSidecars,
+  sweepSubagentContent,
+  compactDetails,
+  withDetails,
+  restoreDetails,
+  referencedDetails,
+  sweepDetailContent,
+  INLINE_DETAIL,
+};

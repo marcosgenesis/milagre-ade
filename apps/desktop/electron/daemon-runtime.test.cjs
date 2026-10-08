@@ -1,4 +1,6 @@
 const test = require("node:test");
+const { readProjectState: readSavedState } = require("@milagre/core/project-store");
+const { applyStatePatch } = require("@milagre/shared/state-patch");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -54,8 +56,13 @@ test("desktop shares saved Chat state with another client and quit keeps the dae
   t.after(() => mobile.close());
   const a = await desktop.openProject(project);
   const session = Object.values(a.state.sessions)[0];
+  // The window holds the state it read; the change reaches it as a patch on that state.
+  const held = await desktop.invoke("state:read", [project]);
   await mobile.call("chat:patch", [project, session.id, { title: "From phone" }]);
-  await waitFor(() => events.some((e) => e.channel === "project:state" && e.payload.state.sessions[session.id].title === "From phone"));
+  const changed = await waitFor(() => events.find((e) => e.channel === "project:state" && e.payload.version > held.version));
+  assert.equal(changed.payload.base, held.version);
+  assert.equal("state" in changed.payload, false);
+  assert.equal(applyStatePatch(held.state, changed.payload.patch).sessions[session.id].title, "From phone");
   assert.equal((await desktop.invoke("project:current")).state.sessions[session.id].title, "From phone");
   await desktop.close();
   assert.ok((await mobile.call("daemon:status")).capabilities.includes("desktop-v1"));
@@ -152,7 +159,7 @@ test("explicit desktop update waits for the shared host to save and stop", async
   await desktop.invoke("chat:patch", [project, session.id, { title: "Before update" }]);
   await desktop.close({ stopHost: true });
   await assert.rejects(fs.stat(path.join(dataDir, "runtime.lock")), { code: "ENOENT" });
-  const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
+  const saved = await readSavedState(project);
   assert.equal(saved.sessions[session.id].title, "Before update");
 });
 
@@ -198,7 +205,7 @@ for (const stopHost of [false, true]) {
       fail = false;
     }
     await desktop.close({ stopHost });
-    const saved = JSON.parse(await fs.readFile(path.join(project, ".milagre/coordination.json"), "utf8"));
+    const saved = await readSavedState(project);
     assert.ok(saved.messages.some((message) => message.body === "Keep this accepted note"));
     if (stopHost) await assert.rejects(fs.stat(path.join(dataDir, "runtime.lock")), { code: "ENOENT" });
     else {
@@ -216,10 +223,11 @@ test("a Project state over 16 MB opens in the desktop, and its changes reach the
     messages.push({
       id: 10 + index,
       session_id: 2,
-      body: `Reply ${index}`,
+      // Long replies make the size: long tool output moves to sidecars, out of the state.
+      body: `Reply ${index} `.padEnd(20_000, "reply line\n"),
       context: null,
       role: "assistant",
-      steps: [{ id: `step-${index}`, kind: "shell", title: "Ran `npm test`", status: "done", detail: `${index} `.padEnd(20_000, "output line\n") }],
+      steps: [{ id: `step-${index}`, kind: "shell", title: "Ran `npm test`", status: "done", detail: `$ npm test\n${index} passed` }],
     });
   }
   await fs.mkdir(path.join(project, ".milagre"));
@@ -237,12 +245,18 @@ test("a Project state over 16 MB opens in the desktop, and its changes reach the
   const opened = await desktop.openProject(project);
   assert.ok(Buffer.byteLength(JSON.stringify(opened)) > 16 * 1024 * 1024);
   assert.equal(opened.state.messages.length, 900);
+  // Read in pages once, then each change is a patch of a few bytes, never the 18 MB state again.
+  const held = await desktop.invoke("state:read", [project]);
+  assert.equal(held.state.messages.length, 900);
   const mobile = await connect({ dataDir });
   t.after(() => mobile.close());
   await mobile.call("chat:patch", [project, 2, { title: "From phone" }]);
-  const changed = await waitFor(() => events.find((e) => e.channel === "project:state" && e.payload.state?.sessions[2].title === "From phone"), 1000);
-  assert.equal(changed.payload.state.messages.length, 900);
+  const changed = await waitFor(() => events.find((e) => e.channel === "project:state" && e.payload.version > held.version), 1000);
   assert.equal("stateTooLarge" in changed.payload, false);
+  assert.ok(JSON.stringify(changed.payload).length < 1000);
+  const applied = applyStatePatch(held.state, changed.payload.patch);
+  assert.equal(applied.sessions[2].title, "From phone");
+  assert.equal(applied.messages, held.state.messages, "the messages the window holds are kept as they are");
   assert.equal(
     events.some((e) => e.channel === "runtime:connection"),
     false,

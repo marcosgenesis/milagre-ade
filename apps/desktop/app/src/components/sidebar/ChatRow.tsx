@@ -35,9 +35,12 @@ import { rowPullRequests } from "@/lib/chat-pull-requests";
 import { useEditors } from "@/lib/editors";
 import type { AgentPort, DiffStat, PullRequest } from "@/model";
 import { portUrl } from "@/lib/ports";
-import { BLOCKERS, pullRequestBlockers } from "@/lib/pr-blockers";
+import { BLOCKERS, pullRequestBlockers, pullRequestPresentation } from "@/lib/pr-blockers";
 import { ScrollArea } from "../primitives/ScrollArea";
 import { useDismiss } from "../../lib/use-dismiss";
+import { chatMarkTone } from "@milagre/shared/chats";
+
+const markToneClass = { accent: "text-accent", orange: "text-orange", red: "text-red", ink3: "text-ink-3" } as const;
 
 const toneClass = { red: "text-red", orange: "text-orange" } as const;
 
@@ -123,14 +126,14 @@ const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgen
  * ───────────────────────────────────────────────────────── */
 /** Marks that ask for you draw an icon, so a question and an approval read apart. The shield is orange like the approval card. */
 const MARK_ICON = {
-  question: { icon: BubbleChatIcon, tone: "text-accent" },
-  waiting: { icon: ShieldAlertIcon, tone: "text-orange" },
-  delegated: { icon: Link04Icon, tone: "text-accent" },
-} satisfies Partial<Record<ChatMark, { icon: HugeIconData; tone: string }>>;
+  question: { icon: BubbleChatIcon },
+  waiting: { icon: ShieldAlertIcon },
+  delegated: { icon: Link04Icon },
+} satisfies Partial<Record<ChatMark, { icon: HugeIconData }>>;
 
 function MarkIcon({ mark }: { mark: keyof typeof MARK_ICON }) {
   return (
-    <span className={`flex ${MARK_ICON[mark].tone}`}>
+    <span className={`flex ${markToneClass[chatMarkTone(mark)]}`}>
       <HugeiconsIcon icon={MARK_ICON[mark].icon} size={13} strokeWidth={2} color="currentColor" />
     </span>
   );
@@ -146,7 +149,7 @@ function ChatMarkDot({ mark, topAligned = false }: { mark: ChatMark; topAligned?
         {...(mark === "idle" ? { "aria-hidden": true } : { role: "img", "aria-label": MARK_LABEL[mark], title: MARK_LABEL[mark] })}
         className={mark === "running" ? "flex" : mark in MARK_ICON ? "flex" : `rounded-full ${dot}`}
       >
-        {mark === "running" && <SpinnerRing size={12} />}
+        {mark === "running" && <SpinnerRing size={12} color="var(--accent)" />}
         {mark in MARK_ICON && <MarkIcon mark={mark as keyof typeof MARK_ICON} />}
       </span>
     </span>
@@ -271,13 +274,13 @@ export const ChatRow = memo(function ChatRow({
               {recentInitials(item.label)}
               {archiving || mark === "running" ? (
                 <span aria-hidden className="absolute -right-1 -top-1 flex rounded-full bg-surface p-px">
-                  <SpinnerRing size={10} stroke={1.75} />
+                  <SpinnerRing size={10} stroke={1.75} color={mark === "running" ? "var(--accent)" : undefined} />
                 </span>
               ) : (
                 mark !== "idle" && <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-surface" />
               )}
             </span>
-            <ChatMarkDot mark={mark} topAligned={hasPullRequests} />
+            <ChatMarkDot mark={mark} topAligned={hasPullRequests || item.worktreeCount !== undefined} />
             <span
               className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasPullRequests ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
                 item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
@@ -380,17 +383,16 @@ export const ChatRow = memo(function ChatRow({
 
 /** Merged is purple, a blocked PR takes its first blocker's tone, running CI is orange like GitHub's own dot, other open PRs are green. */
 function prTone(pr: PullRequest) {
-  const blocker = pullRequestBlockers(pr)[0];
-  return pr.state === "MERGED" ? "text-purple-500" : blocker ? toneClass[BLOCKERS[blocker].tone] : isChecking(pr) ? "text-orange" : "text-green";
+  return { purple: "text-purple-500", red: "text-red", orange: "text-orange", green: "text-green" }[pullRequestPresentation(pr).tone];
 }
 
 function prIcon(pr: PullRequest) {
-  return pr.state === "MERGED" ? GitMergeIcon : isReadyToMerge(pr) ? Tick02Icon : isChecking(pr) ? CircleDotIcon : GitPullRequestIcon;
+  return { merged: GitMergeIcon, ready: Tick02Icon, checking: CircleDotIcon, open: GitPullRequestIcon }[pullRequestPresentation(pr).icon];
 }
 
-const isReadyToMerge = (pr: PullRequest) => pr.state === "OPEN" && pr.readyToMerge && pullRequestBlockers(pr).length === 0;
+const isReadyToMerge = (pr: PullRequest) => pullRequestPresentation(pr).ready;
 /** CI is still running and nothing else blocks the PR; a failure is a blocker and shows as one. */
-const isChecking = (pr: PullRequest) => pr.state === "OPEN" && pr.checks === "running" && pullRequestBlockers(pr).length === 0;
+const isChecking = (pr: PullRequest) => pullRequestPresentation(pr).checking;
 
 /** One PR under the chat's title. Only a chat's single PR has room to spell out its blocker or "Ready". */
 function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean }) {
@@ -496,7 +498,7 @@ function ChatHoverCard({
   const mark = item.mark ?? "idle";
   const status =
     mark !== "idle"
-      ? { label: MARK_LABEL[mark], tone: mark === "running" ? "text-ink-2" : mark === "waiting" ? "text-orange" : "text-accent-ink" }
+      ? { label: MARK_LABEL[mark], tone: markToneClass[chatMarkTone(mark)] }
       : details.failed
         ? { label: "Last turn failed", tone: "text-red" }
         : null;
@@ -608,7 +610,7 @@ function ChatHoverCard({
 }
 
 function ChatMarkDotInline({ mark, failed }: { mark: ChatMark; failed: boolean }) {
-  if (mark === "running") return <SpinnerRing size={12} />;
+  if (mark === "running") return <SpinnerRing size={12} color="var(--accent)" />;
   if (mark in MARK_ICON) return <MarkIcon mark={mark as keyof typeof MARK_ICON} />;
   return <span aria-hidden className={`size-2 rounded-full ${mark === "idle" && failed ? "bg-red" : "bg-accent"}`} />;
 }

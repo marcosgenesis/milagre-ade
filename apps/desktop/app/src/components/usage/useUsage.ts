@@ -3,6 +3,8 @@ import type { UsageSnapshot } from "../../model";
 import { mergeSnapshot, seedSnapshot } from "./format";
 
 const POLL_MS = 5 * 60_000;
+// Each scope's last numbers, so switching Projects shows them at once instead of an empty usage row.
+const lastSnapshots = new Map<string, UsageSnapshot>();
 
 export function useUsage(scopeKey?: string) {
   const currentScope = useRef(scopeKey);
@@ -24,7 +26,11 @@ export function useUsage(scopeKey?: string) {
         if (version !== generation.current || currentScope.current !== scopeKey) return;
         setSnapshotScope(scopeKey);
         lastReadAt.current = Date.now();
-        setSnapshot((previous) => mergeSnapshot(previous, next, Date.now()));
+        setSnapshot((previous) => {
+          const merged = mergeSnapshot(previous, next, Date.now());
+          if (scopeKey && merged) lastSnapshots.set(scopeKey, merged);
+          return merged;
+        });
       })
       .catch(() => {})
       .finally(() => {
@@ -47,7 +53,9 @@ export function useUsage(scopeKey?: string) {
     generation.current++;
     inFlight.current = null;
     lastReadAt.current = 0;
-    setSnapshot(null);
+    const last = scopeKey ? lastSnapshots.get(scopeKey) : undefined;
+    setSnapshotScope(scopeKey);
+    setSnapshot(last ?? null);
     setLoading(false);
     // Saved numbers first, so the sidebar isn't empty while the first read runs.
     const version = generation.current;
@@ -56,7 +64,11 @@ export function useUsage(scopeKey?: string) {
       .then((cached) => {
         if (version === generation.current && currentScope.current === scopeKey) {
           setSnapshotScope(scopeKey);
-          setSnapshot((current) => seedSnapshot(current, cached));
+          setSnapshot((current) => {
+            const seeded = seedSnapshot(current, cached);
+            if (scopeKey && seeded) lastSnapshots.set(scopeKey, seeded);
+            return seeded;
+          });
         }
       })
       .catch(() => {});
@@ -66,6 +78,7 @@ export function useUsage(scopeKey?: string) {
       generation.current++;
       inFlight.current = null;
       lastReadAt.current = 0;
+      lastSnapshots.clear();
       setSnapshot(null);
       void refresh();
     });

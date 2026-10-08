@@ -34,3 +34,9 @@ test("provider services are pinned to effective accounts and never mix scopes", 
   assert.equal(missing.env, undefined);
   assert.equal(seen[0].accountId, "a");
 });
+
+test("the selection covers every provider, Antigravity included", () => {
+  const accounts = { selected: (provider) => `${provider}-id`, environment: () => ({}) };
+  const routing = createAccountRouting({ accounts, cli: async () => ({}), statusFactory: () => () => {}, modelsFactory: () => () => {} });
+  assert.deepEqual(routing.selection(), { codex: "codex-id", claude: "claude-id", antigravity: "antigravity-id" });
+});

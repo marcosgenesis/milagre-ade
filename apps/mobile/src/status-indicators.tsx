@@ -4,6 +4,7 @@ import { AppState, Pressable, Text, View } from "react-native";
 import { BubbleChatIcon, GitPullRequestIcon, ShieldAlertIcon, Alert02Icon } from "@hugeicons/core-free-icons";
 import type { PullRequest, Subagent, Worktree } from "@milagre/shared/model";
 import { BLOCKERS, pullRequestBlockers } from "@milagre/shared/pr-blockers";
+import { chatMarkTone } from "@milagre/shared/chats";
 import { agentCounts, MARK_LABEL, type ChatMark } from "./indicators";
 import { useSession } from "./session";
 import { readPullRequest } from "./pr-status";
@@ -42,22 +43,23 @@ export function usePullRequest(worktree?: Worktree) {
 
 /** Desktop's chat mark slot: a question bubble, an approval shield, a spinning ring, an unread dot, or a faint idle dot. */
 export function ChatMarkIcon({ mark }: { mark: ChatMark }) {
+  const tone = chatMarkTone(mark);
   const body =
     mark === "question" ? (
-      <Icon icon={BubbleChatIcon} tone="accent" size={15} strokeWidth={2} />
+      <Icon icon={BubbleChatIcon} tone={tone} size={15} strokeWidth={2} />
     ) : mark === "waiting" ? (
-      <Icon icon={ShieldAlertIcon} tone="orange" size={15} strokeWidth={2} />
+      <Icon icon={ShieldAlertIcon} tone={tone} size={15} strokeWidth={2} />
     ) : mark === "interrupted" ? (
-      <Icon icon={Alert02Icon} tone="orange" size={15} strokeWidth={2} />
+      <Icon icon={Alert02Icon} tone={tone} size={15} strokeWidth={2} />
     ) : mark === "running" ? (
-      <SpinnerRing size={14} />
+      <SpinnerRing size={14} tone={tone} />
     ) : (
       <View
         style={{
           width: mark === "idle" ? 6 : 8,
           height: mark === "idle" ? 6 : 8,
           borderRadius: 4,
-          backgroundColor: mark === "unread" ? colors.accent : mark === "failed" ? colors.red : colors.idleDot,
+          backgroundColor: mark === "idle" ? colors.idleDot : colors[tone],
         }}
       />
     );

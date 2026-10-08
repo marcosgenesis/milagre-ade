@@ -61,5 +61,11 @@ test("extractOutdatedProvider detects outdated provider from message", () => {
     extractOutdatedProvider("Milagre needs Codex 0.158.0 or later, and you have 0.150.0. Run `codex update` in a terminal, then send your message again."),
     "codex",
   );
+  assert.equal(
+    extractOutdatedProvider(
+      "Milagre needs Antigravity 1.3.0 or later, and you have 1.2.0. Update it from Milagre Settings \u2192 Accounts, then send your message again.",
+    ),
+    "antigravity",
+  );
   assert.equal(extractOutdatedProvider("Regular chat response"), null);
 });

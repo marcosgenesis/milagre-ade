@@ -24,7 +24,7 @@ const KEEP_OPEN_MS = 5 * 60 * 1000;
 const COPY = {
   ack: "Demo agent: your message reached the demo computer through Milagre's relay. ",
   reply:
-    'On your own Mac this Chat would be a Claude Code or Codex session working in your project. This demo computer runs a scripted agent, so no command runs and no file changes. Send "tools" to see agent activity, "approval" for a permission request, or "question" for a question card.',
+    'On your own Mac this Chat would be a Claude Code, Codex or Antigravity session working in your project. This demo computer runs a scripted agent, so no command runs and no file changes. Send "tools" to see agent activity, "approval" for a permission request, or "question" for a question card.',
 };
 const WELCOME = "Welcome! This is a demo computer for trying Milagre. Its agent is scripted: it never runs commands or changes files.";
 

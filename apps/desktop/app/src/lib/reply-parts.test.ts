@@ -82,13 +82,14 @@ test("a reply's last text is its answer; everything before it is activity, in or
       { type: "step", step: step("c", 23) },
     ],
     images: [],
+    artifacts: [],
     answer: "\n\nDone.",
   });
 });
 
 test("a reply without steps is all answer; steps alone are all activity", () => {
-  assert.deepEqual(replyActivity("Hello"), { setup: [], activity: [], images: [], answer: "Hello" });
-  assert.deepEqual(replyActivity("", [step("a", 0)]), { setup: [], activity: [{ type: "step", step: step("a", 0) }], images: [], answer: "" });
+  assert.deepEqual(replyActivity("Hello"), { setup: [], activity: [], images: [], artifacts: [], answer: "Hello" });
+  assert.deepEqual(replyActivity("", [step("a", 0)]), { setup: [], activity: [{ type: "step", step: step("a", 0) }], images: [], artifacts: [], answer: "" });
 });
 
 test("text before steps that end the reply is still its answer", () => {
@@ -96,6 +97,7 @@ test("text before steps that end the reply is still its answer", () => {
     setup: [],
     activity: [{ type: "step", step: step("a", 15) }],
     images: [],
+    artifacts: [],
     answer: "Running it now.",
   });
 });
@@ -165,11 +167,12 @@ test("the worktree setup is pulled out of the activity and left out of its summa
       { type: "step", step: step("a", 0) },
     ],
     images: [],
+    artifacts: [],
     answer: "Done.",
   });
   assert.deepEqual(activitySummary(steps), { text: "Thought for 4s · ran 1 command", failed: 0 });
   assert.deepEqual(activitySummary([setupStep("failed")]), { text: "", failed: 0 });
-  assert.deepEqual(replyActivity("", [setupStep()]), { setup: [setupStep()], activity: [], images: [], answer: "" });
+  assert.deepEqual(replyActivity("", [setupStep()]), { setup: [setupStep()], activity: [], images: [], artifacts: [], answer: "" });
 });
 
 test("replyActivity: generated images come back apart from the activity", () => {

@@ -14,12 +14,14 @@ import {
   LaptopIcon,
   Link04Icon,
   MoreHorizontalIcon,
+  PinIcon,
   Search01Icon,
   Settings01Icon,
   UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { isListedChat, pendingChatSessionId, withPendingChat } from "@milagre/shared/chats";
+import { comparePins, isListedChat, pendingChatSessionId, withPendingChat } from "@milagre/shared/chats";
+import { searchMessages } from "@milagre/shared/message-search";
 import type { AgentSession } from "@milagre/shared/model";
 import type { RegisteredProject } from "./client";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
@@ -34,12 +36,15 @@ import { ProjectSearch } from "./project-search";
 import { chatMenu, runChatAction } from "./chat-actions";
 import { confirm } from "./confirm-store";
 import { ArchiveProgress } from "./archive-progress";
+import { AttentionDot, useAttention } from "./attention";
+import { projectOfKey } from "@milagre/shared/agent-runs";
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
   | { kind: "project"; name: string; expanded: boolean; members?: RegisteredProject[] }
   | { kind: "section"; name: string }
   | { kind: "chat"; chat: AgentSession; worktree: string; mark: ChatMark; pending?: MobilePendingChat }
+  | { kind: "message"; chat: AgentSession; title: string; snippet: string; highlight: [number, number] }
   | { kind: "notice"; message: string; failed?: boolean }
 );
 type Show = "all" | "needs" | "running" | "archived";
@@ -72,6 +77,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const session = useSession();
   const { pendingChats } = usePendingChats();
   const insets = useSafeAreaInsets();
+  const attention = useAttention();
   const { reloadProjects, previewProject, cachedProject } = session;
   const currentPath = session.snapshot?.project.path;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([currentPath || session.recent[0]?.path].filter(Boolean) as string[]));
@@ -122,17 +128,25 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     },
     [previewProject],
   );
+  // A Project hidden in its settings stays out of the list, searches included; Links are always listed.
+  const listed = useMemo(() => session.recent.filter((item) => !item.hidden), [session.recent]);
   // Searching or filtering reads every Project; ordinary browsing only reads expanded groups.
   const searching = !!query.trim() || show !== "all";
   useEffect(() => {
-    const paths = session.recent.filter((item) => searching || expanded.has(item.path)).map((item) => item.path);
+    const paths = listed.filter((item) => searching || expanded.has(item.path)).map((item) => item.path);
     // One slow Project must not hold up the other expanded groups.
     void Promise.all(paths.map(load));
-  }, [expanded, searching, session.recent, load]);
+  }, [expanded, searching, listed, load]);
   const rows = useMemo(() => {
     const result: Row[] = [];
     const needle = query.trim().toLowerCase();
-    for (const project of session.recent) {
+    // Each Project's Chats under the current filter, for the message search below when no Chat title matches.
+    const searchable: {
+      path: string;
+      messages: NonNullable<ReturnType<typeof cachedProject>>["project"]["state"]["messages"];
+      chats: Map<number, AgentSession>;
+    }[] = [];
+    for (const project of listed) {
       const saved = project.path === currentPath && session.snapshot ? session.snapshot : cachedProject(project.path);
       const previews = Object.values(pendingChats).filter((item) => item.hostId === session.client?.url && item.projectPath === project.path);
       const projected = saved && previews.reduce((state, item) => withPendingChat(state, item.preview), saved.project.state);
@@ -159,20 +173,27 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         return { chat, run, pending, sortId, mark: pending && !pending.accepted ? ("running" as const) : chatMark(chat, run, byChat.get(chat.id) || []) };
       });
       // Like desktop's sidebar, a worktree's empty starter Chat stays out until it has a message or a turn is starting.
-      const chats = marked
+      const shown = marked
         .filter(({ chat, run }) => (show === "archived") === !!chat.archived && (run || isListedChat(chat, byChat.get(chat.id)?.length || 0)))
         .filter(({ mark }) => show !== "needs" || NEEDS.includes(mark))
-        .filter(({ mark }) => show !== "running" || mark === "running")
+        .filter(({ mark }) => show !== "running" || mark === "running");
+      if (needle && copy)
+        searchable.push({
+          path: project.path,
+          messages: copy.project.state.messages,
+          chats: new Map(shown.filter(({ pending }) => !pending).map(({ chat }) => [chat.id, chat])),
+        });
+      const chats = shown
         .filter(
           ({ chat }) =>
             !needle ||
             [name, chat.title, chat.generatedTitle, copy?.project.state.worktrees[chat.worktree_id]?.name].some((text) => text?.toLowerCase().includes(needle)),
         )
-        // Newest Chat first, by when it was created, so rows don't jump around as agents reply.
-        .sort((a, b) => b.sortId - a.sortId);
+        // Pinned Chats first in their order, then the newest Chat first, by when it was created, so rows don't jump around as agents reply.
+        .sort((a, b) => comparePins(a.chat, b.chat) || b.sortId - a.sortId);
       if (searching && copy && !chats.length && !(needle && name.toLowerCase().includes(needle)) && !failures[project.path]) continue;
       const section = project.link ? "Links" : "Projects";
-      if (session.recent.some((item) => item.link) && !result.some((row) => row.kind === "section" && row.name === section))
+      if (listed.some((item) => item.link) && !result.some((row) => row.kind === "section" && row.name === section))
         result.push({ key: `section:${section}`, path: "", kind: "section", name: section });
       result.push({ key: project.path, path: project.path, kind: "project", name, expanded: open, members: project.projects });
       if (!open) continue;
@@ -202,9 +223,35 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           message: !copy ? "Loading chats..." : searching ? "No matching chats" : "No chats yet. Start one with +.",
         });
     }
+    // Nothing in a Chat title matched: search what was said in the Chats instead, at most three hits per Chat.
+    if (needle && !result.some((row) => row.kind === "chat")) {
+      const found: Row[] = [];
+      for (const { path, messages, chats } of searchable) {
+        const perChat = new Map<number, number>();
+        for (const match of searchMessages(messages, needle, 200)) {
+          const chat = chats.get(match.message.session_id);
+          const count = perChat.get(match.message.session_id) ?? 0;
+          if (!chat || count >= 3) continue;
+          perChat.set(chat.id, count + 1);
+          found.push({
+            key: `${path}#${chat.id}:message:${match.message.id}`,
+            path,
+            kind: "message",
+            chat,
+            title: chat.title || chat.generatedTitle || "New Chat",
+            snippet: match.snippet,
+            highlight: match.highlight,
+          });
+        }
+      }
+      if (found.length) {
+        result.push({ key: "section:Messages", path: "", kind: "section", name: "Messages" });
+        result.push(...found.slice(0, 30));
+      }
+    }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- revision invalidates rows after the session's preview cache changes.
-  }, [revision, cachedProject, currentPath, expanded, failures, query, searching, show, session.recent, session.snapshot, session.client?.url, pendingChats]);
+  }, [revision, cachedProject, currentPath, expanded, failures, query, searching, show, listed, session.snapshot, session.client?.url, pendingChats]);
 
   // Choosing a Chat or a new Chat goes there at once; the Chat loads the Project behind the splash mark, so nothing
   // waits here.
@@ -502,6 +549,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                     <Text numberOfLines={1} style={[s.secondary, { flex: 1, fontWeight: "500", color: colors.ink }]}>
                       {item.name}
                     </Text>
+                    {attention.some((key) => projectOfKey(key) === item.path) && <AttentionDot />}
                     <Icon icon={item.expanded ? ArrowDown01Icon : ArrowRight01Icon} tone="ink3" size={13} />
                   </View>
                 </PullDown>
@@ -512,6 +560,30 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                   </View>
                 </PullDown>
               </View>
+            );
+          }
+          if (item.kind === "message") {
+            const [start, end] = item.highlight;
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${item.snippet}, in ${item.title}`}
+                onPress={() => select(item.path, item.chat.id)}
+                style={({ pressed }) => [s.chat, { backgroundColor: pressed ? colors.hover : "transparent" }]}
+              >
+                <View style={[s.chatBody, { flex: 1 }]}>
+                  <View style={{ flex: 1, gap: 5 }}>
+                    <Text numberOfLines={2} style={s.chatTitle}>
+                      {item.snippet.slice(0, start)}
+                      <Text style={{ fontWeight: "600" }}>{item.snippet.slice(start, end)}</Text>
+                      {item.snippet.slice(end)}
+                    </Text>
+                    <Text numberOfLines={1} style={s.detail}>
+                      {item.title}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
             );
           }
           if (item.kind === "notice")
@@ -531,7 +603,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           return (
             <View style={[s.chat, { backgroundColor: selected ? colors.hover : "transparent" }]}>
               <PullDown
-                label={`${title}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}`}
+                label={`${title}${item.chat.pinned ? ", pinned" : ""}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}`}
                 title={title}
                 sections={item.pending ? [] : menu}
                 onSelect={(action) => {
@@ -547,6 +619,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                       {title}
                     </Text>
                     <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
+                      {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
                       {!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}
                       <Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>
                         {copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : item.worktree}

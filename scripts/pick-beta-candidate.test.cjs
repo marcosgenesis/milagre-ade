@@ -54,3 +54,19 @@ test("an explicit request still fails when no draft exists", () => {
   const exec = fakeExec({ releases: [release("v1.2.0", "2026-10-01T10:00:00Z")], commits: {} });
   assert.throws(() => pickBetaCandidate({ requested: "v1.2.0", runNumber: 1, exec }), /not a draft/);
 });
+
+test("ignores drafts that are not newer than the published stable and picks by version, not date", () => {
+  const stale = [release("v0.95.3", "2026-10-06T15:53:00Z", { isDraft: true }), release("v0.96.0", "2026-10-06T20:13:00Z")];
+  assert.deepEqual(pickBetaCandidate({ runNumber: 5, exec: fakeExec({ releases: stale, commits: {} }) }), {
+    tag: "",
+    version: "",
+    betaTag: "",
+    changed: false,
+  });
+  assert.throws(
+    () => pickBetaCandidate({ requested: "v0.95.3", runNumber: 5, exec: fakeExec({ releases: stale, commits: {} }) }),
+    /not newer than the published v0.96.0/,
+  );
+  const mixed = [...stale, release("v0.97.0", "2026-10-06T21:00:00Z", { isDraft: true }), release("v0.96.1", "2026-10-06T22:00:00Z", { isDraft: true })];
+  assert.equal(pickBetaCandidate({ runNumber: 5, exec: fakeExec({ releases: mixed, commits: { "v0.97.0": "ddd" } }) }).tag, "v0.97.0");
+});

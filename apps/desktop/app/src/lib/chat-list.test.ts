@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ChatMessage } from "../model";
-import { chatMark, folderName, formatLineCount, orderChats } from "./chat-list.ts";
+import { chatMark, dropIntent, folderName, formatLineCount, orderChats } from "./chat-list.ts";
 
 test("chatMark: a question beats waiting beats running beats unread", () => {
   assert.equal(chatMark({ asking: true, waiting: true, running: true, unread: true }), "question");
@@ -28,7 +28,11 @@ test("formatLineCount and folderName", () => {
 });
 
 test("orderChats sorts newest first by start, or by latest message", () => {
-  const chat = (name: string, ids: number[]) => ({ name, sessionMessages: ids.map((id) => ({ id, session_id: 1, body: "", context: null })) as ChatMessage[] });
+  const chat = (name: string, ids: number[]) => ({
+    name,
+    session: {},
+    sessionMessages: ids.map((id) => ({ id, session_id: 1, body: "", context: null })) as ChatMessage[],
+  });
   const chats = [chat("old but active", [1, 9]), chat("newest", [7, 8]), chat("middle", [4, 5])];
   assert.deepEqual(
     orderChats(chats, "created").map((c) => c.name),
@@ -42,4 +46,40 @@ test("orderChats sorts newest first by start, or by latest message", () => {
     chats.map((c) => c.name),
     ["old but active", "newest", "middle"],
   );
+});
+
+test("orderChats keeps pinned chats on top in their own order, whatever their activity", () => {
+  const chat = (name: string, ids: number[], session = {}) => ({
+    name,
+    session,
+    sessionMessages: ids.map((id) => ({ id, session_id: 1, body: "", context: null })) as ChatMessage[],
+  });
+  const chats = [
+    chat("busy", [1, 99]),
+    chat("second pin", [2], { pinned: true, pin_order: 1 }),
+    chat("first pin", [3, 98], { pinned: true, pin_order: 0 }),
+    chat("quiet", [4]),
+  ];
+  assert.deepEqual(
+    orderChats(chats, "recent").map((c) => c.name),
+    ["first pin", "second pin", "busy", "quiet"],
+  );
+  assert.deepEqual(
+    orderChats(chats, "created").map((c) => c.name),
+    ["first pin", "second pin", "quiet", "busy"],
+  );
+});
+
+test("dropIntent: between rows pins, unpins or reorders; on a row links other Worktrees", () => {
+  const pinned = { pinned: true, worktree: "/a" };
+  const recent = { worktree: "/b" };
+  assert.equal(dropIntent(recent, null, "before"), "pin");
+  assert.equal(dropIntent(pinned, null, "before"), "none");
+  assert.equal(dropIntent(recent, pinned, "after"), "pin");
+  assert.equal(dropIntent(pinned, { pinned: true, worktree: "/c" }, "before"), "reorder");
+  assert.equal(dropIntent(pinned, recent, "before"), "unpin");
+  assert.equal(dropIntent(recent, { worktree: "/c" }, "after"), "none");
+  assert.equal(dropIntent(recent, pinned, "on"), "link");
+  assert.deepEqual(dropIntent(recent, pinned, "on", true), { invalid: "linked" });
+  assert.deepEqual(dropIntent(recent, { worktree: "/b" }, "on"), { invalid: "same-worktree" });
 });

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { CheckmarkCircle02Icon, CircleIcon, MoreVerticalIcon, RefreshIcon } from "@hugeicons/core-free-icons";
+import { Briefcase01Icon, UserIcon, UserMultipleIcon, CheckmarkCircle02Icon, CircleIcon, MoreVerticalIcon, RefreshIcon } from "@hugeicons/core-free-icons";
 import type { AccountsSnapshot, ModelProvider } from "@milagre/shared/model";
-import { providerName } from "@milagre/shared/providers";
+import { accountType, providerName } from "@milagre/shared/providers";
 import { useSession } from "./session";
 import { Icon, ProviderLogo } from "./icons";
 import { IconButton, PullDown, colors, styles } from "./ui";
@@ -96,6 +96,8 @@ export function AccountsForComputer() {
             {group.accounts.map((account, index) => {
               const selected = group.selectedId === account.id;
               const name = account.email || account.label;
+              const type = accountType(account.plan);
+              const typeIcon = type === "Business" ? Briefcase01Icon : type === "Team" ? UserMultipleIcon : UserIcon;
               const details = [
                 account.state === "signed-out"
                   ? "Not signed in"
@@ -104,8 +106,7 @@ export function AccountsForComputer() {
                     : account.state === "unknown"
                       ? "Not checked"
                       : null,
-                account.email ? account.label : null,
-                account.plan,
+                account.email && account.label !== account.email ? account.label : null,
               ]
                 .filter(Boolean)
                 .join(" · ");
@@ -118,7 +119,7 @@ export function AccountsForComputer() {
                     <Pressable
                       accessibilityRole="radio"
                       accessibilityLabel={name}
-                      accessibilityHint="Switches this provider across Projects on your computer"
+                      accessibilityHint={`${type ? `${type} account. ` : ""}Switches this provider across Projects on your computer`}
                       accessibilityState={{ checked: selected, disabled: busy || account.state !== "ready" }}
                       disabled={busy || account.state !== "ready"}
                       onPress={() => {
@@ -138,9 +139,12 @@ export function AccountsForComputer() {
                     >
                       <Icon icon={selected ? CheckmarkCircle02Icon : CircleIcon} tone={selected ? "ink" : "ink3"} size={20} />
                       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-                        <Text numberOfLines={1} style={[styles.text, { fontSize: 15, fontWeight: selected ? "600" : "400" }]}>
-                          {name}
-                        </Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Text numberOfLines={1} style={[styles.text, { flexShrink: 1, fontSize: 15, fontWeight: selected ? "600" : "400" }]}>
+                            {name}
+                          </Text>
+                          {type ? <Icon icon={typeIcon} tone="ink3" size={15} /> : null}
+                        </View>
                         {details ? (
                           <Text numberOfLines={1} style={styles.caption}>
                             {details}

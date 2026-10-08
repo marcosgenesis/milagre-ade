@@ -1,3 +1,4 @@
+const { createAccountRouting } = require("./account-routing.cjs");
 const { createAccounts } = require("./accounts.cjs");
 const { createLinkStore } = require("./link-store.cjs");
 const { createLinkWorkspaces } = require("./link-workspaces.cjs");
@@ -20,13 +21,11 @@ const { createCliCache, inspectCli } = require("./agents/cli.cjs");
 const { runCliUpdate, linkNewestClaudeVersion } = require("./agents/cli-update.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
 const { failedWith, loginMessage } = require("./agents/events.cjs");
-const { createModelCache } = require("./agents/models.cjs");
-const { cliWhenLoggedIn, createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
 const { writeTranscript, generateBrief, createHandoverModels } = require("./agents/handover.cjs");
-const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
+const { discoverSkills, expandSkillPrompt, readDiscoveredSkill } = require("./skills.cjs");
 const { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
 const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
@@ -166,14 +165,15 @@ function createRuntime(options) {
   const usageStore = createUsageStore({ file: path.join(dataDir, "usage-cache.json") });
   // A host may bring its own usage, models and CLI status (the review demo, which runs no real agent).
   const accountUsage = new Map();
-  function usageForAccounts() {
-    const claude = accounts.selected("claude"),
-      codex = accounts.selected("codex");
+  function usageForAccounts(scope) {
+    const claude = accounts.selected("claude", scope),
+      codex = accounts.selected("codex", scope);
     const key = `${claude}-${codex}`;
     if (!accountUsage.has(key)) {
       const store = key === "default-default" ? usageStore : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
       accountUsage.set(key, {
         key,
+        accountIds: { claude, codex },
         store,
         read: createUsageReader({
           ready: () => environmentReady,
@@ -187,6 +187,23 @@ function createRuntime(options) {
       });
     }
     return accountUsage.get(key);
+  }
+
+  async function usageWithAccounts(usage, snapshot) {
+    const identities = await accounts.list();
+    return {
+      ...snapshot,
+      accountKey: usage.key,
+      providers: snapshot.providers.map((provider) => {
+        // Use the IDs captured for this read, even if a selection changed while it was pending.
+        const id = usage.accountIds[provider.provider];
+        const account = identities.providers.find((group) => group.provider === provider.provider)?.accounts.find((entry) => entry.id === id);
+        return {
+          ...provider,
+          account: { id, label: account?.label || "Removed account", ...(account?.email ? { email: account.email } : {}) },
+        };
+      }),
+    };
   }
 
   async function discoverWorktrees(projectPath) {
@@ -330,19 +347,33 @@ function createRuntime(options) {
     if ((await recentProjects().list()).some((item) => item.path === folder)) return;
     throw new Error("Open this project in Milagre first.");
   }
+  // A null Project lists the user's skills only.
   commands.handle("skills:list", async (_event, projectPath) => {
-    await knownFolder(projectPath);
+    if (projectPath !== null) await knownFolder(projectPath);
     return discoverSkills(projectPath);
+  });
+  commands.handle("skills:read", async (_event, projectPath, file) => {
+    if (projectPath !== null) await knownFolder(projectPath);
+    return readDiscoveredSkill(projectPath, file);
   });
   commands.handle("project:branches", async (_event, projectPath) => {
     await knownFolder(projectPath);
     return listBranches(projectPath);
   });
   // The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
-  commands.handle("project:image", async (_event, projectPath) => {
+  async function projectImage(projectPath) {
     await knownFolder(projectPath);
+    const { icon } = await projectSettings().get(projectPath);
+    if (icon) return icon;
     await environmentReady;
     return resolveProjectImage(projectPath);
+  }
+  commands.handle("project:image", (_event, projectPath) => projectImage(projectPath));
+  // The icon the user chose in Settings, or null to go back to the repository's own.
+  commands.handle("project:set-icon", async (_event, projectPath, icon) => {
+    await knownFolder(projectPath);
+    await projectSettings().setIcon(projectPath, icon ?? null);
+    return projectImage(projectPath);
   });
   // Packaged builds get their release version from electron-builder metadata, not the source package.json.
   commands.handle("app:version", () => version);
@@ -478,7 +509,7 @@ function createRuntime(options) {
   async function nameWorktree(projectPath, created, prompt) {
     // The CLI check waits for the login environment and resolves the path the SDK starts directly (no shell). A
     // missing or broken Claude has no command, and the name stays the prompt's first words.
-    const cli = await agentCli("claude");
+    const cli = await agentCli("claude", projectPath);
     const slug = await suggestWorktreeName(prompt, { command: cli.problem ? null : cli.command, env: cli.env, timeoutMs: 15_000 });
     if (closing) return;
     const name = await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug });
@@ -555,24 +586,20 @@ function createRuntime(options) {
     send: (chatId, event) => void chats.receive(chatId, event),
   });
 
-  // lsof reports real paths (/private/var for /var).
-  function realCwd(cwd) {
-    try {
-      return realpathSync(cwd);
-    } catch {
-      return cwd;
-    }
-  }
-
   // The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
   const ports = new PortWatcher({
     isRunning: () => [...agents.sessions.values()].some((entry) => entry.session.turnActive),
-    roots: () => new Map([...agents.processes()].map(([chatId, root]) => [chatId, { ...root, cwd: realCwd(root.cwd) }])),
+    roots: () => agents.processes(),
     publish: (next) => {
       emit("agent:ports", next);
     },
   });
   commands.handle("agent:ports", () => ports.snapshot());
+  commands.handle("chat:ports", (_event, chatId) => {
+    if (typeof chatId !== "string" || !chatId) throw new Error("A Chat is required to list ports.");
+    const snapshot = ports.snapshot();
+    return { chatId, ports: Object.hasOwn(snapshot, chatId) ? snapshot[chatId] : [] };
+  });
   // The renderer is untrusted: only a pid the chat's port list shows can be stopped.
   commands.handle("agent:stop-port", (_event, chatId, pid) => (typeof chatId === "string" && Number.isInteger(pid) ? ports.stopPort(chatId, pid) : false));
 
@@ -585,7 +612,9 @@ function createRuntime(options) {
     const images = decodeImages(request.images);
     // expandSkills: false (the review demo) sends `/skill` as typed: the skills on this Mac are the owner's own.
     const prompt = options.expandSkills === false ? request.prompt : await expandSkillPrompt(request.cwd, request.prompt);
-    const cli = await agentCli(request.provider === "codex" ? "codex" : "claude");
+    const cli =
+      agents.activeAccount(request.chatId, request.provider) ??
+      (await agentCli(request.provider === "codex" ? "codex" : "claude", projectOfKey(request.chatId)));
     // A CLI that is missing, too old or doesn't start fails the turn like any other failure, with its own message.
     if (cli.problem) {
       await chats.receive(request.chatId, failedWith(cli.problem));
@@ -611,14 +640,11 @@ function createRuntime(options) {
     }
   }
 
-  // Built on the first handover: agentCli is declared after the chats.
-  let handoverModels;
-
   const chats = new ChatHost({
     states: scopeStates,
     startTurn: (request) => track(() => startAgentTurn(request), starting),
-    readSubagents: async ({ cwd, agents }) => {
-      const cli = await agentCli("codex");
+    readSubagents: async ({ cwd, agents, projectPath }) => {
+      const cli = await agentCli("codex", projectPath);
       return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, env: cli.env, clientVersion: version });
     },
     nameChat: (projectPath, sessionId) => chatTitles.name(projectPath, sessionId),
@@ -628,7 +654,7 @@ function createRuntime(options) {
     isChatFocused: options.isChatFocused,
     handoverTools: {
       writeTranscript: (input) => track(() => writeTranscript({ ...input, dir: path.join(dataDir, "handovers") }), background),
-      brief: ({ cwd, worktrees, ...input }) =>
+      brief: ({ cwd, worktrees, projectPath, ...input }) =>
         generateBrief(
           {
             ...input,
@@ -649,7 +675,7 @@ function createRuntime(options) {
                     .filter(Boolean)
                     .map((line) => line.slice(3)),
           },
-          { models: (handoverModels ??= createHandoverModels({ cli: agentCli, clientVersion: version })) },
+          { models: createHandoverModels({ cli: (provider) => agentCli(provider, projectPath), clientVersion: version }) },
         ),
     },
   });
@@ -664,12 +690,14 @@ function createRuntime(options) {
     cli: baseCli,
     ready: () => environmentReady,
     changed(provider) {
-      agentCliStatus.invalidate?.(provider);
-      agentModels.invalidate?.(provider);
+      routing.invalidate(provider);
+      options.agentCliStatus?.invalidate?.(provider);
+      options.agentModels?.invalidate?.(provider);
       emit("accounts:changed", {});
     },
   });
-  const agentCli = async (provider) => ({ ...(await baseCli(provider)), env: accounts.environment(provider), accountId: accounts.selected(provider) });
+  const routing = createAccountRouting({ accounts, cli: baseCli, clientVersion: version });
+  const agentCli = routing.cli;
   agentCli.invalidate = (provider) => baseCli.invalidate?.(provider);
   commands.handle("accounts:list", (_event, refresh) => accounts.list(refresh === true));
   let accountMutation = Promise.resolve();
@@ -680,24 +708,32 @@ function createRuntime(options) {
       return pending;
     });
 
-  const titleModels = options.titleModels ?? createChatTitleModels({ cli: agentCli, clientVersion: version });
-  const chatTitles = new ChatTitles({ states: scopeStates, update: updateProject, generate: (request) => generateChatTitle(request, { models: titleModels }) });
+  const chatTitles = new ChatTitles({
+    states: scopeStates,
+    update: updateProject,
+    generate: (request) =>
+      generateChatTitle(request, {
+        models: options.titleModels ?? createChatTitleModels({ cli: (provider) => agentCli(provider, request.projectPath), clientVersion: version }),
+      }),
+  });
 
-  commands.handle("usage:read", async () => {
+  commands.handle("usage:read", async (_event, scope) => {
+    scope = await validateAccountScope(scope, true);
     if (options.readUsage) return options.readUsage();
     await environmentReady;
-    const usage = usageForAccounts();
-    return { ...(await usage.read()), accountKey: usage.key };
+    const usage = usageForAccounts(scope);
+    return usageWithAccounts(usage, await usage.read());
   });
-  commands.handle("usage:cached", () => {
-    const usage = usageForAccounts();
-    return { ...cachedSnapshot(usage.store, Date.now()), accountKey: usage.key };
+  commands.handle("usage:cached", async (_event, scope) => {
+    scope = await validateAccountScope(scope, true);
+    const usage = usageForAccounts(scope);
+    return usageWithAccounts(usage, cachedSnapshot(usage.store, Date.now()));
   });
 
   // The "Commit and open PR" dialog: Milagre runs git and gh itself, in the chat's folder, once the login
   // environment is in (gh from a Finder launch). Its one-shot text call starts the CLI agentCli found.
   registerGitHandlers(commands, {
-    cli: (name) => agentCli(name),
+    cli: async (name, cwd) => agentCli(name, await accountScopeForFolder(cwd)),
     ready: () => environmentReady,
     clientVersion: version,
     knownFolders: () => scopeStates.worktreePaths(),
@@ -753,8 +789,12 @@ function createRuntime(options) {
 
   // What the model picker flags per agent: missing, outdated, broken or logged out. A ready CLI is looked at again
   // after 5 minutes, a problem on every call.
-  const agentCliStatus = options.agentCliStatus ?? createCliStatus({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: version });
-  commands.handle("agent:cli-status", () => agentCliStatus());
+  const agentCliStatus = (scope) => (options.agentCliStatus ? options.agentCliStatus() : routing.services(scope).status());
+  agentCliStatus.invalidate = (provider) => {
+    routing.invalidate(provider);
+    options.agentCliStatus?.invalidate?.(provider);
+  };
+  commands.handle("agent:cli-status", async (_event, scope) => agentCliStatus(await validateAccountScope(scope, true)));
   commands.handle("agent:update-cli", async (_event, provider) => {
     const result = await runCliUpdate(provider);
     agentCli.invalidate(provider);
@@ -763,9 +803,10 @@ function createRuntime(options) {
     return { ...result, status: status[provider] };
   });
 
-  const agentModels =
-    options.agentModels ?? createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: version });
-  commands.handle("agent:models", () => agentModels());
+  commands.handle("agent:models", async (_event, scope) => {
+    scope = await validateAccountScope(scope, true);
+    return options.agentModels ? options.agentModels() : routing.services(scope).models();
+  });
 
   commands.handle("agent:interrupt", async (_event, chatId) => {
     await worktreeSetups.cancel(chatId);
@@ -906,6 +947,52 @@ function createRuntime(options) {
       }
     }
   }
+  async function accountScopes() {
+    const projects = await projectRegistry().list();
+    const registry = await projectRegistry().snapshot();
+    return [
+      ...projects.map((p) => ({
+        key: p.path,
+        name: p.name || projectName(p.path),
+        kind: "project",
+        projects: [{ id: p.id, path: p.path, name: p.name || projectName(p.path) }],
+      })),
+      ...(registry.projectGroups ?? []).map((link) => ({
+        key: scopeKey({ kind: "link", linkId: link.id }),
+        name: link.name,
+        kind: "link",
+        projects: link.projectIds
+          .map((id) => projects.find((p) => p.id === id))
+          .filter(Boolean)
+          .map(({ id, path, name }) => ({ id, path, name })),
+      })),
+    ];
+  }
+  async function validateAccountScope(key, optional = false) {
+    if (key === undefined || key === null) {
+      if (optional) return undefined;
+      throw new Error("Choose a Project or Link.");
+    }
+    if (typeof key !== "string" || !key) throw new Error("Choose a valid Project or Link.");
+    const scopes = await accountScopes();
+    if (scopes.some((scope) => scope.key === key)) return key;
+    throw new Error("Project or Link is no longer available. Refresh and choose another.");
+  }
+  async function accountScopeForFolder(cwd) {
+    if (!cwd) throw new Error("Choose a Chat folder.");
+    for (const key of scopeStates.projects().filter(isLinkScopeKey)) {
+      const state = await scopeStates.get(key);
+      if (Object.values(state.sessions).some((s) => s.workspacePath === cwd || s.worktrees?.some((m) => m.worktreePath === cwd))) return key;
+    }
+    return (await resolveProject(cwd)).path;
+  }
+  commands.handle("accounts:scopes", () => accountScopes());
+  commands.handle("accounts:scope", async (_event, key, refresh) => accounts.scope(await validateAccountScope(key), refresh === true));
+  commands.handle("accounts:assign", (_event, key, provider, id) => {
+    const pending = accountMutation.then(async () => accounts.assign(await validateAccountScope(key), provider, id));
+    accountMutation = pending.catch(() => {});
+    return pending;
+  });
   commands.handle("project:registry", () => projectRegistry().list());
   commands.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
   commands.handle("canvas:snapshot", async () => {
@@ -929,7 +1016,22 @@ function createRuntime(options) {
     if (!(await projectRegistry().list()).some((project) => project.path === requested)) throw new Error("Project is not in the registry.");
     return openProject(requested);
   });
-  commands.handle("project:recent", () => recentProjects().list());
+  // Each recent Project says whether the user hid it from the sidebar and the phone's list.
+  async function withHidden(list) {
+    const hidden = await projectSettings().hiddenPaths();
+    return list.map((project) => (hidden.has(project.path) ? { ...project, hidden: true } : project));
+  }
+  commands.handle("project:recent", async () => withHidden(await recentProjects().list()));
+  commands.handle("project:set-hidden", async (_event, projectPath, hidden) => {
+    await knownFolder(projectPath);
+    await projectSettings().setHidden(projectPath, hidden === true);
+    return withHidden(await recentProjects().list());
+  });
+  // Reads a recent Project's chats for the all-Projects sidebar without making it the open one or reordering the list.
+  commands.handle("project:read", async (_event, projectPath) => {
+    if (!(await recentProjects().list()).some((item) => item.path === projectPath)) throw new Error("Open this project in Milagre first.");
+    return readProject(projectPath);
+  });
   commands.handle("project:snapshot", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");
     return { path: projectPath, name: projectName(projectPath), state: await states.get(projectPath) };
@@ -941,7 +1043,7 @@ function createRuntime(options) {
     return Object.values((await states.get(projectPath)).worktrees ?? {}).map((worktree) => worktree.path);
   });
   commands.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
-  commands.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
+  commands.handle("project:forget", async (_event, projectPath) => withHidden(await recentProjects().forget(projectPath)));
   // The phone's project search: Git repositories under the home folder, matched by name (see project-finder.cjs).
   const projectFinder = createProjectFinder(options.projectSearchRoot || require("node:os").homedir());
   commands.handle("project:find", (_event, query) => projectFinder.search(typeof query === "string" ? query.slice(0, 200) : ""));

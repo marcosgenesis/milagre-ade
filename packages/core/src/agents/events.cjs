@@ -22,7 +22,7 @@ function milagreInstructions(tldrEnabled = true, workspaceInstructions = "") {
     tldrEnabled
       ? TLDR_INSTRUCTIONS
       : "Automatic TLDR writing is disabled in Settings. Do not carry forward previously applied automatic TLDR rules. Explicit /tldr requests and the user's own writing preferences still apply.",
-    "Milagre folds your thinking away and the user rarely opens it. Anything they need to read (an answer, findings, the reason behind a question) goes in your reply text, written before you ask a question or end the turn.",
+    "Milagre folds your thinking away and the user rarely opens it. Anything they need to read (an answer, findings, the reason behind a question) goes in your reply text, written before you ask a question or end the turn. Never leave a summary or a conclusion meant for the user only in your thinking: if you catch yourself drafting one there, write it as reply text before the next tool call.",
     "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
     LINKS_INSTRUCTIONS,
     "Simulators: use milagre simulator_list, simulator_attach and simulator_detach to manage devices for this Chat. After choosing a simulator for mobile work, attach its exact deviceId so the user can view it. The bundled simulator skill has the workflow. Discovery never attaches devices; detach leaves them running.",
@@ -129,6 +129,23 @@ function mapClaudeMessage(message, state) {
     state.sessionId = message.session_id;
     events.push({ type: "session-started", nativeId: message.session_id });
   }
+  // Claude Code compacts the conversation when the context window fills: a status, then a boundary.
+  if (message.type === "system" && message.subtype === "status" && message.status === "compacting" && !state.compacting) {
+    state.compactCount = (state.compactCount ?? 0) + 1;
+    state.compacting = `compact-${state.compactCount}`;
+    events.push({ type: "step-started", step: { id: state.compacting, kind: "other", title: "Compacting context" } });
+  }
+  if (message.type === "system" && message.subtype === "compact_boundary") {
+    if (state.compacting) events.push({ type: "step-completed", id: state.compacting, status: "done", title: "Compacted context" });
+    state.compacting = null;
+    const after = message.compact_metadata?.post_tokens;
+    if (typeof after === "number") events.push(...claudeContextUsage(state, after));
+  }
+  if (message.type === "assistant" && message.parent_tool_use_id == null && message.message?.usage) {
+    const usage = message.message.usage;
+    const used = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.output_tokens ?? 0);
+    events.push(...claudeContextUsage(state, used));
+  }
   if (message.type === "stream_event" && message.parent_tool_use_id == null) {
     const event = message.event ?? {};
     if (event.type === "content_block_start" && event.content_block?.type === "text" && state.hasText) events.push(textDelta(state, "\n\n"));
@@ -177,7 +194,25 @@ function mapClaudeMessage(message, state) {
       if (tasks) events.push({ type: "tasks-updated", tasks });
     }
   }
+  // Claude Code records some task notifications in the transcript without asking the model, and ends
+  // that turn with a result of its own: no model call, no text, and no message of ours. It isn't the
+  // end of the turn Milagre is running (on resume it lands just before the user's message is read).
+  if (
+    message.type === "result" &&
+    message.subtype === "success" &&
+    !message.is_error &&
+    message.num_turns === 0 &&
+    !message.result &&
+    !message.user_message_uuids?.length
+  )
+    return events;
   if (message.type === "result") {
+    // The window size only arrives with a result, so the first turn shows its usage when it ends.
+    const windows = Object.values(message.modelUsage ?? {}).map((usage) => usage?.contextWindow ?? 0);
+    if (Math.max(0, ...windows) > 0) {
+      state.contextWindow = Math.max(...windows);
+      if (state.contextUsed !== undefined) events.push(...claudeContextUsage(state, state.contextUsed));
+    }
     if (message.subtype === "success" && !message.is_error) events.push({ type: "turn-completed" });
     else if (state.authFailed) events.push(failedWith(loginMessage("claude"), { login: true }));
     else
@@ -186,17 +221,30 @@ function mapClaudeMessage(message, state) {
         message: (message.errors?.length ? message.errors.join("\n") : message.result) || "Claude could not finish this turn.",
       });
     state.authFailed = false;
+    state.compacting = null;
   }
   return events;
 }
 
+// The context gauge, once the window size is known.
+function claudeContextUsage(state, used) {
+  state.contextUsed = used;
+  return state.contextWindow ? [{ type: "context-usage", used, size: state.contextWindow }] : [];
+}
+
 // codex app-server notification -> events. Everything not listed is ignored on purpose:
-// the server also reports MCP startup, hooks, rate limits, token usage and the turn's running diff.
+// the server also reports MCP startup, hooks, rate limits and the turn's running diff.
 function mapCodexNotification(method, params, state) {
   const children = codexSubagents(method, params, state);
   if (children.length) return children;
   if (params.threadId && state.threadId && params.threadId !== state.threadId) return [];
   if (method === "turn/started") return [{ type: "turn-started", turnId: params.turn?.id ?? null }];
+  // The last request's tokens are what the context window holds now.
+  if (method === "thread/tokenUsage/updated") {
+    const used = params.tokenUsage?.last?.totalTokens;
+    const size = params.tokenUsage?.modelContextWindow;
+    return typeof used === "number" && size > 0 ? [{ type: "context-usage", used, size }] : [];
+  }
   if ((method === "item/started" || method === "item/completed") && params.item) {
     // An item from an earlier turn is not part of this reply.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];

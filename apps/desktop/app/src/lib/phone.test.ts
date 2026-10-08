@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pairedPhonesLine, pairingWindow, phoneQrSrc, phoneStatusLine } from "./phone.ts";
+import { pairedPhonesLine, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "./phone.ts";
 
 test("the status line says what is happening and where the phone can reach this Mac", () => {
   assert.equal(phoneStatusLine(null), "Checking…");
@@ -52,4 +52,16 @@ test("the QR image source is an inert data URL", () => {
   const src = phoneQrSrc('<svg viewBox="0 0 1 1"><path d="M0 0h1"/></svg>');
   assert.match(src, /^data:image\/svg\+xml;charset=utf-8,%3Csvg/);
   assert.equal(decodeURIComponent(src.split(",")[1]), '<svg viewBox="0 0 1 1"><path d="M0 0h1"/></svg>');
+});
+
+test("phoneLanLine says where a phone on the same network reaches this Mac", () => {
+  const on = { enabled: true, state: "on", remote: "relay" } as const;
+  assert.equal(phoneLanLine(null), null);
+  assert.equal(phoneLanLine({ ...on, lan: { enabled: false, addresses: [] } }), "Off");
+  assert.equal(phoneLanLine({ ...on, lan: { enabled: true, addresses: ["192.168.1.20", "10.0.0.7"] } }), "Reachable at 192.168.1.20, 10.0.0.7");
+  assert.equal(phoneLanLine({ ...on, lan: { enabled: true, addresses: [] } }), "Not connected to a local network");
+  assert.equal(
+    phoneLanLine({ ...on, lan: { enabled: true, addresses: [], error: "listen EADDRINUSE" } }),
+    "Couldn't listen on the local network: listen EADDRINUSE",
+  );
 });

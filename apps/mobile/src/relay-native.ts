@@ -3,6 +3,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { createRelayTransport, type RelayTransport } from "./relay-transport";
 import { phoneIdentity, phoneRandom } from "./phone-identity";
 import type { RelayRuntime } from "./client";
+import { lanRoutes } from "./routes-native";
 
 /** One transport per Mac, shared by every client; a new pairing code for the same Mac replaces it. */
 const open = new Map<string, { pairing: string; transport: RelayTransport }>();
@@ -36,6 +37,7 @@ export const relayRuntime: RelayRuntime & { forget(hostId: string): void } = {
     open.get(hostId)?.transport.close();
     open.delete(hostId);
   },
+  lan: (host) => lanRoutes.view(host),
   files: {
     async find(name) {
       const file = new File(folder(), name);

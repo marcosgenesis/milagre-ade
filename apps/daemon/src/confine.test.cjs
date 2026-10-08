@@ -83,6 +83,7 @@ const callsAt = (target, demo) => [
   ["project:open", [target]],
   ["project:branches", [target]],
   ["skills:list", [target]],
+  ["skills:read", [target, path.join(target, "SKILL.md")]],
   ["chat:send", [{ projectPath: target, sessionId: 1, body: "hi", provider: "codex", model: "demo", permissionMode: "ask" }]],
   ["chat:send", [{ projectPath: demo, cwd: target, sessionId: 1, body: "hi", provider: "codex", model: "demo", permissionMode: "ask" }]],
   [
@@ -551,4 +552,9 @@ test("the project search lists only repositories inside the folder, and a Projec
   assert.equal((await f.rpc("project:open", [f.demo])).status, 200);
   assert.equal((await f.rpc("project:image", [f.demo])).status, 200);
   assert.equal((await f.rpc("project:image", [f.outside])).status, 403);
+});
+
+test("a confined bridge refuses phone:routes even when it has the hook", async (t) => {
+  const f = await fixture(t, { bridgeOptions: { phoneRoutes: async () => ({ hostId: "h", key: "k", lan: [] }) } });
+  assert.equal((await f.rpc("phone:routes", [{ phoneKey: "p".repeat(43) }])).status, 403);
 });

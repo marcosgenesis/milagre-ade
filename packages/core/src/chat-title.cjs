@@ -71,7 +71,7 @@ class ChatTitles {
     const title =
       session.title || session.generatedTitle || !first?.body.trim()
         ? null
-        : await this.generate({ prompt: first.body, provider: session.provider }).catch(() => null);
+        : await this.generate({ prompt: first.body, provider: session.provider, projectPath }).catch(() => null);
     await this.update(projectPath, (latest) => {
       const current = latest.sessions[sessionId];
       if (!current?.titlePending) return latest;

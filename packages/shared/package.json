@@ -18,7 +18,9 @@
     "src/usage.ts",
     "src/simulator.ts",
     "src/browser.ts",
-    "src/message-navigation.ts"
+    "src/message-navigation.ts",
+    "src/message-search.ts",
+    "src/agent-activity.ts"
   ],
   "type": "module",
   "exports": {
@@ -89,6 +91,7 @@
     "./diff-tree": "./src/diff-tree.ts",
     "./diff-layout": "./src/diff-layout.ts",
     "./usage": "./src/usage.ts",
+    "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
@@ -100,10 +103,12 @@
       "default": "./src/browser-receiver.mjs"
     },
     "./message-navigation": "./src/message-navigation.ts",
+    "./message-search": "./src/message-search.ts",
     "./file-syntax": {
       "types": "./src/file-syntax.d.mts",
       "default": "./src/file-syntax.mjs"
-    }
+    },
+    "./agent-activity": "./src/agent-activity.ts"
   },
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",

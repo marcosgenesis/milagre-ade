@@ -1,8 +1,11 @@
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft02Icon, SidebarRight01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowLeft02Icon, ArrowRight02Icon, SidebarRight01Icon } from "@hugeicons/core-free-icons";
 import { useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Tooltip from "../primitives/Tooltip";
+import GlideMenu from "../primitives/GlideMenu";
+import { ScrollArea } from "../primitives/ScrollArea";
+import { useDismiss } from "../../lib/use-dismiss";
 import { EASE_OUT } from "../../lib/ease";
 
 /**
@@ -112,6 +115,92 @@ export function ChangesToggle({ open, onToggle }: { open: boolean; onToggle: () 
           <HugeiconsIcon icon={SidebarRight01Icon} size={18} strokeWidth={1.8} color="currentColor" />
         </button>
       </Tooltip>
+    </div>
+  );
+}
+
+export type AttentionItem = { key: string; project: string; title?: string; asking: boolean; waitingFor?: string };
+
+/**
+ * Top right, left of the changes toggle when it shows. One waiting chat opens on click; several open a menu
+ * that lists each, oldest first, so you pick where to go.
+ */
+export function AttentionButton({ label, items, offset, onOpen }: { label: string; items: AttentionItem[]; offset: boolean; onOpen: (key: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const many = items.length > 1;
+  // The button is fixed to the window's corner, so a scroll or resize never moves it: the menu stays open.
+  useDismiss(
+    open && many,
+    () => setOpen(false),
+    (target) => !!target.closest("[data-attention]"),
+    () => {},
+  );
+  const go = (key: string) => {
+    setOpen(false);
+    onOpen(key);
+  };
+  return (
+    <div
+      data-attention
+      className={`fixed top-[14px] z-[60] [-webkit-app-region:no-drag] ${offset ? "right-12" : "right-3"}`}
+      style={{ animation: "fade-in 160ms ease-out" }}
+    >
+      <button
+        ref={trigger}
+        type="button"
+        data-attention-button
+        aria-haspopup={many ? "menu" : undefined}
+        aria-expanded={many ? open : undefined}
+        onClick={() => (many ? setOpen((value) => !value) : items[0] && go(items[0].key))}
+        className={`flex h-8 items-center gap-1.5 rounded-control px-2.5 text-[13px] font-medium text-orange transition-colors hover:bg-hover ${open ? "bg-hover" : ""}`}
+      >
+        <span className="max-w-80 truncate">{label}</span>
+        <HugeiconsIcon icon={many ? ArrowDown01Icon : ArrowRight02Icon} size={15} strokeWidth={2} color="currentColor" />
+      </button>
+      {open && many && (
+        <div
+          role="menu"
+          aria-label="Chats waiting for you"
+          data-attention-menu
+          onKeyDown={(event) => {
+            const rows = [...event.currentTarget.querySelectorAll<HTMLElement>("[role=menuitem]")];
+            const index = rows.indexOf(document.activeElement as HTMLElement);
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setOpen(false);
+              trigger.current?.focus();
+            } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              rows[(index + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length]?.focus();
+            }
+          }}
+          className="absolute top-full right-0 mt-1.5 flex w-72 flex-col overflow-hidden rounded-[14px] bg-surface shadow-overlay"
+          style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "top right" }}
+        >
+          <ScrollArea className="max-h-80 p-1.5">
+            <GlideMenu className="flex flex-col gap-px" rowSelector="[role=menuitem]" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
+              {items.map((item, index) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="menuitem"
+                  data-attention-chat={item.key}
+                  autoFocus={index === 0}
+                  onClick={() => go(item.key)}
+                  className="relative z-10 flex min-h-11 w-full flex-col justify-center rounded-[8px] px-2.5 py-1.5 text-left outline-none focus-visible:bg-hover-2"
+                >
+                  <span className="w-full truncate text-[13.5px] text-ink">{item.title || item.waitingFor || "Chat"}</span>
+                  <span className="w-full truncate text-[11.5px] text-ink-3">
+                    {item.project} ·{" "}
+                    <span className={item.asking ? "text-accent-ink" : "text-orange"}>{item.asking ? "Asking you" : "Waiting for approval"}</span>
+                  </span>
+                </button>
+              ))}
+            </GlideMenu>
+          </ScrollArea>
+        </div>
+      )}
     </div>
   );
 }

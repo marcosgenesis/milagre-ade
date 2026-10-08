@@ -1,11 +1,12 @@
 /** A project in the recent list, as the main process keeps it (most recent first). */
-export type RecentProject = { path: string; name: string; openedAt: string };
+/** `hidden`: kept out of the all-Projects sidebar and the phone's Projects list. */
+export type RecentProject = { path: string; name: string; openedAt: string; hidden?: boolean };
 
 /** One project row in the project menu. */
 export type ProjectRow = { path: string; name: string; initial: string; current: boolean };
 
 /** The letter shown for a project without an avatar. */
-function projectInitial(name: string): string {
+export function projectInitial(name: string): string {
   return name.trim().slice(0, 1).toUpperCase() || "M";
 }
 
@@ -27,3 +28,6 @@ export function projectRows({ recent, currentPath, currentName }: { recent: Rece
     return [{ path: project.path, name: project.name, initial: projectInitial(project.name), current: project.path === currentPath }];
   });
 }
+
+/** Fired on window after a project is hidden or shown again, so lists read from the main process refresh. */
+export const RECENT_PROJECTS_CHANGED = "milagre:recent-projects-changed";

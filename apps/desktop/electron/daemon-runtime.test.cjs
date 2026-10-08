@@ -121,7 +121,8 @@ test("recovery disconnects an overflowing event stream before publishing a snaps
           // Recovery must reject the stream even when the snapshot never arrives.
           return;
         }
-        const result = request.method === "daemon:status" ? { capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1"], methods: [] } : null;
+        const result =
+          request.method === "daemon:status" ? { capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1"], methods: [], version: "test" } : null;
         protocol.send({ v: 1, id: request.id, result });
       },
     });
@@ -279,7 +280,7 @@ async function fakeHost(t, { capabilities = ["desktop-v1", "snapshot-pages-v1", 
           void onStop?.(connection, server);
           return;
         }
-        const result = request.method === "daemon:status" ? { capabilities, methods: ["project:open"] } : null;
+        const result = request.method === "daemon:status" ? { capabilities, methods: ["project:open"], version: "test" } : null;
         protocol.send({ v: 1, id: request.id, result });
       },
     });
@@ -479,7 +480,7 @@ async function restartableHost(t) {
           }
           const result =
             request.method === "daemon:status"
-              ? { capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1"], methods: ["chat:send", "chat:patch"] }
+              ? { capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1"], methods: ["chat:send", "chat:patch"], version: "test" }
               : request.method === "daemon:snapshot"
                 ? { snapshotId: 1, pageCount: 1, eventSeq: 0 }
                 : request.method === "daemon:snapshot-page"

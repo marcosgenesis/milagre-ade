@@ -37,18 +37,28 @@
     linear-gradient(to bottom, transparent, #000 var(--subagent-edge-size), #000 calc(100% - var(--subagent-edge-size)), transparent);
   mask-composite: intersect;
 }
-/* Fade the entire surface so the blurred edge never leaves a crisp, clipped copy underneath. */
+/* The surface fades out at its edges, so the blurred edge never leaves a crisp, clipped copy underneath.
+ * Two blurs build it up progressively: a light one over the whole edge, a full one over its outer half. */
+.subagent-canvas-surface::before,
 .subagent-canvas-surface::after {
+  --edge: var(--subagent-edge-size);
   content: "";
   position: absolute;
   z-index: 3;
   inset: 0;
   pointer-events: none;
+  mask-image:
+    linear-gradient(to right, #000, transparent var(--edge)), linear-gradient(to left, #000, transparent var(--edge)),
+    linear-gradient(to bottom, #000, transparent var(--edge)), linear-gradient(to top, #000, transparent var(--edge));
+}
+.subagent-canvas-surface::before {
+  backdrop-filter: blur(calc(var(--blur-edge) * 0.5));
+  -webkit-backdrop-filter: blur(calc(var(--blur-edge) * 0.5));
+}
+.subagent-canvas-surface::after {
+  --edge: calc(var(--subagent-edge-size) / 2);
   backdrop-filter: blur(var(--blur-edge));
   -webkit-backdrop-filter: blur(var(--blur-edge));
-  mask-image:
-    linear-gradient(to right, #000, transparent var(--subagent-edge-size)), linear-gradient(to left, #000, transparent var(--subagent-edge-size)),
-    linear-gradient(to bottom, #000, transparent var(--subagent-edge-size)), linear-gradient(to top, #000, transparent var(--subagent-edge-size));
 }
 .subagent-canvas-surface:focus-visible {
   outline: none;
@@ -111,57 +121,6 @@
 }
 .subagent-canvas-node[data-color="boss"] {
   --bot-tint: #d4e3fb;
-}
-
-.subagent-thinking-bubble {
-  position: absolute;
-  z-index: 2;
-  top: -37px;
-  left: calc(50% + 23px);
-  width: 64px;
-  height: 46px;
-  color: var(--ink-2);
-  pointer-events: none;
-  transform-origin: 8px 42px;
-  animation: subagent-cloud-drift 6s ease-in-out infinite;
-}
-.subagent-thinking-bubble > svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  fill: var(--surface);
-  stroke: var(--line-strong);
-  stroke-width: 1.2;
-  stroke-linejoin: round;
-}
-.subagent-thinking-bubble > span {
-  position: absolute;
-  top: 17px;
-  left: 22px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.subagent-thinking-bubble i {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.35;
-  animation: subagent-thinking 2.4s ease-in-out infinite;
-}
-.subagent-thinking-bubble i:nth-child(2) {
-  animation-delay: 0.24s;
-}
-.subagent-thinking-bubble i:nth-child(3) {
-  animation-delay: 0.48s;
-}
-.subagent-thinking-bubble[data-speaking="true"] {
-  color: var(--accent);
-}
-.subagent-thinking-bubble[data-speaking="true"] > svg {
-  stroke: var(--accent);
 }
 
 .subagent-bot-handle {
@@ -488,26 +447,6 @@
   }
   45% {
     scale: 1 0.12;
-  }
-}
-@keyframes subagent-cloud-drift {
-  0%,
-  100% {
-    transform: translate(0, 0) rotate(-2deg);
-  }
-  50% {
-    transform: translate(2px, -4px) rotate(2deg);
-  }
-}
-@keyframes subagent-thinking {
-  0%,
-  45%,
-  100% {
-    opacity: 0.2;
-  }
-  12%,
-  22% {
-    opacity: 0.85;
   }
 }
 @keyframes subagent-sleep-drift {

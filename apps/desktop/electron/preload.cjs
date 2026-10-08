@@ -1,5 +1,5 @@
 // @ts-check
-/** @typedef {import("../app/src/electron.d.ts")} BridgeTypes */
+/** @typedef {typeof import("../app/src/electron.d.ts")} BridgeTypes */
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 /** @type {Window["milagre"]} */
@@ -41,8 +41,12 @@ const bridge = {
   readAttachment: (file) => ipcRenderer.invoke("attachment:preview", file),
   searchProjectFiles: (root, query) => ipcRenderer.invoke("project:files", root, query),
   listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),
+  readSkill: (projectPath, file) => ipcRenderer.invoke("skills:read", projectPath, file),
+  openSkill: (request) => ipcRenderer.invoke("skills:open", request),
+  revealSkill: (projectPath, file) => ipcRenderer.invoke("skills:reveal", projectPath, file),
   listBranches: (projectPath) => ipcRenderer.invoke("project:branches", projectPath),
   getProjectImage: (projectPath) => ipcRenderer.invoke("project:image", projectPath),
+  setProjectIcon: (projectPath, icon) => ipcRenderer.invoke("project:set-icon", projectPath, icon),
   getAppVersion: () => ipcRenderer.invoke("app:version"),
   createWorktree: (request) => ipcRenderer.invoke("worktree:create", request),
   getWorktreeRoots: () => ipcRenderer.invoke("worktree:roots"),
@@ -79,9 +83,12 @@ const bridge = {
   getCurrentProject: () => ipcRenderer.invoke("project:current"),
   openProject: () => ipcRenderer.invoke("project:open"),
   listRecentProjects: () => ipcRenderer.invoke("project:recent"),
+  setProjectHidden: (projectPath, hidden) => ipcRenderer.invoke("project:set-hidden", projectPath, hidden),
+  readProject: (projectPath) => ipcRenderer.invoke("project:read", projectPath),
   listNamedLinks: () => ipcRenderer.invoke("link:list"),
   createNamedLink: (request) => ipcRenderer.invoke("link:create", request),
   openNamedLink: (id) => ipcRenderer.invoke("link:open", id),
+  readLink: (id) => ipcRenderer.invoke("link:snapshot", id),
   sendLinkMessage: (request) => ipcRenderer.invoke("link:send", request),
   onLinkState: (callback) => {
     const listener = (_event, update) => callback(update);
@@ -125,8 +132,11 @@ const bridge = {
   addGitNote: (chatId, body) => ipcRenderer.invoke("chat:git-note", chatId, body),
   setOpenChat: (chatId) => ipcRenderer.invoke("chat:set-open", chatId),
   getRuns: () => ipcRenderer.invoke("chat:runs"),
-  getModels: () => ipcRenderer.invoke("agent:models"),
-  getCliStatus: () => ipcRenderer.invoke("agent:cli-status"),
+  listAccountScopes: () => ipcRenderer.invoke("accounts:scopes"),
+  getProjectAccounts: (scopeKey, refresh) => ipcRenderer.invoke("accounts:scope", scopeKey, refresh),
+  assignProjectAccount: (scopeKey, provider, accountId) => ipcRenderer.invoke("accounts:assign", scopeKey, provider, accountId),
+  getModels: (scopeKey) => ipcRenderer.invoke("agent:models", scopeKey),
+  getCliStatus: (scopeKey) => ipcRenderer.invoke("agent:cli-status", scopeKey),
   updateCli: (provider) => ipcRenderer.invoke("agent:update-cli", provider),
   interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
   respondToPermission: (chatId, requestId, decision) => ipcRenderer.invoke("agent:respond-permission", { chatId, requestId, decision }),
@@ -156,6 +166,7 @@ const bridge = {
   },
   getPhoneStatus: () => ipcRenderer.invoke("phone:status"),
   setPhoneEnabled: (enabled) => ipcRenderer.invoke("phone:set-enabled", enabled),
+  setPhoneLan: (enabled) => ipcRenderer.invoke("phone:set-lan", enabled),
   resetPhoneAccess: () => ipcRenderer.invoke("phone:reset"),
   openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
   onPhoneStatus: (callback) => {
@@ -170,9 +181,9 @@ const bridge = {
     ipcRenderer.on("accounts:changed", listener);
     return () => ipcRenderer.removeListener("accounts:changed", listener);
   },
-  readUsage: () => ipcRenderer.invoke("usage:read"),
+  readUsage: (scopeKey) => ipcRenderer.invoke("usage:read", scopeKey),
   setKeepAwake: (enabled) => ipcRenderer.invoke("app:set-keep-awake", enabled),
-  getCachedUsage: () => ipcRenderer.invoke("usage:cached"),
+  getCachedUsage: (scopeKey) => ipcRenderer.invoke("usage:cached", scopeKey),
   setNotifyWhenWaiting: (on) => ipcRenderer.invoke("settings:notify-when-waiting", on),
   setWindowTranslucent: (on, theme) => ipcRenderer.invoke("settings:window-translucent", { on, theme }),
   syncNotifications: (state) => ipcRenderer.invoke("notification:state", state),

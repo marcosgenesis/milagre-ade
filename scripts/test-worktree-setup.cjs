@@ -65,6 +65,13 @@ window.milagre = new Proxy({
   },
   onAgentEvent: (callback) => { listeners.add(callback); return () => listeners.delete(callback); },
   listEditors: async () => [],
+  listRecentProjects: async () => [{ path: "/fixture", name: "shop", openedAt: "" }, { path: "/blog", name: "blog", openedAt: "" }],
+  getProjectImage: async (projectPath) => window.icons?.[projectPath] ?? null,
+  setProjectIcon: async (projectPath, icon) => {
+    window.calls.icons = [...(window.calls.icons ?? []), { projectPath, icon }];
+    window.icons = { ...window.icons, [projectPath]: icon };
+    return icon;
+  },
   getCachedUsage: async () => ({ providers: [] }),
   readUsage: async () => ({ providers: [] }),
   getUpdateState: async () => ({ status: "idle" }),
@@ -140,7 +147,11 @@ async function browserChecks() {
 
     // Settings › Worktrees: the field saves what is typed, and a repo file takes it over.
     await evaluate(`document.querySelector('[aria-label="Settings"]').click()`);
-    await click("Worktrees");
+    // Every recent Project is listed; the open one is picked.
+    const settingsProject = (name) =>
+      `[...document.querySelectorAll('[aria-label="Settings navigation"] button')].find(el => el.querySelector('.sidebar-copy')?.textContent.trim() === ${JSON.stringify(name)})`;
+    await waitFor(`!!(${settingsProject("blog")})`);
+    await evaluate(`(${settingsProject("shop")}).click()`);
     await waitFor(`!!document.querySelector('#setup-command') && !document.querySelector('#setup-command').disabled`);
     assert.equal(await evaluate(`document.querySelector('#setup-command').placeholder`), "npm ci");
     assert.equal(await evaluate(`document.body.textContent.includes('Runs once in each new worktree before the agent starts, e.g. npm ci.')`), true);
@@ -164,6 +175,35 @@ async function browserChecks() {
     assert.equal(await evaluate(`document.querySelector('#setup-command').readOnly`), false);
     await screenshot("settings-invalid-file");
     console.log("PASS: a repo file locks the field, and an invalid one shows a note");
+
+    // Another Project's settings, and its icon: the chosen image is scaled down and saved for that Project.
+    await evaluate(`(${settingsProject("blog")}).click()`);
+    await waitFor(`document.querySelector('h1')?.textContent === "blog" && !!document.querySelector('[data-project-icon-input]')`);
+    await evaluate(`(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1024;
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#e4572e'; context.fillRect(0, 0, 1024, 1024);
+      context.fillStyle = '#fff'; context.beginPath(); context.arc(512, 512, 300, 0, Math.PI * 2); context.fill();
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([blob], 'icon.png', { type: 'image/png' }));
+      const input = document.querySelector('[data-project-icon-input]');
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await waitFor(`window.calls.icons?.length === 1`);
+    assert.equal(await evaluate(`window.calls.icons[0].projectPath`), "/blog");
+    assert.equal(await evaluate(`window.calls.icons[0].icon.startsWith('data:image/png;base64,')`), true);
+    await waitFor(`!!document.querySelector('[data-project-icon-preview] img') && !!(${settingsProject("blog")}).querySelector('img')`);
+    assert.equal(
+      await evaluate(`(() => { const image = new Image(); image.src = window.calls.icons[0].icon; return image.decode().then(() => image.width); })()`),
+      256,
+    );
+    await screenshot("project-icon");
+    await click("Reset");
+    await waitFor(`window.calls.icons.length === 2 && window.calls.icons[1].icon === null && !document.querySelector('[data-project-icon-preview] img')`);
+    console.log("PASS: every Project is listed in Settings, and its icon can be chosen and reset");
     await click("Back");
 
     // A new worktree's setup starts with the first message: no dialog, and the reply shows the setup running.

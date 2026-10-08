@@ -11,8 +11,11 @@ export type SelectOption<T extends string> = {
   label: string;
   description?: string;
   icon?: ReactNode;
+  // Shown in the trigger instead of the label when this option is selected.
+  display?: ReactNode;
   // Consecutive options with the same group sit under one heading.
   group?: string;
+  disabled?: boolean;
 };
 
 const GAP = 6;
@@ -28,12 +31,14 @@ export function Select<T extends string>({
   options,
   onChange,
   width = 240,
+  disabled = false,
 }: {
   label: string;
   value: T;
   options: SelectOption<T>[];
   onChange: (value: T) => void;
   width?: number;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number }>({ left: 0, maxHeight: 0 });
@@ -60,6 +65,7 @@ export function Select<T extends string>({
   }
 
   function choose(next: T) {
+    if (disabled || options.find((option) => option.value === next)?.disabled) return;
     if (next !== value) onChange(next);
     close();
   }
@@ -67,11 +73,9 @@ export function Select<T extends string>({
   useLayoutEffect(() => {
     if (!open) return;
     const rows = panelRef.current?.querySelectorAll<HTMLElement>("[data-picker-row]");
-    const index = Math.max(
-      0,
-      options.findIndex((option) => option.value === value),
-    );
-    rows?.[index]?.focus({ preventScroll: false });
+    const index = options.findIndex((option) => option.value === value && !option.disabled);
+    const focusIndex = index >= 0 ? index : options.findIndex((option) => !option.disabled);
+    rows?.[focusIndex]?.focus({ preventScroll: false });
   }, [open]);
 
   useDismiss(
@@ -99,6 +103,7 @@ export function Select<T extends string>({
     <>
       <button
         ref={triggerRef}
+        disabled={disabled}
         type="button"
         aria-label={label}
         aria-haspopup="listbox"
@@ -115,7 +120,7 @@ export function Select<T extends string>({
         className={`flex h-8 items-center gap-2 rounded-control border border-line pr-2.5 pl-3 text-[13px] font-medium text-ink transition-colors hover:bg-hover ${open ? "bg-hover" : "bg-surface"}`}
       >
         {selected?.icon}
-        <span className="truncate">{selected?.label ?? ""}</span>
+        {selected?.display ?? <span className="truncate">{selected?.label ?? ""}</span>}
         <span className="text-ink-3">
           <HugeiconsIcon icon={ArrowDown01Icon} size={14} strokeWidth={1.8} color="currentColor" />
         </span>
@@ -137,6 +142,7 @@ export function Select<T extends string>({
                     <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">{option.group}</div>
                   )}
                   <PickerRow
+                    disabled={option.disabled}
                     icon={option.icon}
                     label={option.label}
                     description={option.description}

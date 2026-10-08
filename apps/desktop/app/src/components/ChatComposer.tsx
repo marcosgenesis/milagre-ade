@@ -3,7 +3,7 @@ import { SubagentTrack } from "./agents/SubagentTrack";
 import { BrowserTrack } from "./agents/BrowserTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
-import type { AgentPort, AgentTask, Subagent } from "../model";
+import type { AgentPort, AgentTask, ContextUsage, Subagent } from "../model";
 import { PortTrack } from "./agents/PortTrack";
 import { TaskTrack } from "./agents/TaskTrack";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -87,7 +87,7 @@ function ReplyContent({
   waitingStepIds: string[];
 }) {
   const { setup, activity, images, answer } = replyActivity(body, steps);
-  const thought = !streaming || asking ? unspokenThought(activity, answer) : "";
+  const thought = !streaming || asking ? unspokenThought(body, steps) : "";
   return (
     <>
       {setup.map((step) => (
@@ -324,6 +324,8 @@ interface ChatComposerProps {
   /** The find bar over the message list; the parent owns it so ⌘F and the command palette can open it. */
   findOpen?: boolean;
   findSignal?: number;
+  /** Text the find bar fills in when `findSignal` changes, e.g. the words a ⌘K message result matched. */
+  findSeed?: string;
   onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
@@ -348,6 +350,8 @@ interface ChatComposerProps {
   waitingForSubagents?: boolean;
   /** The running turn's to-do list, shown as a pill beside the subagents. */
   tasks?: AgentTask[];
+  /** How full the agent's context window is, shown as a ring beside Send. */
+  contextUsage?: ContextUsage;
   /** The ports the chat's commands listen on, shown as a pill beside the to-do list. */
   ports?: AgentPort[];
   /** The runtime's key for this Chat (`projectPath#id`), which browser ownership is recorded under. */
@@ -594,6 +598,7 @@ export function ChatComposer({
   onArchiveSubagent,
   waitingForSubagents = false,
   tasks,
+  contextUsage,
   ports,
   agentChatId,
   onStopPort,
@@ -637,6 +642,7 @@ export function ChatComposer({
   newChatError,
   findOpen = false,
   findSignal = 0,
+  findSeed,
   onFindClose,
   notice,
   onDismissNotice,
@@ -687,18 +693,22 @@ export function ChatComposer({
         agents={subagents}
         working={isSending}
         waiting={waitingForSubagents}
+        activity={streamingSteps?.filter((step) => step.status === "running").at(-1)?.title}
         onClose={closeCanvas}
       />
       <div className={canvasOpened ? "hidden" : "contents"} aria-hidden={canvasOpened || undefined}>
-        {/* Messages scrolled past the top fade into a linear blur under the window-drag strip. */}
+        {/* Messages scrolled past the top soften into a progressive blur under the window-drag strip. The layers fade,
+          not the wrapper: a wrapper below full opacity would cut the layers' blur off from the messages behind it. */}
         {!isNewChat && (
           <div
             aria-hidden
             data-busy={isSending || undefined}
-            className={`chat-top-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 transition-opacity duration-200 ${scrolled ? "opacity-100" : "opacity-0"}`}
-          />
+            className={`chat-top-blur progressive-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-16 [&>*]:transition-opacity [&>*]:duration-200 ${scrolled ? "" : "[&>*]:opacity-0"}`}
+          >
+            <ProgressiveBlurLayers />
+          </div>
         )}
-        {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} onClose={onFindClose} />}
+        {!isNewChat && findOpen && onFindClose && <FindBar rootRef={root} focusSignal={findSignal} seed={findSeed} onClose={onFindClose} />}
         {!isNewChat && (
           <div className="relative flex min-h-0 flex-1 flex-col">
             <MessageScroller
@@ -761,9 +771,12 @@ export function ChatComposer({
               </div>
             </MessageScroller>
             {/* Messages passing under the chip row soften into a progressive blur that reaches the composer. */}
-            <div aria-hidden data-busy={isSending || undefined} className="chat-bottom-blur pointer-events-none absolute inset-x-0 bottom-0 z-10 h-20">
-              <div />
-              <div />
+            <div
+              aria-hidden
+              data-busy={isSending || undefined}
+              className="chat-bottom-blur progressive-blur pointer-events-none absolute inset-x-0 bottom-0 z-10 h-20"
+            >
+              <ProgressiveBlurLayers />
             </div>
           </div>
         )}
@@ -858,6 +871,7 @@ export function ChatComposer({
             permissionMode={permissionMode}
             onPermissionModeChange={onPermissionModeChange}
             alwaysExpanded={isNewChat}
+            contextUsage={contextUsage}
           />
           {newChatError && (
             <p role="alert" className="mt-2 px-1 text-[12px] text-red">
@@ -867,5 +881,18 @@ export function ChatComposer({
         </div>
       </div>
     </div>
+  );
+}
+
+/** The four blur layers and the tint of a `.progressive-blur` (styles.css). */
+function ProgressiveBlurLayers() {
+  return (
+    <>
+      <div />
+      <div />
+      <div />
+      <div />
+      <div />
+    </>
   );
 }

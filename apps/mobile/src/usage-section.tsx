@@ -40,12 +40,19 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
 
 function ProviderRows({ provider, now }: { provider: ProviderUsage; now: number }) {
   const failed = provider.status === "error";
+  const account = provider.account?.email || provider.account?.label;
   return (
     <View style={{ gap: 16 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
         <ProviderLogo provider={provider.provider} size={20} />
         <View style={{ flex: 1, gap: 3 }}>
-          <Text style={{ color: colors.ink, fontSize: 16, fontWeight: "600" }}>{providerName(provider.provider)}</Text>
+          <Text
+            selectable
+            accessibilityLabel={`${providerName(provider.provider)} usage: ${account || "Account unavailable"}`}
+            style={{ color: colors.ink, fontSize: 16, fontWeight: "600" }}
+          >
+            {account || "Account unavailable"}
+          </Text>
           <Text selectable style={styles.caption}>
             {failed && provider.windows.length ? "Last known · " : ""}
             {formatUpdatedAgo(provider.updatedAt, now)}
@@ -77,7 +84,7 @@ function ProviderRows({ provider, now }: { provider: ProviderUsage; now: number 
 /** Plan usage, sourced only from the currently connected computer. */
 export function UsageSection() {
   const session = useSession();
-  const usage = useUsage(session.client);
+  const usage = useUsage(session.client, session.snapshot?.project.path, session.providerRevision);
   const [now, setNow] = useState(Date.now);
   // A plain effect: the section also shows in the navigation panel, which sits outside the router's screens.
   useEffect(() => {

@@ -1,4 +1,12 @@
-import type { NamedProjectLink, OpenLink, LinkState, LinkSendRequest, TranscriptState } from "@milagre/shared/model";
+import type {
+  ProjectAccountScope,
+  ProjectAccountsSnapshot,
+  NamedProjectLink,
+  OpenLink,
+  LinkState,
+  LinkSendRequest,
+  TranscriptState,
+} from "@milagre/shared/model";
 import type { Result } from "@milagre/shared/result";
 import type { SimulatorApi } from "@milagre/shared/simulator";
 import type { BrowserApi } from "@milagre/shared/browser";
@@ -41,9 +49,10 @@ export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetu
 
 export type ReleaseChannel = "stable" | "beta";
 export type UpdateState = {
-  status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error" | "unavailable";
+  status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "installing" | "error" | "unavailable";
   version: string | null;
   progress: number;
+  error?: string;
 };
 
 /** The Phone setting as the host runs it. The link and QR (an SVG) are there only while it is on; both carry the access token. */
@@ -63,6 +72,8 @@ export type PhoneStatus = {
   publicUrl?: string;
   pairingLink?: string;
   qrSvg?: string;
+  /** Phone access on this Mac's local network: on or off, and the addresses a phone on the same network dials. */
+  lan?: { enabled: boolean; addresses: string[]; error?: string };
 };
 
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
@@ -102,8 +113,16 @@ declare global {
       readAttachment: (file: string) => Promise<{ text: string; binary: boolean; truncated: boolean }>;
       searchProjectFiles: (root: string, query: string) => Promise<string[]>;
       listSkills: (projectPath: string) => Promise<SkillCatalog>;
+      /** The text of a SKILL.md the catalog listed (a shadowed one included), up to 256 KiB. */
+      readSkill: (projectPath: string, file: string) => Promise<string>;
+      /** Opens a listed SKILL.md in an editor, wherever it lives (user skills are outside any checkout). */
+      openSkill: (request: { projectPath: string; file: string; editor?: string }) => Promise<Result<null>>;
+      /** Shows a listed SKILL.md in the file manager. */
+      revealSkill: (projectPath: string, file: string) => Promise<void>;
       listBranches: (projectPath: string) => Promise<string[]>;
       getProjectImage: (projectPath: string) => Promise<string | null>;
+      /** Saves a chosen icon (an image data URL), or null to go back to the repository's own; returns the icon now shown. */
+      setProjectIcon: (projectPath: string, icon: string | null) => Promise<string | null>;
       getAppVersion: () => Promise<string>;
       /** `setupNote`: why the repo's setup file was ignored. */
       createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number; setupNote?: string }>;
@@ -165,10 +184,16 @@ declare global {
       openProject: () => Promise<OpenProject | null>;
       /** Projects opened lately, most recent first; folders that are gone are left out. */
       listRecentProjects: () => Promise<RecentProject[]>;
+      /** Keeps a recent project out of the all-Projects sidebar and the phone's list, or shows it again; resolves to the list. */
+      setProjectHidden: (projectPath: string, hidden: boolean) => Promise<RecentProject[]>;
+      /** Loads a recent project's chats without opening it; later changes arrive through onProjectState. */
+      readProject: (projectPath: string) => Promise<OpenProject>;
       /** Every opened Project, seeded once from existing coordination files. */
       listNamedLinks: () => Promise<NamedProjectLink[]>;
       createNamedLink: (request: { name: string; projectIds: string[] }) => Promise<NamedProjectLink>;
       openNamedLink: (id: string) => Promise<OpenLink>;
+      /** A Link's chats as saved, without opening it or preparing its worktrees. */
+      readLink: (id: string) => Promise<{ link: NamedProjectLink; state: LinkState }>;
       sendLinkMessage: (request: LinkSendRequest) => Promise<{ sessionId: number }>;
       onLinkState: (callback: (update: { linkId: string; state: LinkState }) => void) => () => void;
       listProjects: () => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
@@ -217,9 +242,12 @@ declare global {
       answerQuestion: (chatId: string, requestId: string, answers: QuestionAnswers | null, summary?: string) => Promise<boolean>;
       setAgentPermissionMode: (chatId: string, mode: PermissionMode) => Promise<void>;
       /** Each agent's model list as its CLI reports it, asked once per app run; null for an agent that couldn't be asked. */
-      getModels: () => Promise<AgentModels>;
+      listAccountScopes: () => Promise<ProjectAccountScope[]>;
+      getProjectAccounts: (scopeKey: string, refresh?: boolean) => Promise<ProjectAccountsSnapshot>;
+      assignProjectAccount: (scopeKey: string, provider: ModelProvider, accountId: string | null) => Promise<ProjectAccountsSnapshot>;
+      getModels: (scopeKey?: string) => Promise<AgentModels>;
       /** How each agent's CLI stands (missing, outdated, broken, logged out, or ready); checked again on every call while it has a problem. */
-      getCliStatus: () => Promise<AgentCliStatus>;
+      getCliStatus: (scopeKey?: string) => Promise<AgentCliStatus>;
       /** Runs update for the specified CLI agent and refreshes status. */
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
       interruptAgent: (chatId: string) => Promise<void>;
@@ -240,6 +268,8 @@ declare global {
       getPhoneStatus: () => Promise<PhoneStatus>;
       /** Turns phone access on or off. Resolves as it starts; progress and the result arrive through onPhoneStatus. */
       setPhoneEnabled: (enabled: boolean) => Promise<PhoneStatus>;
+      /** Turns phone access over the local network on or off. Resolves with the new status. */
+      setPhoneLan(enabled: boolean): Promise<PhoneStatus>;
       /** A new access token: phones paired before scan again. */
       resetPhoneAccess: () => Promise<PhoneStatus>;
       /** Lets phones that have not paired yet do so for another ten minutes. */
@@ -252,10 +282,10 @@ declare global {
         value: string,
       ) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
       onAccountsChanged: (callback: () => void) => () => void;
-      readUsage: () => Promise<UsageSnapshot>;
+      readUsage: (scopeKey?: string) => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
       setKeepAwake: (enabled: boolean) => Promise<void>;
-      getCachedUsage: () => Promise<UsageSnapshot>;
+      getCachedUsage: (scopeKey?: string) => Promise<UsageSnapshot>;
       /** Whether a chat that waits on the user while Milagre is in the background gets a system notification. */
       setNotifyWhenWaiting: (on: boolean) => Promise<void>;
       /** Whether the window lets the blurred desktop show through (macOS). `theme` picks the blur material. */

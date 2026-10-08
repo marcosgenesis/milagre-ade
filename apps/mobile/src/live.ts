@@ -1,5 +1,5 @@
 /** What the bridge's live socket says: fetch the runs, or the whole Project, again. It never carries state. */
-export type LiveSignal = "runs" | "project";
+export type LiveSignal = "runs" | "project" | "accounts";
 export type LiveSocket = {
   onopen: (() => void) | null;
   onmessage: ((event: { data?: unknown }) => void) | null;
@@ -94,7 +94,7 @@ export function openLive(
       } catch {
         return;
       }
-      if (type === "runs" || type === "project") onSignal(type);
+      if (type === "runs" || type === "project" || type === "accounts") onSignal(type);
     };
     // Both platforms put the refused upgrade's status in the message ("…101… but was '404 Not Found'").
     next.onerror = (event) => {
@@ -121,6 +121,7 @@ export type SyncOptions = {
   connect: (options: Pick<LiveOptions, "onSignal" | "onStatus">) => Live;
   snapshot: () => Promise<void>;
   runs: () => Promise<void>;
+  accounts?: () => void;
   onError: (error: Error) => void;
   active: () => boolean;
   /** Calls back with whether the app is in the foreground; returns an unsubscribe. */
@@ -134,7 +135,7 @@ export type SyncOptions = {
  * Keeps one Project fresh: fetches when the live socket says something changed, and polls only while it is down (an
  * older bridge, or a network that drops WebSockets). The socket closes in the background and opens again on return.
  */
-export function syncProject({ connect, snapshot, runs, onError, active, watchActive, pollDelay, timers = defaultTimers }: SyncOptions) {
+export function syncProject({ connect, snapshot, runs, accounts, onError, active, watchActive, pollDelay, timers = defaultTimers }: SyncOptions) {
   let stopped = false;
   let open = false;
   let live: Live | null = null;
@@ -173,7 +174,9 @@ export function syncProject({ connect, snapshot, runs, onError, active, watchAct
     live?.close();
     live = connect({
       onSignal: (signal) => {
-        if (!stopped) void pull(signal);
+        if (stopped) return;
+        if (signal === "accounts") accounts?.();
+        else void pull(signal);
       },
       // On opening, catch up on what changed while it was down; on losing it, poll until it is back.
       onStatus: (next) => {

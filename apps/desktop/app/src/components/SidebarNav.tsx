@@ -1,11 +1,13 @@
 import type { NamedProjectLink } from "@milagre/shared/model";
 import { ProjectAvatarStack } from "./ProjectAvatarStack";
+import { useProjectImages } from "../lib/project-images";
 
 import {
   memo,
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -40,6 +42,12 @@ import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
 import { projectRows, type ProjectRow, type RecentProject } from "@/lib/project-list";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
 import { useDismiss } from "../lib/use-dismiss";
+import { dropIntent, pinOrderAt, type DropIntent, type DropZone } from "@/lib/chat-list";
+import type { ProjectLink } from "@/electron";
+import { ipcErrorMessage } from "@milagre/shared/result";
+import { useSettings } from "../lib/settings";
+import { RECENT_PROJECTS_CHANGED } from "../lib/project-list";
+import { scopeChats, useScopeStates } from "../lib/sidebar-scopes";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -109,6 +117,8 @@ type SidebarNavProps = {
   projectPath?: string;
   /** Opens a project from the recent list in the project menu. */
   onSwitchProject?: (path: string) => void;
+  /** Other projects with a chat that waits on the user: their rows and the project button get a dot. */
+  attentionPaths?: string[];
   onOpenProjectSettings?: () => void;
   recents?: SidebarRecent[];
   /** What the chat rows' menu can do; an action left out is shown disabled. */
@@ -116,9 +126,83 @@ type SidebarNavProps = {
   /** Plan usage, shown above the footer buttons in both the expanded and collapsed sidebar. */
   usage?: ReactNode;
   variant?: string;
+  /** Chat keys with a turn streaming, and with one waiting on the user, joined by newlines (one string keeps memo cheap). */
+  runningKeys?: string;
+  waitingKeys?: string;
+  /** Of those waiting, the chats whose next card is a question. */
+  askingKeys?: string;
+  /** Opens a chat of another Project (its path) or Link (`milagre-link:` key) from the all-Projects sidebar. */
+  onOpenScopeChat?: (scopeKey: string, id: string) => void;
 };
 
 const NO_CHAT_ACTIONS: ChatRowActions = {};
+const NEVER_ACTIVE = () => false;
+const showAllPaths = (enabled: boolean, scopes: Array<{ key: string; link: unknown }>) =>
+  enabled ? scopes.filter((scope) => !scope.link).map((scope) => scope.key) : NO_PATHS;
+// Groups of the all-Projects sidebar the user folded, by Project path or Link key; the rest stay open.
+const CLOSED_SCOPES_KEY = "milagre.sidebarClosedScopes";
+function readClosedScopes(): string[] {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(CLOSED_SCOPES_KEY) ?? "[]");
+    return Array.isArray(saved) ? saved.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** A Project or Link heading in the all-Projects sidebar: folds its chats; the trailing button starts a chat here or opens that one. */
+function ScopeHeader({
+  name,
+  icon,
+  open,
+  current,
+  attention,
+  onToggle,
+  onAction,
+}: {
+  name: string;
+  icon: ReactNode;
+  open: boolean;
+  current: boolean;
+  attention: boolean;
+  onToggle: () => void;
+  onAction: () => void;
+}) {
+  return (
+    <div className="group/scope relative mx-2 flex h-8 items-center">
+      <button
+        type="button"
+        data-scope-toggle
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-[8px] pl-2 pr-9 text-left hover:bg-hover-2"
+      >
+        <span className="flex h-5 shrink-0 items-center justify-center text-ink">{icon}</span>
+        <span className={`min-w-0 flex-1 truncate text-[13px] ${current ? "font-medium text-ink" : "text-ink-2"}`}>{name}</span>
+        {attention && <AttentionDot />}
+        <span className={`flex shrink-0 text-ink-3 transition-transform duration-150 ${open ? "" : "-rotate-90"}`}>
+          <IconChevronDownSmall size={14} />
+        </span>
+      </button>
+      <Tooltip label={current ? "New chat" : `Open ${name}`} shortcut={current ? "⌘N" : undefined} align="end" className="absolute right-0">
+        <button
+          type="button"
+          data-scope-action
+          aria-label={current ? "New chat" : `Open ${name}`}
+          onClick={onAction}
+          className={`${CHATS_HEADER_BUTTON} ${current ? "" : "opacity-0 group-hover/scope:opacity-100 focus-visible:opacity-100"}`}
+        >
+          {current ? <IconPlusMedium size={16} /> : <HugeIcon icon={FolderOpenIcon} size={15} />}
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+const NO_PATHS: string[] = [];
+
+function AttentionDot({ className = "" }: { className?: string }) {
+  return <span role="img" aria-label="Needs attention" title="A chat here waits for you" className={`size-2 shrink-0 rounded-full bg-orange ${className}`} />;
+}
 
 const SIDEBAR_MOTION = {
   expandedWidth: 224,
@@ -188,32 +272,6 @@ export function RailButton({
   );
 }
 
-// The other listed projects' avatars, looked up once per run: the lookup can ask GitHub.
-const projectImages = new Map<string, string | null>();
-
-function useProjectImages(paths: string[]) {
-  const [, setLoaded] = useState(0);
-  const key = paths.join("\n");
-  useEffect(() => {
-    let live = true;
-    for (const path of paths) {
-      if (projectImages.has(path)) continue;
-      projectImages.set(path, null);
-      window.milagre?.getProjectImage(path).then(
-        (src) => {
-          projectImages.set(path, src);
-          if (live) setLoaded((count) => count + 1);
-        },
-        () => {},
-      );
-    }
-    return () => {
-      live = false;
-    };
-  }, [key]);
-  return (path: string) => projectImages.get(path) ?? null;
-}
-
 function WorkspaceMenu({
   position,
   onClose,
@@ -229,6 +287,7 @@ function WorkspaceMenu({
   registeredProjects,
   onSwitchLink,
   onLinkProject,
+  attentionPaths,
 }: {
   position: { top: number; left: number };
   onClose: () => void;
@@ -244,6 +303,7 @@ function WorkspaceMenu({
   registeredProjects: Array<{ id: string; path: string; name: string }>;
   onSwitchLink?: (id: string) => void;
   onLinkProject?: () => void;
+  attentionPaths: string[];
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const imageOf = useProjectImages(projects.filter((row) => !row.current).map((row) => row.path));
@@ -360,6 +420,7 @@ function WorkspaceMenu({
                       <IconCheckmark1Small size={18} />
                     </span>
                   )}
+                  {!row.current && attentionPaths.includes(row.path) && <AttentionDot className="mr-1 group-hover/project:opacity-0" />}
                 </button>
                 {!row.current && (
                   <button
@@ -461,10 +522,17 @@ export default memo(function SidebarNav({
   projectPath,
   onOpenProjectSettings,
   onSwitchProject,
+  attentionPaths = NO_PATHS,
   recents = DEFAULT_RECENTS,
   chatActions = NO_CHAT_ACTIONS,
   usage,
+  runningKeys = "",
+  waitingKeys = "",
+  askingKeys = "",
+  onOpenScopeChat,
 }: SidebarNavProps) {
+  const { sidebarAllProjects, chatOrder } = useSettings();
+  const [listsChanged, setListsChanged] = useState(0);
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(AUTO_COLLAPSE_QUERY).matches);
   // True only while the sidebar is collapsed because the window got narrow, so widening it brings the sidebar back.
   const autoCollapsed = useRef(collapsed);
@@ -505,19 +573,99 @@ export default memo(function SidebarNav({
     void window.milagre
       ?.listNamedLinks?.()
       .then((links) => {
-        if (live) setNamedLinks(links);
+        if (live) setNamedLinks(Array.isArray(links) ? links : []);
       })
       .catch(() => {});
     void window.milagre
       ?.listProjects?.()
       .then((projects) => {
-        if (live) setRegisteredProjects(projects);
+        if (live) setRegisteredProjects(Array.isArray(projects) ? projects : []);
       })
       .catch(() => {});
     return () => {
       live = false;
     };
-  }, [projectPath, workspaceOpen, selectedLink?.id]);
+  }, [projectPath, workspaceOpen, selectedLink?.id, sidebarAllProjects, listsChanged]);
+  useEffect(() => {
+    const changed = () => setListsChanged((count) => count + 1);
+    window.addEventListener(RECENT_PROJECTS_CHANGED, changed);
+    return () => window.removeEventListener(RECENT_PROJECTS_CHANGED, changed);
+  }, []);
+
+  // Every recent Project the user didn't hide, then every Link, like the phone's list. The open one is always there.
+  const currentKey = selectedLink ? `milagre-link:${selectedLink.id}` : (projectPath ?? "");
+  const scopes = [
+    ...projects
+      .filter((row) => row.current || !recentProjects.find((project) => project.path === row.path)?.hidden)
+      .map((row) => ({ key: row.path, name: row.name, initial: row.initial, link: null as NamedProjectLink | null })),
+    ...namedLinks.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link })),
+  ];
+  const scopeImage = useProjectImages(showAllPaths(sidebarAllProjects, scopes));
+  const showAll = sidebarAllProjects && !collapsed;
+  const scopeStates = useScopeStates(
+    showAll,
+    scopes.filter((scope) => scope.key !== currentKey).map((scope) => scope.key),
+  );
+  const marks = useMemo(
+    () => ({
+      running: new Set(runningKeys.split("\n").filter(Boolean)),
+      waiting: new Set(waitingKeys.split("\n").filter(Boolean)),
+      asking: new Set(askingKeys.split("\n").filter(Boolean)),
+    }),
+    [runningKeys, waitingKeys, askingKeys],
+  );
+  // Another Project's or Link's chats can be pinned from here; the row menu's other actions stay with the open one.
+  // One object per scope, so its rows keep their memo.
+  const scopeActions = useRef(new Map<string, ChatRowActions>());
+  const actionsFor = (key: string) => {
+    let actions = scopeActions.current.get(key);
+    if (!actions) {
+      actions = {
+        onPin: (id, order) =>
+          void window.milagre
+            .patchChat(key, Number(id), order == null ? { pinned: false, pin_order: undefined } : { pinned: true, pin_order: order })
+            .catch(() => {}),
+      };
+      scopeActions.current.set(key, actions);
+    }
+    return actions;
+  };
+  const scopePickers = useRef(new Map<string, (item: SidebarRecent) => void>());
+  const pickerFor = (key: string) => {
+    let pick = scopePickers.current.get(key);
+    if (!pick) {
+      pick = (item) => openScope.current(key, item.id);
+      scopePickers.current.set(key, pick);
+    }
+    return pick;
+  };
+  const openScope = useRef((key: string, id: string) => onOpenScopeChat?.(key, id));
+  openScope.current = (key: string, id: string) => onOpenScopeChat?.(key, id);
+  const groups = showAll
+    ? scopes.map((scope) => {
+        const current = scope.key === currentKey;
+        const state = scopeStates[scope.key];
+        const rows = current ? recents : state ? scopeChats(scope.key, state, chatOrder, marks) : [];
+        const list = current
+          ? {
+              isActive: (item: SidebarRecent) => (activeId !== undefined ? item.id === activeId : item.label === selectedTitle),
+              collapsed: false,
+              actions: chatActions,
+              showHints,
+              onPick: pickChat,
+              linkProjectId: !selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null,
+            }
+          : { isActive: NEVER_ACTIVE, collapsed: false, actions: actionsFor(scope.key), showHints: false, onPick: pickerFor(scope.key), linkProjectId: null };
+        return { scope, current, state, list, pinned: rows.filter((row) => row.pinned), rest: rows.filter((row) => !row.pinned) };
+      })
+    : [];
+  const [closedScopes, setClosedScopes] = useState(readClosedScopes);
+  const toggleScope = (key: string) =>
+    setClosedScopes((previous) => {
+      const next = previous.includes(key) ? previous.filter((item) => item !== key) : [...previous, key];
+      window.localStorage.setItem(CLOSED_SCOPES_KEY, JSON.stringify(next));
+      return next;
+    });
 
   const forgetProject = (path: string) => {
     setRecentProjects((list) => list.filter((project) => project.path !== path));
@@ -676,15 +824,23 @@ export default memo(function SidebarNav({
               onClick={() => (workspaceOpen ? setWorkspaceOpen(false) : openWorkspaceMenu())}
               className="sidebar-workspace-control absolute left-2 top-1 flex h-8 w-[calc(100%-16px)] items-center rounded-[8px] px-2 text-left transition-[background-color,transform] duration-100 hover:bg-hover-2 active:scale-[0.99]"
             >
-              <span className={`sidebar-logo flex ${selectedLink ? "h-5 w-9" : "size-5"} shrink-0 items-center justify-center text-ink`}>
+              <span className={`sidebar-logo relative flex ${selectedLink ? "h-5 w-9" : "size-5"} shrink-0 items-center justify-center text-ink`}>
                 {selectedLink ? (
                   <ProjectAvatarStack projects={selectedLink.projects} />
                 ) : (
                   <WorkspaceIcon src={workspace.image} fallback={<IconPopsicle2 size={18} />} />
                 )}
+                {/* Collapsed, the copy beside the logo hides, so the dot moves onto its corner. */}
+                {attentionPaths.length > 0 && (
+                  <span
+                    aria-hidden
+                    className="absolute -top-0.5 -right-0.5 hidden size-2 rounded-full bg-orange ring-2 ring-surface in-data-[sidebar-collapsed=true]:block"
+                  />
+                )}
               </span>
               <span className="sidebar-copy ml-1.5 min-w-0 flex-1 truncate text-[14px] font-medium text-ink-2">{workspace.name}</span>
               {selectedLink && <span className="sidebar-copy mr-1 text-[11px] text-ink-3">Link</span>}
+              {attentionPaths.length > 0 && <AttentionDot className="sidebar-copy mr-1" />}
               <span className="sidebar-copy ml-1 flex shrink-0 text-ink-3">
                 <IconChevronDownSmall size={16} />
               </span>
@@ -705,6 +861,7 @@ export default memo(function SidebarNav({
                 onSwitchProject={onSwitchProject}
                 onOpenProject={onOpenProject}
                 onForgetProject={forgetProject}
+                attentionPaths={attentionPaths}
                 onClose={() => setWorkspaceOpen(false)}
               />
             )}
@@ -732,36 +889,95 @@ export default memo(function SidebarNav({
                 </button>
               </Tooltip>
             )}
-            <div className={`sidebar-copy mx-2 mb-1 flex h-8 items-center justify-between pl-2 ${collapsed ? "hidden" : ""}`}>
-              <span className="text-[12.5px] font-medium text-ink-3">Chats</span>
-              <Tooltip label="New chat" shortcut="⌘N" align="end">
-                <button
-                  type="button"
-                  aria-label="New chat"
-                  onClick={() => {
-                    if (activeTitle === undefined) setDemoActiveTitle(null);
-                    onNewChat?.();
-                  }}
-                  className={CHATS_HEADER_BUTTON}
-                >
-                  <IconPlusMedium size={16} />
-                </button>
-              </Tooltip>
-            </div>
-
-            <GlideGroup>
-              {recents.map((item, index) => (
-                <ChatRow
-                  key={item.id}
-                  item={item}
-                  active={activeId !== undefined ? item.id === activeId : item.label === selectedTitle}
-                  collapsed={collapsed}
-                  actions={chatActions}
-                  shortcutHint={showHints && index < 9 ? `${shortcutModifier}${index + 1}` : undefined}
-                  onPick={pickChat}
-                />
-              ))}
-            </GlideGroup>
+            {showAll ? (
+              <>
+                {/* Pinned chats of every Project and Link sit on top, like the single-project sidebar; each group lists the rest. */}
+                {groups.some((group) => group.pinned.length > 0) && (
+                  <div data-all-pinned className="mb-2">
+                    <p className="sidebar-copy mx-2 mb-1 h-8 pl-2 text-[12.5px] font-medium leading-8 text-ink-3">Pinned</p>
+                    {groups
+                      .filter((group) => group.pinned.length > 0)
+                      .map((group) => (
+                        <div key={group.scope.key} data-pinned-scope={group.scope.key}>
+                          <ChatList recents={group.pinned} {...group.list} pinnedHeader={false} header={null} />
+                        </div>
+                      ))}
+                  </div>
+                )}
+                {groups.map(({ scope, current, state, rest, pinned, list }, index) => {
+                  const open = !closedScopes.includes(scope.key);
+                  return (
+                    <section key={scope.key} data-sidebar-scope={scope.key} aria-label={scope.name} className="mb-2">
+                      {scope.link && !scopes[index - 1]?.link && (
+                        <p className="mx-2 mt-1 mb-1 h-6 pl-2 text-[12.5px] font-medium leading-6 text-ink-3">Links</p>
+                      )}
+                      <ScopeHeader
+                        name={scope.name}
+                        icon={
+                          scope.link ? (
+                            <ProjectAvatarStack
+                              projects={scope.link.projectIds.map(
+                                (id) => registeredProjects.find((project) => project.id === id) ?? { path: "", name: "Project" },
+                              )}
+                            />
+                          ) : (
+                            <span className="flex size-5 items-center justify-center overflow-hidden rounded-[6px] bg-ink text-[10px] font-semibold text-surface">
+                              <WorkspaceIcon src={current && !selectedLink ? workspace.image : scopeImage(scope.key)} fallback={scope.initial} />
+                            </span>
+                          )
+                        }
+                        open={open}
+                        current={current}
+                        attention={!current && attentionPaths.includes(scope.key)}
+                        onToggle={() => toggleScope(scope.key)}
+                        onAction={
+                          current
+                            ? () => {
+                                if (activeTitle === undefined) setDemoActiveTitle(null);
+                                onNewChat?.();
+                              }
+                            : () => (scope.link ? onSwitchLink?.(scope.link.id) : onSwitchProject?.(scope.key))
+                        }
+                      />
+                      {open &&
+                        (rest.length > 0 ? (
+                          <ChatList recents={rest} {...list} hintOffset={pinned.length} header={null} />
+                        ) : pinned.length > 0 ? null : (
+                          <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state || current ? "No chats yet" : "Loading chats…"}</p>
+                        ))}
+                    </section>
+                  );
+                })}
+              </>
+            ) : (
+              <ChatList
+                recents={recents}
+                isActive={(item) => (activeId !== undefined ? item.id === activeId : item.label === selectedTitle)}
+                collapsed={collapsed}
+                actions={chatActions}
+                showHints={showHints}
+                onPick={pickChat}
+                linkProjectId={!selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null}
+                header={
+                  <div className={`sidebar-copy mx-2 mb-1 flex h-8 items-center justify-between pl-2 ${collapsed ? "hidden" : ""}`}>
+                    <span className="text-[12.5px] font-medium text-ink-3">Chats</span>
+                    <Tooltip label="New chat" shortcut="⌘N" align="end">
+                      <button
+                        type="button"
+                        aria-label="New chat"
+                        onClick={() => {
+                          if (activeTitle === undefined) setDemoActiveTitle(null);
+                          onNewChat?.();
+                        }}
+                        className={CHATS_HEADER_BUTTON}
+                      >
+                        <IconPlusMedium size={16} />
+                      </button>
+                    </Tooltip>
+                  </div>
+                }
+              />
+            )}
           </ScrollArea>
 
           {usage && <div className={`mt-3 border-t border-line pt-1.5 ${collapsed ? "mx-auto w-8" : "mx-2 w-[calc(100%-16px)]"}`}>{usage}</div>}
@@ -810,3 +1026,529 @@ export default memo(function SidebarNav({
     </div>
   );
 });
+
+/* ─────────────────────────────────────────────────────────
+ * CHAT LIST
+ * Pinned chats on top in the user's order, the rest below in
+ * the list's own order. A row dragged between two rows pins,
+ * reorders or unpins it; dropped on the middle third of another
+ * row, it offers a Link between the two chats' Worktrees. The
+ * keyboard does the same: Space picks the focused row up, the
+ * arrows move it, Space drops it and Escape cancels.
+ * ───────────────────────────────────────────────────────── */
+
+/** A press that moves this far is a drag; less is still a click that opens the chat. */
+const DRAG_THRESHOLD = 4;
+const TOAST_MS = 6000;
+const DROP_HINTS = { "same-worktree": "Same worktree: a Link joins two different Worktrees", linked: "Already linked" };
+
+/** Where a dragged chat would land: next to or on a row, or (id null) in the empty Pinned section. */
+type DropTarget = { id: string | null; zone: DropZone };
+type ChatDrag = { id: string; target: DropTarget | null; keyboard: boolean };
+type LinkAsk = { source: SidebarRecent; target: SidebarRecent; top: number; left: number };
+
+const sameTarget = (a: DropTarget | null, b: DropTarget | null) => a?.id === b?.id && a?.zone === b?.zone;
+
+function ChatList({
+  recents,
+  isActive,
+  collapsed,
+  actions,
+  showHints,
+  onPick,
+  linkProjectId,
+  header,
+  pinnedHeader = true,
+  hintOffset = 0,
+}: {
+  recents: SidebarRecent[];
+  isActive: (item: SidebarRecent) => boolean;
+  collapsed: boolean;
+  actions: ChatRowActions;
+  showHints: boolean;
+  onPick: (item: SidebarRecent) => void;
+  /** The open Project's id on the canvas; null when its chats can't be linked from here. */
+  linkProjectId: string | null;
+  /** The "Chats" header, between the pinned chats and the rest. */
+  header: ReactNode;
+  /** False when the caller shows one Pinned heading over several lists (the all-Projects sidebar). */
+  pinnedHeader?: boolean;
+  /** Where this list's ⌘1–9 hints start, when its chats follow others in the same Project. */
+  hintOffset?: number;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<ChatDrag | null>(null);
+  const dragRef = useRef<ChatDrag | null>(null);
+  const [links, setLinks] = useState<ProjectLink[]>([]);
+  const [mark, setMark] = useState<{ top: number; height: number } | null>(null);
+  const [toast, setToast] = useState<{ text: string; left: number; undo?: () => void } | null>(null);
+  const [linkAsk, setLinkAsk] = useState<LinkAsk | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const refocus = useRef<string | null>(null);
+  const canDrag = !collapsed && Boolean(actions.onPin);
+  const pinned = recents.filter((item) => item.pinned);
+  const rest = recents.filter((item) => !item.pinned);
+  const byId = (id: string | null) => recents.find((item) => item.id === id);
+
+  // Window listeners and memoized row actions call through this, so they always see the latest render.
+  const live = useRef({ recents, actions, over, drop, finish, hit });
+  live.current = { recents, actions, over, drop, finish, hit };
+
+  const showToast = (text: string, undo?: () => void) => {
+    const aside = listRef.current?.closest("aside")?.getBoundingClientRect();
+    setToast({ text, undo, left: (aside?.right ?? 0) + 12 });
+  };
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), TOAST_MS);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  // Pinning from the row menu and from a drag both land here, so either can be undone.
+  const rowActions = useMemo<ChatRowActions>(
+    () => ({
+      ...actions,
+      onPin:
+        actions.onPin &&
+        ((id, order) => {
+          const now = live.current;
+          const item = now.recents.find((row) => row.id === id);
+          if (!item || !now.actions.onPin) return;
+          const orders = now.recents.filter((row) => row.pinned && row.id !== id).map((row) => row.pinOrder ?? 0);
+          const next = order === undefined ? pinOrderAt(orders, orders.length) : order;
+          const previous = item.pinned ? (item.pinOrder ?? 0) : null;
+          now.actions.onPin(id, next);
+          if ((previous === null) !== (next === null)) showToast(next === null ? "Unpinned" : "Pinned", () => live.current.actions.onPin?.(id, previous));
+        }),
+    }),
+    [actions],
+  );
+
+  const endpoint = (item: SidebarRecent) => ({ pinned: item.pinned, worktree: item.details?.path });
+  const linkBetween = (a: SidebarRecent, b: SidebarRecent) =>
+    links.find(
+      (link) =>
+        link.a.project_id === linkProjectId &&
+        link.b.project_id === linkProjectId &&
+        ((link.a.worktree_path === a.details?.path && link.b.worktree_path === b.details?.path) ||
+          (link.a.worktree_path === b.details?.path && link.b.worktree_path === a.details?.path)),
+    );
+
+  function intentOf(current: ChatDrag): DropIntent {
+    const source = byId(current.id);
+    const target = current.target;
+    if (!source || !target || target.id === current.id) return "none";
+    const onto = target.id === null ? null : byId(target.id);
+    if (onto === undefined || onto?.pending) return "none";
+    if (target.zone === "on" && !(source.details?.path && onto?.details?.path)) return "none";
+    return dropIntent(endpoint(source), onto && endpoint(onto), target.zone, Boolean(onto && linkBetween(source, onto)));
+  }
+
+  /** The pinned chats other than the dragged one, and the index the drop puts it at among them. */
+  function pinSlot(current: ChatDrag) {
+    const others = recents.filter((item) => item.pinned && item.id !== current.id);
+    const target = current.target;
+    const index = !target?.id ? 0 : others.findIndex((item) => item.id === target.id) + (target.zone === "after" ? 1 : 0);
+    return { orders: others.map((item) => item.pinOrder ?? 0), index };
+  }
+
+  function describe(current: ChatDrag) {
+    const intent = intentOf(current);
+    if (typeof intent === "object") return DROP_HINTS[intent.invalid];
+    if (intent === "link") return `On ${byId(current.target!.id)?.label}: create Link`;
+    if (intent === "pin" || intent === "reorder") {
+      const { orders, index } = pinSlot(current);
+      return `Pinned, position ${index + 1} of ${orders.length + 1}`;
+    }
+    return intent === "unpin" ? "Chats: unpin" : "No change";
+  }
+
+  function setDragState(next: ChatDrag | null) {
+    dragRef.current = next;
+    setDrag(next);
+  }
+
+  function begin(id: string, keyboard: boolean) {
+    setDragState({ id, target: null, keyboard });
+    document.documentElement.setAttribute("data-chat-drag", "");
+    if (!keyboard) {
+      // The press that started the drag would otherwise select the labels it moves over.
+      document.body.style.cursor = "grabbing";
+      document.body.style.userSelect = "none";
+      window.getSelection()?.removeAllRanges();
+    }
+    // Read as the drag starts, so "Already linked" follows Links drawn on the canvas since.
+    if (linkProjectId)
+      void window.milagre?.getCanvas?.().then(
+        (snapshot) => setLinks(snapshot.links),
+        () => {},
+      );
+    setAnnouncement(keyboard ? `Picked up ${byId(id)?.label}. Arrow keys move it, Space drops it, Escape cancels.` : "");
+  }
+
+  function finish() {
+    setDragState(null);
+    document.documentElement.removeAttribute("data-chat-drag");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }
+
+  function over(target: DropTarget | null) {
+    const current = dragRef.current;
+    if (!current || sameTarget(current.target, target)) return;
+    const next = { ...current, target };
+    setDragState(next);
+    if (current.keyboard) setAnnouncement(target ? describe(next) : "");
+  }
+
+  function drop() {
+    const current = dragRef.current;
+    finish();
+    if (!current) return;
+    const intent = intentOf(current);
+    if (current.keyboard) {
+      refocus.current = current.id;
+      window.setTimeout(() => {
+        refocus.current = null;
+      }, 1000);
+      setAnnouncement(
+        typeof intent === "object"
+          ? DROP_HINTS[intent.invalid]
+          : intent === "none"
+            ? "Dropped, nothing changed"
+            : intent === "link"
+              ? ""
+              : `Dropped. ${describe(current)}`,
+      );
+    }
+    if (intent === "pin" || intent === "reorder") {
+      const { orders, index } = pinSlot(current);
+      rowActions.onPin?.(current.id, pinOrderAt(orders, index));
+    } else if (intent === "unpin") rowActions.onPin?.(current.id, null);
+    else if (intent === "link") askLink(byId(current.id)!, byId(current.target!.id)!);
+  }
+
+  /** The row or empty Pinned section under the pointer; between two rows it keeps the last one. */
+  function hit(x: number, y: number): DropTarget | null {
+    const list = listRef.current;
+    const box = list?.getBoundingClientRect();
+    if (!list || !box || x < box.left || x > box.right || y < box.top || y > box.bottom) return null;
+    const element = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-chat-id], [data-pin-zone]");
+    if (!element || !list.contains(element)) return dragRef.current?.target ?? null;
+    if (element.hasAttribute("data-pin-zone")) return { id: null, zone: "before" };
+    const rect = element.getBoundingClientRect();
+    const at = (y - rect.top) / rect.height;
+    const zone: DropZone = linkProjectId ? (at < 1 / 3 ? "before" : at > 2 / 3 ? "after" : "on") : at < 0.5 ? "before" : "after";
+    return { id: element.dataset.chatId ?? null, zone };
+  }
+
+  function startPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!canDrag || event.button !== 0 || dragRef.current) return;
+    const pressed = event.target as HTMLElement;
+    const row = pressed.closest<HTMLElement>("[data-chat-id]");
+    const id = row?.dataset.chatId;
+    if (!id || pressed.closest("a, input, [aria-haspopup]") || byId(id)?.pending) return;
+    const start = { x: event.clientX, y: event.clientY };
+    let started = false;
+    const move = (moveEvent: PointerEvent) => {
+      if (!started) {
+        if (Math.hypot(moveEvent.clientX - start.x, moveEvent.clientY - start.y) < DRAG_THRESHOLD) return;
+        started = true;
+        begin(id, false);
+      }
+      live.current.over(live.current.hit(moveEvent.clientX, moveEvent.clientY));
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", cancel);
+    };
+    const end = () => {
+      stop();
+      if (!started) return;
+      // The press still ends in a click; it was a drag, so that click doesn't open a chat.
+      const swallow = (click: MouseEvent) => {
+        click.preventDefault();
+        click.stopPropagation();
+      };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      window.setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+      live.current.drop();
+    };
+    const cancel = () => {
+      stop();
+      if (started) live.current.finish();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", cancel);
+  }
+
+  // Escape cancels a pointer drag; the keyboard drag handles its own keys on the row.
+  useEffect(() => {
+    if (!drag || drag.keyboard) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      live.current.finish();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [drag?.id, drag?.keyboard]);
+
+  /** Every place the keyboard can move a chat to, top to bottom. */
+  function slots(id: string): DropTarget[] {
+    const others = recents.filter((item) => item.id !== id && !item.pending);
+    const pins = others.filter((item) => item.pinned);
+    const around = (item: SidebarRecent): DropTarget[] =>
+      linkProjectId
+        ? [
+            { id: item.id, zone: "before" },
+            { id: item.id, zone: "on" },
+          ]
+        : [{ id: item.id, zone: "before" }];
+    const top: DropTarget[] = pins.length
+      ? [...pins.flatMap(around), { id: pins.at(-1)!.id, zone: "after" }]
+      : byId(id)?.pinned
+        ? []
+        : [{ id: null, zone: "before" }];
+    return [...top, ...others.filter((item) => !item.pinned).flatMap(around)];
+  }
+
+  function keyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const current = dragRef.current;
+    const pressed = event.target as HTMLElement;
+    if (!current) {
+      const id = pressed.closest<HTMLElement>("[data-chat-id]")?.dataset.chatId;
+      if (event.key !== " " || !canDrag || !id || !pressed.matches("[data-row]") || byId(id)?.pending) return;
+      event.preventDefault();
+      begin(id, true);
+      return;
+    }
+    if (!current.keyboard) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const all = slots(current.id);
+      if (!all.length) return;
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      const index = all.findIndex((slot) => sameTarget(slot, current.target));
+      over(all[index === -1 ? (step > 0 ? 0 : all.length - 1) : Math.min(all.length - 1, Math.max(0, index + step))]);
+    } else if (event.key === " ") {
+      event.preventDefault();
+      drop();
+    } else if (event.key === "Escape") {
+      // Consumed here, so Escape doesn't also stop the open chat's turn.
+      event.preventDefault();
+      finish();
+      setAnnouncement("Cancelled");
+    } else if (event.key === "Tab") finish();
+  }
+
+  // Space on a row picks it up instead of opening it; Enter still opens it.
+  const keyUp = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === " " && canDrag && (event.target as HTMLElement).matches("[data-row]")) event.preventDefault();
+  };
+
+  // The line or highlight follows the target row, measured once the Pinned drop area has shown up.
+  const targetId = drag?.target?.id;
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const row = targetId ? list?.querySelector<HTMLElement>(`[data-chat-id="${CSS.escape(targetId)}"]`) : null;
+    if (!list || !row) return setMark(null);
+    const box = list.getBoundingClientRect(),
+      rect = row.getBoundingClientRect();
+    setMark({ top: rect.top - box.top, height: rect.height });
+  }, [targetId, recents]);
+
+  // A row moved by the keyboard comes back in its new place; focus goes back to it.
+  useLayoutEffect(() => {
+    const id = refocus.current;
+    if (!id || listRef.current?.contains(document.activeElement)) return;
+    focusRow(id);
+  }, [recents]);
+
+  function focusRow(id: string) {
+    listRef.current?.querySelector<HTMLElement>(`[data-chat-id="${CSS.escape(id)}"] [data-row]`)?.focus();
+  }
+
+  function askLink(source: SidebarRecent, target: SidebarRecent) {
+    const row = listRef.current?.querySelector(`[data-chat-id="${CSS.escape(target.id)}"]`)?.getBoundingClientRect();
+    const aside = listRef.current?.closest("aside")?.getBoundingClientRect();
+    setLinkAsk({ source, target, top: Math.max(8, Math.min(row?.top ?? 8, window.innerHeight - 220)), left: (aside?.right ?? 0) + 8 });
+  }
+
+  // The same Link the canvas draws between two Worktrees; undo removes it again.
+  async function createLink(ask: LinkAsk) {
+    setLinkAsk(null);
+    focusRow(ask.source.id);
+    if (!linkProjectId || !ask.source.details?.path || !ask.target.details?.path) return;
+    const a = { project_id: linkProjectId, worktree_path: ask.source.details.path };
+    const b = { project_id: linkProjectId, worktree_path: ask.target.details.path };
+    try {
+      const next = await window.milagre.addLink(a, b);
+      setLinks(next);
+      const created = next.find(
+        (link) =>
+          (link.a.worktree_path === a.worktree_path && link.b.worktree_path === b.worktree_path) ||
+          (link.a.worktree_path === b.worktree_path && link.b.worktree_path === a.worktree_path),
+      );
+      showToast(
+        "Link created",
+        created &&
+          (() => void window.milagre.removeLink(created.id).then(setLinks, (error) => showToast(`Could not remove the Link: ${ipcErrorMessage(error)}`))),
+      );
+    } catch (error) {
+      showToast(`Could not create the Link: ${ipcErrorMessage(error)}`);
+    }
+  }
+
+  const intent = drag ? intentOf(drag) : "none";
+  const row = (item: SidebarRecent, index: number) => (
+    <ChatRow
+      key={item.id}
+      item={item}
+      active={isActive(item)}
+      collapsed={collapsed}
+      actions={rowActions}
+      shortcutHint={showHints && hintOffset + index < 9 ? `${shortcutModifier}${hintOffset + index + 1}` : undefined}
+      onPick={onPick}
+      dragging={drag?.id === item.id}
+    />
+  );
+
+  return (
+    <div ref={listRef} data-chat-list className="relative" onPointerDown={startPointer} onKeyDown={keyDown} onKeyUp={keyUp}>
+      {pinnedHeader && (pinned.length > 0 || drag) && !collapsed && (
+        <div className="sidebar-copy mx-2 mb-1 flex h-8 items-center pl-2">
+          <span className="text-[12.5px] font-medium text-ink-3">Pinned</span>
+        </div>
+      )}
+      {drag && pinned.length === 0 && !collapsed && (
+        <div
+          data-pin-zone
+          className={`mx-2 mb-1 flex h-8 items-center justify-center rounded-[8px] border border-dashed text-[12.5px] ${drag.target?.id === null ? "border-accent bg-accent/10 text-accent-ink" : "border-line-strong text-ink-3"}`}
+        >
+          Drop here to pin
+        </div>
+      )}
+      {pinned.length > 0 && (
+        <div data-pinned-chats className="mb-2">
+          <GlideGroup>{pinned.map(row)}</GlideGroup>
+        </div>
+      )}
+      {collapsed && pinned.length > 0 && <div className="mx-auto mb-2 h-px w-5 bg-line" />}
+      {header}
+      <GlideGroup>{rest.map((item, index) => row(item, pinned.length + index))}</GlideGroup>
+
+      {drag?.target?.id &&
+        mark &&
+        intent !== "none" &&
+        (drag.target.zone === "on" ? (
+          <div
+            data-drop-target={typeof intent === "object" ? "invalid" : "link"}
+            className={`pointer-events-none absolute inset-x-2 z-30 flex items-center justify-end rounded-[8px] pr-2 ring-2 ${typeof intent === "object" ? "bg-red/5 ring-red/60" : "bg-accent/10 text-accent ring-accent"}`}
+            style={{ top: mark.top, height: mark.height }}
+          >
+            {typeof intent === "object" ? (
+              <span className="absolute left-0 top-full z-40 mt-1 rounded-[6px] bg-surface px-2 py-1 text-[11.5px] text-red shadow-overlay">
+                {DROP_HINTS[intent.invalid]}
+              </span>
+            ) : (
+              <HugeIcon icon={Link04Icon} size={14} />
+            )}
+          </div>
+        ) : (
+          <div
+            data-drop-line
+            className="pointer-events-none absolute inset-x-3 z-30 h-0.5 -translate-y-1/2 rounded-full bg-accent"
+            style={{ top: drag.target.zone === "before" ? mark.top : mark.top + mark.height }}
+          />
+        ))}
+
+      <div aria-live="assertive" className="sr-only">
+        {announcement}
+      </div>
+      {linkAsk && (
+        <LinkPopover
+          ask={linkAsk}
+          onConfirm={() => void createLink(linkAsk)}
+          onCancel={() => {
+            setLinkAsk(null);
+            focusRow(linkAsk.source.id);
+          }}
+        />
+      )}
+      {toast &&
+        createPortal(
+          <div
+            role="status"
+            data-chat-toast
+            className="fixed bottom-4 z-[80] flex items-center gap-3 rounded-[10px] bg-surface px-3 py-2 text-[13px] text-ink shadow-overlay"
+            style={{ left: toast.left, animation: "fade-up 200ms cubic-bezier(0.23,1,0.32,1) both" }}
+          >
+            <span>{toast.text}</span>
+            {toast.undo && (
+              <button
+                type="button"
+                data-chat-toast-undo
+                onClick={() => {
+                  setToast(null);
+                  toast.undo?.();
+                }}
+                className="font-medium text-accent-ink hover:underline"
+              >
+                Undo
+              </button>
+            )}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+/** Asks before a dropped chat creates a Link; nothing is created until Create Link. */
+function LinkPopover({ ask, onConfirm, onCancel }: { ask: LinkAsk; onConfirm: () => void; onCancel: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    ref.current?.querySelector<HTMLElement>("[data-link-confirm]")?.focus();
+  }, []);
+  useDismiss(true, onCancel, (target) => !!ref.current?.contains(target));
+  const side = (item: SidebarRecent) => item.details?.branch ?? item.label;
+  return createPortal(
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Create Link"
+      data-link-popover
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        onCancel();
+      }}
+      className="fixed z-[70] w-72 rounded-[12px] bg-surface p-3 shadow-overlay"
+      style={{ top: ask.top, left: ask.left, animation: "pop-in 160ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "top left" }}
+    >
+      <p className="text-[13.5px] font-semibold text-ink">Link these Worktrees?</p>
+      <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-2">
+        <span className="truncate">{side(ask.source)}</span>
+        <span className="shrink-0 text-ink-3">
+          <HugeIcon icon={Link04Icon} size={13} />
+        </span>
+        <span className="truncate">{side(ask.target)}</span>
+      </p>
+      <p className="mt-2 text-[12.5px] leading-snug text-ink-3">
+        Every Chat on either side can read the other side and make Delegations to it, so “{ask.source.label}” can ask “{ask.target.label}” for changes.
+      </p>
+      <div className="mt-3 flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className="rounded-[8px] px-3 py-1.5 text-[13px] text-ink-2 hover:bg-hover-2">
+          Cancel
+        </button>
+        <button type="button" data-link-confirm onClick={onConfirm} className="rounded-[8px] bg-ink px-3 py-1.5 text-[13px] font-medium text-surface">
+          Create Link
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+}

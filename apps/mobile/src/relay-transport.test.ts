@@ -486,3 +486,68 @@ test("the hello is for the pinned Mac and names this phone", async () => {
   assert.deepEqual(fake.sent[0].slice(33, 65), phone.publicKey);
   transport.close();
 });
+
+test("ready() handshakes once; onLost fires when the socket drops, not on close()", async () => {
+  const fake = relay();
+  let lost = 0;
+  const { transport } = transportFor(fake, { onLost: () => lost++ });
+  const hellos = () => fake.sent.filter((frame) => frame[0] === 0x01).length;
+  await transport.ready();
+  assert.equal(hellos(), 1);
+  await transport.ready();
+  assert.equal(hellos(), 1);
+  assert.equal(lost, 0);
+  fake.sockets[0].drop(1006);
+  await settle();
+  assert.equal(lost, 1);
+  await transport.ready();
+  assert.equal(hellos(), 2);
+  transport.close();
+  await settle();
+  assert.equal(lost, 1, "close() is not a loss");
+});
+
+test("onLost is not called for a failed handshake", async () => {
+  const fake = relay();
+  fake.state.mode = "bad-token";
+  let lost = 0;
+  const { transport } = transportFor(fake, { onLost: () => lost++ });
+  await assert.rejects(transport.ready(), { message: OLDER_CODE });
+  await settle();
+  assert.equal(lost, 0);
+  transport.close();
+});
+
+test("a throwing consumer during close() does not leave the transport unable to report a later loss", async () => {
+  const fake = relay();
+  let lost = 0;
+  const { transport } = transportFor(fake, { onLost: () => lost++ });
+  transport.live(
+    "/live",
+    () => {},
+    (up) => {
+      if (!up) throw new Error("consumer bug");
+    },
+  );
+  await settle();
+  assert.throws(() => transport.close(), /consumer bug/);
+  await transport.ready();
+  fake.sockets.at(-1)!.drop(1006);
+  await settle();
+  assert.equal(lost, 1, "the closing flag must not stay set after a throwing close()");
+  transport.close();
+});
+
+test("an onLost that throws cannot skip the teardown: what was pending still fails", async () => {
+  const fake = relay(() => "never");
+  const { transport } = transportFor(fake, {
+    onLost: () => {
+      throw new Error("supervisor bug");
+    },
+  });
+  const pending = GET(transport);
+  await settle();
+  fake.sockets[0].drop(1006);
+  await assert.rejects(pending, { message: LOST });
+  transport.close();
+});

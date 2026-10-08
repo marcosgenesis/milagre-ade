@@ -6,6 +6,56 @@ const os = require("node:os");
 const { execFileSync } = require("node:child_process");
 const { createGit, LIMITS } = require("./git/client.cjs");
 
+const WORKTREES = ["/home/me/my shop", "/home/me/worktrees/cart"];
+const nulListing = "worktree /home/me/my shop\0HEAD abc\0branch refs/heads/main\0\0worktree /home/me/worktrees/cart\0HEAD def\0detached\0\0";
+const lineListing =
+  "worktree /home/me/my shop\nHEAD abc\nbranch refs/heads/main\n\nworktree /home/me/worktrees/cart\nHEAD def\ndetached\nprunable gitdir file points to non-existent location\n\n";
+
+function oldGit(calls, stderr = "error: unknown switch `z'\nusage: git worktree list [-v | --porcelain [-z]]\n") {
+  return createGit({
+    execFile(_command, args, _options, done) {
+      calls.push(args);
+      if (args.includes("-z")) {
+        const error = Object.assign(new Error("exit 129"), { code: 129 });
+        done(error, "", stderr);
+      } else done(null, lineListing, "");
+    },
+  });
+}
+
+test("worktree list falls back to newline records on Git before 2.36 and matches the -z result", async () => {
+  const modern = createGit({ execFile: (_command, _args, _options, done) => done(null, nulListing, "") });
+  const expected = await modern.worktreeList("/home/me/my shop");
+  assert.deepEqual(
+    expected.map((entry) => entry.path),
+    WORKTREES,
+  );
+  const calls = [];
+  const git = oldGit(calls);
+  assert.deepEqual(await git.worktreeList("/home/me/my shop"), expected);
+  assert.deepEqual(await git.worktreeList("/home/me/my shop"), expected);
+  // The failing -z form is tried once per process, then remembered.
+  assert.equal(calls.filter((args) => args.includes("-z")).length, 1);
+  assert.equal(calls.length, 3);
+});
+
+test("worktree list falls back on Git's usage-error exit code when its message is localized", async () => {
+  const calls = [];
+  const git = oldGit(calls, "erro: chave desconhecida `z'\nuso: git worktree list [-v | --porcelain [-z]]\n");
+  assert.deepEqual(
+    (await git.worktreeList("/home/me/my shop")).map((entry) => entry.path),
+    WORKTREES,
+  );
+  assert.equal(calls.length, 2);
+});
+
+test("worktree list still reports unrelated Git failures", async () => {
+  const git = createGit({
+    execFile: (_command, _args, _options, done) => done(Object.assign(new Error("x"), { code: 128 }), "", "fatal: not a git repository"),
+  });
+  await assert.rejects(git.worktreeList("/nowhere"), /not a git repository/);
+});
+
 test("Windows Git worktree paths use native separators at the client boundary", async () => {
   const git = createGit({
     platform: "win32",

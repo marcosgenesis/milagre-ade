@@ -7,7 +7,7 @@ Milagre coordinates coding agents across projects and git worktrees on one machi
 ### Work
 
 **Account**:
-A saved Claude or Codex sign-in on one computer. Each provider has one selected **Account** for that computer's **Projects**. Desktop and paired phones share the selection. A running reply keeps its existing **Account**; the next turn uses the selected one.
+A saved Claude or Codex sign-in on one computer. Each provider has a computer default **Account**. Each **Project** and **Named Link** can select its own **Account** or inherit that default. Desktop and paired phones share these selections. A running reply and its active subagents keep their existing **Account**; subsequent idle turns use the owning Project or Named Link's selection. Switching the viewed Project never changes an Account assignment.
 
 **Project**:
 A git repository that has been opened in Milagre at least once. Every **Worktree** of the repository belongs to the same **Project**, whichever of its folders was opened.

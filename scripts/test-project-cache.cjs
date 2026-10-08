@@ -95,6 +95,8 @@ const stubs = {
   "react-native": native,
   "./client": "export const createClient = host => window.makeClient(host);",
   "./relay-native": "export const relayRuntime = {};",
+  "./routes-native":
+    'export const lanRoutes = { set() {}, forget() {}, checkAll() {}, subscribe: () => () => {}, kind: () => "remote", view: () => ({ current: () => null, subscribe: () => () => {} }) }; export const learnRoutes = async () => {};',
   "./hosts-native":
     "export const savedHosts = { list: async () => [] }; export const savedNavigation = { read: async () => null }; export const readPermission = async () => null; export const savePermission = async () => {};",
   "./live": "export const syncProject = () => () => {};",
@@ -111,6 +113,7 @@ const stubs = {
   "./project-search": "export const ProjectSearch = () => null;",
   "./chat-actions": "export const chatMenu = () => []; export const runChatAction = async () => {};",
   "./confirm-store": "export const confirm = async () => true;",
+  "./attention": "export const AttentionDot = () => null; export const useAttention = () => [];",
 };
 
 async function browserChecks() {

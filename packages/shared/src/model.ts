@@ -105,6 +105,10 @@ export interface AgentSession {
   unread?: boolean;
   /** Hidden from the chat list. */
   archived?: boolean;
+  /** Shown in the chat list's Pinned section, above the rest, in `pin_order`. */
+  pinned?: boolean;
+  /** Where a pinned chat sits among the pinned ones, lowest first. Kept when unpinned; only read while pinned. */
+  pin_order?: number;
   /** The chat this one was handed over to, on the other provider. */
   handedOverTo?: number;
   /** The chat this one was handed over from. */
@@ -115,6 +119,14 @@ export interface AgentSession {
   handoverDraft?: string;
   /** Set when a quit stopped this chat's turn: when, so a stale one waits for Continue instead of resuming by itself. */
   resumeTurn?: { stoppedAt?: number };
+  /** How full the agent's context window was when its last turn ended. */
+  contextUsage?: ContextUsage;
+}
+
+/** Tokens in the agent's context window, out of the model's window size. */
+export interface ContextUsage {
+  used: number;
+  size: number;
 }
 
 /** A named Link owns one conversation across an isolated Worktree in each member Project. */
@@ -377,6 +389,7 @@ export type AgentEvent =
   | { type: "subagent-update"; agent: Subagent }
   | { type: "subagents-waiting"; waiting: boolean }
   | { type: "tasks-updated"; tasks: AgentTask[] }
+  | ({ type: "context-usage" } & ContextUsage)
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
   /** `continues`: the turn whose steering message arrived as it ended, which this turn the agent started by itself takes. */
@@ -479,8 +492,15 @@ export interface SkillOption {
   provider: string;
 }
 
+/** A skill discovery skipped because an earlier one has the same name; `shadowedBy` is the winner's path. */
+export interface ShadowedSkill extends SkillOption {
+  shadowedBy: string;
+}
+
 export interface SkillCatalog {
   skills: SkillOption[];
+  /** Absent from an older host. */
+  shadowed?: ShadowedSkill[];
   warnings: string[];
 }
 
@@ -493,6 +513,8 @@ export interface UsageWindow {
 }
 
 export interface ProviderUsage {
+  /** The host Account whose limits are shown, captured with the usage read. */
+  account?: Pick<ProviderAccount, "id" | "label" | "email">;
   provider: ModelProvider;
   status: "ok" | "unavailable" | "error";
   windows: UsageWindow[];
@@ -509,6 +531,8 @@ export interface UsageSnapshot {
 
 /** Provider identities only. Credentials stay with the CLI on the connected computer. */
 export type ProviderAccount = {
+  /** An explicit assignment whose saved profile was removed. */
+  missing?: boolean;
   id: string;
   provider: ModelProvider;
   label: string;
@@ -524,3 +548,10 @@ export interface TranscriptState {
   messages: ChatMessage[];
 }
 export type LinkSendRequest = Omit<ChatSendRequest, "projectPath" | "worktreeId"> & { linkId: string; operationId: string };
+
+/** Host-local account assignments; null follows the computer selection. */
+export type ProjectAccountScope = { key: string; name: string; kind: "project" | "link"; projects: { id: string; path: string; name: string }[] };
+export type ProjectAccountsSnapshot = {
+  scopeKey: string;
+  providers: { provider: ModelProvider; accountId: string | null; effectiveId: string; defaultId: string; accounts: ProviderAccount[] }[];
+};

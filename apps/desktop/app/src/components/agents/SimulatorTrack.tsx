@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft01Icon, ArrowExpand01Icon, ArrowShrink01Icon, Cancel01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, SidebarRight01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import type { SimulatorApi, SimulatorDevice, SimulatorList } from "@milagre/shared/simulator";
 import { createSimulatorBridge, createSimulatorReceiverHtml } from "@milagre/shared/simulator-receiver";
 import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
 import { viewerTheme } from "./viewerTheme";
+
+// Docked width plus the 12px gap to the chat. The chat panes reserve it through --simulator-dock.
+const DOCK_WIDTH = 400;
 
 /** The host owns persistent associations; discovery never attaches a device. */
 export function SimulatorTrack({ chatId }: { chatId: string }) {
@@ -18,19 +21,20 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
   const revision = useRef(0);
   const [list, setList] = useState<SimulatorList>({ devices: [], supported: true });
   const [opened, setOpened] = useState(false),
-    [expanded, setExpanded] = useState(false);
+    [docked, setDocked] = useState(false);
   const [selected, setSelected] = useState<SimulatorDevice | null>(null);
   const [loading, setLoading] = useState(true);
   const [attaching, setAttaching] = useState(false),
     [busy, setBusy] = useState(false);
   const close = useCallback(() => {
     setOpened(false);
-    setExpanded(false);
+    setDocked(false);
     setSelected(null);
     setAttaching(false);
   }, []);
+  // Docked, the viewer is a side panel: pressing the chat or focusing the iframe must not dismiss it.
   const bounds = useAnchoredPopover({
-    opened,
+    opened: opened && !docked,
     setOpened: (value) => {
       if (!value) close();
     },
@@ -52,6 +56,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
         if (result.chatId !== chatId) throw new Error("Update Milagre on this Mac to attach simulators to Chats.");
         if (!disposed && started === revision.current) {
           setList(result);
+          if (!result.attached?.length) close();
           setSelected((current) => (current && result.devices.find((d) => d.id === current.id)) || null);
         }
       } catch (error) {
@@ -75,6 +80,14 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
       document.removeEventListener("visibilitychange", visibility);
     };
   }, [api, close, chatId]);
+  useEffect(() => {
+    if (!opened || !docked) return;
+    const root = document.documentElement.style;
+    root.setProperty("--simulator-dock", `${DOCK_WIDTH + 12}px`);
+    return () => {
+      root.removeProperty("--simulator-dock");
+    };
+  }, [opened, docked]);
   const mutate = async (method: "attach" | "detach", device: SimulatorDevice) => {
     if (!api || busy) return;
     setBusy(true);
@@ -84,6 +97,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
       setList(result);
       setAttaching(false);
       setSelected(method === "attach" ? device : null);
+      if (!result.attached?.length) close();
     } catch (error) {
       setList((current) => ({ ...current, error: error instanceof Error ? error.message : "Could not update attachment." }));
     } finally {
@@ -91,7 +105,8 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
       setBusy(false);
     }
   };
-  if (!api || !list.supported) return null;
+  const attachedCount = list.attached?.length ?? 0;
+  if (!api || !list.supported || !attachedCount) return null;
   const open = () => {
     if (opened) {
       close();
@@ -109,18 +124,17 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
           aria-haspopup="dialog"
           aria-expanded={opened}
           aria-controls={opened ? panelId : undefined}
-          aria-label={`Simulators, ${list.devices.length} running in this Chat`}
+          aria-label={`Simulators, ${attachedCount} attached to this Chat`}
           onClick={open}
           className="flex h-6 items-center gap-1.5 rounded-full border border-line bg-surface px-2 text-[11px] text-ink-2 hover:bg-hover focus-visible:outline-2"
         >
           <HugeiconsIcon icon={SmartphoneIcon} size={12} aria-hidden />
-          Simulators <span className="tabular-nums">{list.devices.length}</span>
+          Simulators <span className="tabular-nums">{attachedCount}</span>
         </button>
       </Tooltip>
       {opened &&
         createPortal(
           <>
-            {expanded && <div className="fixed inset-0 z-40 bg-black/20 backdrop-blur-overlay" aria-hidden />}
             <div
               ref={panel}
               id={panelId}
@@ -129,12 +143,12 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
               aria-modal="false"
               tabIndex={-1}
               data-slot="simulator-popover"
-              data-expanded={expanded || undefined}
-              style={expanded ? { left: 20, right: 20, top: 20, bottom: 20 } : { ...bounds, height: selected ? 650 : undefined }}
+              data-docked={docked || undefined}
+              style={docked ? { top: 40, right: 12, bottom: 12, width: DOCK_WIDTH } : { ...bounds, height: selected ? 650 : undefined }}
               className="fixed z-50 flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface text-ink shadow-raised focus:outline-none"
             >
               <header className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-                {selected || attaching ? (
+                {attaching ? (
                   <Tooltip label="Back to devices">
                     <button
                       type="button"
@@ -152,18 +166,31 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
                   <HugeiconsIcon icon={SmartphoneIcon} size={16} aria-hidden />
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px]">{selected?.name ?? (attaching ? "Attach simulator" : "Simulators")}</div>
-                  <div className="text-[11px] text-ink-3">{attaching ? "Other devices on this Mac" : "This Chat"}</div>
-                </div>
-                {selected && (
-                  <Tooltip label={expanded ? "Collapse simulator" : "Expand simulator"}>
+                  {selected ? (
                     <button
                       type="button"
-                      aria-label={expanded ? "Collapse simulator" : "Expand simulator"}
-                      onClick={() => setExpanded((value) => !value)}
-                      className="rounded p-1 text-ink-2 hover:bg-hover"
+                      aria-label={`${selected.name}, choose simulator`}
+                      onClick={() => setSelected(null)}
+                      className="-ml-1 flex max-w-full items-center gap-1 rounded px-1 text-[13px] hover:bg-hover"
                     >
-                      <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={16} aria-hidden />
+                      <span className="truncate">{selected.name}</span>
+                      <HugeiconsIcon icon={ArrowDown01Icon} size={14} className="shrink-0 text-ink-3" aria-hidden />
+                    </button>
+                  ) : (
+                    <div className="truncate text-[13px]">{attaching ? "Attach simulator" : "Simulators"}</div>
+                  )}
+                  {!selected && <div className="text-[11px] text-ink-3">{attaching ? "Other devices on this Mac" : "This Chat"}</div>}
+                </div>
+                {selected && (
+                  <Tooltip label={docked ? "Undock simulator" : "Dock simulator to the right"}>
+                    <button
+                      type="button"
+                      aria-label={docked ? "Undock simulator" : "Dock simulator to the right"}
+                      aria-pressed={docked}
+                      onClick={() => setDocked((value) => !value)}
+                      className={`rounded p-1 hover:bg-hover ${docked ? "text-accent" : "text-ink-2"}`}
+                    >
+                      <HugeiconsIcon icon={SidebarRight01Icon} size={16} aria-hidden />
                     </button>
                   </Tooltip>
                 )}
@@ -272,7 +299,6 @@ function SimulatorFrame({ api, deviceId, chatId, onClose }: { api: SimulatorApi;
       bridge.dispose();
     };
   }, [api, deviceId, chatId, onClose]);
-  // oxlint-disable-next-line react/iframe-missing-sandbox -- flagged for review, see PR body
   return (
     <iframe
       ref={frame}
@@ -280,6 +306,7 @@ function SimulatorFrame({ api, deviceId, chatId, onClose }: { api: SimulatorApi;
       title="Live simulator"
       data-slot="simulator-frame"
       srcDoc={html}
+      // oxlint-disable-next-line react/iframe-missing-sandbox -- flagged for review, see PR body
       sandbox="allow-scripts allow-same-origin"
       allow="autoplay"
       className="min-h-0 w-full flex-1 border-0 bg-black"

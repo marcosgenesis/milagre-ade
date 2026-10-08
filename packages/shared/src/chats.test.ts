@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentSession, ChatMessage, CoordinatorState } from "./model.ts";
-import { chatTitle } from "./chats.mjs";
+import { chatTitle, comparePins, pinOrderAt } from "./chats.mjs";
 
 const session: AgentSession = { id: 1, worktree_id: 1, agent_name: "main", status: "Created" };
 
@@ -97,4 +97,20 @@ test("legacy acknowledgement requires an accepted target and a new untagged matc
   assert.equal(resolve({ ...saved, session_id: 2 }), null);
   assert.equal(resolve({ ...saved, body: "Other input" }), null);
   assert.equal(resolve({ ...saved, clientMessageId: "another-client" }), null);
+});
+
+test("comparePins puts pinned chats first in their order and leaves the rest alone", () => {
+  const chats = [{ id: 1 }, { id: 2, pinned: true, pin_order: 5 }, { id: 3 }, { id: 4, pinned: true, pin_order: -1 }, { id: 5, pin_order: -9 }];
+  assert.deepEqual(
+    [...chats].sort(comparePins).map((chat) => chat.id),
+    [4, 2, 1, 3, 5],
+  );
+});
+
+test("pinOrderAt fits a chat between, before or after the pinned ones", () => {
+  assert.equal(pinOrderAt([], 0), 0);
+  assert.equal(pinOrderAt([2, 4], 0), 1);
+  assert.equal(pinOrderAt([2, 4], 1), 3);
+  assert.equal(pinOrderAt([2, 4], 2), 5);
+  assert.equal(pinOrderAt([2, 3], 1), 2.5);
 });

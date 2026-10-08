@@ -115,6 +115,20 @@ jobs:
           gpgconf --kill gpg-agent || true
           rm -rf "$GNUPGHOME"
 
+  native-gate:
+    # The required check for native tests. A skipped matrix never reports per-leg names, so this
+    # job always runs: green when native-tests passed or was skipped, red when it failed or was cancelled.
+    if: always()
+    needs: [native-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require native tests to have passed or been skipped
+        env:
+          RESULT: ${{ needs.native-tests.result }}
+        run: |
+          echo "native-tests: $RESULT"
+          case "$RESULT" in success|skipped) exit 0 ;; *) exit 1 ;; esac
   desktop-checks:
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
@@ -148,9 +162,11 @@ jobs:
 
   release:
     # Every CI-green push to main becomes a release candidate: a tag and a DRAFT GitHub release.
-    # Drafts are invisible to installed apps; "Publish beta" or "Publish installers" ship one.
+    # Stable installs never see drafts (they ask for GitHub's latest release). The tag does show in the releases
+    # atom feed, so beta installs resolve their feed through the REST API instead (electron/release-channel.cjs).
+    # "Publish beta" or "Publish installers" ship a candidate.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'the-ptf/milagre-ade'
-    needs: [javascript, native-tests]
+    needs: [javascript, native-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

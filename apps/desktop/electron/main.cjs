@@ -14,6 +14,7 @@ const {
   Notification,
   shell,
   protocol,
+  powerMonitor,
   net,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
@@ -31,61 +32,32 @@ const { createMediaHandler } = require("./media.cjs");
 protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 async function startDesktop() {
   const appIconPath = path.join(__dirname, "../app/public/logo-milagre-image.png");
-  let updateState = { status: "idle", version: null, progress: 0 };
-  let updateCheck = null;
-  const { createReleaseChannelStore, configureUpdater, isChannelNotPublished } = require("./release-channel.cjs");
+  const { createReleaseChannelStore, prepareUpdater } = require("./release-channel.cjs");
+  const { createAppUpdates, watchAppUpdates } = require("./app-updates.cjs");
   const releaseChannel = createReleaseChannelStore({ file: path.join(app.getPath("userData"), "release-channel.json") });
-  function publishUpdateState(nextState) {
-    updateState = { ...updateState, ...nextState };
-    for (const window of BrowserWindow.getAllWindows()) {
-      window.webContents.send("update:state", updateState);
-    }
-    return updateState;
-  }
-
-  function checkForUpdates() {
-    if (!app.isPackaged) return Promise.resolve(publishUpdateState({ status: "unavailable" }));
-    if (updateState.status === "downloading" || updateState.status === "downloaded") return Promise.resolve(updateState);
-    if (updateCheck) return updateCheck;
-    configureUpdater(autoUpdater, releaseChannel.get());
-    autoUpdater.autoDownload = true;
-    autoUpdater.autoInstallOnAppQuit = false;
-    publishUpdateState({ status: "checking", version: null, progress: 0 });
-    updateCheck = autoUpdater
-      .checkForUpdates()
-      .then(
-        () => (updateState.status === "checking" ? publishUpdateState({ status: "up-to-date" }) : updateState),
-        (error) => {
-          if (isChannelNotPublished(error)) return publishUpdateState({ status: "up-to-date" });
-          console.warn("Milagre update check failed:", error.message);
-          return publishUpdateState({ status: "error" });
-        },
-      )
-      .finally(() => {
-        updateCheck = null;
-      });
-    return updateCheck;
-  }
-
-  ipcMain.handle("update:state", () => updateState);
-  ipcMain.handle("update:check", () => checkForUpdates());
+  const updates = createAppUpdates({
+    updater: autoUpdater,
+    enabled: app.isPackaged,
+    prepare: () => prepareUpdater(autoUpdater, releaseChannel.get()),
+    stopHost: async () => {
+      await runtime.close({ stopHost: true });
+      await prepareQuit();
+    },
+    publish: (state) => {
+      for (const window of BrowserWindow.getAllWindows()) window.webContents.send("update:state", state);
+    },
+  });
+  ipcMain.handle("update:state", () => updates.get());
+  ipcMain.handle("update:check", () => updates.check(true));
   ipcMain.handle("update:channel", () => releaseChannel.get());
-  // The new channel is saved first. A running or finished download keeps its state; the channel applies on the next check.
+  // Save immediately; an existing download belongs to its original channel until installed.
   ipcMain.handle("update:set-channel", async (_event, channel) => {
     const next = releaseChannel.set(channel);
-    if (updateState.status === "downloading" || updateState.status === "downloaded") return next;
-    if (updateCheck) await updateCheck.catch(() => {});
-    if (updateState.status === "downloading" || updateState.status === "downloaded") return next;
-    publishUpdateState({ status: "idle", version: null, progress: 0 });
-    void checkForUpdates();
+    if (updates.get().status === "checking") await updates.check();
+    void updates.check(true);
     return next;
   });
-  // Installing replaces the host bundle too. Save and stop it before the updater runs.
-  ipcMain.handle("update:install", async () => {
-    await runtime.close({ stopHost: true });
-    await prepareQuit();
-    autoUpdater.quitAndInstall();
-  });
+  ipcMain.handle("update:install", () => updates.install());
 
   // A project or worktree folder in the file manager; only a checkout's top folder opens (see reveal.cjs).
   ipcMain.handle("project:reveal", (_event, folder) =>
@@ -126,6 +98,7 @@ async function startDesktop() {
   });
 
   // Installed editors are looked up once per run.
+  /** @type {Promise<import("@milagre/core/editors").DetectedEditor[]> | null} */
   let editorsFound = null;
   // Looked up after the login shell filled in PATH, so CLIs from a Finder launch are found.
   // A failed lookup is not kept, so the next call looks again.
@@ -146,6 +119,22 @@ async function startDesktop() {
   }
   const openEditor = createEditorOpener({ editors, open: openInEditor, checkRoot: checkEditorRoot });
   ipcMain.handle("editor:open", (_event, request) => openEditor(request));
+  // Settings > Skills opens or reveals a SKILL.md wherever it lives (~/.claude/skills is no checkout), but only a file the
+  // Project's skill catalog lists, so the renderer can't name any other file.
+  async function checkSkillFile(projectPath, file) {
+    const { skills, shadowed = [] } = /** @type {import("@milagre/shared/model").SkillCatalog} */ (await runtime.invoke("skills:list", [projectPath]));
+    if (typeof file !== "string" || ![...skills, ...shadowed].some((skill) => skill.path === file))
+      throw new Error("That skill is no longer there. Reload the list.");
+  }
+  const openSkillFile = createEditorOpener({ editors, open: openInEditor, checkRoot: async () => {} });
+  ipcMain.handle("skills:open", async (_event, { projectPath, file, editor } = {}) => {
+    await checkSkillFile(projectPath, file);
+    return openSkillFile({ root: path.dirname(file), path: path.basename(file), editor });
+  });
+  ipcMain.handle("skills:reveal", async (_event, projectPath, file) => {
+    await checkSkillFile(projectPath, file);
+    shell.showItemInFolder(file);
+  });
 
   // Brings the window back from a notification click and tells it what to open.
   function openFromNotification(channel, ...args) {
@@ -295,12 +284,8 @@ async function startDesktop() {
     app.on("browser-window-blur", () => {
       void runtime.setFocused(false).catch(() => {});
     });
-    autoUpdater.on("update-available", (info) => publishUpdateState({ status: "downloading", version: info.version }));
-    autoUpdater.on("update-not-available", () => publishUpdateState({ status: "up-to-date" }));
-    autoUpdater.on("download-progress", (progress) => publishUpdateState({ status: "downloading", progress: progress.percent }));
-    autoUpdater.on("update-downloaded", (info) => publishUpdateState({ status: "downloaded", version: info.version, progress: 100 }));
-    autoUpdater.on("error", () => publishUpdateState({ status: "error" }));
-    await checkForUpdates();
+    if (app.isPackaged) watchAppUpdates(updates, { app, powerMonitor });
+    else void updates.check();
     app.on("activate", () => {
       const window = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed());
       if (window) window.show();
@@ -316,6 +301,7 @@ async function startDesktop() {
 
   // Flushes accepted changes and disconnects desktop. The host and agents keep running.
   let quitting = false;
+  /** @type {Promise<void> | null} */
   let quitPrepared = null;
   function prepareQuit() {
     quitting = true;

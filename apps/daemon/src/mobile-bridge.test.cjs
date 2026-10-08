@@ -195,6 +195,10 @@ test("the phone can load the real skill catalog for its project", async (t) => {
     "bundled skills reach the phone",
   );
   assert.equal((await rpc("skills:list", [os.homedir()])).status, 409, "the daemon still requires a known folder");
+  const skill = catalog.skills.find((item) => item.name === "phone-skill");
+  const read = await rpc("skills:read", [project, skill.path]);
+  assert.equal(read.status, 200);
+  assert.ok((await read.json()).result.includes("Do the work."), "the phone reads a listed SKILL.md");
 });
 
 test("HTTP guard rejects unauthorized, cross-origin, malformed and unsupported requests", async (t) => {
@@ -860,6 +864,13 @@ test("a live socket signals runs and state changes of its Project only, and /run
   );
   assert.equal((await request("/runs?projectPath=relative")).status, 400);
   assert.equal((await fetch(bridge.url + "/runs?projectPath=" + encodeURIComponent(project))).status, 401);
+  // A question puts the chat on the attention list every Project's phone view polls.
+  assert.deepEqual((await (await request("/attention")).json()).result, []);
+  session.emit({ type: "question-request", requestId: "question-1", questions: [{ question: "Which branch?" }] });
+  let attention = [];
+  for (const start = Date.now(); !attention.length && Date.now() - start < 3000; await delay(10))
+    attention = (await (await request("/attention")).json()).result;
+  assert.deepEqual(attention, [`${project}#${chat}`]);
 
   // The turn's end saves its reply: one prompt "project" signal, so the reply never disappears between fetches.
   const started = Date.now();
@@ -1054,4 +1065,58 @@ test("drawer snapshots are marked and cached separately from full snapshots", as
   assert.equal(preview.project.state.sessions[chat.id].title, "Drawer chat");
   assert.equal((await (await request(route)).json()).result.previewOnly, undefined);
   assert.equal((await request(route + "&view=chats", { headers: { "if-none-match": response.headers.get("etag") } })).status, 304);
+});
+
+test("phone:routes is answered by the phone hook, never forwarded to the daemon", async (t) => {
+  const asked = [];
+  const answer = { hostId: "h".repeat(22), key: "k".repeat(43), lan: ["ws://192.168.1.20:8798"] };
+  const { rpc } = await fixture(t, { bridgeOptions: { phoneRoutes: async (key) => (asked.push(key), answer) } });
+  const response = await rpc("phone:routes", [{ phoneKey: "p".repeat(43) }]);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).result, answer);
+  assert.deepEqual(asked, ["p".repeat(43)]);
+  // A malformed call still reaches the hook, which owns the validation.
+  assert.equal((await rpc("phone:routes", [])).status, 200);
+  assert.deepEqual(asked, ["p".repeat(43), undefined]);
+});
+
+test("a failing phone:routes hook reports its own status", async (t) => {
+  const { rpc } = await fixture(t, {
+    bridgeOptions: {
+      phoneRoutes: async () => {
+        throw Object.assign(new Error("Expected this phone's key"), { status: 400 });
+      },
+    },
+  });
+  const response = await rpc("phone:routes", [{ phoneKey: "x" }]);
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error.message, /key/);
+});
+
+test("phone:routes is refused without a hook", async (t) => {
+  const { rpc } = await fixture(t);
+  assert.equal((await rpc("phone:routes", [{ phoneKey: "p".repeat(43) }])).status, 403);
+});
+
+test("phone port RPCs preserve Chat scope and cannot stop an unowned process", async (t) => {
+  const f = await fixture(t);
+  const chatId = f.project + "#1";
+  const list = await f.rpc("chat:ports", [chatId]);
+  assert.equal(list.status, 200);
+  assert.deepEqual((await list.json()).result, { chatId, ports: [] });
+  const stop = await f.rpc("agent:stop-port", [chatId, process.pid]);
+  assert.equal(stop.status, 200);
+  assert.equal((await stop.json()).result, false);
+});
+
+test("account assignment changes notify live phones independently of Project state signals", async (t) => {
+  const { project, bridge, rpc, request, token } = await fixture(t);
+  await rpc("project:open", [project]);
+  const chat = Object.values((await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result.project.state.sessions)[0].id;
+  const phone = await openLive(bridge, project, { authorization: `Bearer ${token}` });
+  await rpc("chat:patch", [project, chat, { title: "Changed while assigning" }]);
+  const result = await rpc("accounts:assign", [project, "claude", null]);
+  assert.equal(result.status, 200);
+  await until(() => phone.messages.includes("accounts") && phone.messages.includes("project"));
+  assert.equal(phone.messages.filter((type) => type === "accounts").length, 1);
 });

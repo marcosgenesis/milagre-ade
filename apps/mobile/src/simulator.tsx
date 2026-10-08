@@ -4,7 +4,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DomWebView, type DomWebViewRef } from "@expo/dom-webview";
 import { File, Paths } from "expo-file-system";
-import { ArrowLeft01Icon, Cancel01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowLeft01Icon, Cancel01Icon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import type { SimulatorDevice, SimulatorList } from "@milagre/shared/simulator";
 import { createSimulatorBridge, createSimulatorReceiverHtml } from "@milagre/shared/simulator-receiver";
 import type { Client } from "./client";
@@ -61,11 +61,12 @@ function useSimulators(client: Client | null, chatId?: string) {
 export function SimulatorChip({ chatId }: { chatId: string }) {
   const { client } = useSession();
   const { list } = useSimulators(client, chatId);
-  if (!client || !chatId || list?.supported === false) return null;
+  const attachedCount = list?.attached?.length ?? 0;
+  if (!client || !chatId || list?.supported === false || !attachedCount) return null;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Simulators, ${list?.devices.length ?? 0} running in this Chat`}
+      accessibilityLabel={`Simulators, ${attachedCount} attached to this Chat`}
       onPress={() => router.push({ pathname: "/simulator-sheet", params: { hostId: client.url, chatId } })}
       hitSlop={8}
       style={({ pressed }) => ({
@@ -82,7 +83,7 @@ export function SimulatorChip({ chatId }: { chatId: string }) {
       })}
     >
       <Icon icon={SmartphoneIcon} tone="ink2" size={12} />
-      <Text style={{ color: colors.ink2, fontSize: 11 }}>Simulators {list?.devices.length ?? 0}</Text>
+      <Text style={{ color: colors.ink2, fontSize: 11 }}>Simulators {attachedCount}</Text>
     </Pressable>
   );
 }
@@ -134,13 +135,12 @@ export function SimulatorSheet({ hostId, chatId }: { hostId?: string; chatId?: s
     }
   };
   return (
-    <View style={{ flex: 1, backgroundColor: colors.page, paddingBottom: insets.bottom }}>
-      {/* Keep the header as one native view: form-sheet scroll sizing cannot account for a flattened header. */}
+    <View style={{ flex: 1, backgroundColor: colors.page, paddingTop: insets.top, paddingBottom: insets.bottom }}>
       <View
         collapsable={false}
         style={{ flexShrink: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, gap: 8 }}
       >
-        {selected || attaching ? (
+        {attaching ? (
           <CircleButton
             label="Back to devices"
             icon={ArrowLeft01Icon}
@@ -154,10 +154,28 @@ export function SimulatorSheet({ hostId, chatId }: { hostId?: string; chatId?: s
           <View style={{ width: 40 }} />
         )}
         <View style={{ flex: 1, alignItems: "center" }}>
-          <Text accessibilityRole="header" numberOfLines={1} style={{ color: colors.ink, fontSize: 17, fontWeight: "600" }}>
-            {selected?.name ?? (attaching ? "Attach simulator" : "Simulators")}
-          </Text>
-          <Text style={{ color: colors.ink3, fontSize: 11 }}>{attaching ? "Other devices on this Mac" : "This Chat"}</Text>
+          {selected ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${selected.name}, choose simulator`}
+              onPress={() => {
+                setChoosing(true);
+                setSelected(null);
+              }}
+              hitSlop={8}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "100%" }}
+            >
+              <Text accessibilityRole="header" numberOfLines={1} style={{ flexShrink: 1, color: colors.ink, fontSize: 17, fontWeight: "600" }}>
+                {selected.name}
+              </Text>
+              <Icon icon={ArrowDown01Icon} tone="ink3" size={16} />
+            </Pressable>
+          ) : (
+            <Text accessibilityRole="header" numberOfLines={1} style={{ color: colors.ink, fontSize: 17, fontWeight: "600" }}>
+              {attaching ? "Attach simulator" : "Simulators"}
+            </Text>
+          )}
+          {!selected && <Text style={{ color: colors.ink3, fontSize: 11 }}>{attaching ? "Other devices on this Mac" : "This Chat"}</Text>}
         </View>
         <CircleButton label="Close simulator" icon={Cancel01Icon} onPress={() => router.back()} />
       </View>
@@ -240,7 +258,7 @@ function SimulatorWebView({ client, deviceId, chatId }: { client: Client; device
   const scheme = useColorScheme();
   const theme = useMemo(() => {
     const palette = hex(scheme);
-    // The sheet and its bottom safe area use page, not the raised surface color.
+    // The page and its bottom safe area use page, not the raised surface color.
     return { ...palette, surface: palette.page, scheme: scheme === "dark" ? ("dark" as const) : ("light" as const) };
   }, [scheme]);
   const latestTheme = useRef(theme);

@@ -3,6 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState } from "react-native";
 import { createClient, type ClientHost, type Client, type OpenProject, type RecentProject, type Snapshot, type ProjectPreview } from "./client";
 import { relayRuntime } from "./relay-native";
+import { learnRoutes, lanRoutes } from "./routes-native";
 import { syncProject } from "./live";
 import { readPermission, savedHosts, savedNavigation, savePermission } from "./hosts-native";
 import type { ChatLocation } from "./navigation-store";
@@ -63,39 +64,50 @@ function useSessionState() {
     autoOpen.current = false;
     return first;
   };
+  const scopeKey = snapshot?.project.path;
+  const providerRequest = useRef(0);
+  const providerContext = useRef({ client, scopeKey });
   useEffect(() => {
-    let cancelled = false;
-    if (!client || process.env.EXPO_PUBLIC_DEMO === "1") return;
-    void Promise.all([client.call<AgentModels>("agent:models"), client.call<AgentCliStatus>("agent:cli-status")])
-      .then(([models, status]) => {
-        if (!cancelled) {
-          setModels(models);
-          setCliStatus(status);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setProviderError("Could not check the installed agents. Reconnect to check again.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
+    providerContext.current = { client, scopeKey };
+  }, [client, scopeKey]);
+  const [providerRevision, setProviderRevision] = useState(0);
   const refreshProviders = useCallback(async () => {
-    if (!client) return;
-    const version = generation.current;
+    if (!client || process.env.EXPO_PUBLIC_DEMO === "1") return;
+    const version = ++providerRequest.current;
+    const current = () => version === providerRequest.current && providerContext.current.client === client && providerContext.current.scopeKey === scopeKey;
+    setProviderRevision((value) => value + 1);
+    setModels(null);
+    setCliStatus(null);
+    setProviderError("");
     try {
-      const [models, status] = await Promise.all([client.call<AgentModels>("agent:models"), client.call<AgentCliStatus>("agent:cli-status")]);
-      if (version !== generation.current) return;
+      const args = scopeKey ? [scopeKey] : [];
+      const [models, status] = await Promise.all([client.call<AgentModels>("agent:models", args), client.call<AgentCliStatus>("agent:cli-status", args)]);
+      if (!current()) return;
       setModels(models);
       setCliStatus(status);
-      setProviderError("");
     } catch {
-      setProviderError("Could not check the installed agents. Reconnect to check again.");
+      if (current()) setProviderError("Could not check the installed agents. Reconnect to check again.");
     }
-  }, [client]);
+  }, [client, scopeKey]);
+  const invalidateProviders = useCallback(() => {
+    providerRequest.current++;
+  }, []);
+  useEffect(() => {
+    // Invalidate previously displayed discovery when the selected Project changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshProviders();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refreshProviders();
+    });
+    return () => {
+      invalidateProviders();
+      subscription.remove();
+    };
+  }, [refreshProviders, invalidateProviders]);
   const loadHosts = useCallback(async () => {
     const list = await savedHosts.list();
     setHosts(list);
+    for (const saved of list) lanRoutes.set(saved.id, saved.token, saved.routes?.lan);
     return list;
   }, []);
   // Saved computers are read once at launch; the startup splash waits for them.
@@ -103,7 +115,11 @@ function useSessionState() {
     void Promise.all([
       savedHosts
         .list()
-        .then(setHosts)
+        .then((list) => {
+          setHosts(list);
+          for (const saved of list) lanRoutes.set(saved.id, saved.token, saved.routes?.lan);
+          return list;
+        })
         .catch(() => {}),
       savedNavigation.read().then(setLastLocation),
     ]).finally(() => setBooted(true));
@@ -144,6 +160,7 @@ function useSessionState() {
         }
       }
       if (current !== generation.current) return false;
+      if (process.env.EXPO_PUBLIC_DEMO !== "1") void learnRoutes(next, { token: host.token.trim(), relay: host.relay }).catch(() => {});
       setModels(null);
       setCliStatus(null);
       setProviderError("");
@@ -167,6 +184,7 @@ function useSessionState() {
     try {
       await next.call("daemon:status");
       if (current !== generation.current) return false;
+      if (process.env.EXPO_PUBLIC_DEMO !== "1") void learnRoutes(next, { token: host.token, relay: host.relay }).catch(() => {});
       const projects = await next.recentScopes();
       const state = await next.open(projectPath);
       const project = state.project;
@@ -317,6 +335,9 @@ function useSessionState() {
       connect: (options) => client.live(projectPath, options),
       snapshot: refresh,
       runs: refreshRuns,
+      accounts: () => {
+        void refreshProviders();
+      },
       onError: (error) => setError(error.message),
       active: () => AppState.currentState === "active",
       watchActive: (listener) => {
@@ -326,7 +347,7 @@ function useSessionState() {
       // Live turns refresh every second; an idle Project only needs a slower check for changes made elsewhere.
       pollDelay: () => (running.current || Date.now() < busyUntil.current ? 1000 : 4000),
     });
-  }, [client, projectPath, refresh, refreshRuns]);
+  }, [client, projectPath, refresh, refreshRuns, refreshProviders]);
   const selected = selection.current;
   const isSelected = () => selected !== null && selection.current === selected;
   const disconnect = () => {
@@ -359,6 +380,7 @@ function useSessionState() {
     cliStatus,
     providerError,
     refreshProviders,
+    providerRevision,
     connect,
     open,
     openNotificationTarget,

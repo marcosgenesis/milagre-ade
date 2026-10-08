@@ -3,7 +3,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Attachment01Icon, FlashIcon, SecurityCheckIcon } from "@hugeicons/core-free-icons";
-import type { AgentCliStatus, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
+import type { AgentCliStatus, ContextUsage, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { effortCopy, PERMISSION_MODES } from "../model";
 import Tooltip from "./primitives/Tooltip";
 import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
@@ -20,6 +20,7 @@ import { useSkills } from "./useSkills";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { promptSkillParts } from "../lib/prompt-skills";
 import { PromptHighlights } from "./PromptHighlights";
+import { ContextRing } from "./ContextRing";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -78,6 +79,8 @@ interface PromptComposerProps {
   onPermissionModeChange: (mode: PermissionMode) => void;
   /** Keep the tall layout (input above the controls) even while the draft is empty. */
   alwaysExpanded?: boolean;
+  /** How full the agent's context window is, shown as a ring beside Send. */
+  contextUsage?: ContextUsage;
 }
 
 const POPOVER_GAP = 12;
@@ -134,6 +137,7 @@ export function PromptComposer({
   permissionMode,
   onPermissionModeChange,
   alwaysExpanded = false,
+  contextUsage,
 }: PromptComposerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -618,7 +622,7 @@ export function PromptComposer({
         )}
 
         <div
-          className={`promptbar-surface relative isolate flex flex-col overflow-visible border border-line bg-surface transition-[border-color,border-radius] duration-150 focus-within:border-line-strong ${expanded ? "gap-2.5 rounded-[22px] p-3.5" : "gap-1.5 rounded-[14px] p-1.5"}`}
+          className={`promptbar-surface relative isolate flex flex-col overflow-visible border border-line transition-[border-color,border-radius] duration-150 focus-within:border-line-strong ${expanded ? "gap-2.5 rounded-[22px] p-3.5" : "gap-1.5 rounded-[14px] p-1.5"}`}
         >
           <input
             ref={fileInputRef}
@@ -651,7 +655,7 @@ export function PromptComposer({
           )}
 
           <div
-            className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_28px]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_28px]"}`}
+            className={`grid items-end gap-x-1 gap-y-1.5 ${expanded ? "grid-cols-[28px_auto_minmax(0,1fr)_auto_auto]" : "grid-cols-[28px_minmax(0,1fr)_auto_auto_auto]"}`}
           >
             <button
               type="button"
@@ -765,16 +769,19 @@ export function PromptComposer({
               <Icon icon={SecurityCheckIcon} size={14} />
               <span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span>
             </button>
-            <button
-              type="button"
-              aria-label={canStop ? "Stop agent" : "Send"}
-              disabled={!canStop && (!canSend || sendBlocked || imageDraft.loading)}
-              onClick={canStop ? onStop : send}
-              className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`}
-              style={{ background: canStop || (canSend && !sendBlocked) ? "var(--ink)" : "var(--line-strong)" }}
-            >
-              {canStop ? <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" /> : <Icon icon={ArrowUp01Icon} size={16} />}
-            </button>
+            <div className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`}>
+              {contextUsage && contextUsage.size > 0 && <ContextRing {...contextUsage} />}
+              <button
+                type="button"
+                aria-label={canStop ? "Stop agent" : "Send"}
+                disabled={!canStop && (!canSend || sendBlocked || imageDraft.loading)}
+                onClick={canStop ? onStop : send}
+                className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2`}
+                style={{ background: canStop || (canSend && !sendBlocked) ? "var(--ink)" : "var(--line-strong)" }}
+              >
+                {canStop ? <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" /> : <Icon icon={ArrowUp01Icon} size={16} />}
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -6,17 +6,14 @@ const { killWindowsTree } = require("./process-tree.cjs");
 // each command shell leads its own, so only a child that is a shell or leads its own group
 // counts. A server that outlived its shell (`server &`) keeps the shell's group, so a chat
 // remembers the groups it has seen and keeps showing their ports after the shell exits, and
-// after the agent's session closes, until nothing in them runs any more. A shell that exited
-// before a poll saw it leaves an orphan group (launchd's child, its leader gone); such a group
-// is adopted by the chats whose worktree holds its working directory.
+// after the agent's session closes, until nothing in them runs any more. An unobserved orphan
+// has no proven Chat owner. Sharing a working directory never grants ownership.
 const { execFile } = require("node:child_process");
-const path = require("node:path");
 
 const POLL_MS = 3000;
 const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "sandbox-exec"]);
 
 const basename = (command) => command.split("/").pop().replace(/^-/, "");
-const inside = (dir, root) => dir === root || dir.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
 
 /** `ps -axo pid=,ppid=,pgid=,comm=` as rows of { pid, ppid, pgid, command }. */
 function parsePs(output) {
@@ -56,39 +53,6 @@ function parseLsof(output) {
     }
   }
   return rows;
-}
-
-/** `lsof -d cwd -F pn` as a Map of pid to working directory. */
-function parseCwds(output) {
-  const result = new Map();
-  let pid = 0;
-  for (const line of output.split("\n")) {
-    if (line[0] === "p") pid = Number(line.slice(1));
-    else if (line[0] === "n" && pid) result.set(pid, line.slice(1));
-  }
-  return result;
-}
-
-/** Processes in groups whose leader is gone and that launchd adopted: what a shell left running after it exited. */
-function orphans(processes) {
-  const pids = new Set(processes.map((row) => row.pid));
-  return processes.filter((row) => row.ppid === 1 && row.pgid !== row.pid && !pids.has(row.pgid));
-}
-
-/**
- * Adds each orphan group to the groups of the chats whose worktree holds its working directory.
- * `cwds` maps an orphan's pid to its working directory; `roots` maps a chat id to { pid, cwd }.
- */
-function adoptOrphans(processes, cwds, roots, groups) {
-  for (const row of orphans(processes)) {
-    const dir = cwds.get(row.pid);
-    if (!dir) continue;
-    for (const [chatId, root] of roots) {
-      if (!root.cwd || !inside(dir, root.cwd)) continue;
-      if (!groups.has(chatId)) groups.set(chatId, new Set());
-      groups.get(chatId).add(row.pgid);
-    }
-  }
 }
 
 /**
@@ -308,15 +272,6 @@ class PortWatcher {
           this.windowsIdentities = current;
         }
         this.processes = new Map(processes.map((row) => [row.pid, row]));
-        const known = new Set([...this.groups.values()].flatMap((set) => [...set]));
-        const strays = [...roots.values()].some((root) => root.cwd) ? orphans(processes).filter((row) => !known.has(row.pgid)) : [];
-        if (strays.length)
-          adoptOrphans(
-            processes,
-            parseCwds(await this.exec("lsof", ["-a", "-d", "cwd", "-p", strays.map((row) => row.pid).join(","), "-F", "pn"])),
-            roots,
-            this.groups,
-          );
         const byChat = chatProcesses(processes, roots, this.groups);
         const pids = [...new Set([...byChat.values()].flatMap((set) => [...set]))];
         this.set(chatPorts(await this.listenersOf(pids, fresh), byChat));
@@ -350,4 +305,4 @@ class PortWatcher {
   }
 }
 
-module.exports = { PortWatcher, adoptOrphans, chatPorts, chatProcesses, orphans, parseCwds, parseLsof, parsePs };
+module.exports = { PortWatcher, chatPorts, chatProcesses, parseLsof, parsePs };

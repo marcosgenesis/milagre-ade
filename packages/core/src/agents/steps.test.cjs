@@ -312,8 +312,7 @@ test("Codex: a generated image is an image step that ends with its file and prom
 });
 
 test("Codex: messages, reasoning and other items are not steps", () => {
-  for (const type of ["agentMessage", "reasoning", "userMessage", "plan", "contextCompaction", "somethingNew"])
-    assert.equal(codexStep({ type, id: "x" }), null);
+  for (const type of ["agentMessage", "reasoning", "userMessage", "plan", "somethingNew"]) assert.equal(codexStep({ type, id: "x" }), null);
 });
 
 test("a long command's starting detail keeps its end too", () => {

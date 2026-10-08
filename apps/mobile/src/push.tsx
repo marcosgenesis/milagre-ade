@@ -3,6 +3,7 @@ import { Alert, AppState } from "react-native";
 import { router, useGlobalSearchParams, usePathname } from "expo-router";
 import { createClient } from "./client";
 import { relayRuntime } from "./relay-native";
+import { lanRoutes } from "./routes-native";
 import { savedHosts } from "./hosts-native";
 import { useSession } from "./session";
 import { createPushController, notificationTarget, type PushView } from "./push-controller";
@@ -32,6 +33,7 @@ function usePushState() {
       if (sessionRef.current.client?.url === host.id) sessionRef.current.disconnect();
       await savedHosts.forget(host.id);
       if (host.relay) relayRuntime.forget(host.relay.hostId);
+      lanRoutes.forget(host.id);
       await sessionRef.current.loadHosts();
     }
   }, []);

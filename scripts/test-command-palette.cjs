@@ -9,8 +9,15 @@ import '/src/styles.css';
 // A project's state as the main process reads it.
 const state = { next_id: 1, projects: { 1: { id: 1, name: 'Milagre' } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: 'feature/palette', path: '/fixture/palette', project_id: 1 } };
-state.sessions = { 3: { id: 3, worktree_id: 1, agent_name: 'Claude', provider: 'claude', status: 'Idle' } };
-state.messages = [{ id: 4, session_id: 3, role: 'user', body: 'Add a command palette', context: null }];
+state.sessions = {
+  2: { id: 2, worktree_id: 1, agent_name: 'Claude', provider: 'claude', status: 'Idle', title: 'Relay deploy' },
+  3: { id: 3, worktree_id: 1, agent_name: 'Claude', provider: 'claude', status: 'Idle' },
+};
+state.messages = [
+  { id: 1, session_id: 2, role: 'user', body: 'Ship it', context: null },
+  { id: 2, session_id: 2, role: 'assistant', body: 'The relay deploys with wrangler from apps/relay, then /health answers.', context: null },
+  { id: 4, session_id: 3, role: 'user', body: 'Add a command palette', context: null },
+];
 state.next_id = 5;
 window.calls = [];
 window.escapes = 0;
@@ -233,6 +240,24 @@ async function browserChecks() {
     assert.ok(await evaluate('document.querySelector("[aria-selected=true]").textContent.includes("Current")'), "Reopening shows the saved theme as current");
     await search("add palette");
     assert.ok(await evaluate('document.querySelector("[aria-selected=true]").textContent.includes("Add a command palette")'), "Search matches multiple words");
+    // No command, chat or project matches a typo'd word from a reply, so the palette searches what was said.
+    await search("wranglr");
+    await waitFor('!!document.querySelector("dialog [role=group][aria-label=Messages]")');
+    assert.equal(await evaluate('document.querySelector("[aria-selected=true] mark").textContent'), "wrangler", "The matched word is marked");
+    assert.ok(await evaluate('document.querySelector("[aria-selected=true]").textContent.includes("Relay deploy")'), "The row names its chat");
+    await screenshot("palette-messages-dark.png");
+    await evaluate('document.documentElement.classList.remove("dark")');
+    await screenshot("palette-messages-light.png");
+    await evaluate('document.documentElement.classList.add("dark")');
+    await key("Enter");
+    await waitFor('!document.querySelector("dialog")');
+    await waitFor('document.querySelector("[aria-label=\\"Find in chat\\"]")?.value === "wrangler"');
+    assert.ok(await evaluate('document.querySelector("[aria-current=page]").textContent.includes("Relay deploy")'), "The message's chat opens");
+    await waitFor('document.querySelector("[data-find-count]").textContent === "1 of 1"');
+    await screenshot("message-opened-dark.png");
+    await key("Escape");
+    await waitFor('!document.querySelector("[data-find-bar]")');
+    await open();
     await search("");
     await screenshot("palette-dark.png");
     for (const [width, height] of [
@@ -297,7 +322,7 @@ async function browserChecks() {
     assert.ok(await evaluate('document.body.textContent.includes("Add a command palette")'));
     await screenshot("chat-action-failure.png");
     console.log(
-      "PASS: Cmd/Ctrl+K, animated exit, reduced-motion dismissal, repeated Enter guard, direct settings changes and persistence, current setting, filtering, navigation, empty state, action dispatch, focus restore, Escape isolation, modifier-only hints, release/blur cleanup, numbered chat navigation, themes, viewport fit, settings and project navigation, shortcuts over a waiting question card",
+      "PASS: Cmd/Ctrl+K, fuzzy message fallback opening the chat with find seeded, animated exit, reduced-motion dismissal, repeated Enter guard, direct settings changes and persistence, current setting, filtering, navigation, empty state, action dispatch, focus restore, Escape isolation, modifier-only hints, release/blur cleanup, numbered chat navigation, themes, viewport fit, settings and project navigation, shortcuts over a waiting question card",
     );
     app.exit(0);
   } catch (error) {

@@ -304,6 +304,7 @@ function BrowserFrame({
       title="Live browser page"
       data-slot="browser-frame"
       srcDoc={html}
+      // oxlint-disable-next-line react/iframe-missing-sandbox -- same receiver setup as the simulator viewer, flagged for review there
       sandbox="allow-scripts allow-same-origin"
       className="min-h-0 w-full flex-1 border-0 bg-surface"
     />

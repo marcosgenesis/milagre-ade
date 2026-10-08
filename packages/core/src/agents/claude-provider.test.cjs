@@ -9,6 +9,7 @@ const TURN = { prompt: "Hi", images: [], model: "claude-opus-5-5", permissionMod
 const init = { type: "system", subtype: "init", session_id: "session-1" };
 const delta = (text) => ({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "text_delta", text } } });
 const success = { type: "result", subtype: "success", is_error: false, result: "Hello" };
+const notificationResult = { type: "result", subtype: "success", is_error: false, num_turns: 0, result: "" };
 
 const COLOR_QUESTION = {
   questions: [
@@ -42,6 +43,15 @@ const scripts = {
     yield delta("Hel");
     yield delta("lo");
     yield success;
+  },
+  // On resume, Claude Code records a stale task notification as a turn of its own before it reads the message.
+  async *notified({ next }) {
+    yield init;
+    yield notificationResult;
+    yield init;
+    yield delta("Hello");
+    yield success;
+    await next();
   },
   async *interruptible({ interrupted }) {
     yield init;
@@ -713,6 +723,36 @@ test("a steer that arrives as the turn ends becomes a turn of its own", async (t
   assert.notEqual(started[1].turnId, first.turnId);
   assert.equal(session.turnActive, false);
   assert.equal(calls.prompts.length, 2);
+});
+
+test("a turn that only records a task notification doesn't end the user's turn", async (t) => {
+  const { session, events, calls } = claude(t, { script: scripts.notified });
+  await session.startTurn(TURN);
+  await ended(events);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ["turn-started", "session-started", "text-delta", "turn-completed"],
+  );
+  assert.equal(calls.prompts[0].uuid.length, 36);
+});
+
+test("a task notification recorded while no turn runs starts no turn", async (t) => {
+  const { session, events } = claude(t, {
+    script: async function* ({ next }) {
+      yield init;
+      yield delta("Hello");
+      yield success;
+      yield init;
+      yield notificationResult;
+      await next();
+    },
+  });
+  await session.startTurn(TURN);
+  await ended(events);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(events.filter((event) => event.type === "turn-started").length, 1);
+  assert.equal(events.filter(isTerminal).length, 1);
+  assert.equal(session.turnActive, false);
 });
 
 test("a steer sent while the SDK is still loading waits for the turn", async (t) => {

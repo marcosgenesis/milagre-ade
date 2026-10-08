@@ -12,11 +12,12 @@ import "/src/styles.css";
 const noop = () => {};
 window.deviceCount = 3;
 window.attachedIds = [0,1];
+window.stoppedIds = [];
 window.simulatorCalls = [];
 window.simulatorClosed = [];
 const device = i => i === 0 ? {id:'device-0',name:'iPhone 17',platform:'ios',version:'27'} : {id:'device-'+i,name:i===1?'Pixel 9':'Other Chat device',platform:'android',version:'16'};
 window.milagre = { simulators: {
- list: async ({chatId}) => ({chatId,devices:window.attachedIds.map(device),attached:window.attachedIds.map(device),available:Array.from({length:window.deviceCount},(_,i)=>i).filter(i=>!window.attachedIds.includes(i)).map(device),supported:true}),
+ list: async ({chatId}) => ({chatId,devices:window.attachedIds.filter(i=>!window.stoppedIds.includes(i)).map(device),attached:window.attachedIds.map(device),available:Array.from({length:window.deviceCount},(_,i)=>i).filter(i=>!window.attachedIds.includes(i)).map(device),supported:true}),
  attach: async ({chatId,deviceId}) => {window.attachedIds.push(Number(deviceId.split('-')[1]));return window.milagre.simulators.list({chatId});},
  detach: async ({chatId,deviceId}) => {window.attachedIds=window.attachedIds.filter(i=>device(i).id!==deviceId);return window.milagre.simulators.list({chatId});},
  open: async args => { window.simulatorCalls.push(args); return {viewerId:'view-'+window.simulatorCalls.length,device:device(Number(args.deviceId.split('-')[1])),iceServers:[]}; },
@@ -58,7 +59,7 @@ function Fixture() {
     id: index + 1, session_id: 1, context: null, role: index === 0 ? "user" : "assistant",
     body: index === 0 ? "Review authentication and run the relevant tests." : "I started two subagents. Their progress is available below.",
   }));
-  return <div style={{ height: "100%", padding: 12 }}>
+  return <div data-chat-pane style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} tasks={tasks} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
@@ -120,6 +121,13 @@ async function browserChecks() {
     await screenshot("new-chat");
     await evaluate("window.setMessageCount(2)");
     await waitFor('!!document.querySelector("[data-slot=simulator-track]")');
+    await click("[data-slot=simulator-track] button");
+    await evaluate('window.attachedIds=[]; document.dispatchEvent(new Event("visibilitychange"))');
+    await waitFor('!document.querySelector("[data-slot=simulator-track]") && !document.querySelector("[data-slot=simulator-popover]")');
+    await screenshot("no-attachments");
+    await evaluate('window.attachedIds=[0,1]; document.dispatchEvent(new Event("visibilitychange"))');
+    await waitFor('!!document.querySelector("[data-slot=simulator-track]")');
+    assert.equal(await evaluate('!!document.querySelector("[data-slot=simulator-popover]")'), false, "reattaching must not reopen the viewer");
     await screenshot("composer-dark");
     await click("[data-slot=simulator-track] button");
     await waitFor('document.querySelectorAll("[data-simulator-device]").length===2');
@@ -129,19 +137,29 @@ async function browserChecks() {
     await click('[data-simulator-device="device-0"]');
     await waitFor("window.simulatorCalls.length===1");
     await waitFor('document.querySelector("[data-slot=simulator-frame]")');
-    await click('[aria-label="Expand simulator"]');
-    await waitFor('document.querySelector("[data-slot=simulator-popover]").dataset.expanded==="true"');
-    await screenshot("expanded-dark");
+    await click('[aria-label="Dock simulator to the right"]');
+    await waitFor('document.querySelector("[data-slot=simulator-popover]").dataset.docked==="true"');
+    assert.ok(
+      await evaluate(
+        '(()=>{const pane=document.querySelector("[data-chat-pane]").getBoundingClientRect(),dock=document.querySelector("[data-slot=simulator-popover]").getBoundingClientRect();return pane.right<=dock.left&&dock.right<=innerWidth})()',
+      ),
+      "docked viewer sits beside the chat pane",
+    );
+    await click("textarea");
+    await delay(100);
+    assert.ok(await evaluate('!!document.querySelector("[data-slot=simulator-popover]")'), "pressing the chat keeps the docked viewer");
+    await screenshot("docked-dark");
     const footerMatches =
       '(()=>{const doc=document.querySelector("[data-slot=simulator-frame]").contentDocument;return doc && getComputedStyle(doc.body).backgroundColor===getComputedStyle(document.querySelector("[data-slot=simulator-popover]")).backgroundColor})()';
     await waitFor(footerMatches);
     await evaluate("window.setDark(false)");
     await waitFor(footerMatches);
     assert.equal(await evaluate("window.simulatorCalls.length"), 1, "theme changes must preserve the viewer session");
-    await screenshot("expanded-light");
+    await screenshot("docked-light");
     await evaluate("window.setDark(true)");
     await waitFor(footerMatches);
-    await click('[aria-label="Collapse simulator"]');
+    await click('[aria-label="Undock simulator"]');
+    assert.equal(await evaluate('document.documentElement.style.getPropertyValue("--simulator-dock")'), "", "undocking returns the space");
     window.setContentSize(390, 500);
     await delay(200);
     assert.ok(
@@ -167,13 +185,31 @@ async function browserChecks() {
     await click("[data-simulator-device=device-2]");
     await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("3")');
     assert.equal(await evaluate("window.simulatorCalls.at(-1).chatId"), "/fixture#1");
-    await click('[aria-label="Back to devices"]');
+    assert.equal(await evaluate("!!document.querySelector(\"[aria-label='Back to devices']\")"), false, "the viewer has no back button");
+    assert.equal(
+      await evaluate('document.querySelector("[data-slot=simulator-popover] header").textContent.includes("This Chat")'),
+      false,
+      "the viewer has no subtitle",
+    );
+    await click('[aria-label="Other Chat device, choose simulator"]');
     await click('[aria-label="Detach Other Chat device from Chat"]');
     await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("2")');
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
     await waitFor('!document.querySelector("[data-slot=simulator-popover]")');
+    await evaluate('window.stoppedIds=[0,1]; document.dispatchEvent(new Event("visibilitychange"))');
+    await click("[data-slot=simulator-track] button");
+    await waitFor('document.querySelector("[data-slot=simulator-popover]")?.textContent.includes("Stopped")');
+    assert.equal(
+      await evaluate('document.querySelector("[data-slot=simulator-track] button").getAttribute("aria-label")'),
+      "Simulators, 2 attached to this Chat",
+    );
+    await click('[aria-label="Detach iPhone 17 from Chat"]');
+    await waitFor('document.querySelector("[data-slot=simulator-track]").textContent.includes("1")');
+    await click('[aria-label="Detach Pixel 9 from Chat"]');
+    await waitFor('!document.querySelector("[data-slot=simulator-track]") && !document.querySelector("[data-slot=simulator-popover]")');
+    await screenshot("last-detached");
     console.log(
-      "PASS: icon/count and composer placement, on-demand capture, chooser, expand/collapse, narrow layout, close cleanup, Escape, light/dark screenshots",
+      "PASS: icon/count and composer placement, on-demand capture, chooser, dock/undock, narrow layout, close cleanup, Escape, light/dark screenshots",
     );
     app.exit(0);
   } catch (error) {

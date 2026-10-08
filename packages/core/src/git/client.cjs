@@ -127,34 +127,50 @@ function createGit({ execFile = execute, env = process.env, platform = process.p
     return { name, ref: null };
   }
 
+  // `worktree list -z` needs Git 2.36. Older Git rejects the switch, so fall back to newline records and remember which form works.
+  let nulSeparated = true;
+  async function worktreeBlocks(cwd) {
+    if (nulSeparated) {
+      const result = await run(cwd, ["worktree", "list", "--porcelain", "-z"]);
+      if (result.ok)
+        return result.stdout
+          .split("\0\0")
+          .filter(Boolean)
+          .map((block) => block.split("\0"));
+      // 129 is Git's usage-error exit code, whatever language its message is in.
+      if (result.code !== 129 && !/unknown switch .z.|usage: git worktree/i.test(result.stderr)) throw new GitError(result);
+      nulSeparated = false;
+    }
+    const output = await text(cwd, ["worktree", "list", "--porcelain"]);
+    return output
+      .split(/\r?\n\r?\n/)
+      .map((block) => block.split(/\r?\n/).filter(Boolean))
+      .filter((fields) => fields.length);
+  }
+
   async function worktreeList(cwd) {
-    const output = await text(cwd, ["worktree", "list", "--porcelain", "-z"]);
     const listed = await Promise.all(
-      output
-        .split("\0\0")
-        .filter(Boolean)
-        .map(async (block) => {
-          const fields = block.split("\0");
-          const folder = fields.find((field) => field.startsWith("worktree "))?.slice(9);
-          if (!folder) return null;
-          const branch = fields
-            .find((field) => field.startsWith("branch "))
-            ?.slice(7)
-            .replace(/^refs\/heads\//, "");
-          // Git's spelling can differ from Node's (slashes, drive case or aliases).
-          // Resolve existing Windows worktrees through the OS, preserving missing
-          // entries for activeWorktrees to filter out as before.
-          let nativePath = folder;
-          if (platform === "win32") {
-            try {
-              nativePath = await realpath(folder);
-            } catch (error) {
-              if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
-            }
-            nativePath = path.win32.normalize(nativePath);
+      (await worktreeBlocks(cwd)).map(async (fields) => {
+        const folder = fields.find((field) => field.startsWith("worktree "))?.slice(9);
+        if (!folder) return null;
+        const branch = fields
+          .find((field) => field.startsWith("branch "))
+          ?.slice(7)
+          .replace(/^refs\/heads\//, "");
+        // Git's spelling can differ from Node's (slashes, drive case or aliases).
+        // Resolve existing Windows worktrees through the OS, preserving missing
+        // entries for activeWorktrees to filter out as before.
+        let nativePath = folder;
+        if (platform === "win32") {
+          try {
+            nativePath = await realpath(folder);
+          } catch (error) {
+            if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
           }
-          return { path: nativePath, name: branch || (platform === "win32" ? path.win32 : path).basename(nativePath) };
-        }),
+          nativePath = path.win32.normalize(nativePath);
+        }
+        return { path: nativePath, name: branch || (platform === "win32" ? path.win32 : path).basename(nativePath) };
+      }),
     );
     return listed.filter(Boolean);
   }

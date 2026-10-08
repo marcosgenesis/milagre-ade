@@ -4,17 +4,22 @@ import { LinkChangesPanel } from "./changes/LinkChangesPanel";
 import { useLinkDiffLists } from "./changes/useLinkDiffLists";
 import { ChangesPanelSlot } from "./changes/ChangesPanelSlot";
 import { DiffView } from "./changes/DiffView";
-import { ChangesToggle, DiffBar } from "./changes/ChangesChrome";
+import { AttentionButton, ChangesToggle, DiffBar } from "./changes/ChangesChrome";
 import { DiffToolbar, useDiffPreferences } from "./changes/DiffPrefs";
 import { useDiffComments } from "./changes/useDiffComments";
 import { formatCommentsMessage } from "../lib/diff-comments";
+import { messageCommands } from "../lib/message-commands";
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import type { AgentPorts, LinkState, ModelProvider, OpenLink, WorktreeBinding } from "@milagre/shared/model";
 import { chatKeyForScope, scopeKey } from "@milagre/shared/chat-scopes";
 import { chatTitle } from "@milagre/shared/chats";
+import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shared/attention";
+import { useSettings } from "../lib/settings";
+import { projectOfKey, sessionIdFromKey } from "@milagre/shared/agent-runs";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { DotBackground } from "./DotBackground";
 import SidebarNav from "./SidebarNav";
+import { runKeys } from "../lib/sidebar-scopes";
 import { DraftChatComposer } from "./DraftChatComposer";
 import { createDraftStore } from "../lib/draft-store";
 import { createScopeDrafts, linkChatRows, memberWorktreeForAction } from "../lib/link-scope";
@@ -107,12 +112,21 @@ export function LinkWorkspace({
   const session = sessionId == null ? undefined : state.sessions[sessionId];
   const chatId = session ? chatKeyForScope(scope, session.id) : null;
   const run = chatId ? agents.runs[chatId] : undefined;
+  // Every project's chats that wait on the user; the Link's own are marked in its sidebar.
+  const attentionKey = chatsNeedingAttention(agents.runs).join("\n");
+  const sidebarRunKeys = runKeys(agents.runs);
+  const attentionChats = useMemo(() => (attentionKey ? attentionKey.split("\n") : []), [attentionKey]);
+  const { showAttentionButton } = useSettings();
+  const attentionPaths = useMemo(() => [...new Set(attentionChats.map(projectOfKey))], [attentionChats]);
   const messages = state.messages.filter((message) => message.session_id === sessionId);
   const imageDraft = usePastedImages(`${owner}:${sessionId ?? "new"}`);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findSignal, setFindSignal] = useState(0);
+  const [findSeed, setFindSeed] = useState<string | undefined>();
+  // A ⌘K message result picks its chat first; the find bar opens once that chat's messages are on screen.
+  const pendingFind = useRef<{ sessionId: number; term: string } | null>(null);
   const [memberId, setMemberId] = useState<string>("");
   const [gitMemberId, setGitMemberId] = useState("");
   const [gitDialog, setGitDialog] = useState<{ sessionId: number; member: WorktreeBinding } | null>(null);
@@ -201,6 +215,7 @@ export function LinkWorkspace({
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
+        setFindSeed(undefined);
         setFindOpen(true);
         setFindSignal((value) => value + 1);
       }
@@ -312,6 +327,24 @@ export function LinkWorkspace({
       setError(ipcErrorMessage(error));
     }
   }
+  useEffect(() => {
+    const pending = pendingFind.current;
+    if (!pending || sessionId !== pending.sessionId || !messages.length) return;
+    pendingFind.current = null;
+    setFindSeed(pending.term);
+    setFindOpen(true);
+    setFindSignal((value) => value + 1);
+  }, [sessionId, messages.length]);
+  function openMessage(id: number, term: string) {
+    pendingFind.current = { sessionId: id, term };
+    if (id === sessionId) {
+      // The chat is already open, so the effect above won't run on its own.
+      setFindSeed(term);
+      setFindOpen(true);
+      setFindSignal((value) => value + 1);
+      pendingFind.current = null;
+    } else pick(id);
+  }
   const recents = linkChatRows(state).map((row) => {
     const running = agents.runs[chatKeyForScope(scope, Number(row.id))];
     return {
@@ -358,6 +391,7 @@ export function LinkWorkspace({
         <div className="flex min-h-0 shrink-0 pt-[60px] pb-3 pl-3">
           <SidebarNav
             fill
+            attentionPaths={attentionPaths}
             workspaceName={opened.link.name}
             selectedLink={{ id: opened.link.id, projects: opened.projects }}
             onSwitchLink={onSwitchLink}
@@ -376,6 +410,10 @@ export function LinkWorkspace({
             activeId={sessionId == null ? null : String(sessionId)}
             recents={recents}
             usage={usage}
+            runningKeys={sidebarRunKeys.running}
+            waitingKeys={sidebarRunKeys.waiting}
+            askingKeys={sidebarRunKeys.asking}
+            onOpenScopeChat={(key, id) => onCanvasChat(key, Number(id))}
             chatActions={{
               onRename: (id, title) => void window.milagre.patchChat(owner, Number(id), { title }).catch((error) => setError(ipcErrorMessage(error))),
               onMarkUnread: (id, unread) => void window.milagre.patchChat(owner, Number(id), { unread }),
@@ -454,6 +492,7 @@ export function LinkWorkspace({
                     runStartedAt={run?.startedAt}
                     runModelName={run?.model}
                     tasks={run?.tasks}
+                    contextUsage={run?.contextUsage ?? session?.contextUsage}
                     subagents={session?.subagents?.filter((agent) => agent.id !== session.native_session_id)}
                     ports={chatId ? ports[chatId] : undefined}
                     agentChatId={chatId ?? undefined}
@@ -495,6 +534,7 @@ export function LinkWorkspace({
                     newChatError={error}
                     findOpen={findOpen}
                     findSignal={findSignal}
+                    findSeed={findSeed}
                     onFindClose={() => setFindOpen(false)}
                     approval={
                       approval && chatId ? (
@@ -545,6 +585,19 @@ export function LinkWorkspace({
         </ChangesPanelSlot>
       </div>
       {!canvasOpen && session && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+      {showAttentionButton && attentionChats[0] && (
+        <AttentionButton
+          label={attentionLabel(attentionPaths.map((path) => path.split("/").pop() ?? path))}
+          items={attentionChats.map((key) => ({
+            key,
+            project: projectOfKey(key).split("/").pop() ?? key,
+            asking: !agents.runs[key]?.approvals.length,
+            waitingFor: waitingFor(agents.runs[key]),
+          }))}
+          offset={!canvasOpen && !!session}
+          onOpen={(key) => onCanvasChat(projectOfKey(key), sessionIdFromKey(key))}
+        />
+      )}
       {gitChoice !== null && (
         <dialog
           ref={memberDialog}
@@ -601,6 +654,7 @@ export function LinkWorkspace({
               run: () => onSwitchProject(project.path),
             })),
           ]}
+          searchMessages={(query) => messageCommands(state.messages, query, new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)}
           onClose={() => setCommandsOpen(false)}
           onError={setError}
         />

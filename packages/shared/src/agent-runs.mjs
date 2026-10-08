@@ -154,6 +154,8 @@ export function applyRunEvent(runs, chatId, event, model = "") {
       const { tasks: _cleared, ...rest } = run;
       return { ...runs, [chatId]: event.tasks.length ? { ...rest, tasks: event.tasks } : rest };
     }
+    case "context-usage":
+      return run ? { ...runs, [chatId]: { ...run, contextUsage: { used: event.used, size: event.size } } } : runs;
     // The user's answers to a question were saved as their message, after the reply so far (see recordAnswers).
     case "answers-sent":
       return run ? { ...runs, [chatId]: splitRun(run) ?? { ...run, split: true } } : runs;
@@ -249,8 +251,11 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
     case "turn-failed": {
       if (!run) return { state, runs, changed: false };
       const remaining = applyRunEvent(runs, chatId, event);
+      // The context gauge outlives the run, so the composer still shows it between turns.
+      if (run.contextUsage) state = { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, contextUsage: run.contextUsage } } };
       // The reply so far was saved when a steering message split it; there is nothing left to show.
-      if (event.type === "turn-completed" && run.split && !run.text.trim() && !run.steps.length) return { state, runs: remaining, changed: false };
+      if (event.type === "turn-completed" && run.split && !run.text.trim() && !run.steps.length)
+        return { state, runs: remaining, changed: Boolean(run.contextUsage) };
       const message = {
         id: state.next_id,
         session_id: sessionId,

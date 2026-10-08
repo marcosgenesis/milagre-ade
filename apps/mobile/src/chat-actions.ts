@@ -5,6 +5,7 @@ import type { Client } from "./client";
 import type { MenuSection } from "./ui";
 import { archiveFromPhone, type ArchiveRequest } from "./archive";
 import { confirm, confirmSheet } from "./confirm-store";
+import { pinPatch } from "./pins";
 
 /** Desktop's ⋯ menu for a Chat, less what only makes sense at the Mac (Finder, editor, commit). */
 export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: string }): MenuSection[] {
@@ -20,6 +21,16 @@ export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: 
         { id: "rename", title: "Rename chat", systemImage: "pencil" },
         chat.unread ? { id: "read", title: "Mark as read", systemImage: "checkmark" } : { id: "unread", title: "Mark as unread", systemImage: "circle" },
       ],
+    },
+    // Desktop drags pinned chats into order; here they move one place at a time.
+    {
+      items: chat.pinned
+        ? [
+            { id: "unpin", title: "Unpin", systemImage: "pin.slash" },
+            { id: "pin-up", title: "Move up", systemImage: "arrow.up" },
+            { id: "pin-down", title: "Move down", systemImage: "arrow.down" },
+          ]
+        : [{ id: "pin", title: "Pin", systemImage: "pin" }],
     },
     {
       items: [
@@ -95,6 +106,10 @@ export async function runChatAction({
     });
   }
   if (action === "archive") await client.call("chat:patch", [projectPath, chat.id, { archived: false }]);
+  if (action === "pin" || action === "unpin" || action === "pin-up" || action === "pin-down") {
+    const patch = pinPatch(action, chat, Object.values(state.sessions));
+    if (patch) await client.call("chat:patch", [projectPath, chat.id, patch]);
+  }
   if (action === "read" || action === "unread") await client.call("chat:patch", [projectPath, chat.id, { unread: action === "unread" }]);
   const worktree = state.worktrees[chat.worktree_id];
   if (action === "copy-path" && worktree) await Clipboard.setStringAsync(worktree.path);

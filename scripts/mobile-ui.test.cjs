@@ -407,7 +407,21 @@ test("a broken Markdown image leaves a browser link, and unsafe sources never lo
 const snapshot = (projectPath) => ({ project: { path: projectPath, state: { sessions: {} } }, runs: { runs: {} } });
 
 const relayRuntime = { name: "relay runtime" };
-function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [] } = {}) {
+/** The LAN route wiring, stubbed: no native modules, every computer stays on its paired route. Calls are recorded when asked. */
+const routesNative = ({ learned = [], forgotten = [] } = {}) => ({
+  lanRoutes: {
+    set() {},
+    forget: (id) => forgotten.push(id),
+    checkAll() {},
+    subscribe: () => () => {},
+    kind: () => "remote",
+    view: () => ({ current: () => null, subscribe: () => () => {} }),
+  },
+  learnRoutes: async (client, host) => {
+    learned.push([client.url, host]);
+  },
+});
+function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [], learned = [] } = {}) {
   client.recentScopes ??= () => client.call("project:recent");
   client.open ??= async (owner) => {
     await client.call("project:open", [owner]);
@@ -428,6 +442,7 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
         },
       },
       "./relay-native": { relayRuntime },
+      "./routes-native": routesNative({ learned }),
       "./live": require("../apps/mobile/src/live.ts"),
       "./hosts-native": {
         savedHosts: {
@@ -464,14 +479,20 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
 
 test("pairing through the relay builds the client from the pairing and saves the relay link", async () => {
   const created = [],
-    saved = [];
+    saved = [],
+    learned = [];
   const relay = { url: "wss://relay.milagre.cloud", hostId: "H".repeat(22), key: "K".repeat(43) };
-  const render = sessionHost({ url: `relay://${relay.hostId}`, call: async (method) => (method === "project:recent" ? [] : {}) }, { created, saved });
+  const render = sessionHost({ url: `relay://${relay.hostId}`, call: async (method) => (method === "project:recent" ? [] : {}) }, { created, saved, learned });
   const pairing = { address: `relay://${relay.hostId}`, token: "a".repeat(64), name: "", relay };
   assert.equal(await render().connect(pairing), true);
   assert.equal(created[0][0], pairing);
   assert.equal(created[0][3], relayRuntime);
   assert.deepEqual(JSON.parse(JSON.stringify(saved)), [{ name: "Mac", address: `relay://${relay.hostId}`, token: "a".repeat(64), relay }]);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(learned)),
+    [[`relay://${relay.hostId}`, { token: "a".repeat(64), relay }]],
+    "asks the Mac for its LAN route after connecting",
+  );
   assert.equal(render().hostName, "Mac");
 });
 
@@ -665,6 +686,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     Alert: { alert },
     Linking: {},
     StyleSheet: { absoluteFill: {} },
+    useColorScheme: () => "light",
   };
   const icons = new Proxy({}, { get: (_, name) => String(name) });
   const router = {
@@ -678,19 +700,25 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     },
   };
   const { default: ChatScreen } = load("app/chat.tsx", {
+    "@sbaiahmed1/react-native-blur": { LiquidGlassView: "LiquidGlassView" },
     "expo-crypto": { randomUUID: require("node:crypto").randomUUID },
     "../archive-progress": archiveProgress,
+    "../attention": { AttentionPill: () => null },
     "../chat-actions": load("chat-actions.ts", {
       "react-native": { Alert: { alert } },
       "expo-clipboard": { setStringAsync: async () => {} },
       "./archive": require("../apps/mobile/src/archive.ts"),
+      "./pins": require("../apps/mobile/src/pins.ts"),
       "./confirm-store": { confirmSheet: (...args) => alert(...args), confirm: async () => true },
     }),
     "@milagre/shared/message-navigation": require("@milagre/shared/message-navigation"),
     "../message-navigation": { MessageNavigation: "MessageNavigation" },
     "../prompt-field": { PromptField: "PromptField" },
+    "../context-ring": { ContextRing: "ContextRing" },
+    "../theme": { hex: () => ({ surface: "#ffffff" }) },
     "../simulator": { SimulatorChip: "SimulatorChip" },
     "../browser": { BrowserChip: "BrowserChip" },
+    "../ports": { PortsChip: "PortsChip" },
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": native,
@@ -1082,6 +1110,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "@hugeicons/core-free-icons": {},
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     "@milagre/shared/chats": { ...require("@milagre/shared/chats"), isListedChat: () => true },
+    "@milagre/shared/message-search": require("@milagre/shared/message-search"),
     "./session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
     "./indicators": { chatMark: () => "idle" },
     "./status-indicators": { ChatMarkIcon: "ChatMarkIcon" },
@@ -1089,10 +1118,13 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "./loading-logo": { LoadingLogo: "LoadingLogo" },
     "./ui": { ...Object.fromEntries(["ErrorNotice", "Field", "IconButton", "PillButton", "PullDown"].map((name) => [name, name])), colors: {}, styles: {} },
     "./archive-progress": archiveProgress,
+    "./attention": { AttentionDot: "AttentionDot", useAttention: () => [] },
+    "@milagre/shared/agent-runs": { projectOfKey: (key) => key.slice(0, key.lastIndexOf("#")) },
     "./chat-actions": load("chat-actions.ts", {
       "react-native": native,
       "expo-clipboard": { setStringAsync: async () => {} },
       "./archive": require("../apps/mobile/src/archive.ts"),
+      "./pins": require("../apps/mobile/src/pins.ts"),
       "./confirm-store": confirmStore,
     }),
     "@milagre/shared/chat-scopes": require("@milagre/shared/chat-scopes"),
@@ -1193,6 +1225,29 @@ test("the sidebar filter shows archived, running or waiting Chats across Project
   assert.equal(nav.filter().props.sections[0].items.find((item) => item.id === "archived").checked, true);
   nav.filter().props.onSelect("running");
   assert.equal(ids(), "[]", "chatMark is idle in this host, so nothing is running");
+});
+
+test("a chat search with no matching title lists matching messages, and a tap opens their Chat", () => {
+  const nav = navigationHost(deferred().promise);
+  nav.state.project.state.sessions[3] = { id: 3, title: "Relay work" };
+  nav.state.project.state.messages = [{ id: 7, session_id: 3, body: "Deploy the relay with wrangler, then check /health" }];
+  const search = () => find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats");
+  search().props.onChangeText("wranglr");
+  const data = nav.rows().props.data;
+  assert.equal(
+    JSON.stringify(data.filter((item) => item.kind === "section" || item.kind === "message").map((item) => item.name ?? item.snippet)),
+    JSON.stringify(["Messages", "Deploy the relay with wrangler, then check /health"]),
+  );
+  const message = nav.row("message");
+  assert.equal(message.props.accessibilityLabel, "Deploy the relay with wrangler, then check /health, in Relay work");
+  message.props.onPress();
+  assert.equal(JSON.stringify(nav.routes), JSON.stringify([{ pathname: "/chat", params: { projectPath: "/last", hostId: "mac", id: "3" } }]));
+  search().props.onChangeText("relay");
+  assert.equal(
+    nav.rows().props.data.some((item) => item.kind === "message"),
+    false,
+    "a Chat title match keeps messages out",
+  );
 });
 
 test("a sidebar Project can be removed from the list after confirming", async () => {
@@ -2021,6 +2076,7 @@ function pushHost(t, initial = "index") {
       "expo-router": { router, usePathname: () => pathname, useGlobalSearchParams: () => params },
       "./client": {},
       "./relay-native": { relayRuntime: {} },
+      "./routes-native": routesNative(),
       "./hosts-native": { savedHosts: { list: async () => [host] } },
       "./session": { useSession: () => session },
       "./push-controller": require("../apps/mobile/src/push-controller.ts"),
@@ -2190,7 +2246,11 @@ function activityItemHost() {
     "./theme": { colors: palette, fonts: { mono: "mono" }, hex: () => palette },
   });
   const shared = load("activity-item.tsx", { ...common, "./running-logo": running, "./theme": { fonts: { mono: "mono" } } });
-  const SubagentItem = load("subagent-item.tsx", { ...common, "./activity-item": shared }).SubagentItem;
+  const SubagentItem = load("subagent-item.tsx", {
+    ...common,
+    "./activity-item": shared,
+    "@milagre/shared/agent-activity": require("@milagre/shared/agent-activity"),
+  }).SubagentItem;
   const ToolRow = load("tool-row.tsx", {
     ...common,
     "./activity-item": shared,
@@ -2631,6 +2691,7 @@ test("relay transports: one per Mac, replaced by a new code, closed in the backg
       },
     },
     "./phone-identity": { phoneIdentity: async () => identity, phoneRandom },
+    "./routes-native": routesNative(),
   });
   const link = (hostId, key = "K".repeat(43)) => ({ url: "wss://relay.milagre.cloud", hostId, key });
   const a = await relayRuntime.transport({ relay: link("A".repeat(22)), token: "a".repeat(64) });
@@ -2701,6 +2762,7 @@ test("refreshing saved hosts during startup cannot cancel the claimed auto-open"
     "../confirm-store": { confirmSheet() {} },
     "../client": {},
     "../relay-native": {},
+    "../routes-native": routesNative(),
     "../icons": { Icon: "Icon" },
     "../ui": { colors: {}, styles: {}, ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll" },
   });
@@ -2833,7 +2895,7 @@ test("an accepted preview cannot assign its Chat id to a different requested Pro
   assert.equal(screen.session.pendingChats["mac|/p#new:1"].promoted, undefined);
 });
 
-function simulatorHost(client) {
+function simulatorHost(client, file = "simulator.tsx") {
   const react = hookHost({ effects: true }),
     files = new Map(),
     listeners = new Set();
@@ -2869,7 +2931,7 @@ function simulatorHost(client) {
     }
   }
   const source = load(
-    "simulator.tsx",
+    file,
     {
       react,
       "react/jsx-runtime": { jsx, jsxs: jsx },
@@ -2878,6 +2940,7 @@ function simulatorHost(client) {
       "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 34 }) },
       "@expo/dom-webview": { DomWebView: "DomWebView" },
       "expo-file-system": { File, Paths: { cache: "/cache" } },
+      "expo-clipboard": { setStringAsync: async () => {} },
       "@hugeicons/core-free-icons": {},
       "@milagre/shared/simulator-receiver": require("../packages/shared/src/simulator-receiver.mjs"),
       "./session": { useSession: () => ({ client }) },
@@ -2885,9 +2948,9 @@ function simulatorHost(client) {
       "./theme": {
         hex: () => ({ page: "#fafafb", surface: "#ffffff", ink: "#1f2124", ink2: "#62656b", line: "#ecedef", hover: "#f4f5f6", accent: "#0285ff" }),
       },
-      "./ui": { CircleButton: "CircleButton", PageScroll: "PageScroll", PillButton: "PillButton", colors: {}, styles: {} },
+      "./ui": { CircleButton: "CircleButton", PageScroll: "PageScroll", PillButton: "PillButton", ErrorNotice: "ErrorNotice", colors: {}, styles: {} },
     },
-    "\nexports.TestSimulatorWebView = SimulatorWebView;",
+    file === "simulator.tsx" ? "\nexports.TestSimulatorWebView = SimulatorWebView;" : "",
   );
   return {
     source,
@@ -2895,6 +2958,10 @@ function simulatorHost(client) {
     background() {
       native.AppState.currentState = "background";
       for (const fn of listeners) fn("background");
+    },
+    foreground() {
+      native.AppState.currentState = "active";
+      for (const fn of listeners) fn("active");
     },
     render(name, props) {
       react.begin();
@@ -3191,98 +3258,108 @@ test("mobile browser frames are written to local files; only their address enter
   assert.equal(h.files.size, 0, "the viewer page and frames are deleted");
 });
 
-test("mobile Accounts selects by tapping the row and manages accounts through its menu", async () => {
-  const react = hookHost({ effects: true });
-  const calls = [];
-  const accounts = {
-    providers: [
-      {
-        provider: "codex",
-        selectedId: "default",
-        accounts: [
-          { id: "default", provider: "codex", label: "Connected CLI account", state: "ready" },
-          { id: "work", provider: "codex", label: "Work", email: "work@example.test", state: "ready" },
-        ],
+for (const provider of ["claude", "codex"])
+  test(`mobile Accounts selects by tapping the row and manages accounts through its menu (${provider})`, async () => {
+    const react = hookHost({ effects: true });
+    const calls = [];
+    const accounts = {
+      providers: [
+        {
+          provider,
+          selectedId: "default",
+          accounts: [
+            { id: "default", provider, label: "Connected CLI account", state: "ready" },
+            {
+              id: "work",
+              provider,
+              label: "Work",
+              email: "work@example.test",
+              plan: provider === "claude" ? "self_serve_business_polite" : "business",
+              state: "ready",
+            },
+          ],
+        },
+      ],
+    };
+    const session = {
+      hostName: "Preview Mac",
+      refreshProviders: async () => {
+        calls.push(["refreshProviders"]);
       },
-    ],
-  };
-  const session = {
-    hostName: "Preview Mac",
-    refreshProviders: async () => {
-      calls.push(["refreshProviders"]);
-    },
-    client: {
-      call: async (method, args = []) => {
-        calls.push([method, ...args]);
-        const group = accounts.providers[0];
-        if (method === "accounts:select") group.selectedId = args[1];
-        if (method === "accounts:login") group.accounts.find((a) => a.id === args[1]).state = "signing-in";
-        if (method === "accounts:cancel") group.accounts.find((a) => a.id === args[1]).state = "signed-out";
-        if (method === "accounts:remove") {
-          group.accounts = group.accounts.filter((a) => a.id !== args[1]);
-          group.selectedId = "default";
-        }
-        return structuredClone(accounts);
+      client: {
+        call: async (method, args = []) => {
+          calls.push([method, ...args]);
+          const group = accounts.providers[0];
+          if (method === "accounts:select") group.selectedId = args[1];
+          if (method === "accounts:login") group.accounts.find((a) => a.id === args[1]).state = "signing-in";
+          if (method === "accounts:cancel") group.accounts.find((a) => a.id === args[1]).state = "signed-out";
+          if (method === "accounts:remove") {
+            group.accounts = group.accounts.filter((a) => a.id !== args[1]);
+            group.selectedId = "default";
+          }
+          return structuredClone(accounts);
+        },
       },
-    },
-  };
-  const { AccountsForComputer: AccountsSection } = load("accounts-section.tsx", {
-    react,
-    "react/jsx-runtime": { jsx, jsxs: jsx },
-    "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
-    "@hugeicons/core-free-icons": {},
-    "@milagre/shared/providers": require("@milagre/shared/providers"),
-    "./session": { useSession: () => session },
-    "./icons": { ProviderLogo: "ProviderLogo", Icon: "Icon" },
-    "./ui": { PillButton: "Button", Field: "Field", IconButton: "IconButton", PullDown: "PullDown", colors: {}, styles: {} },
+    };
+    const { AccountsForComputer: AccountsSection } = load("accounts-section.tsx", {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable" },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/providers": require("@milagre/shared/providers"),
+      "./session": { useSession: () => session },
+      "./icons": { ProviderLogo: "ProviderLogo", Icon: "Icon" },
+      "./ui": { PillButton: "Button", Field: "Field", IconButton: "IconButton", PullDown: "PullDown", colors: {}, styles: {} },
+    });
+    const render = () => {
+      react.begin();
+      return AccountsSection();
+    };
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+    const menu = () => find(render(), (n) => n.type === "PullDown" && n.props.label === "Actions for work@example.test");
+    try {
+      render();
+      await settle();
+      const row = find(render(), (n) => n.type === "Pressable" && n.props.accessibilityRole === "radio" && n.props.accessibilityLabel === "work@example.test");
+      assert.ok(row, "The account row is a directly selectable control");
+      assert.match(row.props.accessibilityHint, /^Business account\./);
+      assert.equal(JSON.stringify(row).includes("self_serve_business_polite"), false);
+      row.props.onPress();
+      await settle();
+      assert.ok(calls.some((c) => c.join(":") === `accounts:select:${provider}:work`));
+      assert.equal(find(render(), (n) => n.props.accessibilityLabel === "work@example.test").props.accessibilityState.checked, true);
+      assert.ok(calls.some((c) => c[0] === "refreshProviders"));
+      assert.equal(
+        find(render(), (n) => n.props.title === "Add account"),
+        undefined,
+      );
+      assert.equal(
+        find(render(), (n) => n.type === "Field"),
+        undefined,
+      );
+      assert.equal(
+        menu()
+          .props.sections.flatMap((s) => s.items.map((i) => i.title))
+          .join(","),
+        "Re-authenticate,Remove",
+      );
+      menu().props.onSelect("login");
+      await settle();
+      assert.ok(calls.some((c) => c.join(":") === `accounts:login:${provider}:work`));
+      menu().props.onSelect("cancel");
+      await settle();
+      assert.ok(calls.some((c) => c.join(":") === `accounts:cancel:${provider}:work`));
+      menu().props.onSelect("remove");
+      await settle();
+      assert.ok(calls.some((c) => c.join(":") === `accounts:remove:${provider}:work`));
+      assert.equal(
+        find(render(), (n) => n.props.accessibilityLabel === "work@example.test"),
+        undefined,
+      );
+    } finally {
+      react.unmount();
+    }
   });
-  const render = () => {
-    react.begin();
-    return AccountsSection();
-  };
-  const settle = () => new Promise((resolve) => setImmediate(resolve));
-  const menu = () => find(render(), (n) => n.type === "PullDown" && n.props.label === "Actions for work@example.test");
-  try {
-    render();
-    await settle();
-    const row = find(render(), (n) => n.type === "Pressable" && n.props.accessibilityRole === "radio" && n.props.accessibilityLabel === "work@example.test");
-    assert.ok(row, "The account row is a directly selectable control");
-    row.props.onPress();
-    await settle();
-    assert.ok(calls.some((c) => c.join(":") === "accounts:select:codex:work"));
-    assert.equal(find(render(), (n) => n.props.accessibilityLabel === "work@example.test").props.accessibilityState.checked, true);
-    assert.ok(calls.some((c) => c[0] === "refreshProviders"));
-    assert.equal(
-      find(render(), (n) => n.props.title === "Add account"),
-      undefined,
-    );
-    assert.equal(
-      find(render(), (n) => n.type === "Field"),
-      undefined,
-    );
-    assert.equal(
-      menu()
-        .props.sections.flatMap((s) => s.items.map((i) => i.title))
-        .join(","),
-      "Re-authenticate,Remove",
-    );
-    menu().props.onSelect("login");
-    await settle();
-    assert.ok(calls.some((c) => c.join(":") === "accounts:login:codex:work"));
-    menu().props.onSelect("cancel");
-    await settle();
-    assert.ok(calls.some((c) => c.join(":") === "accounts:cancel:codex:work"));
-    menu().props.onSelect("remove");
-    await settle();
-    assert.ok(calls.some((c) => c.join(":") === "accounts:remove:codex:work"));
-    assert.equal(
-      find(render(), (n) => n.props.accessibilityLabel === "work@example.test"),
-      undefined,
-    );
-  } finally {
-    react.unmount();
-  }
-});
 
 function ongoingChatHost(options = {}) {
   const screen = chatHost({ effects: true, ...options });
@@ -3583,6 +3660,206 @@ test("mobile TSX preview colors native text in both themes and preserves selecti
   assert.notEqual(keyword(dark), tag(dark));
 });
 
+for (const provider of ["claude", "codex"])
+  test(`mobile Project Accounts assigns within a scope and restores inheritance (${provider})`, async () => {
+    const react = hookHost({ effects: true });
+    const calls = [];
+    const login = deferred();
+    const snapshot = {
+      scopeKey: "/p",
+      providers: [
+        {
+          provider,
+          accountId: null,
+          effectiveId: "default",
+          defaultId: "default",
+          accounts: [
+            { id: "default", provider, label: "CLI", email: "default@example.test", state: "ready" },
+            { id: "work", provider, label: "Work", email: "work@example.test", plan: "business", state: "ready" },
+            { id: "out", provider, label: "Expired", state: "signed-out" },
+            { id: "gone", provider, label: "Removed account", state: "error", missing: true, message: "Choose a saved account." },
+          ],
+        },
+      ],
+    };
+    const session = {
+      snapshot: { project: { path: "/p" } },
+      refreshProviders: async () => calls.push(["refreshProviders"]),
+      client: {
+        call: async (method, args = []) => {
+          calls.push([method, ...args]);
+          if (method === "accounts:scopes")
+            return [
+              { key: "/p", name: "Project", kind: "project", projects: [{ id: "p", path: "/p", name: "Project" }] },
+              { key: "milagre-link:two", name: "Linked work", kind: "link", projects: [{ id: "p", path: "/p", name: "Project" }] },
+            ];
+          if (method === "accounts:login") return login.promise;
+          if (method === "accounts:scope") return { ...structuredClone(snapshot), scopeKey: args[0] };
+          if (method === "accounts:assign") {
+            snapshot.providers[0].accountId = args[2];
+            snapshot.providers[0].effectiveId = args[2] || "default";
+          }
+          return structuredClone(snapshot);
+        },
+      },
+    };
+    const { ProjectAccountsSection } = load("project-accounts-section.tsx", {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": { Text: "Text", View: "View", Pressable: "Pressable", StyleSheet: { hairlineWidth: 1 } },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/providers": require("@milagre/shared/providers"),
+      "./session": { useSession: () => session },
+      "./icons": { Icon: "Icon", ProviderLogo: "ProviderLogo" },
+      "./project-icon": { ProjectIcon: "ProjectIcon", ProjectIcons: "ProjectIcons" },
+      "./ui": { ListRow: "ListRow", PageScroll: "PageScroll", PullDown: "PullDown", colors: {}, styles: {} },
+      "expo-router": { router: { push() {} } },
+    });
+    // Renders nested function components in place, sharing one hook host in a stable order.
+    const expand = (node) =>
+      Array.isArray(node)
+        ? node.map(expand)
+        : node && typeof node.type === "function"
+          ? expand(node.type(node.props))
+          : node?.props?.children !== undefined
+            ? { ...node, props: { ...node.props, children: expand(node.props.children) } }
+            : node;
+    const render = () => {
+      react.begin();
+      return expand(ProjectAccountsSection());
+    };
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+    try {
+      render();
+      await settle();
+      render();
+      await settle();
+      const menu = () => find(render(), (n) => n.type === "PullDown" && n.props.label === `${provider === "claude" ? "Claude" : "Codex"} account`);
+      assert.ok(menu(), "Provider selector loads for the current Project");
+      const items = menu().props.sections.flatMap((s) => s.items);
+      assert.equal(items.find((i) => i.id === "out").disabled, true);
+      assert.equal(
+        items.find((i) => i.id === "gone"),
+        undefined,
+        "Removed accounts are not offered",
+      );
+      assert.equal(
+        find(render(), (n) => n.props.title === "Re-authenticate"),
+        undefined,
+        "A ready account needs no sign-in",
+      );
+      assert.ok(
+        find(render(), (n) => n.type === "Text" && n.props.children === "Default"),
+        "Inherited account is tagged Default",
+      );
+      assert.match(items.find((i) => i.id === "__default__").title, /default@example.test/);
+      menu().props.onSelect("work");
+      await settle();
+      assert.ok(calls.some((c) => c[0] === "accounts:assign" && c[1] === "/p" && c[2] === provider && c[3] === "work"));
+      menu().props.onSelect("__default__");
+      await settle();
+      assert.ok(calls.some((c) => c[0] === "accounts:assign" && c[3] === null));
+      assert.ok(calls.some((c) => c[0] === "refreshProviders"));
+      assert.equal(find(render(), (n) => n.type === "ListRow" && n.props.title === "Project").props.leading.props.path, "/p");
+      // An assignment that later signed out offers Re-authenticate for that account only.
+      menu().props.onSelect("out");
+      await settle();
+      render();
+      find(render(), (n) => n.props.title === "Re-authenticate").props.onPress();
+      find(render(), (n) => n.props.title === "Project").props.onPress();
+      find(render(), (n) => n.props.title === "Linked work").props.onPress();
+      render();
+      await settle();
+      const scopeReads = calls.filter((c) => c[0] === "accounts:scope").length;
+      login.resolve({});
+      await settle();
+      assert.equal(
+        calls.filter((c) => c[0] === "accounts:scope").length,
+        scopeReads,
+        "Finishing login from an old scope must not invalidate current scope reads",
+      );
+      assert.ok(menu());
+      assert.equal(find(render(), (n) => n.props.title === "Linked work").props.leading.type, "ProjectIcons");
+    } finally {
+      react.unmount();
+    }
+  });
+
+test("mobile provider discovery uses the selected scope and ignores late responses after switching", async () => {
+  const stale = deferred();
+  const requests = [],
+    sockets = [];
+  const AppState = { currentState: "active", addEventListener: () => ({ remove() {} }) };
+  const render = sessionHost(
+    {
+      call: async (method, args) => {
+        if (method === "project:recent") return [];
+        if (method === "agent:models" || method === "agent:cli-status") {
+          requests.push([method, ...(args || [])]);
+          if (args?.[0] === "A") return stale.promise;
+          return { source: args?.[0] || "default" };
+        }
+        return {};
+      },
+      snapshot: async (path) => snapshot(path),
+      live: (_path, options) => {
+        sockets.push(options);
+        return { close() {} };
+      },
+    },
+    { effects: true, AppState },
+  );
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  try {
+    await render().connect({ address: "mac", token: "token" });
+    await render().open("A");
+    render();
+    await render().open("B");
+    render();
+    await settle();
+    assert.equal(render().models.source, "B");
+    stale.resolve({ source: "A" });
+    await settle();
+    assert.equal(render().models.source, "B");
+    assert.equal(render().cliStatus.source, "B");
+    const before = render().providerRevision;
+    sockets.at(-1).onSignal("accounts");
+    await settle();
+    assert.ok(render().providerRevision > before);
+    assert.ok(requests.some((request) => request.join(":") === "agent:models:B"));
+    assert.ok(requests.some((request) => request.join(":") === "agent:cli-status:B"));
+  } finally {
+    render.unmount();
+  }
+});
+
+test("mobile Project Accounts opens from Settings as a native stack screen", () => {
+  const opened = [];
+  const { SettingsView } = load("app/settings.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { View: "View" },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} } },
+    "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client: null }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../push": { usePush: () => ({}) },
+    "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
+    "../icons": { Icon: "Icon" },
+    "../ui": { ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../attention": { useAttentionButton: () => [true, () => {}] },
+  });
+  find(SettingsView({ onOpen: (page) => opened.push(page) }), (n) => n.props.title === "Project Accounts").props.onPress();
+  assert.deepEqual(opened, ["project-accounts"]);
+  const { default: Screen } = load("app/project-accounts.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "expo-router": { Stack: { Screen: "Screen" } },
+    "../ui": { PageScroll: "PageScroll" },
+    "../project-accounts-section": { ProjectAccountsSection: "ProjectAccountsSection" },
+  });
+  assert.equal(find(Screen(), (n) => n.type === "Screen").props.options.title, "Project Accounts");
+  assert.ok(find(Screen(), (n) => n.type === "ProjectAccountsSection"));
+});
+
 test("new mobile Chat has no simulator pill; an existing Chat carries its identity", () => {
   const fresh = chatHost();
   assert.equal(
@@ -3591,6 +3868,42 @@ test("new mobile Chat has no simulator pill; an existing Chat carries its identi
   );
   const existing = ongoingChatHost();
   assert.equal(find(existing.render(), (n) => n.type === "SimulatorChip").props.chatId, "/p#7");
+  assert.equal(
+    find(fresh.render(), (n) => n.type === "PortsChip"),
+    undefined,
+  );
+  assert.equal(find(existing.render(), (n) => n.type === "PortsChip").props.chatId, "/p#7");
+});
+
+test("mobile simulator pill stays hidden until this Chat has attachments, including stopped devices", async (t) => {
+  const device = { id: "a", name: "My iPhone", platform: "ios", version: "27" };
+  for (const attached of [[], [device]]) {
+    const gate = deferred();
+    const h = simulatorHost({ url: "mac", call: () => gate.promise });
+    t.after(() => h.cleanup());
+    const render = () => h.render("SimulatorChip", { chatId: "/p#7" });
+    assert.equal(render(), null, "loading must not flash an empty pill");
+    gate.resolve({ chatId: "/p#7", supported: true, devices: [], attached, available: [device] });
+    await settle();
+    if (attached.length) assert.equal(render().props.accessibilityLabel, "Simulators, 1 attached to this Chat");
+    else assert.equal(render(), null, "other running devices must not show the pill");
+    h.cleanup();
+  }
+});
+
+test("mobile simulator pill disappears after the last attachment is removed", async (t) => {
+  const device = { id: "a", name: "My iPhone", platform: "ios", version: "27" };
+  let attached = [device];
+  const h = simulatorHost({ url: "mac", call: async () => ({ chatId: "/p#7", supported: true, devices: attached, attached }) });
+  t.after(() => h.cleanup());
+  const render = () => h.render("SimulatorChip", { chatId: "/p#7" });
+  render();
+  await settle();
+  assert.ok(render());
+  attached = [];
+  h.foreground();
+  await settle();
+  assert.equal(render(), null);
 });
 
 test("mobile picker exposes other devices only in Attach and detach updates this Chat", async () => {
@@ -3610,7 +3923,12 @@ test("mobile picker exposes other devices only in Attach and detach updates this
   const render = () => h.render("SimulatorSheet", { hostId: "mac", chatId: "/p#7" });
   render();
   await settle();
-  find(render(), (n) => n.props.label === "Back to devices").props.onPress();
+  assert.equal(
+    find(render(), (n) => n.props.label === "Back to devices"),
+    undefined,
+    "the viewer has no back button",
+  );
+  find(render(), (n) => n.props.accessibilityLabel === "My iPhone, choose simulator").props.onPress();
   assert.equal(
     find(render(), (n) => n.props.accessibilityLabel === "Attach Other device"),
     undefined,
@@ -3619,7 +3937,7 @@ test("mobile picker exposes other devices only in Attach and detach updates this
   find(render(), (n) => n.props.accessibilityLabel === "Attach Other device").props.onPress();
   await settle();
   assert.ok(find(render(), (n) => n.props.deviceId === "b"));
-  find(render(), (n) => n.props.label === "Back to devices").props.onPress();
+  find(render(), (n) => n.props.accessibilityLabel === "Other device, choose simulator").props.onPress();
   find(render(), (n) => n.props.label === "Detach Other device from Chat").props.onPress();
   await settle();
   assert.equal(
@@ -3677,4 +3995,166 @@ test("Chat header shows archive progress until the delayed request completes", a
   await settleAll();
   assert.equal(archiveIndicator(header()), undefined);
   assert.equal(screen.router.replaced, "/projects");
+});
+
+test("mobile Ports pill requests only its Chat and hides empty or mismatched responses", async (t) => {
+  for (const reply of [
+    { chatId: "/p#7", ports: [] },
+    { chatId: "/p#8", ports: [{ port: 3000, pid: 22 }] },
+    { chatId: "/p#7", ports: [{ port: 3000, pid: 22 }] },
+  ]) {
+    const calls = [];
+    const h = simulatorHost(
+      {
+        url: "mac",
+        call: async (...args) => {
+          calls.push(args);
+          return reply;
+        },
+      },
+      "ports.tsx",
+    );
+    t.after(() => h.cleanup());
+    const render = () => h.render("PortsChip", { chatId: "/p#7" });
+    assert.equal(render(), null);
+    await settle();
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["chat:ports", ["/p#7"]]]);
+    if (reply.chatId === "/p#7" && reply.ports.length) assert.equal(render().props.accessibilityLabel, "Ports, 1 listening");
+    else assert.equal(render(), null);
+  }
+});
+
+test("mobile Ports sheet stops only this Chat's process and refuses another host", async (t) => {
+  const calls = [];
+  let ports = [{ port: 3000, pid: 22, command: "node", address: "127.0.0.1" }];
+  const client = {
+    url: "mac",
+    call: async (method, args) => {
+      calls.push([method, args]);
+      if (method === "agent:stop-port") {
+        ports = [];
+        return true;
+      }
+      return { chatId: "/p#7", ports };
+    },
+  };
+  const h = simulatorHost(client, "ports.tsx");
+  t.after(() => h.cleanup());
+  const render = () => h.render("PortsSheet", { hostId: "mac", chatId: "/p#7" });
+  render();
+  await settle();
+  await find(render(), (n) => n.props.accessibilityLabel === "Stop port 3000").props.onPress();
+  await settle();
+  assert.ok(calls.some(([method, args]) => method === "agent:stop-port" && args[0] === "/p#7" && args[1] === 22));
+  assert.equal(
+    find(render(), (n) => n.props.accessibilityLabel === "Stop port 3000"),
+    undefined,
+  );
+  const other = simulatorHost(client, "ports.tsx");
+  t.after(() => other.cleanup());
+  calls.length = 0;
+  other.render("PortsSheet", { hostId: "other", chatId: "/p#7" });
+  await settle();
+  assert.deepEqual(calls, []);
+});
+
+test("a reply shows the thinking it wrote nothing after, once it waits on a question or ends, not while working", () => {
+  const react = { memo: (fn) => fn, useCallback: (fn) => fn, useEffect() {}, useRef: () => ({}), useState: (value) => [value, () => {}] };
+  const { ChatReply } = load("chat-reply.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
+    "react-native": { Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", useColorScheme: () => "dark" },
+    "react-native-svg": { default: "Svg", Path: "Path" },
+    "expo-router": { router: {} },
+    "@hugeicons/core-free-icons": new Proxy({}, { get: (_, key) => key }),
+    "@milagre/shared/reply-parts": require("@milagre/shared/reply-parts"),
+    "./file-chip": { FileChip: "FileChip" },
+    "./markdown": { Markdown: "Markdown" },
+    "./icons": { Icon: "Icon" },
+    "./activity-item": { ActivityTitle: "ActivityTitle" },
+    "./tool-row": { ToolRow: "ToolRow" },
+    "./theme": { hex: () => "#000" },
+    "./viewer-store": { showImages() {} },
+    "./ui": { colors: {}, styles: { card: {}, row: {}, muted: {} } },
+  });
+  const conclusion = "T3 Code tries every route in parallel.";
+  const steps = [
+    { id: "t1", kind: "thinking", title: "Thought", status: "done", detail: "Looking.", offset: 9 },
+    { id: "a", kind: "other", title: "Ran an agent", status: "done", offset: 9 },
+    { id: "t2", kind: "thinking", title: "Thought", status: "done", detail: conclusion, offset: 9 },
+  ];
+  const run = (questions) => ({ text: "Checking.", model: "m", startedAt: 0, steps, approvals: [], questions, answered: {} });
+  const markdown = (tree) => {
+    const texts = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node.type === "Markdown") texts.push(node.props.text);
+      walk(node.props?.children);
+    };
+    walk(tree);
+    return texts;
+  };
+  const props = { media: () => null, onActivity() {} };
+  assert.deepEqual(markdown(ChatReply({ ...props, run: run([{ requestId: "q" }]) })), ["Checking.", conclusion]);
+  assert.deepEqual(markdown(ChatReply({ ...props, run: run([]) })), ["Checking."]);
+  assert.deepEqual(markdown(ChatReply({ ...props, message: { id: 1, session_id: 1, role: "assistant", body: "Checking.", steps } })), [
+    "Checking.",
+    conclusion,
+  ]);
+  assert.deepEqual(
+    markdown(ChatReply({ ...props, message: { id: 1, session_id: 1, role: "assistant", body: "Checking. Done.", steps: [{ ...steps[2], offset: 0 }] } })),
+    ["Checking. Done."],
+  );
+});
+
+test("mobile usage identifies the account by email, falls back to its label, and accepts older hosts", () => {
+  const { ProviderRows } = load(
+    "usage-section.tsx",
+    {
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      react: {},
+      "react-native": { Text: "Text", View: "View" },
+      "@hugeicons/core-free-icons": {},
+      "@milagre/shared/providers": { providerName: () => "Codex" },
+      "@milagre/shared/usage": { formatUpdatedAgo: () => "Updated just now" },
+      "./icons": {},
+      "./ui": { colors: {}, styles: {} },
+      "./session": {},
+      "./use-usage": {},
+    },
+    "\nexport { ProviderRows };\n",
+  );
+  const provider = { provider: "codex", status: "ok", windows: [], updatedAt: new Date().toISOString() };
+  for (const account of [
+    { id: "work", label: "Work", email: "work@example.test" },
+    { id: "work", label: "Work" },
+  ]) {
+    const tree = ProviderRows({ provider: { ...provider, account }, now: Date.now() });
+    const label = find(tree, (node) => node.type === "Text" && node.props.children === (account.email || account.label));
+    assert.ok(label, "The account identity is visible");
+    assert.equal(label.props.selectable, true);
+    assert.equal(
+      find(tree, (node) => node.type === "Text" && node.props.children === "Codex"),
+      undefined,
+    );
+  }
+  assert.doesNotThrow(() => ProviderRows({ provider, now: Date.now() }));
+});
+
+test("mobile subagent rows show current activity and preserve terminal states", () => {
+  const { SubagentItem } = load("subagent-item.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Text: "Text" },
+    "@hugeicons/core-free-icons": { AiBrainIcon: "brain" },
+    "@milagre/shared/agent-activity": require("@milagre/shared/agent-activity"),
+    "./activity-item": { ActivityItem: "ActivityItem" },
+    "./ui": { colors: {}, styles: {} },
+  });
+  const agent = { title: "Review authentication", status: "running", latestActivity: "Reading auth.ts", transcript: [] };
+  assert.equal(SubagentItem({ agent }).props.status, "Reading files");
+  assert.equal(SubagentItem({ agent: { ...agent, latestActivity: "Running auth tests" } }).props.status, "Running tests");
+  const failed = SubagentItem({ agent: { ...agent, status: "failed" } });
+  assert.equal(failed.props.status, "Needs attention");
+  assert.equal(failed.props.state, "failed");
 });

@@ -30,12 +30,18 @@ import { SimulatorChip } from "../simulator";
 import { PortsChip } from "../ports";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { ChatReply } from "../chat-reply";
+import { designMessageSent, peekDesignMessage } from "../design-outbox";
+import { chosenDesign, designActivity } from "@milagre/shared/artifact";
+import { handoffSides } from "../handoff-sides";
+import { HandoffDivider } from "../handoff-divider";
+import { showBrief } from "../handoff-brief-store";
+import { isHandoff } from "@milagre/shared/handoff";
 import { ThinkingIndicator } from "../running-logo";
 import { BottomFade, EdgeFade } from "../bottom-fade";
 import { useDotBackground } from "../dot-background";
 import { Approval, Questions } from "../questions";
 import { AgentControls, PermissionChip } from "../agent-controls";
-import { selectedModel, sendOptions } from "../turn-options";
+import { afterSend, modelsFor, selectedModel, sendOptions, turnTarget } from "../turn-options";
 import { Icon } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
@@ -175,16 +181,22 @@ export default function ChatScreen() {
         : savedMessages,
     [pending, pendingCanonicalId, allMessages, savedMessages],
   );
+  // The design the user last chose on the design sheet, which its cards mark.
+  const chosen = useMemo(() => chosenDesign(messages.filter((message) => message.role === "user").map((message) => message.body)), [messages]);
+  const designChoice = chosen ? `${chosen.id}:${chosen.version}` : undefined;
   // Long Chats mount their newest messages first; earlier ones load on request.
   const [shown, setShown] = useState({ id: params.id, count: PAGE });
   const visible = shown.id === params.id ? shown.count : PAGE;
+  const handoffModels = useMemo(() => [...modelsFor("claude", session.models), ...modelsFor("codex", session.models)], [session.models]);
   const navigationItems = useMemo(
     () =>
       messageNavigationIndices(messages.length).map((index) => ({
         index,
-        label: `Go to ${messages[index].role} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
+        label: isHandoff(messages[index])
+          ? `Go to ${handoffSides(messages[index].context, handoffModels).restored ? "context restored" : "context handoff"} ${index + 1} of ${messages.length}.`
+          : `Go to ${messages[index].role} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
       })),
-    [messages],
+    [messages, handoffModels],
   );
   const messagePositions = useRef(new Map<number, number>());
   const navigationTarget = useRef<number | null>(null);
@@ -213,6 +225,10 @@ export default function ChatScreen() {
       }
     }
   };
+  const openBrief = useCallback((brief: string) => {
+    showBrief(brief);
+    router.push("/handoff-brief");
+  }, []);
   const openActivity = useCallback((message: string) => router.push({ pathname: "/activity", params: { id: String(params.id), message } }), [params.id]);
   const { rememberChat } = session;
   const canRemember = !!params.id && !!session.snapshot?.project.state.sessions[Number(params.id)] && targetMatches;
@@ -242,6 +258,19 @@ export default function ChatScreen() {
       <Stack.Toolbar.Button icon="sidebar.left" accessibilityLabel="Open navigation" onPress={() => panels.show("left")} />
     </Stack.Toolbar>
   );
+  // A comment or a choice from the design sheet is sent from here when the Chat comes back into view. Sent while the
+  // Chat is busy, it waits and goes once it no longer is; one that fails waits for the Chat's next focus.
+  const sendDesign = useRef<() => void>(() => {});
+  const designDeferred = useRef(false);
+  const designKey = session.client && session.snapshot ? `${session.client.url}|${session.snapshot.project.path}#${params.id}` : null;
+  useFocusEffect(
+    useCallback(() => {
+      if (designKey && params.id) sendDesign.current();
+    }, [designKey, params.id]),
+  );
+  useEffect(() => {
+    if (!busy && !picking && designDeferred.current) sendDesign.current();
+  }, [busy, picking]);
   if (!session.client || (!session.snapshot && !wanted)) return <Redirect href="/" />;
   if (!session.snapshot || !targetMatches || needsWorktree) {
     return (
@@ -269,10 +298,16 @@ export default function ChatScreen() {
   const attachments = composer.attachments[chatId] || [];
   const attachmentDisabled = busy || picking || attachments.length >= 4;
   const run = chat ? runs.runs[chatId] : undefined;
+  // Feedback cards read the agent's resolutions again only when a comment may have changed.
+  const designsMoved = designActivity(
+    [...messages.flatMap((message) => message.steps ?? []), ...(run?.steps ?? [])],
+    messages.filter((message) => message.role === "user").map((message) => message.body),
+  );
   const contextUsage = run?.contextUsage ?? chat?.contextUsage;
   const preferences = composer.preferences[chatId] || composer.defaults;
-  const actualProvider = chat?.provider || preferences.provider;
-  const model = selectedModel(actualProvider, preferences.model || (chat ? lastUserModel(project.state, chat.id) : ""), session.models);
+  const turn = turnTarget(composer.preferences[chatId], chat?.provider, composer.defaults);
+  const actualProvider = turn.provider;
+  const model = selectedModel(actualProvider, turn.model || (chat && !turn.picked ? lastUserModel(project.state, chat.id) : ""), session.models);
   const worktreeId = chat?.worktree_id ?? Number(params.worktreeId);
   const worktree = project.state.worktrees[worktreeId];
   const branches = branchList?.client === client && branchList.path === project.path ? branchList : null;
@@ -318,8 +353,20 @@ export default function ChatScreen() {
       setPicking(false);
     }
   }
-  async function send(body = draft, withAttachments = true) {
-    if (busy || sendingRef.current || pending || picking || (!body && !(withAttachments && attachments.length))) return;
+  sendDesign.current = () => {
+    const message = designKey ? peekDesignMessage(designKey) : null;
+    if (!message || !designKey) return;
+    void send(message.text, false).then((sent) => {
+      designDeferred.current = sent === "busy";
+      if (sent === true) designMessageSent(designKey, message);
+    });
+  };
+  /** Whether the message went: "busy" when it wasn't tried, the Chat being busy. */
+  async function send(body = draft, withAttachments = true): Promise<boolean | "busy"> {
+    // A turn running now takes this message as a steer, on the provider it already runs.
+    const steered = Boolean(run);
+    if (!body && !(withAttachments && attachments.length)) return false;
+    if (busy || sendingRef.current || pending || picking) return "busy";
     sendingRef.current = true;
     setBusy(true);
     setError("");
@@ -439,7 +486,7 @@ export default function ChatScreen() {
         return next;
       });
       composer.setPreferences((current) => {
-        const next = { ...current, [destination]: { ...(current[chatId] || preferences), provider: actualProvider, model: model.id } };
+        const next = { ...current, [destination]: afterSend(current[chatId] || preferences, turn, chat?.provider, model.id, steered) };
         if (destination !== chatId) delete next[chatId];
         return next;
       });
@@ -450,6 +497,7 @@ export default function ChatScreen() {
         if (!params.id) router.setParams({ id: String(result.sessionId) });
       }
       await session.refresh();
+      return true;
     } catch (e) {
       if (!accepted) {
         pendingStore.setPendingChats((current) => {
@@ -464,6 +512,7 @@ export default function ChatScreen() {
         }));
       }
       if (current()) setError((e as Error).message);
+      return accepted;
     } finally {
       sendingRef.current = false;
       setBusy(false);
@@ -606,7 +655,18 @@ export default function ChatScreen() {
   );
   const question = run?.questions[0];
   const pendingInput = pending && pendingCanonicalId === null ? pending.preview.message : null;
-  const liveReply = run ? <ChatReply key="run" run={run} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} /> : null;
+  const liveReply = run ? (
+    <ChatReply
+      key="run"
+      run={run}
+      media={media}
+      basePath={worktree?.path || project.path}
+      chatId={chatId}
+      designChoice={designChoice}
+      designsMoved={designsMoved}
+      onActivity={openActivity}
+    />
+  ) : null;
   // The composer floats above the transcript and rides the keyboard, stopping 8pt above it.
   const dockPadding = Math.max(insets.bottom, 12);
   const lift = dockPadding - 8;
@@ -692,7 +752,19 @@ export default function ChatScreen() {
                 }
               }}
             >
-              <ChatReply message={message} media={media} basePath={worktree?.path || project.path} onActivity={openActivity} />
+              {isHandoff(message) ? (
+                <HandoffDivider context={message.context} models={handoffModels} onOpen={openBrief} />
+              ) : (
+                <ChatReply
+                  message={message}
+                  media={media}
+                  basePath={worktree?.path || project.path}
+                  chatId={chatId}
+                  designChoice={designChoice}
+                  designsMoved={designsMoved}
+                  onActivity={openActivity}
+                />
+              )}
             </View>,
           ])}
           {!pendingInput && liveReply}
@@ -968,7 +1040,13 @@ export default function ChatScreen() {
                     onToggle={() => {
                       router.push({
                         pathname: "/model-sheet",
-                        params: { chatId, model: model.id, ...(chat?.provider ? { locked: chat.provider } : {}), ...(run ? { busy: "1" } : {}) },
+                        params: {
+                          chatId,
+                          model: model.id,
+                          provider: actualProvider,
+                          ...(chat?.provider ? { on: chat.provider } : {}),
+                          ...(run ? { busy: "1" } : {}),
+                        },
                       });
                     }}
                   />
@@ -977,7 +1055,9 @@ export default function ChatScreen() {
                     onPress={() => router.push({ pathname: "/permission-sheet", params: { chatId, ...(run ? { busy: "1" } : {}) } })}
                   />
                   <View style={{ flex: 1 }} />
-                  {contextUsage && contextUsage.size > 0 && <ContextRing {...contextUsage} />}
+                  {contextUsage && contextUsage.size > 0 && params.id && (
+                    <ContextRing {...contextUsage} onPress={() => router.push({ pathname: "/context-sheet", params: { id: params.id } })} />
+                  )}
                   {run && !draft.trim() && !attachments.length && (
                     <IconButton
                       label="Stop"

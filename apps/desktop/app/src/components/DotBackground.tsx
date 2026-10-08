@@ -15,7 +15,10 @@ export function DotBackground({ children }: { children: ReactNode }) {
           <div aria-hidden className="pointer-events-none absolute inset-0 bg-page [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)]" />
         </>
       )}
-      <div className="relative z-10 flex h-full min-h-0">{children}</div>
+      {/* The docked panels render in here (dock-area.ts dockLayer), stacked with the git changes panel beside them. */}
+      <div data-dock-layer className="relative z-10 flex h-full min-h-0">
+        {children}
+      </div>
     </div>
   );
 }

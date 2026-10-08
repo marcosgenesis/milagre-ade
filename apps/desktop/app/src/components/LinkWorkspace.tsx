@@ -10,7 +10,7 @@ import { useDiffComments } from "./changes/useDiffComments";
 import { formatCommentsMessage } from "../lib/diff-comments";
 import { messageCommands } from "../lib/message-commands";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import type { AgentPorts, LinkState, ModelProvider, OpenLink, WorktreeBinding } from "@milagre/shared/model";
+import type { AgentPorts, LinkState, OpenLink, WorktreeBinding } from "@milagre/shared/model";
 import { chatKeyForScope, scopeKey } from "@milagre/shared/chat-scopes";
 import { chatTitle } from "@milagre/shared/chats";
 import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shared/attention";
@@ -29,7 +29,6 @@ import { attachmentPrompt } from "../lib/media";
 import { modelForChat, sentDecision, sentReply } from "../lib/agent-runs";
 import { PermissionCard } from "./agents/PermissionCard";
 import { QuestionCard } from "./agents/QuestionCard";
-import { handoverLinks, handoverModel } from "../lib/handover";
 import { getSettings } from "../lib/settings";
 import { EditorLinks } from "./editor-links";
 import { openInEditor } from "../lib/editors";
@@ -78,6 +77,7 @@ export function LinkWorkspace({
   initialSessionId,
   hostConnection,
   ports,
+  onNewChatInScope,
 }: {
   opened: OpenLink;
   state: LinkState;
@@ -95,6 +95,7 @@ export function LinkWorkspace({
   linkedWork: LinkedWork;
   onCanvasChat: (path: string, id: number) => void;
   usage?: ReactNode;
+  onNewChatInScope?: (scopeKey: string) => void;
 }) {
   const scope = { kind: "link" as const, linkId: opened.link.id },
     owner = scopeKey(scope);
@@ -268,13 +269,14 @@ export function LinkWorkspace({
       .catch(() => {});
   }, [owner, chatId, state.sessions]);
   async function send(body = draftStore.get().trim(), preserve = false) {
-    if (preparing || imageDraft.loading || (!body && !imageDraft.images.length && !imageDraft.files.length && session?.handoverDraft === undefined)) return;
+    if (preparing || imageDraft.loading || (!body && !imageDraft.images.length && !imageDraft.files.length)) return;
     const selection = latest.current.selection;
     const operation = drafts.beginSend(scope, sessionId, JSON.stringify({ body, images: imageDraft.images, files: imageDraft.files }));
     setPreparing(true);
     setError(null);
     pendingOperation.current = operation;
-    const model = modelForChat(preferences.selectedModel, session?.provider, messages, preferences.models);
+    // The picker decides the provider: a chat on another one hands off to it.
+    const model = preferences.selectedModel;
     try {
       const sent = await window.milagre.sendLinkMessage({
         linkId: opened.link.id,
@@ -307,28 +309,6 @@ export function LinkWorkspace({
       if (latest.current.active && latest.current.selection === selection) setError(ipcErrorMessage(error));
     } finally {
       if (latest.current.active) setPreparing(false);
-    }
-  }
-  async function handover(provider: ModelProvider) {
-    if (!session) return;
-    const model = handoverModel(preferences.selectedModel, provider, state.messages, preferences.models);
-    if (!model) return;
-    try {
-      const target = await window.milagre.handover({
-        projectPath: owner,
-        sessionId: session.id,
-        provider,
-        model: model.id,
-        permissionMode: preferences.permissionMode,
-        effort: preferences.effort,
-        tldrEnabled: getSettings().tldrEnabled,
-      });
-      if (latest.current.active) {
-        pick(target.sessionId);
-        preferences.onModelChange(model);
-      }
-    } catch (error) {
-      setError(ipcErrorMessage(error));
     }
   }
   useEffect(() => {
@@ -418,6 +398,7 @@ export function LinkWorkspace({
             waitingKeys={sidebarRunKeys.waiting}
             askingKeys={sidebarRunKeys.asking}
             onOpenScopeChat={(key, id) => onCanvasChat(key, Number(id))}
+            onNewChatInScope={onNewChatInScope}
             chatActions={{
               onRename: (id, title) => void window.milagre.patchChat(owner, Number(id), { title }).catch((error) => setError(ipcErrorMessage(error))),
               onMarkUnread: (id, unread) => void window.milagre.patchChat(owner, Number(id), { unread }),
@@ -490,11 +471,12 @@ export function LinkWorkspace({
                     onSend={() => void send()}
                     onStop={chatId && run ? () => void agents.interrupt(chatId) : undefined}
                     isSending={Boolean(run && !approval && !question)}
-                    sendBlocked={preparing || Boolean(session?.handoverPending)}
+                    sendBlocked={preparing}
                     streamingText={run?.text}
                     streamingSteps={run?.steps}
                     runStartedAt={run?.startedAt}
                     runModelName={run?.model}
+                    sessionProvider={session?.provider}
                     tasks={run?.tasks}
                     contextUsage={run?.contextUsage ?? session?.contextUsage}
                     subagents={session?.subagents?.filter((agent) => agent.id !== session.native_session_id)}
@@ -502,15 +484,6 @@ export function LinkWorkspace({
                     waitingForSubagents={run?.waitingForSubagents}
                     asking={Boolean(question)}
                     waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
-                    lockedProvider={messages.length ? session?.provider : undefined}
-                    onHandover={(provider) => void handover(provider)}
-                    canHandover={messages.length > 0}
-                    handover={{ ...handoverLinks(session, state), onOpen: pick }}
-                    handoverBrief={
-                      session?.handoverDraft !== undefined && chatId
-                        ? { chatId, brief: session.handoverDraft, onSave: (text) => window.milagre.setHandoverDraft(owner, session.id, text) }
-                        : undefined
-                    }
                     resume={
                       session?.resumeTurn
                         ? { onContinue: () => void window.milagre.resumeChat(owner, session.id).catch((error) => setError(ipcErrorMessage(error))) }
@@ -597,7 +570,7 @@ export function LinkWorkspace({
             asking: !agents.runs[key]?.approvals.length,
             waitingFor: waitingFor(agents.runs[key]),
           }))}
-          offset={!canvasOpen && !!session}
+          offset={!canvasOpen && session ? 1 : 0}
           onOpen={(key) => onCanvasChat(projectOfKey(key), sessionIdFromKey(key))}
         />
       )}

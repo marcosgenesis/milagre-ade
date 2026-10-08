@@ -15,6 +15,12 @@ const bridge = {
     input: (request) => ipcRenderer.invoke("simulator:input", request),
     close: (request) => ipcRenderer.invoke("simulator:close", request),
   },
+  artifacts: {
+    get: (request) => ipcRenderer.invoke("artifact:get", request),
+    list: (request) => ipcRenderer.invoke("artifact:list", request),
+    addComments: (request) => ipcRenderer.invoke("artifact:add-comments", request),
+    comments: (request) => ipcRenderer.invoke("artifact:comments", request),
+  },
   getRuntimeConnection: () => ipcRenderer.invoke("runtime:connection"),
   restartHost: () => ipcRenderer.invoke("runtime:restart-host"),
   onRuntimeConnection: (callback) => {
@@ -94,6 +100,11 @@ const bridge = {
   openCanvasProject: (projectPath) => ipcRenderer.invoke("canvas:open-project", projectPath),
   getLinkedWork: () => ipcRenderer.invoke("linked:snapshot"),
   stopNegotiation: (id) => ipcRenderer.invoke("linked:stop-negotiation", id),
+  onAppShortcut: (callback) => {
+    const listener = (_event, key) => callback(key);
+    ipcRenderer.on("app:shortcut", listener);
+    return () => ipcRenderer.removeListener("app:shortcut", listener);
+  },
   onLinkedWork: (callback) => {
     const listener = (_event, work) => callback(work);
     ipcRenderer.on("linked:changed", listener);
@@ -114,8 +125,6 @@ const bridge = {
   },
   sendMessage: (request) => ipcRenderer.invoke("chat:send", request),
   resumeChat: (projectPath, sessionId) => ipcRenderer.invoke("chat:resume", projectPath, sessionId),
-  handover: (request) => ipcRenderer.invoke("chat:handover", request),
-  setHandoverDraft: (projectPath, sessionId, text) => ipcRenderer.invoke("chat:handover-draft", projectPath, sessionId, text),
   patchChat: (projectPath, sessionId, patch) => ipcRenderer.invoke("chat:patch", projectPath, sessionId, patch),
   archiveSubagent: (projectPath, sessionId, id, archived) => ipcRenderer.invoke("chat:archive-subagent", projectPath, sessionId, id, archived),
   archiveFinishedSubagents: (projectPath, sessionId) => ipcRenderer.invoke("chat:archive-finished-subagents", projectPath, sessionId),
@@ -128,6 +137,11 @@ const bridge = {
   getModels: (scopeKey) => ipcRenderer.invoke("agent:models", scopeKey),
   getCliStatus: (scopeKey) => ipcRenderer.invoke("agent:cli-status", scopeKey),
   updateCli: (provider) => ipcRenderer.invoke("agent:update-cli", provider),
+  onCliProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on("agent:cli-progress", listener);
+    return () => ipcRenderer.removeListener("agent:cli-progress", listener);
+  },
   interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
   respondToPermission: (chatId, requestId, decision) => ipcRenderer.invoke("agent:respond-permission", { chatId, requestId, decision }),
   answerQuestion: (chatId, requestId, answers, summary) => ipcRenderer.invoke("agent:answer-question", { chatId, requestId, answers, summary }),

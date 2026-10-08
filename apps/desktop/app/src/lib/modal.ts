@@ -1,6 +1,6 @@
 /**
  * What's open on top of the app: a native dialog shown with showModal (the command palette, the image viewer)
- * or a panel marked aria-modal (the commit dialog, the handover brief). Approval and question cards and the
+ * or a panel marked aria-modal (the commit dialog, the handoff brief). Approval and question cards and the
  * chip popovers use role="dialog" too, but they are not modal: the app's shortcuts keep working over them.
  */
 const MODAL_SELECTOR = 'dialog[open], [aria-modal="true"]';

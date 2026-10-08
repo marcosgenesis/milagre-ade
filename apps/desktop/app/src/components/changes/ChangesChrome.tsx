@@ -1,5 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon, ArrowLeft02Icon, ArrowRight02Icon, SidebarRight01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowLeft02Icon, ArrowRight02Icon, GitBranchIcon } from "@hugeicons/core-free-icons";
 import { useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Tooltip from "../primitives/Tooltip";
@@ -103,7 +103,7 @@ export function ChangesToggle({ open, onToggle }: { open: boolean; onToggle: () 
   return (
     // Same line as the traffic lights and the sidebar toggle (top 14px, 32px tall).
     <div className="fixed top-[14px] right-3 z-[60] [-webkit-app-region:no-drag]">
-      <Tooltip label={open ? "Hide changes" : "Show changes"} shortcut="⌘⇧D" side="bottom" align="end">
+      <Tooltip label={open ? "Hide changes" : "Show changes"} shortcut="⌘⇧D" compactHint side="bottom" align="end">
         <button
           type="button"
           aria-label="Toggle changes panel"
@@ -112,7 +112,7 @@ export function ChangesToggle({ open, onToggle }: { open: boolean; onToggle: () 
           onClick={onToggle}
           className={`flex size-8 items-center justify-center rounded-control transition-colors hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : "text-ink-3"}`}
         >
-          <HugeiconsIcon icon={SidebarRight01Icon} size={18} strokeWidth={1.8} color="currentColor" />
+          <HugeiconsIcon icon={GitBranchIcon} size={18} strokeWidth={1.8} color="currentColor" />
         </button>
       </Tooltip>
     </div>
@@ -122,10 +122,10 @@ export function ChangesToggle({ open, onToggle }: { open: boolean; onToggle: () 
 export type AttentionItem = { key: string; project: string; title?: string; asking: boolean; waitingFor?: string };
 
 /**
- * Top right, left of the changes toggle when it shows. One waiting chat opens on click; several open a menu
+ * Top right, left of the panel buttons when they show (the changes toggle, and a Chat's designs and simulator). One waiting chat opens on click; several open a menu
  * that lists each, oldest first, so you pick where to go.
  */
-export function AttentionButton({ label, items, offset, onOpen }: { label: string; items: AttentionItem[]; offset: boolean; onOpen: (key: string) => void }) {
+export function AttentionButton({ label, items, offset, onOpen }: { label: string; items: AttentionItem[]; offset: number; onOpen: (key: string) => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const many = items.length > 1;
@@ -143,8 +143,9 @@ export function AttentionButton({ label, items, offset, onOpen }: { label: strin
   return (
     <div
       data-attention
-      className={`fixed top-[14px] z-[60] [-webkit-app-region:no-drag] ${offset ? "right-12" : "right-3"}`}
-      style={{ animation: "fade-in 160ms ease-out" }}
+      className="fixed top-[14px] z-[60] [-webkit-app-region:no-drag]"
+      // Left of the buttons in the corner: `offset` is how many there are, 40px each (PanelToggles' CORNER_PITCH).
+      style={{ right: 12 + offset * 40, animation: "fade-in 160ms ease-out" }}
     >
       <button
         ref={trigger}

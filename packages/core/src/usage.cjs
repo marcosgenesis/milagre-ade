@@ -249,6 +249,13 @@ async function readCodexUsage(deps = {}) {
   });
 }
 
+// Antigravity exposes no quota endpoint (docs/adr/0006-antigravity-over-acp.md), so Antigravity is always unavailable,
+// whichever Account is selected; nothing is started or read.
+const ANTIGRAVITY_UNAVAILABLE = "Google doesn't report Antigravity quota.";
+async function readAntigravityUsage({ now = Date.now } = {}) {
+  return providerResult("antigravity", now, "unavailable", [], ANTIGRAVITY_UNAVAILABLE);
+}
+
 // On an error, keep showing the last good numbers (minus windows that have since reset).
 function withLastGood(result, last, nowMs) {
   if (result.status !== "error" || !last) return result;
@@ -259,7 +266,14 @@ function withLastGood(result, last, nowMs) {
 function createUsageReader(deps = {}) {
   // `ready` resolves once the login environment is applied: opened from Finder the app's PATH is bare until then,
   // and the Codex lookup starts `codex` from it.
-  const { readClaude = readClaudeUsage, readCodex = readCodexUsage, now = Date.now, store = createUsageStore(), ready = () => undefined } = deps;
+  const {
+    readClaude = readClaudeUsage,
+    readCodex = readCodexUsage,
+    readAntigravity = () => readAntigravityUsage({ now }),
+    now = Date.now,
+    store = createUsageStore(),
+    ready = () => undefined,
+  } = deps;
   const readProvider = async (provider, read) => {
     const { blocked } = store.get(provider);
     let result;
@@ -279,7 +293,7 @@ function createUsageReader(deps = {}) {
     inFlight ??= Promise.resolve()
       .then(ready)
       .catch(() => {})
-      .then(() => Promise.all([readProvider("claude", readClaude), readProvider("codex", readCodex)]))
+      .then(() => Promise.all([readProvider("claude", readClaude), readProvider("codex", readCodex), readProvider("antigravity", readAntigravity)]))
       .then((providers) => ({ providers }))
       .finally(() => {
         inFlight = null;
@@ -333,4 +347,4 @@ async function readClaudeProfileUsage({
   }
 }
 
-module.exports = { createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage };
+module.exports = { ANTIGRAVITY_UNAVAILABLE, createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage, readAntigravityUsage };

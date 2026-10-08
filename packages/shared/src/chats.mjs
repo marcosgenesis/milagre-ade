@@ -13,7 +13,7 @@ export function chatTitle(session, messages) {
   return line.length > 60 ? `${line.slice(0, 57)}…` : line;
 }
 
-/** A handed-over chat that is still being prepared or holds its brief as a draft: it is a live, provider-locked chat even with no messages. */
+/** A legacy handover chat (before in-place handoff) that is still being prepared or holds its brief as a draft: it is a live, provider-locked chat even with no messages. */
 export function isHandoverChat(session) {
   return Boolean(session?.handoverPending) || session?.handoverDraft !== undefined;
 }

@@ -2,6 +2,7 @@ import { isTurnEnd } from "@milagre/shared/agent-runs";
 import { useCallback, useEffect, useState } from "react";
 import type { DiffMode } from "../../electron";
 import { useDiffFiles } from "./useDiffFiles";
+import { useCloseWhenDesignsExpand, useSidePanelRoom } from "../agents/dock-area";
 
 export type Changes = ReturnType<typeof useChanges>;
 
@@ -36,6 +37,10 @@ export function useChanges({ cwd, base, chatId, available }: { cwd: string | und
   }, [shown, chatId, refresh]);
 
   const toggle = useCallback(() => setOpen((value) => !value), []);
+  const hide = useCallback(() => setOpen(false), []);
+  useCloseWhenDesignsExpand(hide);
+  // The panel is 320px wide, plus the 12px gap beside it.
+  useSidePanelRoom("changes", shown, 332, hide);
   const closeDiff = useCallback(() => setDiffChatId(null), []);
   const selectFile = useCallback(
     (path: string) => {

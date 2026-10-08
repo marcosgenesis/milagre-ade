@@ -9,6 +9,7 @@ import type {
 } from "@milagre/shared/model";
 import type { Result } from "@milagre/shared/result";
 import type { SimulatorApi } from "@milagre/shared/simulator";
+import type { ArtifactApi } from "@milagre/shared/artifact";
 
 import type { AgentRuns } from "./lib/agent-runs";
 import type { SessionPatch, WorktreeRename } from "@milagre/shared/project-edits";
@@ -21,7 +22,6 @@ import type {
   AgentPorts,
   EditorInfo,
   AgentEvent,
-  ChatHandoverRequest,
   ChatSendRequest,
   CoordinatorState,
   LinkedWork,
@@ -98,10 +98,15 @@ export type CanvasSnapshot = {
   states: { path: string; state: CoordinatorState }[];
 };
 
+export type CliProgress =
+  | { provider: ModelProvider; phase: "download"; received: number; total: number }
+  | { provider: ModelProvider; phase: "extract" | "validate" | "done" };
+
 declare global {
   interface Window {
     milagre: {
       simulators: SimulatorApi;
+      artifacts: ArtifactApi;
       getRuntimeConnection: () => Promise<RuntimeConnection>;
       /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
       restartHost: () => Promise<void>;
@@ -205,6 +210,8 @@ declare global {
       /** Delegations and Negotiations still open across Links, and the Codex Chats that only receive. */
       getLinkedWork: () => Promise<LinkedWork>;
       onLinkedWork: (callback: (work: LinkedWork) => void) => () => void;
+      /** An app ⌘⇧ shortcut pressed while an embedded frame had focus, forwarded by the main process (its letter). */
+      onAppShortcut: (callback: (key: string) => void) => () => void;
       /** The canvas's Stop on a Link: the Negotiation stops, turns already running finish. */
       stopNegotiation: (id: string) => Promise<void>;
       setWorktreePosition: (id: string, worktreePath: string, position: { x: number; y: number }) => Promise<unknown>;
@@ -221,10 +228,6 @@ declare global {
       sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;
       /** Continues a chat a quit stopped mid-turn, on its saved options. Resolves false when it has nothing to continue. */
       resumeChat: (projectPath: string, sessionId: number) => Promise<boolean>;
-      /** Opens a chat on the other provider in this chat's worktree and writes it a brief of this chat, kept as a draft until the first message. Resolves once the new chat exists. */
-      handover: (request: ChatHandoverRequest) => Promise<{ sessionId: number }>;
-      /** Replaces a handed-over chat's brief while it has no messages yet; does nothing once it has. */
-      setHandoverDraft: (projectPath: string, sessionId: number, text: string) => Promise<void>;
       patchChat: (projectPath: string, sessionId: number, patch: SessionPatch) => Promise<void>;
       /** Archives one of a chat's subagents, or brings it back; the provider carries on either way. */
       archiveSubagent: (projectPath: string, sessionId: number, id: string, archived: boolean) => Promise<void>;
@@ -248,6 +251,8 @@ declare global {
       getCliStatus: (scopeKey?: string) => Promise<AgentCliStatus>;
       /** Runs update for the specified CLI agent and refreshes status. */
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
+      /** Where Antigravity's install stands while `updateCli("antigravity")` runs: download bytes, then extract, validate, done. */
+      onCliProgress: (callback: (progress: CliProgress) => void) => () => void;
       interruptAgent: (chatId: string) => Promise<void>;
       /** An agent event, with its project's new state when the event changed it, and its number once it's folded into the main process's runs (see getRuns). */
       onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState | LinkState; seq?: number }) => void) => () => void;

@@ -244,10 +244,11 @@ html[data-popover-open] .title-drag {
   -webkit-app-region: no-drag;
 }
 
-/* A docked simulator (SimulatorTrack) sits in this space beside the chat. */
+/* A docked simulator (SimulatorTrack) and an open design (ArtifactCard) sit in this space beside the chat. A chat pane
+   inside the workspace already has it from the workspace; reserving it twice would leave the chat no room. */
 [data-workspace-main],
-[data-chat-pane] {
-  margin-right: var(--simulator-dock, 0px);
+[data-chat-pane]:not([data-workspace-main] [data-chat-pane]) {
+  margin-right: calc(var(--simulator-dock, 0px) + var(--artifact-dock, 0px));
 }
 
 html {
@@ -489,7 +490,8 @@ a {
 }
 
 /* The project menu's rows show keyboard focus with their own fill, in ink rather than the accent. */
-[data-workspace-menu] :focus-visible {
+[data-workspace-menu] :focus-visible,
+[data-scope-menu-panel] :focus-visible {
   outline: none;
 }
 

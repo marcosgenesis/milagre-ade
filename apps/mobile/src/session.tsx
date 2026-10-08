@@ -66,6 +66,8 @@ function useSessionState() {
   };
   const scopeKey = snapshot?.project.path;
   const providerRequest = useRef(0);
+  // Each Project's last model lists and CLI status, per computer, shown at once on a switch while they reload.
+  const providerCache = useRef(new Map<string, { models: AgentModels; status: AgentCliStatus }>());
   const providerContext = useRef({ client, scopeKey });
   useEffect(() => {
     providerContext.current = { client, scopeKey };
@@ -76,13 +78,16 @@ function useSessionState() {
     const version = ++providerRequest.current;
     const current = () => version === providerRequest.current && providerContext.current.client === client && providerContext.current.scopeKey === scopeKey;
     setProviderRevision((value) => value + 1);
-    setModels(null);
-    setCliStatus(null);
+    const key = `${client.url}|${scopeKey ?? ""}`;
+    const hit = providerCache.current.get(key);
+    setModels(hit?.models ?? null);
+    setCliStatus(hit?.status ?? null);
     setProviderError("");
     try {
       const args = scopeKey ? [scopeKey] : [];
       const [models, status] = await Promise.all([client.call<AgentModels>("agent:models", args), client.call<AgentCliStatus>("agent:cli-status", args)]);
       if (!current()) return;
+      providerCache.current.set(key, { models, status });
       setModels(models);
       setCliStatus(status);
     } catch {
@@ -336,6 +341,7 @@ function useSessionState() {
       snapshot: refresh,
       runs: refreshRuns,
       accounts: () => {
+        providerCache.current.clear();
         void refreshProviders();
       },
       onError: (error) => setError(error.message),

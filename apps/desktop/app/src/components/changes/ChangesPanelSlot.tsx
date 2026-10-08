@@ -16,7 +16,8 @@ export function ChangesPanelSlot({ open, children }: { open: boolean; children: 
         <motion.div
           key="changes-panel"
           data-changes-slot
-          className={`-ml-3 flex min-h-0 shrink-0 ${sliding ? "overflow-hidden" : "overflow-visible"}`}
+          // Above the panels docked left of it (dock-area.ts has the order), so they slide under it, not over it.
+          className={`relative z-[43] -ml-3 flex min-h-0 shrink-0 ${sliding ? "overflow-hidden" : "overflow-visible"}`}
           onAnimationStart={() => setSliding(true)}
           onAnimationComplete={() => setSliding(false)}
           initial={{ width: 0 }}

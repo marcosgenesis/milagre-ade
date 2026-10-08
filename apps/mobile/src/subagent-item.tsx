@@ -1,18 +1,9 @@
 import { Text } from "react-native";
 import { AiBrainIcon } from "@hugeicons/core-free-icons";
+import { subagentActivityLabel } from "@milagre/shared/agent-activity";
 import type { Subagent } from "@milagre/shared/model";
 import { ActivityItem } from "./activity-item";
 import { colors, styles } from "./ui";
-
-const LABELS: Record<Subagent["status"], string> = {
-  initializing: "Starting",
-  running: "Running",
-  waiting: "Waiting",
-  completed: "Done",
-  failed: "Failed",
-  cancelled: "Stopped",
-  unknown: "Unknown",
-};
 
 /** Subagent data adapted to the same icon, shimmer and output surface used by tool activity. */
 export function SubagentItem({ agent }: { agent: Subagent }) {
@@ -25,7 +16,7 @@ export function SubagentItem({ agent }: { agent: Subagent }) {
           ? "failed"
           : "idle";
   return (
-    <ActivityItem title={agent.title} icon={AiBrainIcon} state={state} status={LABELS[agent.status]} disclosureOnly>
+    <ActivityItem title={agent.title} icon={AiBrainIcon} state={state} status={subagentActivityLabel(agent)} disclosureOnly>
       {!!agent.latestActivity && (
         <Text selectable style={styles.caption}>
           {agent.latestActivity}

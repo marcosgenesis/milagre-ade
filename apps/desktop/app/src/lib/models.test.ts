@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentModels, ModelOption, ReportedModel } from "../model";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./models.ts";
-import { capabilityFor } from "../model.ts";
+import { MODEL_CATALOG, capabilityFor } from "../model.ts";
 
 test("until the agents answer, fast mode is guessed for Codex and the Opus models Claude Code offers it on", () => {
   const option = (id: string): ModelOption => ({ id, name: id, provider: id.startsWith("gpt") ? "codex" : "claude", description: "" });
@@ -61,8 +61,9 @@ test("capabilities come from the reported models", () => {
   assert.deepEqual(capabilitiesFrom(models), {
     codex: { "gpt-6-sol": { efforts: ["low", "ultra"], defaultEffort: "medium", ultracode: false, fastMode: true } },
     claude: { "claude-opus-5-5": { efforts: ["low", "xhigh"], ultracode: true, fastMode: true } },
+    antigravity: {},
   });
-  assert.deepEqual(capabilitiesFrom({ codex: null, claude: null }), { codex: {}, claude: {} });
+  assert.deepEqual(capabilitiesFrom({ codex: null, claude: null, antigravity: null }), { codex: {}, claude: {}, antigravity: {} });
   assert.equal(capabilitiesFrom(null), null);
 });
 
@@ -88,16 +89,24 @@ const catalog: ModelOption[] = [
 ];
 const pick = (id: string) => catalog.find((model) => model.id === id)!;
 
-test("a locked Claude chat stays on its model when the default is a Codex model", () => {
+test("a Claude chat stays on its model when the default is a Codex model", () => {
   const current = pick("claude-haiku-4-5");
-  assert.equal(nextSelection(catalog, current, { defaultId: "gpt-6-astra", applyDefault: true, lockedProvider: "claude" }), current);
-  assert.equal(nextSelection(catalog, current, { defaultId: "gpt-6-astra", applyDefault: false, lockedProvider: "claude" }), current);
+  assert.equal(nextSelection(catalog, current, { defaultId: "gpt-6-astra", applyDefault: true, preferredProvider: "claude" }), current);
+  assert.equal(nextSelection(catalog, current, { defaultId: "gpt-6-astra", applyDefault: false, preferredProvider: "claude" }), current);
 });
 
-test("the Settings default replaces the starting model once, when nothing locks the chat", () => {
+test("a pick on the other provider survives a refetch of the lists", () => {
+  const picked = pick("gpt-6-sol");
+  assert.equal(nextSelection(catalog, picked, { defaultId: "claude-haiku-4-5", applyDefault: false, preferredProvider: "claude" }), picked);
+});
+
+test("the Settings default replaces the starting model once, when no chat prefers a provider", () => {
   assert.equal(nextSelection(catalog, pick("gpt-6-astra"), { defaultId: "claude-haiku-4-5", applyDefault: true }).id, "claude-haiku-4-5");
   assert.equal(nextSelection(catalog, pick("gpt-6-astra"), { defaultId: "claude-haiku-4-5", applyDefault: false }).id, "gpt-6-astra");
-  assert.equal(nextSelection(catalog, pick("gpt-6-astra"), { defaultId: "claude-haiku-4-5", applyDefault: true, lockedProvider: "codex" }).id, "gpt-6-astra");
+  assert.equal(
+    nextSelection(catalog, pick("gpt-6-astra"), { defaultId: "claude-haiku-4-5", applyDefault: true, preferredProvider: "codex" }).id,
+    "gpt-6-astra",
+  );
 });
 
 test("a refetch with identical lists changes nothing", () => {
@@ -124,4 +133,23 @@ test("a stale id gives way to its provider's recommended model", () => {
   assert.equal(nextSelection(catalog, pick("claude-opus-5-5"), { defaultId: "gpt-6.1-sol", applyDefault: true }).id, "gpt-6-astra");
   assert.equal(providerForId("claude-sonnet-4-5"), "claude");
   assert.equal(providerForId("gpt-6.1-sol"), "codex");
+  assert.equal(providerForId("gemini-3.8-flash-high"), "antigravity");
+  assert.equal(providerForId("gemini-pro-agent"), "antigravity");
+});
+
+test("Antigravity's picker shows one row per model family, with the family's thinking levels as efforts", () => {
+  const antigravity = mergeModels(null, MODEL_CATALOG).filter((model) => model.provider === "antigravity");
+  assert.deepEqual(
+    antigravity.map((model) => model.name),
+    ["Gemini 3.8 Flash", "Gemini 3.1 Pro", "Gemini 3.7 Flash", "Gemini 3.6 Flash"],
+  );
+  assert.deepEqual(capabilityFor(antigravity[1], null).efforts, ["low", "high"]);
+  const reportedList: AgentModels = {
+    codex: null,
+    claude: null,
+    antigravity: [reported("gemini-3.1-pro", { efforts: ["low", "high"], defaultEffort: "low" })],
+  };
+  assert.deepEqual(capabilitiesFrom(reportedList)?.antigravity, {
+    "gemini-3.1-pro": { efforts: ["low", "high"], defaultEffort: "low", ultracode: false, fastMode: false },
+  });
 });

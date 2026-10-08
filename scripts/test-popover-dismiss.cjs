@@ -26,7 +26,7 @@ function Fixture() {
     <PromptComposer projectPath="/fixture" draft={draft} onDraftChange={setDraft}
       imageDraft={{ images: [], files: [], loading: false, error: '', onPaste: noop, remove: noop, removeFile: noop }}
       onSend={noop} sendBlocked={false} running
-      models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
+      models={MODEL_CATALOG} cliStatus={{ codex: { state: 'outdated', message: 'Milagre needs Codex 0.99. Run codex update.' } }} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop} />
   </div>;
@@ -60,10 +60,11 @@ async function browserChecks() {
     await delay(100);
     fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, name + ".png"), (await window.webContents.capturePage()).toPNG());
   };
-  // A real mouse press and release at the centre of the first element matching the selector.
-  const click = async (selector) => {
+  // A real mouse press and release at the centre of the first element matching the selector, or `inset` px from
+  // its left edge when the centre may sit under an open picker.
+  const click = async (selector, { inset } = {}) => {
     const point = await evaluate(
-      `(() => { const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) }; })()`,
+      `(() => { const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(${inset === undefined ? "rect.x + rect.width / 2" : `rect.x + ${Number(inset)}`}), y: Math.round(rect.y + rect.height / 2) }; })()`,
     );
     window.webContents.sendInputEvent({ type: "mouseDown", button: "left", clickCount: 1, ...point });
     window.webContents.sendInputEvent({ type: "mouseUp", button: "left", clickCount: 1, ...point });
@@ -79,6 +80,11 @@ async function browserChecks() {
     await click(model);
     await waitFor(`!!document.querySelector('[data-picker-panel] input')`);
     await screenshot("model-picker-open");
+    assert.equal(
+      await evaluate(`[...document.querySelectorAll('[data-picker-panel] [data-provider-tabs] > button')].map((tab) => tab.disabled).join()`),
+      "false,false,false",
+      "A provider tab stays clickable while its CLI needs an update",
+    );
     await click("[data-picker-panel] input");
     assert.equal(await panels(), 1, "Pressing inside the picker keeps it open");
     await click("textarea");
@@ -97,7 +103,8 @@ async function browserChecks() {
     assert.equal(await panels(), 0, "A surface that stops propagation still closes the picker");
 
     await click(model);
-    await click('[data-testid="transcript"]');
+    // The open picker covers the transcript's centre; press the transcript beside it, not a model row.
+    await click('[data-testid="transcript"]', { inset: 24 });
     assert.equal(await panels(), 0, "Pressing the transcript closes the picker");
 
     await click('button[aria-label="Theme"]');

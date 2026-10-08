@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -394,24 +394,34 @@ export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?
  * off, and nothing the page posts is read.
  */
 function ArtifactWebView({ html }: { html: string }) {
-  const [uri, setUri] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    const file = new File(Paths.cache, `artifact-${Date.now()}-${Math.random().toString(36).slice(2)}.html`);
+  const [crashed, setCrashed] = useState(false);
+  // Written while rendering, so the page is there on the first frame; each design gets a file of its own, removed
+  // when the design changes or goes.
+  // Named for this view and the design's content: two views never share a file, and a changed design gets a new one.
+  const id = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const prepared = useMemo(() => {
+    let hash = 5381;
+    for (let index = 0; index < html.length; index++) hash = (hash * 33) ^ html.charCodeAt(index);
+    const file = new File(Paths.cache, `artifact-${id}-${(hash >>> 0).toString(36)}.html`);
     try {
       file.write(artifactShell(html));
-      setUri(file.uri);
+      return { file, uri: file.uri };
     } catch {
-      setFailed(true);
+      return null;
     }
-    return () => {
+  }, [html, id]);
+  useEffect(
+    () => () => {
       try {
-        if (file.exists) file.delete();
+        if (prepared?.file.exists) prepared.file.delete();
       } catch {
         /* The OS may purge cache files while backgrounding. */
       }
-    };
-  }, [html]);
+    },
+    [prepared],
+  );
+  const failed = crashed || !prepared;
+  const uri = prepared?.uri;
   if (failed)
     return (
       <Text accessibilityRole="alert" style={{ color: colors.red, padding: 20 }}>
@@ -428,8 +438,8 @@ function ArtifactWebView({ html }: { html: string }) {
       allowsInlineMediaPlayback
       automaticallyAdjustContentInsets={false}
       contentInsetAdjustmentBehavior="never"
-      onContentProcessDidTerminate={() => setFailed(true)}
-      onRenderProcessGone={() => setFailed(true)}
+      onContentProcessDidTerminate={() => setCrashed(true)}
+      onRenderProcessGone={() => setCrashed(true)}
     />
   );
 }

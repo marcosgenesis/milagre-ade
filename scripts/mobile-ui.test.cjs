@@ -41,6 +41,10 @@ function hookHost({ effects = false } = {}) {
       const index = cursor++;
       return (slots[index] ??= { current: initial });
     },
+    useId() {
+      const index = cursor++;
+      return (slots[index] ??= { id: `:r${index}:` }).id;
+    },
     useCallback(fn, deps) {
       const index = cursor++;
       const previous = slots[index];

@@ -40,12 +40,19 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
 
 function ProviderRows({ provider, now }: { provider: ProviderUsage; now: number }) {
   const failed = provider.status === "error";
+  const account = provider.account?.email || provider.account?.label;
   return (
     <View style={{ gap: 16 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
         <ProviderLogo provider={provider.provider} size={20} />
         <View style={{ flex: 1, gap: 3 }}>
-          <Text style={{ color: colors.ink, fontSize: 16, fontWeight: "600" }}>{providerName(provider.provider)}</Text>
+          <Text
+            selectable
+            accessibilityLabel={`${providerName(provider.provider)} usage: ${account || "Account unavailable"}`}
+            style={{ color: colors.ink, fontSize: 16, fontWeight: "600" }}
+          >
+            {account || "Account unavailable"}
+          </Text>
           <Text selectable style={styles.caption}>
             {failed && provider.windows.length ? "Last known · " : ""}
             {formatUpdatedAgo(provider.updatedAt, now)}

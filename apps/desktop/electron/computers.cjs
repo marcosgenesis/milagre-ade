@@ -197,6 +197,7 @@ function createComputers({
       retryTimer: null,
       offlineTimer: null,
       attempts: 0,
+      failures: 0,
       refused: false,
       stopped: false,
       switching: false,
@@ -231,6 +232,24 @@ function createComputers({
     return entry;
   }
 
+  /** Waits out the step the runtime's redials back off by; turning the computer off or removing it ends the wait. */
+  function backoff(entry) {
+    const wait = backoffMs[Math.min(entry.failures - 1, backoffMs.length - 1)];
+    const { signal } = entry.abort;
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new Error("This computer is no longer connected."));
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, wait);
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
   /** The runtime's `connect`: the LAN channel the supervisor holds, when it has one, else a new relay channel. */
   async function connectRoute(entry) {
     if (entry.stopped || entry.refused) throw new Error("This computer is no longer connected.");
@@ -242,13 +261,18 @@ function createComputers({
     }
     const computer = store.get(entry.id);
     if (!computer) throw new Error("This computer was removed.");
+    // The runtime redials every reconnectMs; a computer that keeps failing is dialed less and less often (a first start has its own backoff).
+    if (entry.runtime && entry.failures > 0) await backoff(entry);
     try {
       return adopt(entry, await dial(entry, computer.relay), "relay");
     } catch (error) {
       entry.switching = false;
       // The runtime would retry this forever: a refusal retrying can't fix stops the computer instead.
       if (isFinal(error)) refuse(entry, error);
-      else entry.lastError = error;
+      else {
+        entry.lastError = error;
+        entry.failures++;
+      }
       throw error;
     }
   }
@@ -258,6 +282,7 @@ function createComputers({
     entry.state = "online";
     entry.message = null;
     entry.lastError = null;
+    entry.failures = 0;
     entry.switching = false;
     recovered(entry);
     void store.seen(entry.id).catch(() => {});

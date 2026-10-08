@@ -105,6 +105,7 @@ function fakeMac({ lan = [], hello = "accept" } = {}) {
     lan,
     sockets: [],
     urls: [],
+    times: [],
     calls: [],
     accepts: [],
     held: [],
@@ -134,6 +135,7 @@ function fakeMac({ lan = [], hello = "accept" } = {}) {
   };
   mac.createSocket = (url) => {
     mac.urls.push(url);
+    mac.times.push(Date.now());
     const reader = createFrameReader("rpc");
     const writer = createFrameWriter("evt");
     let channel = null;
@@ -197,8 +199,8 @@ function fakeMac({ lan = [], hello = "accept" } = {}) {
 
 const macLink = (mac) => link().replace(`key=${"k".repeat(43)}`, `key=${mac.hostKey}`);
 
-async function until(check, label) {
-  for (let i = 0; i < 600; i++) {
+async function until(check, label, ms = 3000) {
+  for (let i = 0; i < ms / 5; i++) {
     if (check()) return;
     await delay(5);
   }
@@ -492,5 +494,36 @@ test("a computer whose first calls fail keeps no channel open between its retrie
   assert.ok(mac.urls.length >= 4, "it kept retrying");
   assert.ok(most <= 1, `at most the channel being tried is open, saw ${most}`);
   await computers.setEnabled(false);
+  assert.equal(mac.open().length, 0);
+});
+
+test("a computer that keeps refusing is dialed less and less often, and a connection starts it over", async (t) => {
+  const mac = fakeMac();
+  const steps = [150, 300, 600];
+  const { computers, state } = await paired(t, mac, { backoffMs: steps, reconnectMs: 5, offlineAfterMs: 60_000 });
+  await computers.add(macLink(mac), { name: "studio" });
+  await computers.setEnabled(true);
+  await until(() => state() === "online", "online");
+  const failAndCount = async (dials) => {
+    const from = mac.urls.length;
+    mac.hello = "full";
+    mac.drop();
+    await until(() => mac.urls.length >= from + dials, `${dials} dials`);
+    return mac.times.slice(from - 1, from + dials);
+  };
+  const [dropped, first, second, third] = await failAndCount(3);
+  assert.ok(first - dropped < steps[0], `the first redial is not held back: ${first - dropped}ms`);
+  assert.ok(second - first >= steps[0] - 10, `then it waits ${steps[0]}: ${second - first}ms`);
+  assert.ok(third - second >= steps[1] - 10, `then ${steps[1]}: ${third - second}ms`);
+  assert.equal(state(), "reconnecting");
+  // It comes back, and the next trouble starts again at the first step.
+  mac.hello = "accept";
+  await until(() => state() === "online", "online again", 2000);
+  const [lost, again] = await failAndCount(1);
+  assert.ok(again - lost < steps[0], `the redial after a success is not held back: ${again - lost}ms`);
+  // Turning the computer off ends a wait in progress.
+  const started = Date.now();
+  await computers.setEnabled(false);
+  assert.ok(Date.now() - started < steps[0], "off does not wait out the backoff");
   assert.equal(mac.open().length, 0);
 });

@@ -14,6 +14,7 @@ import {
   SecurityCheckIcon,
   Settings01Icon,
   SmartphoneIcon,
+  TestTube01Icon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
 import type { FilesToCopy as FilesToCopyResult, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
@@ -43,7 +44,7 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "phone" | "about" | "project";
+export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "phone" | "experimental" | "about" | "project";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
@@ -52,6 +53,7 @@ const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> =
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
   { key: "skills", label: "Skills", icon: MagicWand01Icon },
   { key: "phone", label: "Phone", icon: SmartphoneIcon },
+  { key: "experimental", label: "Experimental", icon: TestTube01Icon },
   { key: "about", label: "About", icon: InformationCircleIcon },
 ];
 
@@ -176,6 +178,24 @@ function PercentSlider({
       <RangeSlider label={label} value={value} {...range} formatValueText={(v) => `${v}%`} onValueChange={onChange} className="w-44" />
       <span className="w-10 text-right tabular-nums text-ink-2">{value}%</span>
     </span>
+  );
+}
+
+function ExperimentalSettings() {
+  const settings = useSettings();
+  return (
+    <Group title="Beta">
+      <Row
+        label="Every project in the sidebar"
+        description="Lists each project and Link with its chats, so a chat in another project opens in place. Replaces the project menu at the top of the sidebar. Hide a project in its own settings."
+      >
+        <Switch
+          label="Every project in the sidebar"
+          checked={settings.sidebarAllProjects}
+          onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })}
+        />
+      </Row>
+    </Group>
   );
 }
 
@@ -1057,6 +1077,7 @@ export function SettingsPanel({
             <p className="mt-6 text-[13px] text-ink-3">Open a project to see its skills.</p>
           ))}
         {section === "phone" && <PhoneSettings />}
+        {section === "experimental" && <ExperimentalSettings />}
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && project && <ProjectSettings key={project.path} project={project} onManageAccounts={() => onSectionChange?.("accounts")} />}
       </div>

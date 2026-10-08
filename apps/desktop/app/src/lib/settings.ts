@@ -31,6 +31,8 @@ export interface AppSettings {
   tldrEnabled: boolean;
   /** Sidebar chats by start date, or with the latest message first. */
   chatOrder: ChatOrder;
+  /** Experimental: the sidebar lists every recent Project and Link with its chats, not only the open one's. */
+  sidebarAllProjects: boolean;
   /** Let the blurred desktop show through the window (macOS). */
   windowTranslucent: boolean;
   /** How much of the desktop shows through the window's own background, 10 to 100. */
@@ -66,6 +68,7 @@ const DEFAULTS: AppSettings = {
   claudeReplies: "concise",
   tldrEnabled: true,
   chatOrder: "created",
+  sidebarAllProjects: false,
   windowTranslucent: false,
   windowTranslucency: 80,
   panelTranslucency: 40,
@@ -96,6 +99,7 @@ function load(): AppSettings {
       tldrEnabled: typeof saved.tldrEnabled === "boolean" ? saved.tldrEnabled : DEFAULTS.tldrEnabled,
       claudeReplies: CLAUDE_REPLIES.includes(saved.claudeReplies as ClaudeReplies) ? saved.claudeReplies! : DEFAULTS.claudeReplies,
       chatOrder: CHAT_ORDERS.includes(saved.chatOrder as ChatOrder) ? saved.chatOrder! : DEFAULTS.chatOrder,
+      sidebarAllProjects: typeof saved.sidebarAllProjects === "boolean" ? saved.sidebarAllProjects : DEFAULTS.sidebarAllProjects,
       windowTranslucent: typeof saved.windowTranslucent === "boolean" ? saved.windowTranslucent : DEFAULTS.windowTranslucent,
       windowTranslucency: clampTo(saved.windowTranslucency, WINDOW_TRANSLUCENCY_RANGE, DEFAULTS.windowTranslucency),
       panelTranslucency: clampTo(saved.panelTranslucency, PANEL_TRANSLUCENCY_RANGE, DEFAULTS.panelTranslucency),

@@ -488,7 +488,8 @@ a {
   border-radius: 4px;
 }
 
-/* The Project menu's rows show keyboard focus with their own fill, in ink rather than the accent. */
+/* The project menu's rows show keyboard focus with their own fill, in ink rather than the accent. */
+[data-workspace-menu] :focus-visible,
 [data-scope-menu-panel] :focus-visible {
   outline: none;
 }
@@ -834,8 +835,18 @@ a:focus-visible .animated-underline::after {
 }
 
 /* Hidden labels must not take space away from the centered icon. */
-[data-sidebar-collapsed="true"] .sidebar-row > .sidebar-copy {
+[data-sidebar-collapsed="true"] .sidebar-row > .sidebar-copy,
+[data-sidebar-collapsed="true"] .sidebar-workspace-control > .sidebar-copy {
   display: none;
+}
+
+[data-sidebar-collapsed="true"] .sidebar-workspace-control {
+  width: 32px;
+  left: 6px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+  pointer-events: auto;
 }
 
 [data-sidebar-collapsed="true"] .sidebar-collapse-control {

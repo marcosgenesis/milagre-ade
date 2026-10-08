@@ -1,6 +1,7 @@
-// Browser check: the sidebar always lists each recent Project and Link with its chats, leaves out a hidden Project,
-// marks exactly one open scope, shows each scope's ⋯ menu and New chat label, pins and folds groups, opens another
-// Project's chat and follows its live updates. No agent calls.
+// Browser check: with the Experimental "Every project in the sidebar" on, the sidebar lists each recent Project and
+// Link with its chats, leaves out a hidden Project, marks exactly one open scope, shows each scope's ⋯ menu and New chat
+// label, pins and folds groups, opens another Project's chat and follows its live updates. Off, the project menu is
+// back on top. No agent calls.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -10,6 +11,7 @@ const fixture = `
 import React from "react";
 import { createRoot } from "react-dom/client";
 import SidebarNav from "/src/components/SidebarNav";
+import { updateSettings } from "/src/lib/settings";
 import "/src/styles.css";
 const chat = (id, body) => ({
   sessions: { [id]: { id, worktree_id: 1, agent_name: "Claude", status: "Idle" } },
@@ -45,7 +47,9 @@ window.milagre = {
   },
 };
 window.pushShop = (state) => listeners.forEach((callback) => callback({ path: "/work/shop", state }));
+window.showAll = (sidebarAllProjects) => updateSettings({ sidebarAllProjects });
 localStorage.removeItem("milagre.sidebarClosedScopes");
+updateSettings({ sidebarAllProjects: true });
 createRoot(document.getElementById("root")).render(
   <div style={{ display: "flex", height: "100vh", padding: "60px 12px 12px" }}>
     <SidebarNav fill workspaceName="arketa" projectPath="/work/arketa" recents={[{ id: "1", label: "Fix the login flow" }]} activeId="1"
@@ -85,7 +89,7 @@ async function browserChecks() {
     await delay(200);
   };
   // Other checks share this storage: leave the sidebar as they expect it.
-  const reset = () => evaluate(`localStorage.removeItem("milagre.sidebarClosedScopes")`).catch(() => {});
+  const reset = () => evaluate(`window.showAll?.(false); localStorage.removeItem("milagre.sidebarClosedScopes")`).catch(() => {});
   const scopes = () => evaluate(`[...document.querySelectorAll("[data-sidebar-scope]")].map((node) => node.dataset.sidebarScope)`);
   const chats = (scope) => evaluate(`[...document.querySelectorAll('[data-sidebar-scope="${scope}"] [data-chat-id]')].map((node) => node.textContent.trim())`);
   try {
@@ -169,10 +173,16 @@ async function browserChecks() {
     assert.deepEqual(JSON.parse(await evaluate(`localStorage.getItem("milagre.sidebarClosedScopes")`)), ["/work/shop"]);
     await screenshot("folded");
 
+    await evaluate("window.showAll(false)");
+    await waitFor(`!document.querySelector("[data-sidebar-scope]")`);
+    await screenshot("off");
+    assert.match(await evaluate(`document.querySelector("[data-chat-id]").textContent`), /Fix the login flow/, "Off, only the open Project's chats");
+    assert.equal(await evaluate(`!!document.querySelector("[data-workspace-trigger]")`), true, "Off, the project menu is back on top");
+    assert.equal(await evaluate(`!!document.querySelector("[data-link-projects]")`), false, "Off, Link projects stays in that menu");
     assert.deepEqual(errors, []);
     await reset();
     console.log(
-      "PASS: the sidebar lists each Project and Link with its chats, skips a hidden Project, marks one open scope, offers New chat per scope and Remove only on other Projects, pins chats to one Pinned section on top, opens them, marks Link chats waiting on the user, follows live changes, and folds groups",
+      "PASS: with the Experimental setting on, the sidebar lists each Project and Link with its chats, skips a hidden Project, marks one open scope, offers New chat per scope and Remove only on other Projects, pins chats to one Pinned section on top, opens them, marks Link chats waiting on the user, follows live changes, and folds groups; off, the old project menu returns",
     );
     app.exit(0);
   } catch (error) {

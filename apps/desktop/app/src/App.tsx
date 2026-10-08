@@ -1002,11 +1002,11 @@ function App() {
   });
   useEffect(() => window.milagre.onOpenChat(openChatByKey), []);
 
-  // Clicking the "phone paired" notification opens Settings → Phone, where access can be reset.
+  // Clicking the "phone paired" notification opens Settings → Devices, where it can be removed.
   useEffect(
     () =>
       window.milagre.onOpenPhoneSettings(() => {
-        setSettingsSection("phone");
+        setSettingsSection("devices");
         setView("settings");
       }),
     [],

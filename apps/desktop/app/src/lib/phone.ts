@@ -38,12 +38,5 @@ export function pairingWindow(status: PhoneStatus | null, now: number): { open: 
   return left > 0 ? { open: true, minutes: Math.ceil(left / 60_000) } : { open: false, minutes: 0 };
 }
 
-/** How many phones paired since the last reset. Only a relay phone keeps count. */
-export function pairedPhonesLine(status: PhoneStatus | null): string | null {
-  if (!status || status.remote !== "relay" || status.pairedPhones === undefined) return null;
-  const count = status.pairedPhones;
-  return count === 0 ? "No phones yet" : count === 1 ? "1 phone" : `${count} phones`;
-}
-
 /** The host's QR code is an SVG string; an <img> shows it without letting it run anything. */
 export const phoneQrSrc = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;

@@ -117,7 +117,10 @@ test("a policy refuses what it denies before it runs, and daemon:status leaves t
     const reply = await peer.call(method, args);
     assert.deepEqual(reply.error, { code: "NOT_AVAILABLE_REMOTELY", message: "Not available on a remote computer" }, method);
   }
-  const methods = (await peer.call("daemon:status")).result.methods;
+  const peerStatus = (await peer.call("daemon:status")).result;
+  const methods = peerStatus.methods;
+  assert.equal(peerStatus.capabilities.includes("mobile-push-v1"), false, "push is denied, so its capability is not advertised");
+  assert.ok(peerStatus.capabilities.includes("desktop-v1"), "the rest stay");
   assert.equal(
     methods.some((method) => peerPolicy.denies(method)),
     false,
@@ -125,7 +128,9 @@ test("a policy refuses what it denies before it runs, and daemon:status leaves t
   assert.ok(methods.includes("project:recent"));
   const local = virtualClient(daemon);
   assert.equal((await local.call("phone:status")).result.state, "off", "the denied phone:set-enabled never ran");
-  assert.ok((await local.call("daemon:status")).result.methods.includes("phone:set-enabled"), "the socket's own view is unchanged");
+  const localStatus = (await local.call("daemon:status")).result;
+  assert.ok(localStatus.methods.includes("phone:set-enabled"), "the socket's own view is unchanged");
+  assert.ok(localStatus.capabilities.includes("mobile-push-v1"), "and so are its capabilities");
 });
 
 test("a request that arrives after close is dropped, and the connection is not registered again", async (t) => {

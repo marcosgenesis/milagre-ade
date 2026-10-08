@@ -513,7 +513,17 @@ async function startDaemon({
             protocolVersion: VERSION,
             dataDir,
             socketPath,
-            capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1", "mobile-push-v1", STATE_PATCHES, CHAT_PAGES, SUBAGENT_TAILS, DESKTOP_PEER],
+            // A capability tied to a method this connection may not call is not advertised to it (mobile push is push:*).
+            capabilities: [
+              "desktop-v1",
+              "snapshot-pages-v1",
+              "result-pages-v1",
+              ...(policy?.denies("push:register") ? [] : ["mobile-push-v1"]),
+              STATE_PATCHES,
+              CHAT_PAGES,
+              SUBAGENT_TAILS,
+              DESKTOP_PEER,
+            ],
             methods: [...runtime.methods, ...PHONE_METHODS, ...DEVICE_METHODS, ...PUSH_METHODS, ...STATE_METHODS, ...PEER_METHODS].filter(
               (method) => !policy?.denies(method),
             ),

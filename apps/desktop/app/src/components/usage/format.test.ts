@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProviderUsage, UsageSnapshot } from "../../model";
-import { formatResetsIn, formatUpdatedAgo, mergeSnapshot, seedSnapshot, shownPercent, usageLabel, usageTone, visibleProviders } from "./format.ts";
+import {
+  contextSummary,
+  formatResetsIn,
+  formatTokens,
+  formatUpdatedAgo,
+  mergeSnapshot,
+  seedSnapshot,
+  shownPercent,
+  usageLabel,
+  usageTone,
+  visibleProviders,
+} from "./format.ts";
 
 const NOW = Date.parse("2026-10-01T19:30:00Z");
 const MINUTE = 60_000;
@@ -153,4 +164,19 @@ test("seedSnapshot fills an empty snapshot but never overwrites a fresh read", (
   assert.equal(seedSnapshot(null, cached), cached);
   assert.equal(seedSnapshot(fresh, cached), fresh);
   assert.equal(seedSnapshot(null, { providers: [] }), null);
+});
+
+test("token counts name a million-token window 1M, not 1000k", () => {
+  assert.equal(formatTokens(1_000_000), "1M");
+  assert.equal(formatTokens(999_600), "1M");
+  assert.equal(formatTokens(1_500_000), "1.5M");
+  assert.equal(formatTokens(366_400), "366k");
+  assert.equal(formatTokens(258_400), "258k");
+  assert.equal(formatTokens(400), "400");
+  assert.deepEqual(contextSummary({ used: 366_000, size: 1_000_000 }), {
+    ratio: 0.366,
+    percent: 37,
+    tokens: "366k of 1M tokens",
+    left: "634k left",
+  });
 });

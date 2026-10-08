@@ -46,7 +46,7 @@ function Fixture() {
   return <div style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} tasks={tasks} contextUsage={{ used: 196000, size: 258400 }} streamingText="" streamingSteps={[{ id: "c-1", kind: "other", title: "Compacting context", status: "running", offset: 0 }]} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} tasks={tasks} contextUsage={{ used: 366000, size: 1000000 }} streamingText="" streamingSteps={[{ id: "c-1", kind: "other", title: "Compacting context", status: "running", offset: 0 }]} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
@@ -96,15 +96,33 @@ async function browserChecks() {
     await waitFor('!!document.querySelector("[data-slot=task-track]")');
     assert.equal(await evaluate(`document.querySelector("${pill}").textContent`), "2/7");
     // The context ring sits beside Send, on the same row.
-    assert.equal(
-      await evaluate('document.querySelector("[role=img][aria-label^=Context]").getAttribute("aria-label")'),
-      "Context: 76% used (196k of 258k tokens)",
-    );
+    const ring = "button[aria-label^=Context]";
+    assert.equal(await evaluate(`document.querySelector("${ring}").getAttribute("aria-label")`), "Context: 37% used (366k of 1M tokens)");
     assert.ok(
       await evaluate(
-        '(() => {const r=document.querySelector("[role=img][aria-label^=Context]").getBoundingClientRect(), s=document.querySelector("button[aria-label=Send]").getBoundingClientRect();return r.right<=s.left && Math.abs(r.top-s.top)<1})()',
+        `(() => {const r=document.querySelector("${ring}").getBoundingClientRect(), s=document.querySelector("button[aria-label=Send]").getBoundingClientRect();return r.right<=s.left && Math.abs(r.top-s.top)<1})()`,
       ),
     );
+    // A click opens the context card above the ring, right-aligned with it; Escape closes it.
+    for (const theme of ["dark", "light"]) {
+      await evaluate(`window.setDark(${theme === "dark"})`);
+      await evaluate(`document.querySelector("${ring}").click()`);
+      await waitFor('!!document.querySelector("[data-context-card]")');
+      assert.equal(await evaluate(`document.querySelector("${ring}").getAttribute("aria-expanded")`), "true");
+      assert.equal(
+        await evaluate('document.querySelector("[data-context-card]").textContent'),
+        "Context37% used366k of 1M tokens634k left. The agent compacts the conversation when it gets close to full.",
+      );
+      assert.ok(
+        await evaluate(
+          `(() => {const c=document.querySelector("[data-context-card]").getBoundingClientRect(), r=document.querySelector("${ring}").getBoundingClientRect();return c.bottom<=r.top && Math.abs(c.right-r.right)<1})()`,
+        ),
+      );
+      await delay(220);
+      await screenshot(`context-card-${theme}`);
+      await evaluate('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))');
+      await waitFor('!document.querySelector("[data-context-card]")');
+    }
     assert.ok(await evaluate(`document.querySelector("${pill}").getBoundingClientRect().height <= 24`));
     // The pill sits right next to Subagents, on the same row.
     const gap = await evaluate(

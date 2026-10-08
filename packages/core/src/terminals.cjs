@@ -12,6 +12,8 @@ const MAX_BUFFER_CHARS = 1024 * 1024;
 const MAX_BUFFER_LINES = 10_000;
 const MAX_INPUT = 64 * 1024;
 const READ_WAIT_MS = 8000;
+// The smallest read limit a viewer may ask for: below it a flood would take a round trip per screenful.
+const MIN_READ_LIMIT = 4096;
 const TITLE_POLL_MS = 1500;
 const MAX_PER_CHAT = 12;
 const MAX_TOTAL = 64;
@@ -60,6 +62,16 @@ function terminalEnvironment(env = process.env) {
   return result;
 }
 
+// A cut never splits a surrogate pair: the head stops before a lone high half, the tail starts after a lone low half.
+function headEnd(data, limit) {
+  const code = data.charCodeAt(limit - 1);
+  return code >= 0xd800 && code <= 0xdbff ? limit - 1 : limit;
+}
+function tailStart(data, limit) {
+  const start = data.length - limit;
+  const code = data.charCodeAt(start);
+  return code >= 0xdc00 && code <= 0xdfff ? start + 1 : start;
+}
 const lineCount = (text) => {
   let count = 0;
   for (let index = text.indexOf("\n"); index !== -1; index = text.indexOf("\n", index + 1)) count++;
@@ -271,10 +283,13 @@ function createTerminals(options = {}) {
     /**
      * Long-polls for output after `after`, the offset a viewer already has. `reset` means the viewer fell behind the
      * kept output (or is new) and gets all of it; it replaces what the viewer shows. `ended` means the shell exited.
+     * `limit` caps the characters one read returns: the oldest part of what follows `after`, or the newest of a reset.
      */
     async read(request) {
       const after = request?.after;
       if (!Number.isSafeInteger(after) || after < 0) throw new Error("Invalid Terminal read.");
+      const limit = request?.limit;
+      if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < MIN_READ_LIMIT)) throw new Error("Invalid Terminal read.");
       const id = request?.terminalId;
       let terminal = typeof id === "string" && TERMINAL_ID.test(id) ? terminals.get(id) : null;
       if (!terminal || closed) return { offset: after, data: "", reset: false, ended: true };
@@ -291,7 +306,14 @@ function createTerminals(options = {}) {
         });
       }
       const { reset, data } = since(terminal, after);
-      return { offset: terminal.end, data, reset, ended: terminal.exited || !terminals.has(terminal.id), terminal: info(terminal) };
+      const ended = terminal.exited || !terminals.has(terminal.id);
+      if (limit && data.length > limit) {
+        if (reset) return { offset: terminal.end, data: data.slice(tailStart(data, limit)), reset, ended, terminal: info(terminal) };
+        const cut = headEnd(data, limit);
+        // More is waiting, so the shell hasn't ended for this viewer yet.
+        return { offset: after + cut, data: data.slice(0, cut), reset, ended: false, terminal: info(terminal) };
+      }
+      return { offset: terminal.end, data, reset, ended, terminal: info(terminal) };
     },
     async input(request) {
       const terminal = find(request);

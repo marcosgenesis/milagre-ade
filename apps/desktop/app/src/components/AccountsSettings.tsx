@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AccountsSnapshot, ModelProvider } from "@milagre/shared/model";
+import type { AccountsSnapshot, CliStatus, ModelProvider } from "@milagre/shared/model";
+import type { CliProgress } from "../electron";
 import { accountType, providerName } from "@milagre/shared/providers";
 import { ProviderLogo } from "./ProviderLogo";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -7,6 +8,89 @@ import { Briefcase01Icon, UserIcon, UserMultipleIcon, CheckmarkCircle02Icon, Cir
 
 const button =
   "rounded-lg border border-line cursor-pointer disabled:cursor-default px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover disabled:opacity-40";
+
+const MB = 1024 * 1024;
+
+/** The Antigravity install row in its account group: Milagre downloads it itself, so Settings is where it is installed and updated. */
+function AntigravityRow() {
+  const [status, setStatus] = useState<CliStatus | null>(null);
+  const [progress, setProgress] = useState<CliProgress | null>(null);
+  const [error, setError] = useState("");
+  const [working, setWorking] = useState(false);
+  const refresh = useCallback(() => {
+    window.milagre
+      .getCliStatus()
+      .then((all) => setStatus(all.antigravity ?? null))
+      .catch(() => setStatus(null));
+  }, []);
+  useEffect(() => {
+    refresh();
+    return window.milagre.onCliProgress?.((next) => {
+      if (next.provider === "antigravity") setProgress(next);
+    });
+  }, [refresh]);
+  const install = async () => {
+    setWorking(true);
+    setError("");
+    setProgress(null);
+    try {
+      const result = await window.milagre.updateCli("antigravity");
+      if (!result.ok) setError(result.error ?? "Antigravity could not be installed. Try again.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Antigravity could not be installed. Try again.");
+    } finally {
+      setWorking(false);
+      setProgress(null);
+      refresh();
+    }
+  };
+  const missing = status?.state === "missing" || status?.state === "broken";
+  const outdated = status?.state === "outdated";
+  const label = working ? "Installing…" : status?.state === "broken" ? "Reinstall" : outdated ? "Update" : "Install";
+  const detail = !working
+    ? missing
+      ? "Not installed. Milagre downloads Antigravity for you."
+      : outdated
+        ? "A newer Antigravity is available."
+        : status
+          ? "Installed."
+          : "Checking…"
+    : progress?.phase === "download"
+      ? `Downloading ${Math.round(progress.received / MB)} of ${Math.max(1, Math.round(progress.total / MB))} MB`
+      : progress?.phase === "extract"
+        ? "Unpacking…"
+        : progress?.phase === "validate"
+          ? "Checking…"
+          : "Starting…";
+  const percent = progress?.phase === "download" && progress.total ? Math.min(100, Math.round((progress.received / progress.total) * 100)) : null;
+  return (
+    <div data-antigravity-row className="mx-3 mt-3 grid gap-2 rounded-lg border border-line px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0 space-y-1">
+          <span className="block text-[13.5px] font-medium">Antigravity</span>
+          <span role="status" className="block text-[12px] text-ink-3">
+            {detail}
+          </span>
+        </span>
+        {(missing || outdated || working) && (
+          <button className={button} disabled={working} onClick={() => void install()}>
+            {label}
+          </button>
+        )}
+      </div>
+      {working && (
+        <div className="h-1 overflow-hidden rounded-full bg-inset" role="progressbar" aria-label="Antigravity download" aria-valuenow={percent ?? undefined}>
+          <div className="h-full bg-ink transition-[width]" style={{ width: `${percent ?? 5}%` }} />
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="text-[12px] text-red">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export function AccountsSettings() {
   const [snapshot, setSnapshot] = useState<AccountsSnapshot | null>(null);
@@ -92,6 +176,7 @@ export function AccountsSettings() {
               Add account
             </button>
           </div>
+          {group.provider === "antigravity" && <AntigravityRow />}
           <div className="grid gap-2 p-3" role="group" aria-label={`${providerName(group.provider)} accounts`}>
             {group.accounts.map((account) => {
               const selected = group.selectedId === account.id;
@@ -144,7 +229,7 @@ export function AccountsSettings() {
                       )}
                     </span>
                   </button>
-                  {account.id !== "default" && (
+                  {(account.id !== "default" || group.provider === "antigravity") && (
                     <div className="flex shrink-0 gap-2">
                       {account.state === "signing-in" ? (
                         <button className={button} disabled={busy} onClick={() => void act("cancel", group.provider, account.id)}>
@@ -161,15 +246,17 @@ export function AccountsSettings() {
                           Re-authenticate
                         </button>
                       )}
-                      <button
-                        className={`${button} flex items-center gap-1.5 border-transparent`}
-                        disabled={busy}
-                        title="Remove from Milagre. The local profile remains. Removing the active account selects the connected CLI account."
-                        onClick={() => void act("remove", group.provider, account.id)}
-                      >
-                        <HugeiconsIcon icon={Delete02Icon} size={14} />
-                        Remove
-                      </button>
+                      {account.id !== "default" && (
+                        <button
+                          className={`${button} flex items-center gap-1.5 border-transparent`}
+                          disabled={busy}
+                          title="Remove from Milagre. The local profile remains. Removing the active account selects the connected CLI account."
+                          onClick={() => void act("remove", group.provider, account.id)}
+                        >
+                          <HugeiconsIcon icon={Delete02Icon} size={14} />
+                          Remove
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

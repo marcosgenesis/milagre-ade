@@ -36,9 +36,12 @@ const RESUME_FAILED_MESSAGE =
   "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
 
 // What a turn fails with when an agent's CLI can't run it. Each names the fix; the next message checks again.
+// Claude and Codex are fixed in a terminal. Antigravity is installed and signed in by Milagre itself, so its
+// instructions point at Settings, not at a shell command.
 const INSTALL_COMMANDS = { claude: "curl -fsSL https://claude.ai/install.sh | bash", codex: "npm install -g @openai/codex" };
 const UPDATE_COMMANDS = { claude: "claude update", codex: "codex update" };
 const LOGIN_COMMANDS = { claude: "claude auth login", codex: "codex login" };
+const SETTINGS_ACCOUNTS = "Milagre Settings \u2192 Accounts";
 
 // A tracing log line: "2026-10-02T00:59:00.724526Z ERROR codex_core::tools::router: error=…". The prefix says
 // nothing a reader needs.
@@ -66,19 +69,25 @@ const lastLine = (text) => readLastLine(text).line;
 const withoutPeriod = (text) => text.replace(/\.$/, "");
 
 function missingCliMessage(name) {
+  if (name === "antigravity") return `Milagre couldn't find ${cliName(name)}. Install it from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `Milagre couldn't find ${cliName(name)}. Install it with \`${INSTALL_COMMANDS[name]}\`, then send your message again.`;
 }
 
 function cliTooOldMessage(name, version, minimum) {
+  if (name === "antigravity")
+    return `Milagre needs ${cliName(name)} ${minimum} or later, and you have ${version}. Update it from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `Milagre needs ${cliName(name)} ${minimum} or later, and you have ${version}. Run \`${UPDATE_COMMANDS[name]}\` in a terminal, then send your message again.`;
 }
 
 function cliBrokenMessage(name, command, detail) {
   const reason = lastLine(detail);
+  if (name === "antigravity")
+    return `${cliName(name)} (${command}) didn't start${reason ? `: ${withoutPeriod(reason)}` : ""}. Reinstall it from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `${cliName(name)} (${command}) didn't start${reason ? `: ${withoutPeriod(reason)}` : ""}. Check that it runs in a terminal, then send your message again.`;
 }
 
 function loginMessage(name) {
+  if (name === "antigravity") return `${cliName(name)} isn't signed in. Sign in to Antigravity from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `${cliName(name)} isn't logged in. Run \`${LOGIN_COMMANDS[name]}\` in a terminal, then send your message again.`;
 }
 

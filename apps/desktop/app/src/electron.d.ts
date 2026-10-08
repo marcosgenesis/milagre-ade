@@ -98,6 +98,10 @@ export type CanvasSnapshot = {
   states: { path: string; state: CoordinatorState }[];
 };
 
+export type CliProgress =
+  | { provider: ModelProvider; phase: "download"; received: number; total: number }
+  | { provider: ModelProvider; phase: "extract" | "validate" | "done" };
+
 declare global {
   interface Window {
     milagre: {
@@ -247,6 +251,8 @@ declare global {
       getCliStatus: (scopeKey?: string) => Promise<AgentCliStatus>;
       /** Runs update for the specified CLI agent and refreshes status. */
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
+      /** Where Antigravity's install stands while `updateCli("antigravity")` runs: download bytes, then extract, validate, done. */
+      onCliProgress: (callback: (progress: CliProgress) => void) => () => void;
       interruptAgent: (chatId: string) => Promise<void>;
       /** An agent event, with its project's new state when the event changed it, and its number once it's folded into the main process's runs (see getRuns). */
       onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState | LinkState; seq?: number }) => void) => () => void;

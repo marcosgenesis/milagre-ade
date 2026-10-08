@@ -94,7 +94,7 @@ const runs = {
   },
   seq: 1,
 };
-const models = { codex: null, claude: null };
+const models = { codex: null, claude: null, antigravity: null };
 const linked = { delegations: [], negotiations: [], receiveOnly: [] };
 
 const fixture = `
@@ -106,7 +106,7 @@ window.addEventListener('error', e => console.error(e.error?.stack || e.message)
 const project = ${JSON.stringify(project)}, runs = ${JSON.stringify(runs)};
 const replies = {
   getCurrentProject: project, getRuns: runs, getModels: ${JSON.stringify(models)},
-  getCliStatus: {codex:{state:'ready'},claude:{state:'ready'}},
+  getCliStatus: {codex:{state:'ready'},claude:{state:'ready'},antigravity:{state:'ready'}},
   getRuntimeConnection: {connected:true}, getLinkedWork: ${JSON.stringify(linked)},
   listRecentProjects: [{path:project.path,name:project.name}], listBranches: ['main'],
   getWorktreeRoots: [], getCachedUsage: {providers:[]}, readUsage: {providers:[]}, getAgentPorts: {},
@@ -229,7 +229,7 @@ async function main() {
         "project:recent": [{ path: projectPath, name: "Milagre" }],
         "project:open": project,
         "agent:models": models,
-        "agent:cli-status": { codex: { state: "ready" }, claude: { state: "ready" } },
+        "agent:cli-status": { codex: { state: "ready" }, claude: { state: "ready" }, antigravity: { state: "ready" } },
         "chat:runs": runs,
         "usage:read": { providers: [] },
         "git:branches": ["main"],

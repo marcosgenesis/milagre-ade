@@ -32,6 +32,12 @@ function codexPlanTasks(plan) {
   return plan.flatMap((item, index) => (text(item?.step) ? [task(index, text(item.step), item.status === "inProgress" ? "in_progress" : item.status)] : []));
 }
 
+// ACP plan entries [{ content, status: "pending" | "in_progress" | "completed", priority }]: the whole plan each time.
+function acpPlanTasks(entries) {
+  if (!Array.isArray(entries)) return null;
+  return entries.flatMap((entry, index) => (text(entry?.content) ? [task(index, text(entry.content), entry.status)] : []));
+}
+
 // The id TaskCreate gave a task: from its structured result, else from "Task #3 created successfully".
 function createdId(structured, block) {
   if (structured?.task?.id !== undefined) return String(structured.task.id);
@@ -78,4 +84,4 @@ function applyToolResult(map, call, block, structured) {
   return [...map.values()];
 }
 
-module.exports = { applyToolResult, applyToolUse, codexPlanTasks, todoWriteTasks };
+module.exports = { acpPlanTasks, applyToolResult, applyToolUse, codexPlanTasks, todoWriteTasks };

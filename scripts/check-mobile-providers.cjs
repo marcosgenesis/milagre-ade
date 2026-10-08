@@ -10,7 +10,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function main() {
   if (process.argv.length !== 3 || process.argv[2] !== "--run") {
     console.log(
-      "Run node scripts/check-mobile-providers.cjs --run to send one short no-tool prompt through each installed Codex and Claude account, then verify saved provider IDs after host restart. This uses provider quota.",
+      "Run node scripts/check-mobile-providers.cjs --run to send one short no-tool prompt through each installed Codex, Claude and Antigravity account, then verify saved provider IDs after host restart. This uses provider quota.",
     );
     return;
   }
@@ -31,6 +31,7 @@ async function main() {
     for (const [provider, model] of [
       ["codex", "gpt-6.1-sol"],
       ["claude", "claude-fable-5-1"],
+      ["antigravity", "gemini-3.8-flash"],
     ]) {
       const { sessionId } = await client.call("chat:send", [
         {

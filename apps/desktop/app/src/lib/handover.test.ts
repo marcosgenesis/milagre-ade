@@ -25,4 +25,5 @@ test("a divider names each side by model when the catalog knows it, else by prov
 test("a divider on one provider is a restore", () => {
   assert.equal(handoffLabel(context({ provider: "claude" }, { provider: "claude" }), models).restored, true);
   assert.equal(providerLabel("codex"), "Codex");
+  assert.equal(providerLabel("antigravity"), "Antigravity");
 });

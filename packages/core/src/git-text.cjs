@@ -1,10 +1,11 @@
 const { PROVIDERS } = require("@milagre/shared/providers");
 const os = require("node:os");
 const { CodexRpc } = require("./agents/codex-rpc.cjs");
+const { antigravityModel: acpModel } = require("./agents/antigravity-text.cjs");
 
 // The commit message, PR title and PR body the "Commit and open PR" dialog starts with: one call to a
 // small model, which returns the three as JSON. Claude chats ask Claude Haiku 4.5, Codex chats ask
-// GPT-6 Luna, and either falls back to the other. The model call is injected, so tests use a fake.
+// GPT-6 Luna, Antigravity chats ask Gemini 3.8 Flash, and each falls back to the others. The model call is injected, so tests use a fake.
 
 const DIFF_LIMIT = 40_000;
 const TITLE_LIMIT = 200;
@@ -171,14 +172,14 @@ async function withTimeout(task, timeoutMs) {
 }
 
 /**
- * Writes the dialog's text with the chat's own agent, else the other one. Each gets `timeoutMs`. A
+ * Writes the dialog's text with the chat's own agent, else the others in picker order. Each gets `timeoutMs`. A
  * commit subject that repeats an earlier one is asked for again, once; if it still repeats, the
  * commit message comes back empty (`repeated: true`) and the dialog shows its note there. Never
  * throws: when neither agent answers, the result carries the note.
  */
 async function generateGitText(input, { provider = "claude", models = {}, timeoutMs = TIMEOUT_MS } = {}) {
   const prompt = buildGitTextPrompt(input);
-  const order = provider === "codex" ? PROVIDERS : PROVIDERS.toReversed();
+  const order = [provider, ...PROVIDERS.filter((name) => name !== provider)];
   const ask = (call, text) => withTimeout((signal) => call({ system: SYSTEM, prompt: text, signal }), timeoutMs);
   for (const name of order) {
     const call = models[name];
@@ -251,6 +252,9 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
+/** One Gemini 3.8 Flash turn in a one-shot ACP session in an empty temporary folder, with every permission request turned down. */
+const antigravityModel = (options) => acpModel({ outputSchema: OUTPUT_SCHEMA, ...options });
+
 /** One GPT-6 Luna turn in a short-lived, ephemeral, read-only `codex app-server` thread. */
 function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options), clientVersion = "0.0.0", outputSchema = OUTPUT_SCHEMA }) {
   return async ({ system, prompt, signal }) => {
@@ -316,6 +320,7 @@ module.exports = {
   buildGitTextPrompt,
   claudeModel,
   codexModel,
+  antigravityModel,
   generateGitText,
   parseGitText,
   repeatsSubject,

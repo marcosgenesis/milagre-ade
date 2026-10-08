@@ -1429,6 +1429,8 @@ function createRuntime(options) {
         return readOpenChat(view ? view.chatId : chats.openChat);
       }),
     flush: async () => {
+      // A waiting Linear sign-in is an accepted command, but its window is gone when this runs on quit: end it.
+      await linear.dispose();
       await Promise.allSettled([...active]);
       await scopeStates.flush();
       await usageStore.idle();

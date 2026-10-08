@@ -706,3 +706,23 @@ test("linear commands connect, report and disconnect, and emit the status", asyn
   assert.deepEqual(await runtime.invoke("linear:disconnect"), { connected: false });
   assert.deepEqual(events.filter((event) => event.channel === "linear:status-changed").at(-1).payload, { connected: false });
 });
+
+test("flush ends a waiting Linear sign-in instead of waiting out its timeout", async (t) => {
+  const { make } = await fixture(t);
+  const runtime = make({
+    linear: {
+      clientId: "cid",
+      apiBase: "https://api.test",
+      port: 0,
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+      openBrowser: () => {},
+    },
+  });
+  const waiting = runtime.invoke("linear:connect");
+  const rejected = assert.rejects(waiting, { code: "cancelled" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const started = Date.now();
+  await runtime.flush();
+  assert.ok(Date.now() - started < 5000, "flush returned promptly");
+  await rejected;
+});

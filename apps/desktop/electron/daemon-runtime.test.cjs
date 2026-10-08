@@ -182,7 +182,13 @@ test("desktop reconnect restores two large Projects without an oversized aggrega
     throw error;
   });
   assert.equal(restored.payload.projects.length, 2);
-  for (const opened of restored.payload.projects) assert.equal(opened.state.messages[0].body.length, 9 * 1024 * 1024);
+  // The snapshot leaves messages out (chat-pages-v1); each Chat's are read as a page.
+  for (const opened of restored.payload.projects) {
+    assert.deepEqual([opened.state.messages, opened.state.messagesInChats], [[], true]);
+    const session = Object.values(opened.state.sessions)[0];
+    const page = await desktop.invoke("chat:messages", [opened.path, session.id, { turns: 1 }]);
+    assert.equal(page.messages[0].body.length, 9 * 1024 * 1024);
+  }
   assert.equal((await desktop.invoke("project:current")).path, other);
 });
 
@@ -216,7 +222,7 @@ for (const stopHost of [false, true]) {
   });
 }
 
-test("a Project state over 16 MB opens in the desktop, and its changes reach the window whole", async (t) => {
+test("a Project with 18 MB of messages opens in the desktop without them, a page at a time, and its changes are patches", async (t) => {
   const { dataDir, project, desktop, events } = await fixture(t);
   const messages = [];
   for (let index = 0; index < 900; index++) {
@@ -242,12 +248,14 @@ test("a Project state over 16 MB opens in the desktop, and its changes reach the
       tasks: {},
     }),
   );
+  // The desktop takes states without messages (chat-pages-v1): opening sends the Chats, not 18 MB of replies.
   const opened = await desktop.openProject(project);
-  assert.ok(Buffer.byteLength(JSON.stringify(opened)) > 16 * 1024 * 1024);
-  assert.equal(opened.state.messages.length, 900);
-  // Read in pages once, then each change is a patch of a few bytes, never the 18 MB state again.
+  assert.ok(Buffer.byteLength(JSON.stringify(opened)) < 64 * 1024);
+  assert.equal(opened.state.sessions[2].summary.count, 900);
+  const page = await desktop.invoke("chat:messages", [project, 2, { turns: 10, limit: 20 }]);
+  assert.deepEqual([page.messages.length, page.hasMore, page.messages.at(-1).id], [20, true, 909]);
   const held = await desktop.invoke("state:read", [project]);
-  assert.equal(held.state.messages.length, 900);
+  assert.deepEqual(held.state.messages, []);
   const mobile = await connect({ dataDir });
   t.after(() => mobile.close());
   await mobile.call("chat:patch", [project, 2, { title: "From phone" }]);

@@ -36,7 +36,10 @@ export function chatInProject(projectPath, key) {
 
 /** The model of the chat's last message, which a turn the agent started by itself runs on. */
 export function lastUserModel(state, sessionId) {
-  return [...state.messages].reverse().find((message) => message.session_id === sessionId && message.role === "user")?.model ?? "";
+  const last = state.messages.findLast((message) => message.session_id === sessionId && message.role === "user");
+  if (last) return last.model ?? "";
+  // A window that holds no messages (chat-pages-v1) has it in the Chat's summary.
+  return state.sessions?.[sessionId]?.summary?.lastModel ?? "";
 }
 
 export function startRun(runs, chatId, model) {

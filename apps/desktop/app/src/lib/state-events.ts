@@ -3,6 +3,7 @@ import { projectOfKey } from "@milagre/shared/agent-runs";
 import { scopeKey } from "@milagre/shared/chat-scopes";
 import type { StatePatch } from "@milagre/shared/state-patch";
 import type { AgentEvent, CoordinatorState, LinkState } from "../model.ts";
+import type { MessageChanges } from "../electron.d.ts";
 
 // A host that sends state patches (state-patches-v1) puts what changed in a state event in place of the whole state,
 // which runs to megabytes in a large Project: `patch`, made from the state numbered `base`, gives the one numbered
@@ -11,7 +12,15 @@ import type { AgentEvent, CoordinatorState, LinkState } from "../model.ts";
 // state again with state:read. Events from an older host carry whole states and pass through.
 
 type AnyState = CoordinatorState | LinkState;
-type Numbered = { patch?: StatePatch; base?: number; version?: number; epoch?: string; resync?: boolean };
+type Numbered = { patch?: StatePatch; base?: number; version?: number; epoch?: string; resync?: boolean; messages?: MessageChanges };
+/** A change to the messages of a scope's Chats, or `reset` when they must be read again (a missed change, a new host). */
+export type MessagesUpdate = { scope: string; changes?: MessageChanges; reset?: boolean };
+
+/**
+ * Whether a state comes from a host that keeps messages by Chat (chat-pages-v1): its `messages` is empty, and the Chats
+ * on screen read theirs with window.milagre.readChatMessages (see chat-messages.ts).
+ */
+export const isLean = (state: { messagesInChats?: boolean } | null | undefined) => state?.messagesInChats === true;
 export type ProjectStateUpdate = { path: string; state: CoordinatorState };
 export type LinkStateUpdate = { linkId: string; state: LinkState };
 export type AgentEventUpdate = { chatId: string; event: AgentEvent; state?: AnyState; seq?: number };
@@ -24,9 +33,11 @@ const reading = new Map<string, { patches: Numbered[]; events: HeldEvent[] }>();
 const projectListeners = new Set<(update: ProjectStateUpdate) => void>();
 const linkListeners = new Set<(update: LinkStateUpdate) => void>();
 const agentListeners = new Set<(update: AgentEventUpdate) => void>();
+const messageListeners = new Set<(update: MessagesUpdate) => void>();
 let subscribed = false;
 
 const linkPrefix = "milagre-link:";
+const READ_TIMEOUT_MS = 3000;
 const numbered = (payload: Numbered) => typeof payload.version === "number" && typeof payload.epoch === "string";
 
 /** The state an event's patch gives, or null while the scope is read again (which then announces the state itself). */
@@ -43,6 +54,8 @@ function stateFor(scope: string, payload: Numbered): AnyState | null {
   }
   const state = applyStatePatch(last.state, payload.patch);
   held.set(scope, { epoch: payload.epoch!, version: payload.version!, state });
+  if (payload.messages && (payload.messages.changed.length || payload.messages.removed.length))
+    for (const listener of messageListeners) listener({ scope, changes: payload.messages });
   return state;
 }
 
@@ -52,7 +65,11 @@ async function readAgain(scope: string, first: Numbered) {
   reading.set(scope, pending);
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const read = await window.milagre.readState(scope);
+      // A read that doesn't answer soon gives up: the events held back behind it (a turn streaming) must not wait on it.
+      const read = await Promise.race([
+        window.milagre.readState(scope),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("The state read took too long")), READ_TIMEOUT_MS)),
+      ]);
       let current = { epoch: read.epoch, version: read.version, state: read.state as AnyState };
       let gap = false;
       // What arrived during the read: older patches are in the state read; newer ones follow it in order.
@@ -67,6 +84,8 @@ async function readAgain(scope: string, first: Numbered) {
       if (gap) continue;
       held.set(scope, current);
       reading.delete(scope);
+      // Message changes in the gap are lost: the Chats shown read their messages again.
+      if (isLean(current.state)) for (const listener of messageListeners) listener({ scope, reset: true });
       for (const { event, withState } of pending.events)
         for (const listener of agentListeners) listener(withState ? { ...event, state: current.state } : event);
       announce(scope, current.state);
@@ -142,4 +161,6 @@ export const stateEvents = {
   onProjectState: (listener: (update: ProjectStateUpdate) => void) => listen(projectListeners, listener),
   onLinkState: (listener: (update: LinkStateUpdate) => void) => listen(linkListeners, listener),
   onAgentEvent: (listener: (update: AgentEventUpdate) => void) => listen(agentListeners, listener),
+  /** The messages each change adds, changes or removes, from a host that keeps them by Chat. */
+  onMessages: (listener: (update: MessagesUpdate) => void) => listen(messageListeners, listener),
 };

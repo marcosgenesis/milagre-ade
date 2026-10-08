@@ -11,8 +11,10 @@ const json = (status, body) => ({ ok: status >= 200 && status < 300, status, jso
 // A fake Linear: the token endpoint, the viewer query and revoke. The browser "approves" by calling the callback.
 function fakeLinear() {
   const calls = [];
+  const revokes = [];
   const fetchImpl = async (url, init) => {
     calls.push(url);
+    if (url.endsWith("/oauth/revoke")) revokes.push(Object.fromEntries(new URLSearchParams(init.body)));
     if (url.endsWith("/oauth/token")) return json(200, { access_token: "a1", refresh_token: "r1", expires_in: 86400 });
     if (url.endsWith("/oauth/revoke")) return json(200, {});
     return json(200, { data: { viewer: { name: "Victor", email: "v@x" }, organization: { name: "Acme", urlKey: "acme" } } });
@@ -21,7 +23,7 @@ function fakeLinear() {
     const params = new URL(url).searchParams;
     void fetch(`${params.get("redirect_uri")}?code=abc&state=${params.get("state")}`);
   };
-  return { calls, fetchImpl, approve };
+  return { calls, revokes, fetchImpl, approve };
 }
 
 function setup(t, overrides = {}) {
@@ -138,4 +140,71 @@ test("three connects in a row: only the newest survives", async (t) => {
   await assert.rejects(second, { code: "cancelled" });
   assert.equal((await third).connected, true);
   assert.equal(opened, 1);
+});
+
+test("disconnect revokes the refresh token first, then the access token", async (t) => {
+  const { service, linear } = setup(t);
+  await service.connect();
+  await service.disconnect();
+  assert.deepEqual(linear.revokes, [
+    { token: "r1", token_type_hint: "refresh_token", client_id: "cid" },
+    { token: "a1", token_type_hint: "access_token", client_id: "cid" },
+  ]);
+});
+
+test("disconnect still revokes the access token when revoking the refresh token fails", async (t) => {
+  const linear = fakeLinear();
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith("/oauth/revoke") && new URLSearchParams(init.body).get("token_type_hint") === "refresh_token") {
+      linear.revokes.push({ token: "r1", failed: true });
+      throw new Error("offline");
+    }
+    return linear.fetchImpl(url, init);
+  };
+  const { service } = setup(t, { fetchImpl, openBrowser: linear.approve });
+  await service.connect();
+  assert.deepEqual(await service.disconnect(), { connected: false });
+  assert.deepEqual(linear.revokes, [
+    { token: "r1", failed: true },
+    { token: "a1", token_type_hint: "access_token", client_id: "cid" },
+  ]);
+});
+
+test("a sign-in that fails after the token exchange revokes the new grant and says it failed", async (t) => {
+  const linear = fakeLinear();
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith("/graphql")) return json(200, { errors: [{ message: "Viewer unavailable" }] });
+    return linear.fetchImpl(url, init);
+  };
+  const { service, changes } = setup(t, { fetchImpl, openBrowser: linear.approve });
+  await assert.rejects(service.connect(), { code: "failed", message: "Linear sign-in failed: Viewer unavailable" });
+  assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token", client_id: "cid" }]);
+  assert.deepEqual(service.status(), { connected: false });
+  assert.equal(changes(), 0);
+});
+
+test("a sign-in cancelled while its token is being exchanged saves nothing and revokes it", async (t) => {
+  const linear = fakeLinear();
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  let exchanging;
+  const started = new Promise((resolve) => (exchanging = resolve));
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith("/oauth/token")) {
+      exchanging();
+      await gate;
+    }
+    return linear.fetchImpl(url, init);
+  };
+  const { service, changes } = setup(t, { fetchImpl, openBrowser: linear.approve });
+  const waiting = service.connect();
+  const rejected = assert.rejects(waiting, { code: "cancelled" });
+  await started;
+  const disposed = service.dispose();
+  release();
+  await disposed;
+  await rejected;
+  assert.deepEqual(service.status(), { connected: false });
+  assert.equal(changes(), 0);
+  assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token", client_id: "cid" }]);
 });

@@ -2,7 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const http = require("node:http");
-const { createPkce, authorizeUrl, listenForCallback, exchangeCode, refreshTokens } = require("./oauth.cjs");
+const { createPkce, authorizeUrl, listenForCallback, exchangeCode, refreshTokens, revokeToken } = require("./oauth.cjs");
 
 const json = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
@@ -169,4 +169,16 @@ test("a refresh posts the refresh token and returns the new one Linear sends bac
     refresh_token: "r1",
     client_id: "cid",
   });
+});
+
+test("revoking posts the token with its type hint, and the Bearer header only for an access token", async () => {
+  const sent = [];
+  const fetchImpl = async (url, init) => (sent.push({ url, init }), json(200, {}));
+  await revokeToken({ fetchImpl, apiBase: "https://api.test", clientId: "cid", token: "r1", hint: "refresh_token" });
+  await revokeToken({ fetchImpl, apiBase: "https://api.test", clientId: "cid", token: "a1", hint: "access_token" });
+  assert.equal(sent[0].url, "https://api.test/oauth/revoke");
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(sent[0].init.body)), { token: "r1", token_type_hint: "refresh_token", client_id: "cid" });
+  assert.equal(sent[0].init.headers.authorization, undefined);
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(sent[1].init.body)), { token: "a1", token_type_hint: "access_token", client_id: "cid" });
+  assert.equal(sent[1].init.headers.authorization, "Bearer a1");
 });

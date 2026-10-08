@@ -28,7 +28,7 @@ function authorizeUrl({ clientId, redirectUri, state, challenge }) {
 const page = (text) =>
   `<!doctype html><meta charset="utf-8"><title>Milagre</title><body style="font:15px -apple-system,sans-serif;padding:48px">${text}</body>`;
 
-// One sign-in's callback: a loopback server that takes the first request carrying the right state, then closes.
+// One sign-in's callback: a loopback server that answers requests carrying the right state until the caller closes it.
 async function listenForCallback({ state, port = 47615, timeoutMs = 300_000 }) {
   let settle;
   const code = new Promise((resolve, reject) => (settle = { resolve, reject }));
@@ -116,11 +116,12 @@ function refreshTokens({ fetchImpl, apiBase, clientId, refreshToken, now }) {
   return tokenRequest({ fetchImpl, apiBase, params: { grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId }, now });
 }
 
-async function revokeToken({ fetchImpl, apiBase, accessToken }) {
+// Ends one token's grant. Revoking the refresh token ends the whole grant; the access token alone expires in a day.
+async function revokeToken({ fetchImpl, apiBase, clientId, token, hint }) {
   await fetchImpl(`${apiBase}/oauth/revoke`, {
     method: "POST",
-    headers: { ...FORM, authorization: `Bearer ${accessToken}` },
-    body: new URLSearchParams({ token: accessToken }).toString(),
+    headers: hint === "access_token" ? { ...FORM, authorization: `Bearer ${token}` } : FORM,
+    body: new URLSearchParams({ token, token_type_hint: hint, client_id: clientId }).toString(),
     signal: AbortSignal.timeout(10_000),
   });
 }

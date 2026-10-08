@@ -36,6 +36,9 @@ function createLinear({
     return token ? { connected: true, viewer: token.viewer, organization: token.organization } : { connected: false };
   }
 
+  // Best effort: a token Linear can't be told about is gone from this Mac either way.
+  const revoke = (token, hint) => revokeToken({ fetchImpl, apiBase, clientId, token, hint }).catch(() => {});
+
   async function signIn(attempt) {
     const pkce = createPkce();
     const state = crypto.randomBytes(16).toString("hex");
@@ -45,13 +48,24 @@ function createLinear({
       if (attempt.cancelled) throw new LinearError("Replaced by a newer Linear sign-in.", "cancelled");
       openBrowser(authorizeUrl({ clientId, redirectUri: callback.redirectUri, state, challenge: pkce.challenge }));
       const code = await callback.code;
+      const replaced = () => new LinearError("Replaced by a newer Linear sign-in.", "cancelled");
+      if (attempt.cancelled) throw replaced();
       const tokens = await exchangeCode({ fetchImpl, apiBase, clientId, code, redirectUri: callback.redirectUri, verifier: pkce.verifier, now: now() });
-      const { viewer, organization } = await postGraphql({ fetchImpl, apiBase, accessToken: tokens.accessToken, query: VIEWER });
-      store.saveToken({
-        ...tokens,
-        viewer: { name: viewer.name, email: viewer.email },
-        organization: { name: organization.name, urlKey: organization.urlKey },
-      });
+      try {
+        // The exchange and the Viewer query are awaits too: a sign-in cancelled during them must not save a token.
+        if (attempt.cancelled) throw replaced();
+        const { viewer, organization } = await postGraphql({ fetchImpl, apiBase, accessToken: tokens.accessToken, query: VIEWER });
+        if (attempt.cancelled) throw replaced();
+        store.saveToken({
+          ...tokens,
+          viewer: { name: viewer.name, email: viewer.email },
+          organization: { name: organization.name, urlKey: organization.urlKey },
+        });
+      } catch (error) {
+        // Linear already issued a grant; without a saved token nothing here could ever end it.
+        await revoke(tokens.refreshToken, "refresh_token");
+        throw error.code === "cancelled" ? error : new LinearError(`Linear sign-in failed: ${error.message}`, "failed");
+      }
     } finally {
       await callback.close();
     }
@@ -87,8 +101,9 @@ function createLinear({
       store.clearToken();
       if (!token) return status();
       changed();
-      // Best effort: the token is gone from this Mac whether or not Linear hears about it.
-      await revokeToken({ fetchImpl, apiBase, accessToken: token.accessToken }).catch(() => {});
+      // The refresh token carries the grant; the access token goes too so it stops working before it expires.
+      await revoke(token.refreshToken, "refresh_token");
+      await revoke(token.accessToken, "access_token");
       return status();
     },
     async dispose() {

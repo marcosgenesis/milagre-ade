@@ -30,7 +30,8 @@ test("paired phones can read cached and live usage through the owner without ope
     socket.on("close", () => sockets.delete(socket));
     const connection = wire(socket, {
       onMessage(request) {
-        requests.push(request.method);
+        // The bridge asks for state patches when it connects; this test is about what the phone asks.
+        if (request.method !== "daemon:state-patches") requests.push(request.method);
         connection.send({ v: 1, id: request.id, result: usage });
       },
       onInvalid: (error) => socket.destroy(error),

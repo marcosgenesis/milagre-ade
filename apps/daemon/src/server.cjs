@@ -1,4 +1,5 @@
-const { isLinkScopeKey, scopeFromKey } = require("@milagre/shared/chat-scopes");
+const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
+const { diffState } = require("@milagre/shared/state-patch");
 const { preparePrivateDirectory } = require("@milagre/core/private-files");
 const { prepareToken, validToken, authenticationProof, authenticationNonce, validNonce } = require("./local-auth.cjs");
 const net = require("node:net");
@@ -17,6 +18,10 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 // Handled here, never by core, and not in the mobile bridge's allow-list: a paired phone must not manage its own access.
 const PUSH_METHODS = Object.freeze(["push:register", "push:unregister", "push:focus"]);
 const PHONE_METHODS = Object.freeze(["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing", "phone:set-lan"]);
+// A client that asks for them (daemon:state-patches) gets what changed in a state event, not the whole state; see
+// state-patch.mjs. state:read gives it a whole state and its version when it has none or missed one.
+const STATE_PATCHES = "state-patches-v1";
+const STATE_METHODS = Object.freeze(["state:read"]);
 
 const PAGES_TTL_MS = 30000;
 // What one connection may hold in paged responses at once, in characters. A response larger than that alone is still
@@ -101,6 +106,15 @@ function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = 
   };
 }
 
+/** The Project or Link (scope key) whose state an event carries; null for one without a state. */
+function stateScope(channel, payload) {
+  if (!payload?.state || typeof payload.state !== "object") return null;
+  if (channel === "project:state") return typeof payload.path === "string" ? payload.path : null;
+  if (channel === "link:state") return typeof payload.linkId === "string" ? scopeKey({ kind: "link", linkId: payload.linkId }) : null;
+  if (channel === "agent:event") return typeof payload.chatId === "string" ? projectOfKey(payload.chatId) : null;
+  return null;
+}
+
 // A project's state is encoded once per state object (states are replaced, never changed in place) and reused by every
 // event, reply and client, so a burst of events and the reads that follow them serialise it once.
 const encodedStates = new WeakMap();
@@ -157,6 +171,11 @@ async function startDaemon({
   const clients = new Map();
   const views = new Map();
   let eventSeq = 0;
+  // Sockets that take state patches, and per scope the last state sent and its number. The numbers start again with
+  // each host (epoch), so a client that reconnects to a new one reads its states again.
+  const patchSockets = new Set();
+  const epoch = randomUUID();
+  const sentStates = new Map();
   let stopping;
   let listening = false;
   const sender = createExpoPush({ ...pushOptions, onError, onInvalid: (token) => push.invalidate(token) });
@@ -189,16 +208,48 @@ async function startDaemon({
   function broadcast(channel, payload) {
     if (channel === "agent:event") push.observe(payload.chatId, payload.event);
     const seq = ++eventSeq;
+    const patched = statePatch(channel, payload, seq);
     if (!clients.size) return;
-    // An event that still doesn't fit is skipped, never the connection.
-    const { json, bytes } = eventFrame(channel, payload, seq, inlineLimit);
-    for (const connection of clients.values()) {
+    // An event that still doesn't fit is skipped, never the connection. Each form is encoded once, when a client takes it.
+    let whole;
+    for (const [socket, connection] of clients) {
       try {
-        connection.send(null, json, bytes);
+        const frame = patched && patchSockets.has(socket) ? patched : (whole ??= eventFrame(channel, payload, seq, inlineLimit));
+        connection.send(null, frame.json, frame.bytes);
       } catch (error) {
         onError(new Error(`Milagre couldn't send a ${channel} event: ${error.message}`));
       }
     }
+  }
+  /**
+   * For an event that carries a state: numbers that state, and when a client takes patches, the event with what changed
+   * since the last state sent for its scope (`patch`, `base`, `version`) in place of the state. A first state, or a
+   * patch too large for an event, says `resync` instead: the client reads the state with state:read.
+   */
+  function statePatch(channel, payload, seq) {
+    const scope = stateScope(channel, payload);
+    if (!scope) return null;
+    const previous = sentStates.get(scope);
+    const version = (previous?.version ?? 0) + 1;
+    sentStates.set(scope, { version, state: payload.state });
+    if (![...patchSockets].some((socket) => clients.has(socket))) return null;
+    const { state, ...rest } = payload;
+    const frame = (body) => eventFrame(channel, body, seq, Infinity);
+    if (previous) {
+      const patched = frame({ ...rest, patch: diffState(previous.state, state), base: previous.version, version, epoch });
+      if (patched.bytes <= inlineLimit) return patched;
+    }
+    return frame({ ...rest, resync: true, version, epoch });
+  }
+  /** A scope's state with its number, for a client that takes patches. A newer state than the one sent goes out first. */
+  async function readState(owner) {
+    if (typeof owner !== "string" || !owner) throw new Error("Choose a Project or Link");
+    const link = isLinkScopeKey(owner);
+    const { state } = await runtime.invoke(link ? "link:snapshot" : "project:snapshot", [link ? scopeFromKey(owner).linkId : owner]);
+    if (sentStates.get(owner)?.state !== state)
+      broadcast(link ? "link:state" : "project:state", link ? { linkId: scopeFromKey(owner).linkId, state } : { path: owner, state });
+    const sent = sentStates.get(owner);
+    return { state: sent.state, version: sent.version, epoch };
   }
   // Its bridge connects to this daemon's socket as a client, so it only starts once the socket listens.
   // A first pairing is announced to the desktop, which tells the owner in case it was not them.
@@ -253,6 +304,7 @@ async function startDaemon({
       sockets.delete(socket);
       clients.delete(socket);
       views.delete(socket);
+      patchSockets.delete(socket);
       Promise.resolve(runtime.disconnect?.(context.clientId)).catch(onError);
     });
     async function dispatch(request) {
@@ -341,8 +393,8 @@ async function startDaemon({
             protocolVersion: VERSION,
             dataDir,
             socketPath,
-            capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1", "mobile-push-v1"],
-            methods: [...runtime.methods, ...PHONE_METHODS, ...PUSH_METHODS],
+            capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1", "mobile-push-v1", STATE_PATCHES],
+            methods: [...runtime.methods, ...PHONE_METHODS, ...PUSH_METHODS, ...STATE_METHODS],
           };
         else if (request.method === "phone:status") result = phone.status();
         // Settings shows the reply, which arrives after the status events: answer with the settled status, not the
@@ -374,6 +426,10 @@ async function startDaemon({
           } else result = snapshot;
         } else if (request.method === "daemon:snapshot-page" || request.method === "daemon:result-page") result = resultPages.page(...request.args);
         else if (request.method === "daemon:flush") result = await runtime.flush();
+        else if (request.method === "daemon:state-patches") {
+          patchSockets.add(socket);
+          result = { epoch };
+        } else if (request.method === "state:read") result = await readState(request.args[0]);
         else if (request.method === "daemon:focus") {
           const next = request.args[0];
           if (!next || typeof next.focused !== "boolean") throw new Error("Expected a focused boolean");

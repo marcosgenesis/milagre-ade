@@ -1,5 +1,5 @@
 // The "Milagre" OAuth app in Linear (Settings › API › OAuth applications). PKCE, so no secret ships with the app.
-const BUILT_IN_CLIENT_ID = "";
+const BUILT_IN_CLIENT_ID = "dc64c9e039ea10991d5cd4abb3bb3633";
 
 module.exports = {
   CLIENT_ID: process.env.MILAGRE_LINEAR_CLIENT_ID || BUILT_IN_CLIENT_ID,

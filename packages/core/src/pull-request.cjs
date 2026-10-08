@@ -18,18 +18,27 @@ const execOptions = (cwd) => ({
   env: { ...process.env, GH_PROMPT_DISABLED: "1" },
 });
 
-/** Resolve the latest PR for the checked-out branch, including PRs submitted from a fork. */
-async function readPullRequest(cwd, exec = execFileAsync) {
+/**
+ * Whether the checked-out branch has any PR, in any state (OPEN, CLOSED or MERGED): `known: false` when git or gh
+ * failed, so a caller can tell "no PR" (`known: true, pr: null`) from "couldn't ask". Never throws.
+ */
+async function readPullRequestState(cwd, exec = execFileAsync) {
   try {
     const git = createGit({ execFile: callbackExec(exec) }).read;
     const { stdout: branchOutput } = await git.checked(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
     const branch = branchOutput.trim();
-    if (!branch) return null;
-    return await readBranchPullRequest(cwd, branch, exec);
+    if (!branch) return { known: false, pr: null };
+    const { stdout } = await exec("gh", ["pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", FIELDS], execOptions(cwd));
+    return { known: true, pr: JSON.parse(stdout)[0] ?? null };
   } catch {
     // No PR, offline, or gh unavailable: this optional metadata never blocks a chat.
-    return null;
+    return { known: false, pr: null };
   }
+}
+
+/** Resolve the latest PR for the checked-out branch, including PRs submitted from a fork. */
+async function readPullRequest(cwd, exec = execFileAsync) {
+  return toPullRequest((await readPullRequestState(cwd, exec)).pr);
 }
 
 // `pr view` can infer the wrong head repository for a fork or a branch tracking main.
@@ -158,4 +167,4 @@ function checksState(rollup) {
   return running ? "running" : undefined;
 }
 
-module.exports = { readPullRequest, readPullRequests, createPullRequestReader };
+module.exports = { readPullRequest, readPullRequestState, readPullRequests, createPullRequestReader };

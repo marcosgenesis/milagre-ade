@@ -22,6 +22,7 @@ import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
 import { messageSender } from "@milagre/shared/advisor-result";
 import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 import { LINK_PR_HINT, issueChipLabel, issueFirstMessage, type LinearIssue, type LinearIssuesResult } from "@milagre/shared/linear";
+import { worktreeShared } from "@milagre/shared/archive";
 import type { Client, OpenProject } from "../client";
 import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
 import { pullRequestBlockers } from "@milagre/shared/pr-blockers";
@@ -668,9 +669,10 @@ export default function ChatScreen() {
     // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the issue comes from the host's JSON, so url may be missing and startsWith would throw
     if (/^https:\/\//.test(url)) void Linking.openURL(url).catch(() => {});
   }
-  // A Chat's own Worktree (not the main checkout) can link an issue; a stored one is shown with its hint when Linear can't see it.
-  const canLink = linearActive && !!chat && !project.link && !!worktree?.path && worktree.path !== project.path;
-  const storedIssue = worktree?.linearIssue;
+  // A Chat's own Worktree (not the main checkout, not one another Chat shares) can link an issue; a stored one is shown
+  // with its hint when Linear can't see it. Nothing about the link shows while Linear is off.
+  const canLink = linearActive && !!chat && !project.link && !!worktree?.path && worktree.path !== project.path && !worktreeShared(project.state, chat.id);
+  const storedIssue = linearActive ? worktree?.linearIssue : undefined;
   const linkHint = storedIssue && !(worktree?.name ?? "").toLowerCase().includes(storedIssue.toLowerCase()) ? LINK_PR_HINT(storedIssue) : null;
   /** Picks an issue from the list and links it to this Chat's Worktree. */
   function linkIssue() {
@@ -764,7 +766,7 @@ export default function ChatScreen() {
             </Stack.Toolbar.MenuAction>
             {canLink &&
               (storedIssue ? (
-                <Stack.Toolbar.MenuAction icon="link.badge.plus" disabled={busy} onPress={() => void unlinkWorktreeIssue()}>
+                <Stack.Toolbar.MenuAction icon="minus.circle" disabled={busy} onPress={() => void unlinkWorktreeIssue()}>
                   Unlink Linear issue
                 </Stack.Toolbar.MenuAction>
               ) : (

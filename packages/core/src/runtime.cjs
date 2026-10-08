@@ -33,7 +33,16 @@ const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
 const { writeTranscript, generateBrief, createHandoverModels } = require("./agents/handover.cjs");
 const { discoverSkills, expandSkillPrompt, readDiscoveredSkill } = require("./skills.cjs");
-const { DEFAULT_WORKTREE_ROOT, createWorktree, issueBranch, listBranches, moveWorktreeBranch, newSuffix, renameWorktreeBranch } = require("./worktrees.cjs");
+const {
+  DEFAULT_WORKTREE_ROOT,
+  branchPushed,
+  createWorktree,
+  issueBranch,
+  listBranches,
+  moveWorktreeBranch,
+  newSuffix,
+  renameWorktreeBranch,
+} = require("./worktrees.cjs");
 const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 const { previewFilesToCopy } = require("./worktree-files.cjs");
@@ -41,7 +50,7 @@ const { createProjectSettings } = require("./project-settings.cjs");
 const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
-const { createPullRequestReader, readPullRequests } = require("./pull-request.cjs");
+const { createPullRequestReader, readPullRequestState, readPullRequests } = require("./pull-request.cjs");
 const { emptyState, reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { migrateWorktreeChats } = require("./worktree-chats.cjs");
 const { createLinear } = require("./linear/index.cjs");
@@ -673,8 +682,8 @@ function createRuntime(options) {
     if (!issue) void track(() => nameWorktree(request.projectPath, created, request.prompt ?? ""), background).catch(() => {});
     return { project: { ...project, state }, worktreeId: listed.id, ...(resolved.note ? { setupNote: resolved.note } : {}) };
   });
-  // Links a Worktree that already exists to a Linear issue. A Milagre-named branch with no open PR takes the issue's
-  // branch name (the folder keeps its name); any other branch is left alone and only the key is stored.
+  // Links a Worktree that already exists to a Linear issue. A Milagre-named branch that was never pushed and has no PR
+  // takes the issue's branch name (the folder keeps its name); any other branch is left alone and only the key is stored.
   commands.handle("worktree:link-issue", async (_event, { projectPath, worktreeId, key } = {}) => {
     await ownProject(projectPath);
     await environmentReady;
@@ -683,10 +692,19 @@ function createRuntime(options) {
     const project = await readProject(projectPath);
     const worktree = project.state.worktrees[worktreeId];
     if (!worktree) throw new Error("That worktree is no longer in this project.");
-    const pullRequest = await readPullRequest(worktree.path).catch(() => null);
-    if (worktree.name.startsWith("milagre/") && pullRequest?.state !== "OPEN") {
+    if (worktree.path === projectPath) throw new Error("The main checkout can't be linked to a Linear issue.");
+    const sharing = Object.values(project.state.sessions).filter((session) => session.worktree_id === worktreeId && !session.archived);
+    if (sharing.length > 1) throw new Error("Another chat uses this worktree, so it can't be linked to a Linear issue.");
+    // Only a Milagre branch is ever checked against git and gh; a branch the user named keeps its name without a lookup.
+    // The branch is renamed only when it was never pushed and gh definitely reports no PR in any state.
+    let renamable = false;
+    if (worktree.name.startsWith("milagre/") && !(await branchPushed(worktree.path, worktree.name))) {
+      const lookup = await readPullRequestStateOf(worktree.path).catch(() => ({ known: false, pr: null }));
+      renamable = lookup.known && lookup.pr === null;
+    }
+    if (renamable) {
       // The suffix that tells this worktree's branch apart stays with it when the issue's name is taken.
-      const suffix = worktree.name.match(/-([a-z0-9]+)$/)?.[1] ?? newSuffix();
+      const suffix = worktree.name.match(/-([a-z0-9]{4})$/)?.[1] ?? newSuffix();
       const branch = await issueBranch({ projectPath, issue, suffix });
       await moveWorktreeBranch({ worktreePath: worktree.path, from: worktree.name, to: branch });
       const state = await updateProject(projectPath, (latest) => {
@@ -726,6 +744,7 @@ function createRuntime(options) {
     );
   });
   const readPullRequest = options.readPullRequest ?? createPullRequestReader();
+  const readPullRequestStateOf = options.readPullRequestState ?? readPullRequestState;
   commands.handle("worktree:pull-request", async (_event, worktreePath) => {
     await environmentReady;
     return readPullRequest(worktreePath);

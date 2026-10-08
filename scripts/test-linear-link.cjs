@@ -41,6 +41,10 @@ const rows = [
   { id: 'chat-stored', label: 'Stored link', mark: 'idle', details: { branch: 'milagre/login-fix-cd34', path: '/worktrees/stored', linkable: on(true), linearKey: on('ENG-1'), linearIssue: on(issues[0]) } },
   // Stored ENG-1 on a branch that names it: no hint in the card.
   { id: 'chat-named', label: 'Named branch', mark: 'idle', details: { branch: 'eng-1-fix-login-redirect', path: '/worktrees/named', linkable: on(true), linearKey: on('ENG-1'), linearIssue: on(issues[0]) } },
+  // A Worktree another chat shares, even with a stored key: neither item, as on the phone.
+  { id: 'chat-shared', label: 'Shared worktree', mark: 'idle', details: { branch: 'milagre/login-fix-ef56', path: '/worktrees/shared', linearKey: on('ENG-1'), linearIssue: on(issues[0]) } },
+  // An own Worktree near the bottom of the window: its picker must stay inside the window.
+  { id: 'chat-low', label: 'Low chat', mark: 'idle', details: { branch: 'milagre/login-fix-gh78', path: '/worktrees/low', linkable: on(true) } },
   // The main checkout: neither item.
   { id: 'chat-main', label: 'Main checkout', mark: 'idle', details: { branch: 'main', path: '/fixture' } },
 ];
@@ -50,6 +54,7 @@ function Fixture() {
       <div style={{ width: 280 }}>
         {rows.map((row) => (
           <div key={row.id} data-row={row.id}>
+            {row.id === 'chat-low' && <div style={{ height: Math.max(0, window.innerHeight - 420) }} />}
             <ChatRow item={row} active={false} collapsed={false} onPick={() => {}} actions={actions} />
           </div>
         ))}
@@ -141,6 +146,30 @@ async function checks(url) {
     await evaluate(`[...document.querySelectorAll('[data-chat-menu] [data-menu-row]')].find((el) => el.textContent.trim() === 'Unlink Linear issue').click()`);
     await waitFor(`window.__unlink.length === 1`);
     assert.deepEqual(await evaluate(`window.__unlink`), [{ id: "chat-stored" }]);
+
+    // A shared Worktree offers neither Link nor Unlink, even with a stored key.
+    const sharedLabels = await openMenu("chat-shared");
+    assert.equal(
+      sharedLabels.some((label) => /Linear issue/.test(label)),
+      false,
+      "a shared Worktree has no Linear item",
+    );
+    await closeMenu();
+
+    // The picker opened from a row near the bottom of the window stays inside it.
+    await evaluate(`${rowEl("chat-low")}.scrollIntoView({ block: 'end' })`);
+    await openMenu("chat-low");
+    await evaluate(`[...document.querySelectorAll('[data-chat-menu] [data-menu-row]')].find((el) => el.textContent.trim() === 'Link Linear issue…').click()`);
+    await waitFor(`document.querySelectorAll('[data-linear-link-picker] [data-linear-issue-row]').length === 2`);
+    // The picker moves once its height is known, a frame after the rows appear, so wait for it to settle.
+    await waitFor(
+      `(() => { const box = document.querySelector('[data-linear-link-picker]').getBoundingClientRect(); return box.top >= 0 && box.bottom <= window.innerHeight; })()`,
+    );
+    const box = JSON.parse(await evaluate(`JSON.stringify(document.querySelector('[data-linear-link-picker]').getBoundingClientRect())`));
+    const viewport = await evaluate(`window.innerHeight`);
+    assert.ok(box.top >= 0 && box.bottom <= viewport, `the picker stays inside the window (${JSON.stringify(box)} in ${viewport})`);
+    await evaluate(`document.querySelector('[data-linear-link-picker] [data-linear-issue-row] button')?.click()`);
+    await waitFor(`!document.querySelector('[data-linear-link-picker]')`);
 
     // The hover card hints when the branch doesn't name the stored key, and not when it does.
     await hover("chat-stored");

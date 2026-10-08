@@ -710,8 +710,24 @@ function CardLine({ icon, children }: { icon: ReactNode; children: ReactNode }) 
 /** The issue list over the menu's place, for "Link Linear issue…". Picking an issue hands its key up and closes. */
 function LinkIssuePopover({ position, onPick, onClose }: { position: { x: number; y: number }; onPick: (issue: LinearIssue) => void; onClose: () => void }) {
   useDismiss(true, onClose, (target) => !!target.closest("[data-picker-panel]"));
+  const ref = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState(position.y);
+  // Opens above the menu's place when there isn't room below, and never above the window's top edge.
+  // Measured again as the issue list fills in, since its height isn't known on the first paint.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const place = () => {
+      const height = element.getBoundingClientRect().height;
+      setTop(position.y + height > window.innerHeight - 8 ? Math.max(8, position.y - height - 8) : position.y);
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [position.y]);
   return createPortal(
-    <div data-linear-link-picker className="fixed z-[70]" style={{ top: position.y, left: Math.min(position.x, window.innerWidth - 420 - 8) }}>
+    <div ref={ref} data-linear-link-picker className="fixed z-[70]" style={{ top, left: Math.min(position.x, window.innerWidth - 420 - 8) }}>
       <LinearIssuePicker className="w-[420px] max-w-[calc(100vw-2rem)]" title="Link a Linear issue" onPick={onPick} onClose={onClose} />
     </div>,
     document.body,
@@ -818,19 +834,20 @@ function ChatMenu({
     { key: "copy-path", label: "Copy path", icon: Copy01Icon, onSelect: copy(details.path ?? ""), disabled: !details.path },
     { key: "copy-branch", label: "Copy branch name", icon: GitBranchIcon, onSelect: copy(details.branch ?? ""), disabled: !details.branch },
     { key: "rename", label: "Rename chat", icon: PencilEdit02Icon, onSelect: run(onRename), disabled: !actions.onRename },
-    ...(details.linearKey
-      ? [
-          {
-            key: "unlink-issue",
-            label: "Unlink Linear issue",
-            icon: Unlink01Icon,
-            onSelect: run(() => actions.onUnlinkIssue?.(item.id)),
-            disabled: !actions.onUnlinkIssue,
-          },
-        ]
-      : details.linkable
-        ? [{ key: "link-issue", label: "Link Linear issue…", icon: Link01Icon, onSelect: run(onLink), disabled: !actions.onLinkIssue }]
-        : []),
+    // Unlink and Link are offered on the same Worktrees (own, not shared, not the main checkout), as on the phone.
+    ...(details.linkable
+      ? details.linearKey
+        ? [
+            {
+              key: "unlink-issue",
+              label: "Unlink Linear issue",
+              icon: Unlink01Icon,
+              onSelect: run(() => actions.onUnlinkIssue?.(item.id)),
+              disabled: !actions.onUnlinkIssue,
+            },
+          ]
+        : [{ key: "link-issue", label: "Link Linear issue…", icon: Link01Icon, onSelect: run(onLink), disabled: !actions.onLinkIssue }]
+      : []),
     item.unread
       ? { key: "read", label: "Mark as read", icon: Tick02Icon, onSelect: run(() => actions.onMarkUnread?.(item.id, false)), disabled: !actions.onMarkUnread }
       : {

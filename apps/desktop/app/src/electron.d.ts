@@ -13,7 +13,11 @@ import type { Result } from "@milagre/shared/result";
 import type { StatePatch } from "@milagre/shared/state-patch";
 
 /** On a state event from a host that sends patches: what changed since the state numbered `base`, or `resync`. */
-type StateNumbering = { patch?: StatePatch; base?: number; version?: number; epoch?: string; resync?: boolean };
+type StateNumbering = { patch?: StatePatch; base?: number; version?: number; epoch?: string; resync?: boolean; messages?: MessageChanges };
+/** To a client that reads messages by Chat: the messages a change added, changed (each after the one before it in its Chat) or removed. */
+export type MessageChanges = { changed: Array<{ message: ChatMessage; after: number | null }>; removed: number[] };
+/** Where a search match is and what matched. */
+export type ChatSearchMatch = { message: { id: number; session_id: number }; score: number; snippet: string; highlight: [number, number]; term: string };
 import type { SimulatorApi } from "@milagre/shared/simulator";
 import type { BrowserApi } from "@milagre/shared/browser";
 import type { ArtifactApi } from "@milagre/shared/artifact";
@@ -285,6 +289,14 @@ declare global {
       ) => () => void;
       /** A Project's or Link's (scope key) state and its number, for applying the host's state patches. */
       readState: (scope: string) => Promise<{ state: CoordinatorState | LinkState; version: number; epoch: string }>;
+      /** A page of one Chat's messages: its latest turns, or those before the message `before` (chat-pages-v1). */
+      readChatMessages: (
+        scope: string,
+        chatId: number,
+        options?: { before?: number; turns?: number; limit?: number },
+      ) => Promise<{ messages: ChatMessage[]; hasMore: boolean; total: number }>;
+      /** Matches across the Chats of a Project or Link, best first (chat-pages-v1). */
+      searchChats: (scope: string, query: string, options?: { limit?: number }) => Promise<ChatSearchMatch[]>;
       /** Every chat's listening ports now, by chat key. */
       getAgentPorts: () => Promise<AgentPorts>;
       /** Stops the command listening on one of a chat's ports; false when the chat's list doesn't show that pid. */

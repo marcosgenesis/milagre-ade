@@ -17,6 +17,15 @@ if (new URLSearchParams(location.search).has("long")) {
   }));
   state.next_id = 303;
 }
+const lean = new URLSearchParams(location.search).has("lean");
+function leanState() {
+  const copy = structuredClone(state);
+  for (const session of Object.values(copy.sessions)) {
+    const chat = copy.messages.filter((message) => message.session_id === session.id);
+    session.summary = { count: chat.length, ...(chat.length ? { firstId: chat[0].id, lastId: chat.at(-1).id } : {}), titleLine: chat.find((message) => message.role === "user")?.body };
+  }
+  return { ...copy, messages: [], messagesInChats: true };
+}
 window.renderedMessageIds = [];
 window.transcriptRenders = 0;
 window.railItemsRendered = 0;
@@ -28,7 +37,22 @@ window.milagre = new Proxy({
   getAgentPorts: async () => ({}),
   getRuns: async () => ({ seq: 0, runs: {} }),
   getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
-  getCurrentProject: async () => ({ path: "/fixture", name: "shop", state: structuredClone(state) }),
+  getCurrentProject: async () => ({ path: "/fixture", name: "shop", state: lean ? leanState() : structuredClone(state) }),
+  // ?lean: a host that keeps messages by Chat (chat-pages-v1), paging them like chat:messages does.
+  readChatMessages: async (_scope, chatId, { before, turns = 10, limit = 75 } = {}) => {
+    window.calls.pages = (window.calls.pages ?? 0) + 1;
+    const chat = state.messages.filter((message) => message.session_id === chatId);
+    let end = chat.length;
+    const at = before === undefined ? -1 : chat.findIndex((message) => message.id === before);
+    if (at >= 0) end = at;
+    let start = end;
+    let seen = 0;
+    while (start > 0 && end - start < limit) {
+      start--;
+      if (chat[start].role === "user" && ++seen >= turns) break;
+    }
+    return structuredClone({ messages: chat.slice(start, end), hasMore: start > 0, total: chat.length });
+  },
   listBranches: async () => ["main"],
   getPathForFile: file => "/fixture/" + file.name,
   createWorktree: () => {

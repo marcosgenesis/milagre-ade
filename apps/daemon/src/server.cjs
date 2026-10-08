@@ -222,6 +222,8 @@ async function startDaemon({
   const patchSockets = new Map();
   const epoch = randomUUID();
   const sentStates = new Map();
+  // Per scope, what a snapshot holds besides the state (a Project's path and name, a Link's definition).
+  const snapshotRest = new Map();
   let stopping;
   let listening = false;
   const sender = createExpoPush({ ...pushOptions, onError, onInvalid: (token) => push.invalidate(token) });
@@ -310,11 +312,17 @@ async function startDaemon({
   async function readState(owner, { messages = true } = {}) {
     if (typeof owner !== "string" || !owner) throw new Error("Choose a Project or Link");
     const link = isLinkScopeKey(owner);
+    const answer = (sent) => ({ ...snapshotRest.get(owner), state: messages ? sent.state : withoutMessages(sent.state), version: sent.version, epoch });
+    // The last state sent answers at once: a client reading again is waiting with its events held back, and reading the
+    // snapshot waits behind whatever the Project or Link is busy with (a shared Chat's Worktrees being prepared). Its
+    // next change follows as a patch on it. A client that needs the rest of the snapshot (a name) reads it once.
+    const sent = sentStates.get(owner);
+    if (sent && (!messages || snapshotRest.has(owner))) return answer(sent);
     const { state, ...rest } = await runtime.invoke(link ? "link:snapshot" : "project:snapshot", [link ? scopeFromKey(owner).linkId : owner]);
+    snapshotRest.set(owner, rest);
     if (sentStates.get(owner)?.state !== state)
       broadcast(link ? "link:state" : "project:state", link ? { linkId: scopeFromKey(owner).linkId, state } : { path: owner, state });
-    const sent = sentStates.get(owner);
-    return { ...rest, state: messages ? sent.state : withoutMessages(sent.state), version: sent.version, epoch };
+    return answer(sentStates.get(owner));
   }
   // Its bridge connects to this daemon's socket as a client, so it only starts once the socket listens.
   // A first pairing is announced to the desktop, which tells the owner in case it was not them.

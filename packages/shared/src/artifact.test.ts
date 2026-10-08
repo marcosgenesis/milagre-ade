@@ -15,23 +15,24 @@ import {
 import { replyActivity } from "./reply-parts.ts";
 
 const policy = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`;
+const escape = /<script>[^<]*milagre:artifact-escape[^<]*<\/script>/.exec(artifactDocument(""))![0];
 
 test("the policy comes first, after the doctype, ahead of anything the design wrote", () => {
   assert.equal(
     artifactDocument('<!-- hi --><!doctype html><html><head lang="en"><title>x</title></head></html>'),
-    `<!-- hi --><!doctype html>${policy}<html><head lang="en"><title>x</title></head></html>`,
+    `<!-- hi --><!doctype html>${policy}${escape}<html><head lang="en"><title>x</title></head></html>`,
   );
-  assert.equal(artifactDocument("<html><body>hi</body></html>"), `<!doctype html>${policy}<html><body>hi</body></html>`);
+  assert.equal(artifactDocument("<html><body>hi</body></html>"), `<!doctype html>${policy}${escape}<html><body>hi</body></html>`);
   assert.match(
     artifactDocument("<div>hi</div>"),
-    /^<!doctype html><meta http-equiv="Content-Security-Policy"[^>]+><meta charset="utf-8"><meta name="viewport"[^>]+><div>hi<\/div>$/,
+    /^<!doctype html><meta http-equiv="Content-Security-Policy"[^>]+><meta charset="utf-8"><meta name="viewport"[^>]+><script>.*<\/script><div>hi<\/div>$/,
   );
 });
 
 test("a decoy <head> in a comment or a script string can't take the policy", () => {
   for (const html of ["<html><!-- <head> --><head></head><body></body></html>", '<html><script>var s="<head>"</script><head></head></html>']) {
     const document = artifactDocument(html);
-    assert.ok(document.startsWith(`<!doctype html>${policy}<html>`), document);
+    assert.ok(document.startsWith(`<!doctype html>${policy}${escape}<html>`), document);
   }
 });
 

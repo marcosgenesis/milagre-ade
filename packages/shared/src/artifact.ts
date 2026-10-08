@@ -122,8 +122,14 @@ export function artifactDocument(html: string): string {
   const at = doctype ? doctype[0].length : 0;
   // A bare fragment (no <html> of its own) also gets the charset and a phone-sized viewport a page would set.
   const page = /<html[\s>]/i.test(html) ? "" : '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
-  return `${doctype ? html.slice(0, at) : "<!doctype html>"}${policy}${page}${html.slice(at)}`;
+  return `${doctype ? html.slice(0, at) : "<!doctype html>"}${policy}${page}${ESCAPE_OUT}${html.slice(at)}`;
 }
+
+/** What a design posts its embedder when Escape is pressed in it: a key the design has the focus for is the design's. */
+export const ARTIFACT_ESCAPE = "milagre:artifact-escape";
+// Escape with the focus in a design still leaves it, then closes the canvas, as it does outside: the design tells its
+// embedder. Captured first, so a design that stops the key's propagation still lets go of it.
+const ESCAPE_OUT = `<script>addEventListener("keydown",function(e){if(e.key==="Escape")parent.postMessage("${ARTIFACT_ESCAPE}","*")},true)</script>`;
 
 /** Escapes text for an HTML attribute value in double quotes. */
 const attribute = (text: string) => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;");

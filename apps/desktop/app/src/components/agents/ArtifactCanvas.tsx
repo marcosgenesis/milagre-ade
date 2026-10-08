@@ -1,7 +1,7 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft01Icon, ArrowRight01Icon, CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
-import { ARTIFACT_CSP, artifactDocument, type Artifact } from "@milagre/shared/artifact";
+import { ARTIFACT_CSP, ARTIFACT_ESCAPE, artifactDocument, type Artifact } from "@milagre/shared/artifact";
 import type { ArtifactRef } from "../../model";
 import Tooltip from "../primitives/Tooltip";
 
@@ -214,6 +214,25 @@ export const ArtifactCanvas = forwardRef<
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [active]);
+  // Escape pressed in a design (its frame has the focus, so the window never sees the key) arrives as a message: the
+  // focus comes back to the canvas and the key goes on as if pressed here, leaving the design, then comment mode,
+  // then the canvas. Only this canvas's own frames are listened to.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.data !== ARTIFACT_ESCAPE || !event.source) return;
+      const frames = board.current?.querySelectorAll("iframe") ?? [];
+      if (![...frames].some((frame) => frame.contentWindow === event.source)) return;
+      // Blurring the frame leaves the focus inside it; focusing the canvas takes it out. The key starts from the canvas,
+      // as a real one would: dispatched on the window itself, its listeners would run in the order they were added,
+      // the canvas's capturing one no longer first.
+      const port = viewport.current;
+      if (!port) return;
+      port.focus({ preventScroll: true });
+      port.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
   // `design` is the design a press started on: released without dragging, it hands that design the mouse. (The pointer
   // capture that keeps a drag going sends the click to the canvas, so a click handler on the design never fires.)
   const drag = useRef<{ pointer: number; x: number; y: number; startX: number; startY: number; design: string | null } | null>(null);
@@ -253,7 +272,8 @@ export const ArtifactCanvas = forwardRef<
     <div
       ref={viewport}
       data-slot="artifact-canvas"
-      className={`relative min-h-0 flex-1 touch-none overflow-hidden bg-canvas ${drag.current ? "cursor-grabbing" : "cursor-grab"}`}
+      tabIndex={-1}
+      className={`relative min-h-0 flex-1 touch-none overflow-hidden bg-canvas outline-none ${drag.current ? "cursor-grabbing" : "cursor-grab"}`}
       style={{
         backgroundImage: "radial-gradient(var(--color-line) 1px, transparent 1px)",
         backgroundSize: `${24 * view.scale}px ${24 * view.scale}px`,

@@ -232,8 +232,24 @@ async function browserChecks() {
     window.webContents.sendInputEvent({ type: "mouseUp", x: moved.x, y: moved.y, button: "left", clickCount: 1 });
     await waitFor(`${frame("login")}.querySelector("[data-design-body]").dataset.active === "true"`);
     assert.equal(await evaluate(`!!${frame("login")}.querySelector("[data-slot=artifact-shield]")`), false, "the design has the mouse");
-    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    // A click in the design gives it the focus, so the window never sees the key: Escape still leaves the design.
+    window.webContents.sendInputEvent({ type: "mouseDown", x: moved.x, y: moved.y, button: "left", clickCount: 1 });
+    window.webContents.sendInputEvent({ type: "mouseUp", x: moved.x, y: moved.y, button: "left", clickCount: 1 });
+    await waitFor('document.activeElement?.tagName === "IFRAME"');
+    // The key is pressed in the design's own document (sendInputEvent always reaches the window first).
+    const at = await evaluate(`[...document.querySelectorAll("iframe")].indexOf(${frame("login")}.querySelector("iframe"))`);
+    const login = window.webContents.mainFrame.frames[at];
+    assert.equal(await login.executeJavaScript("document.title"), "Login");
+    await login.executeJavaScript('document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))');
     await waitFor(`!${frame("login")}.querySelector("[data-design-body]").dataset.active && !!${dock}`);
+    assert.notEqual(await evaluate("document.activeElement?.tagName"), "IFRAME", "the focus comes back to the canvas");
+    // A closing dock stays in the page while it slides out, so the room it keeps is what tells it is still open.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(
+      await evaluate('getComputedStyle(document.documentElement).getPropertyValue("--artifact-dock")'),
+      "572px",
+      "leaving the design doesn't close the canvas",
+    );
     await evaluate(`${dock}.querySelector("[aria-label='Fit every design']").click()`);
 
     // A revision from the agent replaces what its frame shows, since the frame follows the newest.

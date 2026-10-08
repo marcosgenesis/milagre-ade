@@ -1,13 +1,15 @@
+import type { ReactElement } from "react";
 import type { IconData } from "./icons";
 /** Searchable choices wait here because a native sheet route cannot carry callbacks. */
 type ChoiceItem = { id: string; title: string; subtitle?: string; checked?: boolean; disabled?: boolean };
-/** `icon` replaces the leading branch icon on each row; the default stays for branch and worktree pickers. */
+/** `icon` replaces the leading branch icon on each row, and `leading` (a brand mark) replaces both; the default stays for branch and worktree pickers. */
 type ChoiceRequest = {
   title: string;
   placeholder: string;
   emptyLabel: string;
   items: ChoiceItem[];
   icon?: IconData;
+  leading?: ReactElement;
   onSelect: (id: string) => void;
 };
 type ChoiceRequestEntry = Omit<ChoiceRequest, "onSelect"> & { choose: (id: string | null) => void };

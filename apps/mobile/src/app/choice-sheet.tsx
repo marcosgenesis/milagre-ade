@@ -75,7 +75,7 @@ export default function ChoiceSheet() {
               opacity: item.disabled ? 0.4 : 1,
             })}
           >
-            <Icon icon={entry.icon ?? GitBranchIcon} tone={item.checked ? "accent" : "ink3"} size={18} />
+            {entry.leading ?? <Icon icon={entry.icon ?? GitBranchIcon} tone={item.checked ? "accent" : "ink3"} size={18} />}
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={{ color: colors.ink, fontFamily: fonts.mono, fontSize: 14, lineHeight: 21 }}>{item.title}</Text>
               {item.subtitle && (

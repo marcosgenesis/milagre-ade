@@ -15,7 +15,6 @@ import {
   GitForkIcon,
   LaptopIcon,
   StopIcon,
-  Ticket01Icon,
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
 import type { ChatMessage, PullRequestActionContext } from "@milagre/shared/model";
@@ -49,7 +48,7 @@ import { useDotBackground } from "../dot-background";
 import { Approval, Questions } from "../questions";
 import { AgentControls, PermissionChip } from "../agent-controls";
 import { afterSend, modelsFor, selectedModel, sendOptions, turnTarget } from "../turn-options";
-import { Icon } from "../icons";
+import { Icon, LinearLogo } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
 import { useOpenProject } from "../use-open-project";
@@ -407,7 +406,7 @@ export default function ChatScreen() {
       title: "Start from a Linear issue",
       placeholder: "Search issues",
       emptyLabel: "No issues found.",
-      icon: Ticket01Icon,
+      leading: <LinearLogo size={18} />,
       items: issues.map((issue) => ({ id: issue.key, title: `${issue.key} ${issue.title}`, subtitle: issue.state.name })),
       onSelect: (key) => {
         const issue = issues.find((item) => item.key === key);
@@ -1077,7 +1076,7 @@ export default function ChatScreen() {
                           opacity: targetDisabled ? 0.35 : pressed ? 0.6 : 1,
                         })}
                       >
-                        <Icon icon={Ticket01Icon} tone="ink2" size={14} />
+                        <LinearLogo size={13} />
                         <Text style={styles.label}>Linear issue</Text>
                       </Pressable>
                     )}

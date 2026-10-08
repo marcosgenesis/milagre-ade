@@ -104,6 +104,7 @@ async function checks(url) {
     // (a) Linear on: the chip opens the issue list, typing filters through listLinearIssues, picking starts the chat.
     await click("Linear issue");
     await waitFor(`document.querySelectorAll('[data-linear-issue-row]').length === 2`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-linear-issue-row] [data-linear-logo]')`), true, "picker rows show Linear's mark");
     assert.equal(await evaluate(`document.body.textContent.includes('Start from a Linear issue')`), true, "the picker is titled");
     await screenshot("linear-issue-menu");
     await type("dark");
@@ -121,6 +122,7 @@ async function checks(url) {
     // (c) A sidebar row with a linked issue shows its chip, and the row without one shows none.
     await waitFor(`document.querySelector('[data-linear-issue-chip]')?.textContent === 'ENG-1 · In Progress'`);
     assert.equal(await evaluate(`document.querySelectorAll('[data-linear-issue-chip]').length`), 1);
+    assert.equal(await evaluate(`!!document.querySelector('[data-linear-issue-chip] [data-linear-logo]')`), true, "the row chip shows Linear's mark");
     await screenshot("linear-issue-chip");
     assert.deepEqual(errors, []);
     console.log("PASS: Linear issue picker starts a chat from an issue; the sidebar chip shows the issue; both hidden while Linear is off");

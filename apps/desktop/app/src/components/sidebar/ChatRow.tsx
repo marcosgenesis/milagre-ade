@@ -1,5 +1,6 @@
 import { ChatTitle } from "./ChatTitle";
 import { issueChipLabel, type LinearIssue } from "@milagre/shared/linear";
+import { LinearLogo } from "../ProviderLogo";
 import { SpinnerRing } from "../primitives/SpinnerRing";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -421,7 +422,7 @@ function LinearIssueChip({ issue }: { issue: LinearIssue }) {
       }}
       className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
     >
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: issue.state.color }} />
+      <LinearLogo size={11} />
       <span className="truncate">{issueChipLabel(issue)}</span>
     </button>
   );
@@ -632,7 +633,7 @@ function ChatHoverCard({
           </CardLine>
         )}
         {details.linearIssue && (
-          <CardLine icon={<span className="size-1.5 rounded-full" style={{ backgroundColor: details.linearIssue.state.color }} />}>
+          <CardLine icon={<LinearLogo size={13} />}>
             <a
               href={details.linearIssue.url}
               target="_blank"

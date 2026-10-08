@@ -199,6 +199,8 @@ const bridge = {
   setPhoneLan: (enabled) => ipcRenderer.invoke("phone:set-lan", enabled),
   resetPhoneAccess: () => ipcRenderer.invoke("phone:reset"),
   openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
+  listDevices: () => ipcRenderer.invoke("devices:list"),
+  removeDevice: (key) => ipcRenderer.invoke("devices:remove", key),
   onPhoneStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("phone:status", listener);

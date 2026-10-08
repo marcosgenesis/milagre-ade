@@ -1,8 +1,9 @@
 // The single writer of each Project's in-memory state. Disk I/O has its own bounded,
 // coalescing write-behind path, so a slow save cannot stall another Chat's events.
 class ProjectStates {
-  constructor({ read, save, debounceMs = 250 }) {
-    Object.assign(this, { read, save, debounceMs });
+  /** `compact(key, next, previous)` (optional) slims a state before it is kept, e.g. moving tool output to sidecars. */
+  constructor({ read, save, compact, debounceMs = 250 }) {
+    Object.assign(this, { read, save, compact, debounceMs });
     this.states = new Map();
     this.queues = new Map();
     this.dirty = new Map();
@@ -33,11 +34,12 @@ class ProjectStates {
       .then(async () => {
         let state = this.states.get(projectPath);
         if (state === undefined) {
-          state = await this.read(projectPath);
+          state = await this.slim(projectPath, await this.read(projectPath), null);
           this.states.set(projectPath, state);
         }
-        const next = await change(state);
-        if (next === state) return { state, changed: false };
+        const changed = await change(state);
+        if (changed === state) return { state, changed: false };
+        const next = await this.slim(projectPath, changed, state);
         this.states.set(projectPath, next);
         if (persist) {
           this.transient.delete(projectPath);
@@ -53,6 +55,17 @@ class ProjectStates {
     };
     run.then(forget, forget);
     return run;
+  }
+
+  /** The state compacted; as it is when there is no compaction or it fails (the save tries again). */
+  async slim(projectPath, next, previous) {
+    if (!this.compact || !next) return next;
+    try {
+      return await this.compact(projectPath, next, previous);
+    } catch (error) {
+      console.warn(`Milagre couldn't move tool output out of ${projectPath}'s state:`, error.message);
+      return next;
+    }
   }
 
   schedule(projectPath) {

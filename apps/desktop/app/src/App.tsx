@@ -1889,6 +1889,7 @@ function App() {
                   pendingMessageId={pendingHere && pendingCanonicalId === null ? pendingSend?.message.id : undefined}
                   imageDraft={imageDraft}
                   projectPath={selectedWorktree?.path ?? project.path}
+                  messageScope={project.path}
                   onSend={() => void sendMessage()}
                   onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
                   onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}

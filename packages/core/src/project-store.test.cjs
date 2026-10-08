@@ -165,3 +165,45 @@ test("only a durable save syncs to disk; routine saves just rename", async (t) =
   assert.equal(syncs.mock.callCount(), 2, "the file, then its folder after the rename");
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(projectPath, ".milagre/coordination.json"), "utf8")).sessions, { 1: { id: 1 } });
 });
+
+const withOutput = (id, label) => ({
+  id,
+  session_id: 1,
+  role: "assistant",
+  body: "Done",
+  context: null,
+  steps: [{ id: `step-${id}`, kind: "shell", title: "Ran a command", status: "done", detail: `$ ${label}\n`.padEnd(5000, "output line\n") }],
+});
+const detailFiles = async (projectPath) =>
+  (await fs.readdir(path.join(projectPath, ".milagre", "details")).catch(() => [])).filter((name) => name.endsWith(".json")).sort();
+
+test("a saved state from before sidecars reads back with its long tool output moved out, and saves small", async (t) => {
+  const { readProjectState, saveProjectState } = require("./project-store.cjs");
+  const { withDetails } = require("./project-content.cjs");
+  const projectPath = await tempProject(t);
+  const legacy = { next_id: 3, sessions: {}, messages: [withOutput(1, "npm test"), withOutput(2, "npm run lint")] };
+  await fs.mkdir(path.join(projectPath, ".milagre"));
+  await fs.writeFile(stateFile(projectPath), JSON.stringify(legacy));
+  const read = await readProjectState(projectPath);
+  assert.equal(
+    read.messages.every((message) => message.steps[0].hasDetail && !message.steps[0].detail),
+    true,
+  );
+  assert.equal((await detailFiles(projectPath)).length, 2);
+  await saveProjectState(projectPath, read, { sweepMinAgeMs: 0 });
+  assert.ok((await fs.stat(stateFile(projectPath))).size < 1000);
+  assert.deepEqual(await withDetails(projectPath, (await readProjectState(projectPath)).messages[1]), legacy.messages[1]);
+});
+
+test("a details sidecar no saved message points at is removed by the next save that writes one", async (t) => {
+  const { readProjectState, saveProjectState } = require("./project-store.cjs");
+  const projectPath = await tempProject(t);
+  await saveProjectState(projectPath, { next_id: 3, sessions: {}, messages: [withOutput(1, "one"), withOutput(2, "two")] }, { sweepMinAgeMs: 0 });
+  const saved = await readProjectState(projectPath);
+  assert.equal((await detailFiles(projectPath)).length, 2);
+  // The first chat's worktree went away, and its messages with it; the other chat replied again.
+  await saveProjectState(projectPath, { ...saved, messages: [saved.messages[1], withOutput(3, "three")] }, { sweepMinAgeMs: 0 });
+  const kept = (await readProjectState(projectPath)).messages.map((message) => message.detailFile).sort();
+  assert.deepEqual(await detailFiles(projectPath), kept);
+  assert.equal(kept.includes(saved.messages[0].detailFile), false);
+});

@@ -141,6 +141,7 @@ const bridge = {
   addGitNote: (chatId, body) => ipcRenderer.invoke("chat:git-note", chatId, body),
   setOpenChat: (chatId) => ipcRenderer.invoke("chat:set-open", chatId),
   getRuns: () => ipcRenderer.invoke("chat:runs"),
+  getMessage: (scope, id) => ipcRenderer.invoke("chat:message", scope, id),
   listAccountScopes: () => ipcRenderer.invoke("accounts:scopes"),
   getProjectAccounts: (scopeKey, refresh) => ipcRenderer.invoke("accounts:scope", scopeKey, refresh),
   assignProjectAccount: (scopeKey, provider, accountId) => ipcRenderer.invoke("accounts:assign", scopeKey, provider, accountId),

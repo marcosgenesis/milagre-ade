@@ -20,6 +20,7 @@ import { useFileOpener } from "../editor-links";
 import { CodeBlock } from "../markdown/CodeBlock";
 import { Markdown } from "../markdown/Markdown";
 import { ScrollArea } from "../primitives/ScrollArea";
+import { useHasStepDetail, useStepDetail } from "./step-details";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -72,7 +73,8 @@ export const StepRow = memo(function StepRow({ step, waiting = false }: { step: 
   const opener = useFileOpener();
   // A read or edit's file opens in the editor from its name; the click doesn't toggle the row.
   const fileIndex = opener ? fileSpanIndex(step.title, step.file) : -1;
-  const expandable = Boolean(step.detail);
+  const expandable = useHasStepDetail(step);
+  const { detail, loading, failed } = useStepDetail(step, open);
   // A running tool's title shimmers; a tool waiting on the approval card is paused on the user.
   const shimmer = step.status === "running" && !waiting;
   // A finished tool just stops shimmering; screen readers hear only what isn't obvious.
@@ -145,17 +147,21 @@ export const StepRow = memo(function StepRow({ step, waiting = false }: { step: 
       ) : (
         <div className={rowClass}>{content}</div>
       )}
-      {open && step.detail && (
+      {open && detail ? (
         <ScrollArea id={detailId} chainScroll className="max-h-96 pl-6">
           {step.kind === "thinking" ? (
             <div className="px-1.5 py-1 text-[12.5px] leading-[1.55] text-ink-2">
-              <Markdown text={step.detail} />
+              <Markdown text={detail} />
             </div>
           ) : (
-            <CodeBlock code={step.detail.replace(/\n$/, "")} fence={DETAIL_FENCES[step.kind]} />
+            <CodeBlock code={detail.replace(/\n$/, "")} fence={DETAIL_FENCES[step.kind]} />
           )}
         </ScrollArea>
-      )}
+      ) : open && (loading || failed) ? (
+        <div id={detailId} role="status" className="py-1 pl-7.5 text-[12px] text-ink-3">
+          {loading ? "Loading output…" : "This output isn't available anymore."}
+        </div>
+      ) : null}
     </div>
   );
 });

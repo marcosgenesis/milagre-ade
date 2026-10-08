@@ -222,6 +222,14 @@ const bridge = {
   openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
   listDevices: () => ipcRenderer.invoke("devices:list"),
   removeDevice: (key) => ipcRenderer.invoke("devices:remove", key),
+  listPendingDevices: () => ipcRenderer.invoke("devices:pending"),
+  allowDevice: (key) => ipcRenderer.invoke("devices:allow", key),
+  denyDevice: (key) => ipcRenderer.invoke("devices:deny", key),
+  onDevicesPending: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("devices:pending", listener);
+    return () => ipcRenderer.removeListener("devices:pending", listener);
+  },
   onPhoneStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("phone:status", listener);

@@ -184,7 +184,9 @@ async function startDesktop() {
       emit(channel, payload) {
         if (channel === "agent:event") notifier.observe(payload.chatId, payload.event);
         if (channel === "notification:waiting" && notifyWhenWaiting && Notification.isSupported()) notifier.notify(payload);
-        if (channel === "phone:paired" && Notification.isSupported()) notifier.notifyDevicePaired(payload?.kind);
+        // A computer pairs only once its owner clicked Allow here, so only a phone's pairing needs telling.
+        if (channel === "phone:paired" && payload?.kind !== "computer" && Notification.isSupported()) notifier.notifyDevicePaired(payload?.kind);
+        if (channel === "devices:pending" && Notification.isSupported()) notifier.notifyComputerWaiting(payload?.requests);
         if (channel === "runtime:connection") {
           connectionState = payload;
           // A host started again after it went away can be newer, with more commands. (Not yet set during the first connect.)

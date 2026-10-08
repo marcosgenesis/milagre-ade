@@ -8,6 +8,8 @@ const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 
 const CHAT = "/fixture#1";
+// ⌘ on macOS, Ctrl elsewhere: the main process only takes the close key with the platform's own modifier.
+const COMMAND = process.platform === "darwin" ? "meta" : "control";
 
 const fixture = `
 import React, { useState } from "react";
@@ -179,13 +181,13 @@ async function electronChecks() {
     await waitFor('document.activeElement?.classList.contains("xterm-helper-textarea")');
     await type("sleep 30\r");
     await waitFor(`${tabs}[1].includes("sleep")`, "the tab named after its command");
-    press("W", ["meta"]);
+    press("W", [COMMAND]);
     await waitFor(`[...document.querySelectorAll("button")].some((button) => button.textContent === "End sleep")`, "the confirmation");
     assert.equal((await terminals.list({ chatId: CHAT })).terminals.length, 2, "⌘W asks first");
     await screenshot("terminal-confirm-dark");
     // A second ⌘W confirms: focus stayed in the Terminal.
     assert.equal(await evaluate('document.activeElement?.classList.contains("xterm-helper-textarea")'), true);
-    press("W", ["meta"]);
+    press("W", [COMMAND]);
     await waitFor(`${tabs}.length === 1`, "the busy Terminal ended");
     assert.equal((await terminals.list({ chatId: CHAT })).terminals.length, 1);
 

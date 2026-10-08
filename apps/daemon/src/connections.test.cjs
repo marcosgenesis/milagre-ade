@@ -150,3 +150,30 @@ test("a connection that must authenticate needs a daemon with an authentication 
   const carrier = { send: () => true, end() {}, destroy() {}, isClosed: () => false };
   assert.throws(() => daemon.acceptConnection({ ...carrier, requireAuthentication: true }), /authentication token/);
 });
+
+test("a paired desktop hears no phone:* event, which carries the pairing link and its token, and still hears the rest", async (t) => {
+  const daemon = await daemonFixture(t);
+  const peer = virtualClient(daemon, { policy: peerPolicy });
+  const local = virtualClient(daemon);
+  await local.call("phone:set-enabled", [true]);
+  await waitFor(() => local.events().some((event) => event.channel === "phone:status" && event.payload.state === "on"));
+  await daemon.close();
+  assert.ok(
+    peer.events().some((event) => event.channel === "daemon:stopping"),
+    "other events still reach it",
+  );
+  assert.deepEqual(
+    peer.events().filter((event) => event.channel.startsWith("phone:")),
+    [],
+  );
+});
+
+test("daemon:status advertises desktop-peer-v1 and peer:routes, which a paired desktop may call", async (t) => {
+  const daemon = await daemonFixture(t);
+  const status = (await virtualClient(daemon, { policy: peerPolicy }).call("daemon:status")).result;
+  assert.ok(status.capabilities.includes("desktop-peer-v1"));
+  assert.ok(status.methods.includes("peer:routes"));
+  assert.equal(peerPolicy.denies("peer:routes"), false);
+  const reply = await virtualClient(daemon, { policy: peerPolicy }).call("peer:routes");
+  assert.deepEqual(reply.error, { code: "COMMAND_FAILED", message: "Phone access is starting. Try again." }, "phone access is off here");
+});

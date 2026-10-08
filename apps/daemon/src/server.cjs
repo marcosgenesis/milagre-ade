@@ -344,6 +344,7 @@ async function startDaemon({
    * once, its own close (`close`).
    */
   function acceptConnection({ send, end, destroy, isClosed, requireAuthentication: mustAuthenticate = false, policy = null }) {
+    if (mustAuthenticate && !authenticationToken) throw new Error("requireAuthentication needs a daemon that has an authentication token");
     let authenticated = !mustAuthenticate;
     let challenge;
     let authenticationRejected = false;
@@ -398,6 +399,7 @@ async function startDaemon({
           end();
           return;
         }
+        if (closed) return;
         authenticated = true;
         unauthenticated--;
         clearTimeout(authenticationTimeout);
@@ -493,7 +495,7 @@ async function startDaemon({
         } else if (request.method === "daemon:snapshot-page" || request.method === "daemon:result-page") result = resultPages.page(...request.args);
         else if (request.method === "daemon:flush") result = await runtime.flush();
         else if (request.method === "daemon:state-patches") {
-          patchClients.set(key, { messages: request.args[0]?.messages !== false });
+          if (!closed) patchClients.set(key, { messages: request.args[0]?.messages !== false });
           result = { epoch };
         } else if (request.method === "state:read") result = await readState(request.args[0], { messages: patchClients.get(key)?.messages !== false });
         else if (request.method === "daemon:focus") {
@@ -526,6 +528,7 @@ async function startDaemon({
     }
     return {
       receive(request) {
+        if (closed) return;
         void dispatch(request).catch((error) => {
           onError(error);
           destroy();

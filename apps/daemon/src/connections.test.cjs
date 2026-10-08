@@ -16,11 +16,12 @@ async function waitFor(read) {
   throw new Error("Timed out");
 }
 
-async function daemonFixture(t) {
+async function daemonFixture(t, options = {}) {
   const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-connections-")));
   const daemon = await startDaemon({
     dataDir,
     version: "test",
+    ...options,
     // No test may dial the real relay or bind the LAN port.
     phoneOptions: { localPort: 0, lanPort: null, startRelay: () => ({ close: async () => {}, status: () => "online" }) },
     runtimeOptions: {
@@ -68,6 +69,7 @@ function virtualClient(daemon, options = {}) {
       connection.receive({ v: 1, id, method, args });
       return reply;
     },
+    receive: (request) => connection.receive(request),
     close: () => connection.close(),
   };
 }
@@ -124,4 +126,27 @@ test("a policy refuses what it denies before it runs, and daemon:status leaves t
   const local = virtualClient(daemon);
   assert.equal((await local.call("phone:status")).result.state, "off", "the denied phone:set-enabled never ran");
   assert.ok((await local.call("daemon:status")).result.methods.includes("phone:set-enabled"), "the socket's own view is unchanged");
+});
+
+test("a request that arrives after close is dropped, and the connection is not registered again", async (t) => {
+  const daemon = await daemonFixture(t);
+  const client = virtualClient(daemon);
+  await client.call("daemon:status");
+  client.close();
+  const before = client.frames.length;
+  client.receive({ v: 1, id: 99, method: "daemon:state-patches", args: [{ messages: true }] });
+  client.receive({ v: 1, id: 100, method: "daemon:status", args: [] });
+  await delay(50);
+  const other = virtualClient(daemon);
+  await other.call("phone:set-enabled", [true]);
+  await waitFor(() => other.events().some((event) => event.channel === "phone:status" && event.payload.state === "on"));
+  await other.call("phone:set-enabled", [false]);
+  await waitFor(() => other.events().some((event) => event.channel === "phone:status" && event.payload.state === "off"));
+  assert.equal(client.frames.length, before, "no reply, and no later broadcast reaches it");
+});
+
+test("a connection that must authenticate needs a daemon with an authentication token", async (t) => {
+  const daemon = await daemonFixture(t, { requireAuthentication: false });
+  const carrier = { send: () => true, end() {}, destroy() {}, isClosed: () => false };
+  assert.throws(() => daemon.acceptConnection({ ...carrier, requireAuthentication: true }), /authentication token/);
 });

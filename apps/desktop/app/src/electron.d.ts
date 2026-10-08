@@ -20,6 +20,7 @@ export type MessageChanges = { changed: Array<{ message: ChatMessage; after: num
 export type ChatSearchMatch = { message: { id: number; session_id: number }; score: number; snippet: string; highlight: [number, number]; term: string };
 import type { SimulatorApi } from "@milagre/shared/simulator";
 import type { BrowserApi } from "@milagre/shared/browser";
+import type { TerminalApi } from "@milagre/shared/terminal";
 import type { ArtifactApi } from "@milagre/shared/artifact";
 
 import type { AgentRuns } from "./lib/agent-runs";
@@ -130,6 +131,12 @@ declare global {
     milagre: {
       simulators: SimulatorApi;
       browsers: BrowserApi;
+      terminals: TerminalApi;
+      /** A Chat's Terminals opened, closed or changed what they run. */
+      onTerminalsChanged: (callback: (payload: { chatId: string }) => void) => () => void;
+      setTerminalFocused: (focused: boolean) => void;
+      /** ⌘W pressed while a Terminal has focus. */
+      onCloseFocusedTerminal: (callback: () => void) => () => void;
       artifacts: ArtifactApi;
       getRuntimeConnection: () => Promise<RuntimeConnection>;
       /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
@@ -308,6 +315,8 @@ declare global {
       ) => Promise<{ messages: ChatMessage[]; hasMore: boolean; total: number }>;
       /** Matches across the Chats of a Project or Link, best first (chat-pages-v1). */
       searchChats: (scope: string, query: string, options?: { limit?: number }) => Promise<ChatSearchMatch[]>;
+      /** One subagent of Chat `chatId` with its whole transcript (subagent-tails-v1). */
+      readSubagent: (scope: string, chatId: number, agentId: string) => Promise<Subagent>;
       /** Every chat's listening ports now, by chat key. */
       getAgentPorts: () => Promise<AgentPorts>;
       /** Stops the command listening on one of a chat's ports; false when the chat's list doesn't show that pid. */

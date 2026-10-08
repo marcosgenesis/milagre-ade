@@ -359,6 +359,30 @@ async function browserChecks() {
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
     await waitFor(`!${frame("login")}.querySelector("[data-slot=artifact-comment-bubble]") && !!${dock}`);
 
+    // ⌘Enter (Control+Enter off the Mac) in a bubble sends the comment right away, without the Send button. A canvas
+    // filling the workspace steps back beside the chat to show the reply coming.
+    await evaluate(`${dock}.querySelector("[aria-label='Fill the window with the designs']").click()`);
+    await waitFor(`${dock}.dataset.full === "true"`);
+    await evaluate(`${dock}.querySelector("[aria-label='Comment on a design']").click()`);
+    await waitFor(`!!${frame("login")}.querySelector("[data-slot=artifact-comment-layer]")`);
+    const second = await evaluate(
+      `(() => { const r = ${frame("login")}.querySelector("[data-slot=artifact-comment-layer]").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + (r.height * 3) / 4) }; })()`,
+    );
+    window.webContents.sendInputEvent({ type: "mouseDown", x: second.x, y: second.y, button: "left", clickCount: 1 });
+    window.webContents.sendInputEvent({ type: "mouseUp", x: second.x, y: second.y, button: "left", clickCount: 1 });
+    await waitFor(`!!${frame("login")}.querySelector("[data-slot=artifact-comment-bubble] textarea") && document.activeElement?.tagName === "TEXTAREA"`);
+    await evaluate(`(() => {
+      const box = document.activeElement;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(box, "Round the corners");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter", modifiers: [process.platform === "darwin" ? "meta" : "control"] });
+    await waitFor("window.sent.length === 2");
+    assert.match(await evaluate("window.sent[1]"), /Round the corners/);
+    await waitFor(`!${dock}.querySelector("[data-slot=artifact-send]") && ${frame("login")}.querySelectorAll("[data-slot=artifact-sent-pin]").length === 2`);
+    await waitFor(`!${dock}.dataset.full`);
+    await screenshot("sent-with-shortcut");
+
     // The corner button shows while the Chat has designs, and closes and reopens the canvas.
     const toggle = 'document.querySelector("[data-panel-toggle=designs]")';
     assert.equal(await evaluate(`${toggle}.getAttribute("aria-pressed")`), "true");

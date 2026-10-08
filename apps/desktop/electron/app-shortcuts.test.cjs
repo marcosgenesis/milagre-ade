@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
-const { forwardAppShortcuts, isAppShortcut } = require("./app-shortcuts.cjs");
+const { forwardAppShortcuts, isAppShortcut, isCloseKey } = require("./app-shortcuts.cjs");
 
 const key = (key, extra = {}) => ({ type: "keyDown", key, meta: true, control: false, shift: true, alt: false, ...extra });
 
@@ -19,11 +19,36 @@ test("a forwarded shortcut is kept from the frame and sent to the renderer", () 
   const contents = new EventEmitter();
   const sent = [];
   contents.send = (...args) => sent.push(args);
-  forwardAppShortcuts(contents, "darwin");
+  forwardAppShortcuts(contents, "darwin", new EventEmitter());
   let prevented = 0;
   const event = { preventDefault: () => prevented++ };
   contents.emit("before-input-event", event, key("E"));
   contents.emit("before-input-event", event, key("a"));
   assert.equal(prevented, 1);
   assert.deepEqual(sent, [["app:shortcut", "e"]]);
+});
+
+test("⌘W closes the focused Terminal, and the window otherwise", () => {
+  const contents = new EventEmitter();
+  const ipc = new EventEmitter();
+  const sent = [];
+  contents.send = (...args) => sent.push(args);
+  forwardAppShortcuts(contents, "darwin", ipc);
+  let prevented = 0;
+  const event = { preventDefault: () => prevented++ };
+  const close = key("w", { shift: false });
+  contents.emit("before-input-event", event, close);
+  assert.equal(prevented, 0, "the window menu closes the window");
+  ipc.emit("app:terminal-focused", { sender: contents }, true);
+  ipc.emit("app:terminal-focused", { sender: new EventEmitter() }, false);
+  contents.emit("before-input-event", event, close);
+  assert.equal(prevented, 1);
+  assert.deepEqual(sent, [["app:close-focused-terminal"]]);
+  ipc.emit("app:terminal-focused", { sender: contents }, false);
+  contents.emit("before-input-event", event, close);
+  assert.equal(prevented, 1);
+  assert.equal(isCloseKey(key("w", { shift: false, meta: false, control: true }), "win32"), true);
+  assert.equal(isCloseKey(key("w"), "darwin"), false, "⌘⇧W is not ⌘W");
+  contents.emit("destroyed");
+  assert.equal(ipc.listenerCount("app:terminal-focused"), 0);
 });

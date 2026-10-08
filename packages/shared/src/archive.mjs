@@ -60,16 +60,28 @@ export function deleteNote(status) {
  */
 export function archiveChoices({ plan, running }) {
   const { milagreOwned, shared, status } = plan;
+  const terminals = terminalNote(plan.terminals ?? []);
+  const withTerminals = (reason) => [reason, terminals].filter(Boolean).join(" ") || null;
   if (!milagreOwned || shared || !status) {
-    return { choices: [{ mode: "hide", label: running ? "Stop and archive" : "Confirm archive", tone: "danger" }], reason: null };
+    return { choices: [{ mode: "hide", label: running ? "Stop and archive" : "Confirm archive", tone: "danger" }], reason: withTerminals(null) };
   }
   if (status.removable) {
-    return { choices: [{ mode: "remove", label: running ? "Stop, archive and remove worktree" : "Archive and remove worktree", tone: "plain" }], reason: null };
+    return {
+      choices: [{ mode: "remove", label: running ? "Stop, archive and remove worktree" : "Archive and remove worktree", tone: "plain" }],
+      reason: withTerminals(null),
+    };
   }
   return {
     choices: [{ mode: "delete", label: running ? "Stop, archive and delete worktree" : "Archive and delete worktree", tone: "danger" }],
-    reason: deleteNote(status),
+    reason: withTerminals(deleteNote(status)),
   };
+}
+
+/** What archiving ends among the chat's Terminals: those running a command, by its name. */
+export function terminalNote(busy) {
+  if (!busy.length) return null;
+  if (busy.length === 1) return `Archiving ends the Terminal running ${busy[0]}.`;
+  return `Archiving ends ${busy.length} Terminals running ${[...new Set(busy)].join(", ")}.`;
 }
 
 /**

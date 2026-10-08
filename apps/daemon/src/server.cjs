@@ -1,5 +1,6 @@
 const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { diffState } = require("@milagre/shared/state-patch");
+const { sessionWithTranscriptTails, withTranscriptTail } = require("@milagre/shared/subagent-transcript");
 const { preparePrivateDirectory } = require("@milagre/core/private-files");
 const { prepareToken, validToken, authenticationProof, authenticationNonce, validNonce } = require("./local-auth.cjs");
 const net = require("node:net");
@@ -25,6 +26,9 @@ const DEVICE_METHODS = Object.freeze(["devices:list", "devices:remove"]);
 const STATE_PATCHES = "state-patches-v1";
 // chat:messages, chat:search and daemon:state-patches({ messages: false }): a client can hold only the messages it shows.
 const CHAT_PAGES = "chat-pages-v1";
+// chat:subagent and daemon:state-patches({ transcripts: false }): a client can take each subagent with only the last
+// entries of its transcript, in states and in subagent updates, and read a whole one when it shows it.
+const SUBAGENT_TAILS = "subagent-tails-v1";
 const STATE_METHODS = Object.freeze(["state:read"]);
 
 const PAGES_TTL_MS = 30000;
@@ -110,25 +114,56 @@ function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = 
   };
 }
 
-// A state as a client that reads messages by Chat gets it: no messages (one empty array, so no patch ever touches it)
-// and `messagesInChats`, the same object for the same state.
-const leanStates = new WeakMap();
+// How a client takes states (daemon:state-patches): without messages (`messages: false`) when it reads them by Chat,
+// and with each subagent's transcript cut to its tail (`transcripts: false`) when it reads those on demand.
+const WHOLE = Object.freeze({ messages: true, transcripts: true });
+const formOf = (options) => ({ messages: options?.messages !== false, transcripts: options?.transcripts !== false });
+const formKey = (form) => `${form.messages ? "m" : "-"}${form.transcripts ? "t" : "-"}`;
 const NO_MESSAGES = Object.freeze([]);
-function withoutMessages(state) {
-  if (!state || typeof state !== "object") return state;
-  let lean = leanStates.get(state);
-  if (!lean) leanStates.set(state, (lean = { ...state, messages: NO_MESSAGES, messagesInChats: true }));
+// Per form, the state as a client of that form gets it: the same object for the same state, so a patch between two of
+// them is found by identity like one between two whole states.
+const leanStates = new Map();
+const tailedSessions = new WeakMap();
+function withTranscriptTails(sessions) {
+  if (!sessions || typeof sessions !== "object") return sessions;
+  let tailed = tailedSessions.get(sessions);
+  if (!tailed) {
+    const entries = Object.entries(sessions).map(([id, session]) => [id, sessionWithTranscriptTails(session)]);
+    tailed = entries.some(([id, session]) => session !== sessions[id]) ? Object.fromEntries(entries) : sessions;
+    tailedSessions.set(sessions, tailed);
+  }
+  return tailed;
+}
+function leanState(state, form = WHOLE) {
+  if (!state || typeof state !== "object" || (form.messages && form.transcripts)) return state;
+  const key = formKey(form);
+  let cache = leanStates.get(key);
+  if (!cache) leanStates.set(key, (cache = new WeakMap()));
+  let lean = cache.get(state);
+  if (!lean) {
+    lean = { ...state };
+    // One empty array, so no patch ever touches it.
+    if (!form.messages) Object.assign(lean, { messages: NO_MESSAGES, messagesInChats: true });
+    if (!form.transcripts) lean.sessions = withTranscriptTails(state.sessions);
+    cache.set(state, lean);
+  }
   return lean;
 }
-/** A reply as a client that reads messages by Chat gets it: every state in it without its messages. */
-function leanResult(result) {
-  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+/** A reply as a client of `form` gets it: every state in it as leanState gives it. */
+function leanResult(result, form = WHOLE) {
+  if (!result || typeof result !== "object" || Array.isArray(result) || (form.messages && form.transcripts)) return result;
   let lean = result;
-  if (result.state && typeof result.state === "object") lean = { ...lean, state: withoutMessages(result.state) };
+  if (result.state && typeof result.state === "object") lean = { ...lean, state: leanState(result.state, form) };
   for (const key of ["projects", "links"])
     if (Array.isArray(result[key]))
-      lean = { ...lean, [key]: result[key].map((item) => (item?.state ? { ...item, state: withoutMessages(item.state) } : item)) };
+      lean = { ...lean, [key]: result[key].map((item) => (item?.state ? { ...item, state: leanState(item.state, form) } : item)) };
   return lean;
+}
+/** A subagent update as a client that takes transcript tails gets it; null for any other event. */
+function tailedAgentEvent(channel, payload) {
+  const agent = channel === "agent:event" && payload?.event?.type === "subagent-update" ? payload.event.agent : undefined;
+  const tailed = agent && withTranscriptTail(agent);
+  return tailed && tailed !== agent ? { ...payload, event: { ...payload.event, agent: tailed } } : null;
 }
 /** The messages `next` has that `previous` didn't (new or changed), each after the message before it in its Chat, and the ids it no longer has. */
 function messageChanges(previous = [], next = []) {
@@ -220,7 +255,7 @@ async function startDaemon({
   let eventSeq = 0;
   // Connections that take state patches, and per scope the last state sent and its number. The numbers start again with
   // each host (epoch), so a client that reconnects to a new one reads its states again.
-  // Connection -> { messages }: false for a client that reads messages by Chat (chat:messages) and takes states without them.
+  // Connection -> the form it takes states in ({ messages, transcripts }, see leanState).
   const patchClients = new Map();
   const epoch = randomUUID();
   const sentStates = new Map();
@@ -262,10 +297,17 @@ async function startDaemon({
     if (!clients.size) return;
     // An event that still doesn't fit is skipped, never the connection. Each form is encoded once, when a client takes it.
     let whole;
+    let tailedFrame;
+    const tailed = tailedAgentEvent(channel, payload);
     for (const [key, connection] of clients) {
       try {
         const taker = patchClients.get(key);
-        const frame = patched && taker ? (taker.messages ? patched.full() : patched.lean()) : (whole ??= eventFrame(channel, payload, seq, inlineLimit));
+        const frame =
+          patched && taker
+            ? patched.form(taker)
+            : taker && !taker.transcripts && tailed
+              ? (tailedFrame ??= eventFrame(channel, tailed, seq, inlineLimit))
+              : (whole ??= eventFrame(channel, payload, seq, inlineLimit));
         connection.send(null, frame.json, frame.bytes);
       } catch (error) {
         onError(new Error(`Milagre couldn't send a ${channel} event: ${error.message}`));
@@ -293,33 +335,37 @@ async function startDaemon({
       }
       return frame({ ...rest, resync: true, version, epoch });
     };
-    // Each form is made once, when a client that takes it is sent the event.
-    let full;
-    let lean;
+    // Each form is made once, when a client that takes it is sent the event. A client without messages also gets the
+    // messages this change added, changed or removed, each with the one before it in its Chat (`after`).
+    const forms = new Map();
     return {
-      full: () => (full ??= numbered(() => ({ patch: diffState(previous.state, state) }))),
-      // The state without its messages, and the messages this change added, changed or removed, each with the one before
-      // it in its Chat (`after`), for a client that holds only some of each Chat's messages.
-      lean: () =>
-        (lean ??= numbered(() => ({
-          patch: diffState(withoutMessages(previous.state), withoutMessages(state)),
-          messages: messageChanges(previous.state.messages, state.messages),
-        }))),
+      form(form) {
+        const key = formKey(form);
+        if (!forms.has(key))
+          forms.set(
+            key,
+            numbered(() => ({
+              patch: diffState(leanState(previous.state, form), leanState(state, form)),
+              ...(form.messages ? {} : { messages: messageChanges(previous.state.messages, state.messages) }),
+            })),
+          );
+        return forms.get(key);
+      },
     };
   }
   /**
    * A scope's state with its number, for a client that takes patches, beside the rest of its snapshot (a Project's path
    * and name, a Link's definition). A newer state than the one sent goes out first.
    */
-  async function readState(owner, { messages = true } = {}) {
+  async function readState(owner, form = WHOLE) {
     if (typeof owner !== "string" || !owner) throw new Error("Choose a Project or Link");
     const link = isLinkScopeKey(owner);
-    const answer = (sent) => ({ ...snapshotRest.get(owner), state: messages ? sent.state : withoutMessages(sent.state), version: sent.version, epoch });
+    const answer = (sent) => ({ ...snapshotRest.get(owner), state: leanState(sent.state, form), version: sent.version, epoch });
     // The last state sent answers at once: a client reading again is waiting with its events held back, and reading the
     // snapshot waits behind whatever the Project or Link is busy with (a shared Chat's Worktrees being prepared). Its
     // next change follows as a patch on it. A client that needs the rest of the snapshot (a name) reads it once.
     const sent = sentStates.get(owner);
-    if (sent && (!messages || snapshotRest.has(owner))) return answer(sent);
+    if (sent && (!form.messages || snapshotRest.has(owner))) return answer(sent);
     const { state, ...rest } = await runtime.invoke(link ? "link:snapshot" : "project:snapshot", [link ? scopeFromKey(owner).linkId : owner]);
     snapshotRest.set(owner, rest);
     if (sentStates.get(owner)?.state !== state)
@@ -441,7 +487,7 @@ async function startDaemon({
       // Serialised once. A client that reads pages (`pages: true`) gets anything over a quarter of a frame as a page
       // count; one that can't gets it whole up to the frame limit, and a clear FRAME_TOO_LARGE error past it.
       async function reply(result) {
-        const resultJson = encode(patchClients.get(key)?.messages === false ? leanResult(result) : result);
+        const resultJson = encode(leanResult(result, patchClients.get(key)));
         if (request.pages === true && !PAGE_METHODS.has(request.method) && resultJson.length > inlineLimit) {
           const pages = await capturePages(resultJson);
           if (pages) connection.send({ v: VERSION, id, pages });
@@ -458,7 +504,7 @@ async function startDaemon({
             protocolVersion: VERSION,
             dataDir,
             socketPath,
-            capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1", "mobile-push-v1", STATE_PATCHES, CHAT_PAGES],
+            capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1", "mobile-push-v1", STATE_PATCHES, CHAT_PAGES, SUBAGENT_TAILS],
             methods: [...runtime.methods, ...PHONE_METHODS, ...DEVICE_METHODS, ...PUSH_METHODS, ...STATE_METHODS].filter((method) => !policy?.denies(method)),
           };
         else if (request.method === "phone:status") result = phone.status();
@@ -485,7 +531,7 @@ async function startDaemon({
         else if (request.method === "push:focus") result = push.focus(request.args[0]);
         else if (request.method === "daemon:snapshot") {
           const whole = runtime.snapshot();
-          const snapshot = { ...(patchClients.get(key)?.messages === false ? leanResult(whole) : whole), eventSeq };
+          const snapshot = { ...leanResult(whole, patchClients.get(key)), eventSeq };
           if (request.args[0]?.paged === true) {
             // Serialize once: all pages describe the same instant and watermark.
             const pages = await capturePages(JSON.stringify(snapshot));
@@ -495,9 +541,9 @@ async function startDaemon({
         } else if (request.method === "daemon:snapshot-page" || request.method === "daemon:result-page") result = resultPages.page(...request.args);
         else if (request.method === "daemon:flush") result = await runtime.flush();
         else if (request.method === "daemon:state-patches") {
-          if (!closed) patchClients.set(key, { messages: request.args[0]?.messages !== false });
+          if (!closed) patchClients.set(key, formOf(request.args[0]));
           result = { epoch };
-        } else if (request.method === "state:read") result = await readState(request.args[0], { messages: patchClients.get(key)?.messages !== false });
+        } else if (request.method === "state:read") result = await readState(request.args[0], patchClients.get(key));
         else if (request.method === "daemon:focus") {
           const next = request.args[0];
           if (!next || typeof next.focused !== "boolean") throw new Error("Expected a focused boolean");

@@ -192,7 +192,7 @@ function ExperimentalSettings() {
     <Group title="Beta">
       <Row
         label="Every project in the sidebar"
-        description="Lists each project and Link with its chats, so a chat in another project opens in place. Replaces the project menu at the top of the sidebar. Hide a project in its own settings."
+        description="Lists each project and Link with its chats, so a chat in another project opens in place. Replaces the project menu at the top of the sidebar. Choose which projects show with the checklist button at the bottom of the sidebar, or in each project's settings."
       >
         <Switch
           label="Every project in the sidebar"

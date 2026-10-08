@@ -19,6 +19,7 @@
     "src/main-sync.ts",
     "src/simulator.ts",
     "src/browser.ts",
+    "src/terminal.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
     "src/message-search.mjs",
@@ -33,6 +34,10 @@
       "default": "./src/prompt-skills.mjs"
     },
     "./model": "./src/model.ts",
+    "./subagent-transcript": {
+      "types": "./src/subagent-transcript.d.mts",
+      "default": "./src/subagent-transcript.mjs"
+    },
     "./chat-summary": {
       "types": "./src/chat-summary.d.mts",
       "default": "./src/chat-summary.mjs"
@@ -120,6 +125,11 @@
       "default": "./src/simulator-receiver.mjs"
     },
     "./browser": "./src/browser.ts",
+    "./terminal": "./src/terminal.ts",
+    "./terminal-client": {
+      "types": "./src/terminal-client.d.mts",
+      "default": "./src/terminal-client.mjs"
+    },
     "./browser-receiver": {
       "types": "./src/browser-receiver.d.mts",
       "default": "./src/browser-receiver.mjs"

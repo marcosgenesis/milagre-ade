@@ -30,6 +30,10 @@ _Avoid_: session, thread (the providers' names for the agent process behind a **
 A page in a Chromium browser on the host that a **Chat** may view and control. It belongs to the **Chat** whose agent process started its browser, or to a **Chat** the user attached that browser to. See ADR-0006.
 _Avoid_: tab (a browser's own UI term), session (the page's sign-in state is part of it, not a separate thing)
 
+**Terminal**:
+An interactive shell the user opens in a **Chat**. It starts in that **Chat**'s **Worktree** with the user's own login shell and environment. It belongs to the **Chat**: other **Chats**, even in the same **Worktree**, do not see it, and the **Chat**'s agent neither reads nor types in it. A **Chat** can have several. A **Terminal** keeps running when the desktop app closes, and ends when its shell exits or its **Chat** is archived. See ADR-0008.
+_Avoid_: console, shell (the program running inside a **Terminal**)
+
 ### Linking
 
 **Named Link**:
@@ -63,6 +67,7 @@ _Avoid_: client (any connection to the daemon, this Mac's own window included)
 ## Relationships
 
 - A **Project** has one or more **Worktrees**; an ordinary **Worktree** has one or more **Chats**. A named Link's shared **Chat** owns one **Worktree** per member **Project**.
+- A **Chat** has zero or more **Terminals**; each **Terminal** belongs to exactly one **Chat**.
 - A **Link** joins exactly two endpoints; each endpoint is a **Project** or a **Worktree**.
 - A **Delegation** travels along exactly one **Link**, from one **Chat** to one **Chat**.
 - A **Negotiation** involves exactly two **Chats** and is made of **Delegations** along one **Link**.

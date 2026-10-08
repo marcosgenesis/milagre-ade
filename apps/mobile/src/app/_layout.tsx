@@ -76,6 +76,7 @@ export default function Layout() {
                     <Stack.Screen name="projects" options={{ title: "Projects" }} />
                     <Stack.Screen name="project-settings" options={{ title: "Project" }} />
                     <Stack.Screen name="link-projects" options={{ ...sheet, sheetAllowedDetents: [1] }} />
+                    <Stack.Screen name="choose-projects" options={{ ...sheet, sheetAllowedDetents: [0.6, 1], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="chat" options={{ title: "Chat" }} />
                     <Stack.Screen name="context-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                     <Stack.Screen name="permission-sheet" options={{ ...sheet, sheetAllowedDetents: [0.42, 0.6], sheetInitialDetentIndex: 0 }} />
@@ -88,6 +89,11 @@ export default function Layout() {
                       options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
                     />
                     <Stack.Screen name="browser-sheet" options={{ ...sheet, sheetAllowedDetents: [1] }} />
+                    {/* Full screen too: a downward drag scrolls the Terminal's output instead of dismissing it. */}
+                    <Stack.Screen
+                      name="terminal-sheet"
+                      options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
+                    />
                     {/* Full screen too: a design scrolls and takes taps of its own. */}
                     <Stack.Screen
                       name="artifact-sheet"

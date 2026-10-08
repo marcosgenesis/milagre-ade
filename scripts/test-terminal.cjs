@@ -181,7 +181,9 @@ async function electronChecks() {
       '(() => { const prompt = document.querySelector("textarea[aria-label=Prompt]").getBoundingClientRect(); const panel = document.querySelector("[data-terminal-panel]").getBoundingClientRect(); return { promptBottom: prompt.bottom, panelTop: panel.top, panelBottom: panel.bottom, height: innerHeight }; })()',
     );
     assert.ok(layout.promptBottom <= layout.panelTop && layout.panelBottom <= layout.height, `The prompt is under the Terminals: ${JSON.stringify(layout)}`);
-    assert.equal(await evaluate("window.terminalGpu()"), true, "The shown Terminal draws with WebGL");
+    // WebGL where the GPU offers WebGL2; where it doesn't (CI's Linux blocklists it), the DOM renderer draws instead.
+    const webgl2 = await evaluate('!!document.createElement("canvas").getContext("webgl2")');
+    assert.equal(await evaluate("window.terminalGpu()"), webgl2, webgl2 ? "The shown Terminal draws with WebGL" : "The Terminal fell back to the DOM renderer");
     await type("echo milagre-$((40+2)); pwd\r");
     await waitFor(`${shown}.includes("milagre-42") && ${shown}.includes(${JSON.stringify(worktree)})`, "the command's output and the Worktree folder");
     assert.equal(await evaluate('document.querySelector("[data-panel-toggle=terminal]").getAttribute("aria-pressed")'), "true");

@@ -81,7 +81,7 @@ function load(scope: string, chatId: number) {
 }
 
 /** Reads the turns before the window; resolves once they're in. */
-export async function loadEarlier(scope: string, chatId: number, turns = TURNS) {
+async function loadEarlier(scope: string, chatId: number, turns = TURNS) {
   const key = keyOf(scope, chatId);
   const current = windows.get(key);
   if (!current?.hasMore || !current.messages.length) return;
@@ -92,7 +92,7 @@ export async function loadEarlier(scope: string, chatId: number, turns = TURNS) 
 }
 
 /** Reads every message of the Chat (find in chat searches all of it). */
-export async function loadAll(scope: string, chatId: number) {
+async function loadAll(scope: string, chatId: number) {
   while (windows.get(keyOf(scope, chatId))?.hasMore) await loadEarlier(scope, chatId, 1_000);
 }
 

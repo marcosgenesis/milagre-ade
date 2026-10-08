@@ -1,4 +1,4 @@
-import { ProjectAccountsSettings } from "./ProjectAccountsSettings";
+import { ProjectAccountsGroup, ProjectAccountsSettings } from "./ProjectAccountsSettings";
 import { AccountsSettings } from "./AccountsSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
@@ -1009,7 +1009,7 @@ function ShowInSidebarSetting({ project }: { project: SettingsProject }) {
   );
 }
 
-function ProjectSettings({ project }: { project: SettingsProject }) {
+function ProjectSettings({ project, onManageAccounts }: { project: SettingsProject; onManageAccounts: () => void }) {
   return (
     <>
       <Group title="Appearance">
@@ -1018,6 +1018,7 @@ function ProjectSettings({ project }: { project: SettingsProject }) {
       <Group title="Sidebar">
         <ShowInSidebarSetting project={project} />
       </Group>
+      <ProjectAccountsGroup projectPath={project.path} onManageAccounts={onManageAccounts} />
       <Group title="New worktrees">
         <FilesToCopy projectPath={project.path} />
         <SetupCommand projectPath={project.path} />
@@ -1060,7 +1061,7 @@ export function SettingsPanel({
           ))}
         {section === "phone" && <PhoneSettings />}
         {section === "about" && <AboutSettings update={update} />}
-        {section === "project" && project && <ProjectSettings key={project.path} project={project} />}
+        {section === "project" && project && <ProjectSettings key={project.path} project={project} onManageAccounts={() => onSectionChange?.("accounts")} />}
       </div>
     </ScrollArea>
   );

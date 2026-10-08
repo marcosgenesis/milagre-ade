@@ -15,7 +15,7 @@ const FOCUS_GAP_MS = 5000;
  * Runs `refresh` every `POLL_MS` only while the window is visible and focused. A hidden or blurred window
  * stops its timer (no wake-ups, no gh calls); coming back refreshes once, unless it just did, and resumes.
  */
-function pollWhileActive(refresh: () => void, lastRefresh: () => number): () => void {
+export function pollWhileActive(refresh: () => void, lastRefresh: () => number): () => void {
   const active = () => document.visibilityState === "visible" && document.hasFocus();
   let interval: number | undefined;
   const stop = () => {

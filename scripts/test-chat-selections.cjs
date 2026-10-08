@@ -56,8 +56,8 @@ async function browserChecks() {
     if (event.level === "error") console.error(event.message);
   });
   const evaluate = (source) => window.webContents.executeJavaScript(source);
-  async function waitFor(source) {
-    for (let n = 0; n < 200; n++) {
+  async function waitFor(source, tries = 200) {
+    for (let n = 0; n < tries; n++) {
       if (await evaluate(source)) return;
       await delay(25);
     }
@@ -80,7 +80,8 @@ async function browserChecks() {
   const modelIs = (name) => waitFor(`[...document.querySelectorAll('[data-promptbar] button')].some(el => el.textContent === ${JSON.stringify(name)})`);
   try {
     await window.loadURL(process.argv[2]);
-    await waitFor(`!!document.querySelector('[aria-label="New chat"]')`);
+    // Vite builds the app on first request: 3-4s on a warm CI runner, up to 8s on a cold one. Later waits stay short.
+    await waitFor(`!!document.querySelector('[aria-label="New chat"]')`, 1200);
     await newChat();
     await modelIs("GPT-6-Astra");
     await evaluate(`window.changeDefaults({ defaultModelId: "gpt-6-sol" })`);

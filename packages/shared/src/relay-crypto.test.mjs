@@ -155,3 +155,15 @@ test("canPair may decide per device: one new phone is turned away while another 
   });
   assert.equal(accepted.firstPairing, true);
 });
+
+test("sealEncoded seals JSON text already encoded, in the same counter sequence as seal", () => {
+  const { host, phone } = pair();
+  const { message, ephemeral } = phoneHello({ phone, host: host.publicKey, token, random, kind: "desktop" });
+  const accepted = hostAccept({ host, hello: message, isKnown: () => false, canPair: true, token, random });
+  const desktop = phoneFinish({ ephemeral, phone, host: host.publicKey, reply: accepted.reply });
+  assert.deepEqual(desktop.open(accepted.channel.seal({ t: "pong" })), { t: "pong" });
+  const encoded = new TextEncoder().encode('{"t":"evt","frame":{"v":1,"id":1,"result":"ação🙂"}}');
+  assert.deepEqual(desktop.open(accepted.channel.sealEncoded(encoded)), { t: "evt", frame: { v: 1, id: 1, result: "ação🙂" } });
+  assert.deepEqual(desktop.open(accepted.channel.seal({ t: "pong" })), { t: "pong" });
+  assert.deepEqual(accepted.channel.open(desktop.sealEncoded(new TextEncoder().encode('{"t":"ping"}'))), { t: "ping" });
+});

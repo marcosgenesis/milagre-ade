@@ -191,7 +191,7 @@ async function browserChecks() {
     await waitFor(`document.querySelector('[data-device-row="phone"]')?.textContent.includes("Victor's iPhone")`);
     assert.equal(await evaluate(`document.querySelector('[data-device-row="phone"] [data-device-line]').textContent`), "Last seen just now");
     assert.equal(await evaluate(computersShown), false, "Computers stays hidden with no computer");
-    assert.deepEqual(paired, [{ pairedPhones: 1 }]);
+    assert.deepEqual(paired, [{ pairedPhones: 1, kind: "phone" }]);
     await hostDevices().add(computerKey, { kind: "computer", name: "studio" });
     await waitFor(`${computersShown} && document.querySelector('[data-device-row="computer"]')?.textContent.includes('studio')`);
     await evaluate(`document.querySelector('[data-device-row="phone"]').scrollIntoView({ block: 'center' })`);

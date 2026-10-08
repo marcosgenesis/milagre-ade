@@ -1,6 +1,7 @@
 const { isLinkScopeKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { ensureDaemon, compatibleClient, HOST_GONE } = require("@milagre/daemon/bootstrap");
 const { projectOfKey } = require("@milagre/shared/agent-runs");
+const { MAX_PAGES, MAX_PAGED_CHARS } = require("./peer-client.cjs");
 
 // A host from before result pages still works; it only fails on very large Projects, as it always did. The window
 // offers to restart it (see restartHost).
@@ -41,7 +42,7 @@ const carriesState = (payload) =>
   Boolean(payload && typeof payload === "object" && (payload.stateTooLarge || (payload.state && typeof payload.state === "object")));
 
 async function connectDesktopRuntime(options) {
-  const { emit = () => {}, dataDir, reconnectMs = 1000 } = options;
+  const { emit = () => {}, dataDir, reconnectMs = 1000, maxPagedChars = MAX_PAGED_CHARS } = options;
   // The start every launch and restartHost use; tests stand in for it.
   /** @type {typeof ensureDaemon} */
   const startHost = options.startHost ?? ensureDaemon;
@@ -51,8 +52,15 @@ async function connectDesktopRuntime(options) {
   const first = remote ? await options.connect() : await startHost(options);
   /** @type {import('@milagre/daemon/bootstrap').DaemonClient | null} */
   let client = first;
-  const status = first.status ?? (await first.call("daemon:status"));
-  await takeStatePatches(first, status);
+  let status;
+  try {
+    status = first.status ?? (await first.call("daemon:status"));
+    await takeStatePatches(first, status);
+  } catch (error) {
+    // No runtime is made, so nothing else would ever close this connection.
+    first.close();
+    throw error;
+  }
   const methods = [...status.methods];
   let hostOutdated = !status.capabilities?.includes(RESULT_PAGES);
   let closed = false;
@@ -250,9 +258,19 @@ async function connectDesktopRuntime(options) {
       await connection.call("daemon:focus", [{ focused }]);
       capturingSnapshot = true;
       const manifest = await connection.call("daemon:snapshot", [{ paged: true }]);
+      // This Mac's own host is trusted to size its pages; a paired computer's is not (peer-client.cjs holds its replies to the same limits).
+      if (remote && (!Number.isSafeInteger(manifest.pageCount) || manifest.pageCount < 1 || manifest.pageCount > MAX_PAGES))
+        throw new Error("The computer sent an invalid snapshot");
       const pages = [];
+      let chars = 0;
       for (let index = 0; index < manifest.pageCount; index++) {
-        pages.push(await connection.call("daemon:snapshot-page", [manifest.snapshotId, index]));
+        const page = await connection.call("daemon:snapshot-page", [manifest.snapshotId, index]);
+        if (remote) {
+          if (typeof page !== "string") throw new Error("The computer sent an invalid snapshot");
+          chars += page.length;
+          if (chars > maxPagedChars) throw new Error("The computer's snapshot is too large");
+        }
+        pages.push(page);
       }
       const snapshot = JSON.parse(pages.join(""));
       emit("runtime:snapshot", snapshot);

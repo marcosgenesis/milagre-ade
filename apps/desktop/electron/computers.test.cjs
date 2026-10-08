@@ -99,7 +99,19 @@ const STATUS = { version: "9.8.7", methods: ["project:recent"], capabilities: ["
  */
 function fakeMac({ lan = [], hello = "accept" } = {}) {
   const host = boxKeyPair(random);
-  const mac = { hostKey: b64url(host.publicKey), hello, lan, sockets: [], urls: [], calls: [], accepts: [], held: [], hold: null };
+  const mac = {
+    hostKey: b64url(host.publicKey),
+    hello,
+    lan,
+    sockets: [],
+    urls: [],
+    calls: [],
+    accepts: [],
+    held: [],
+    hold: null,
+    status: STATUS,
+    failing: null,
+  };
   mac.release = () => mac.held.splice(0).forEach((send) => send());
   mac.accept = () => mac.accepts.splice(0).forEach((accept) => accept());
   mac.drop = () => mac.sockets.forEach((socket) => socket.closeWith(1000));
@@ -107,9 +119,10 @@ function fakeMac({ lan = [], hello = "accept" } = {}) {
   mac.open = () => mac.sockets.filter((socket) => !socket.closed);
   const answer = (frame) => {
     mac.calls.push(frame.method);
+    if (frame.method === mac.failing) return { v: 1, id: frame.id, error: { code: "EFAIL", message: "no" } };
     const result =
       frame.method === "daemon:status"
-        ? STATUS
+        ? mac.status
         : frame.method === "peer:routes"
           ? { hostId: HOST, key: mac.hostKey, lan: mac.lan }
           : frame.method === "daemon:snapshot"
@@ -462,4 +475,22 @@ test("a switch whose recovery fails reads Reconnecting… and the call waiting o
     "the failed switch is not swallowed as part of the switch",
   );
   await until(() => state() === "online", "back online");
+});
+
+test("a computer whose first calls fail keeps no channel open between its retries", async (t) => {
+  const mac = fakeMac();
+  mac.status = { ...STATUS, capabilities: [...STATUS.capabilities, "state-patches-v1"] };
+  const { computers } = await paired(t, mac);
+  await computers.add(macLink(mac), { name: "studio" });
+  mac.failing = "daemon:state-patches";
+  await computers.setEnabled(true);
+  let most = 0;
+  for (let i = 0; i < 400 && mac.urls.length < 4; i++) {
+    most = Math.max(most, mac.open().length);
+    await delay(5);
+  }
+  assert.ok(mac.urls.length >= 4, "it kept retrying");
+  assert.ok(most <= 1, `at most the channel being tried is open, saw ${most}`);
+  await computers.setEnabled(false);
+  assert.equal(mac.open().length, 0);
 });

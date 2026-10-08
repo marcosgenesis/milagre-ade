@@ -367,6 +367,8 @@ function createComputers({
         online(entry);
       } catch (error) {
         handed?.close();
+        // No runtime took the channel it opened (connect ran, then its first calls failed): nothing else would close it.
+        if (!entry.runtime) entry.client?.close();
         if (!enabled || closed || entry.stopped || entry.refused) return;
         if (isFinal(error)) {
           refuse(entry, error);

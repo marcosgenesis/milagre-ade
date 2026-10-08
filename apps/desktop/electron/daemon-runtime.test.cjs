@@ -1,4 +1,5 @@
 const test = require("node:test");
+const { EventEmitter } = require("node:events");
 const { readProjectState: readSavedState } = require("@milagre/core/project-store");
 const { applyStatePatch } = require("@milagre/shared/state-patch");
 const assert = require("node:assert/strict");
@@ -740,4 +741,75 @@ test("a runtime given `connect` reconnects through it alone, and never starts, f
   const check = await compatibleClient(dataDir);
   check.close();
   assert.ok(check.status.capabilities.includes("desktop-v1"), "the host still runs");
+});
+
+// ---- a paired computer's host that answers as a test says ---------------------------------------------------------------
+
+/** A connection as peer-client.cjs gives one: calls answered from `answers`, "close" when it is closed. */
+function fakeConnection(answers, calls = []) {
+  const connection = new EventEmitter();
+  connection.closed = false;
+  connection.status = { version: "1", methods: ["chat:send"], capabilities: ["desktop-v1", "result-pages-v1", "state-patches-v1"] };
+  connection.call = async (method, args) => {
+    calls.push(method);
+    const answer = answers[method];
+    if (answer instanceof Error) throw answer;
+    return typeof answer === "function" ? answer(args) : (answer ?? null);
+  };
+  connection.close = () => {
+    if (connection.closed) return;
+    connection.closed = true;
+    connection.emit("close");
+  };
+  return connection;
+}
+
+test("a computer whose first call fails leaves no channel open, and retrying does not pile them up", async () => {
+  const opened = [];
+  const connect = async () => {
+    const connection = fakeConnection({ "daemon:state-patches": new Error("refused") });
+    opened.push(connection);
+    return connection;
+  };
+  for (let attempt = 0; attempt < 3; attempt++) await assert.rejects(connectDesktopRuntime({ dataDir: "/unused", connect }), /refused/);
+  assert.equal(opened.length, 3);
+  assert.deepEqual(
+    opened.map((connection) => connection.closed),
+    [true, true, true],
+  );
+});
+
+test("a computer's snapshot must be a handful of pages of text, or its reconnect fails and the pages are not read", async () => {
+  for (const [pageCount, page, maxPagedChars, reason] of [
+    [10 ** 9, "{}", undefined, /invalid snapshot/],
+    [1025, "{}", undefined, /invalid snapshot/],
+    [0, "{}", undefined, /invalid snapshot/],
+    [1.5, "{}", undefined, /invalid snapshot/],
+    [2, { not: "text" }, undefined, /invalid snapshot/],
+    [3, "x".repeat(10), 25, /too large/],
+  ]) {
+    const calls = [];
+    const connections = [];
+    const events = [];
+    const connect = async () => {
+      const connection = fakeConnection({ "daemon:snapshot": { snapshotId: "s", pageCount }, "daemon:snapshot-page": () => page }, calls);
+      connections.push(connection);
+      return connection;
+    };
+    const runtime = await connectDesktopRuntime({
+      dataDir: "/unused",
+      connect,
+      reconnectMs: 20,
+      maxPagedChars,
+      emit: (channel, payload) => events.push({ channel, payload }),
+    });
+    connections[0].close();
+    await waitFor(() => connections.length >= 2 && connections[1].closed);
+    await waitFor(() => events.some((event) => event.channel === "runtime:connection" && reason.test(event.payload.message ?? "")));
+    assert.equal(events.filter((event) => event.channel === "runtime:snapshot").length, 0, `${pageCount}: no snapshot is passed on`);
+    if (reason.source === "invalid snapshot" && typeof page === "string") {
+      assert.equal(calls.filter((method) => method === "daemon:snapshot-page").length, 0, `${pageCount}: no page is read`);
+    }
+    await runtime.close();
+  }
 });

@@ -20,7 +20,7 @@
 - Hello inner JSON: optional `name` (control and bidi characters removed, trimmed, at most 64 characters, blank is none) and optional `kind` (`"phone"` or `"desktop"`). No `kind` means phone. Old phones and old daemons keep working both ways.
 - `devices:list` and `devices:remove` run only for this Mac's own window: never in `mobile-bridge.cjs` `METHODS`, refused by `confine.cjs` (no `PATHS` entry), and in the paired-desktop deny set.
 - Paired-desktop deny set: `phone:*`, `devices:*`, `push:*`, `daemon:stop`. A denied call answers `{ code: "NOT_AVAILABLE_REMOTELY", message: "Not available on a remote computer" }`.
-- Copy, verbatim: "Devices", "Computers", "Phones", fallback names "Phone" and "Computer", "Connected now, same network", "Connected now, relay", "Last seen 5 min ago" (via `ago()`), "Not seen yet", "No phones yet", "Remove", confirm line "Remove <name>? It can pair again with a new link.", switch "Allow devices to connect", card "Pair a device", button "Copy link".
+- Copy, verbatim: "Devices", "Computers", "Phones", fallback names "Phone" and "Computer", "Connected now, same network", "Connected now, relay", "Last seen 5 min ago" (via `ago()`), "Not seen yet", "No phones yet", "Remove", confirm line "Remove <name>? It can pair again from Pair a device.", switch "Allow devices to connect", card "Pair a device", button "Copy link".
 - Settings › Devices replaces Settings › Phone for everyone, no flag. It keeps every Phone control: the enable switch, the LAN switch, the QR with Copy link and the countdown, Allow pairing again, Reset access.
 - UI goes through the shared primitives in `docs/agents/ui.md`; this PR adds no scroller, menu or slider.
 - Desktop and mobile stay in sync. The phone has no device-management screen (it never manages pairing, `apps/mobile/src/app/` has no such route); its counterpart here is sending its name and saying "Settings → Devices" in its copy.
@@ -1617,8 +1617,8 @@ test("the line under a device says how it is connected now, or when it was last 
 });
 
 test("removing asks by name and says it can pair again", () => {
-  assert.equal(removeDeviceQuestion(device({ name: "studio", kind: "computer" })), "Remove studio? It can pair again with a new link.");
-  assert.equal(removeDeviceQuestion(device()), "Remove Phone? It can pair again with a new link.");
+  assert.equal(removeDeviceQuestion(device({ name: "studio", kind: "computer" })), "Remove studio? It can pair again from Pair a device.");
+  assert.equal(removeDeviceQuestion(device()), "Remove Phone? It can pair again from Pair a device.");
 });
 
 test("devices split into computers and phones, connected first, then the most recently seen", () => {
@@ -1699,7 +1699,7 @@ export function deviceSeenLine(device: Pick<PairedDevice, "route" | "lastSeen">,
 }
 
 /** Shown in place of that line while Remove waits for a second click. */
-export const removeDeviceQuestion = (device: Pick<PairedDevice, "kind" | "name">) => `Remove ${deviceName(device)}? It can pair again with a new link.`;
+export const removeDeviceQuestion = (device: Pick<PairedDevice, "kind" | "name">) => `Remove ${deviceName(device)}? It can pair again from Pair a device.`;
 
 /** The two lists, each with what is connected first and then the most recently seen. */
 export function devicesByKind(devices: PairedDevice[]): { computers: PairedDevice[]; phones: PairedDevice[] } {
@@ -1813,7 +1813,7 @@ In `scripts/test-settings-devices.cjs`:
     // Remove asks first; Cancel keeps the phone; confirming removes it on the host.
     const phoneLine = `document.querySelector('[data-device-row="phone"] [data-device-line]')?.textContent`;
     await evaluate(`document.querySelector('[data-device-row="phone"] [data-device-remove]').click()`);
-    await waitFor(`${phoneLine} === "Remove Victor's iPhone? It can pair again with a new link."`);
+    await waitFor(`${phoneLine} === "Remove Victor's iPhone? It can pair again from Pair a device."`);
     await screenshot("device-remove-confirm");
     await click("Cancel");
     await waitFor(`${phoneLine} === "Last seen just now"`);

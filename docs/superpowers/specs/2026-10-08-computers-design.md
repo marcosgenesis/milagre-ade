@@ -101,7 +101,7 @@ Paired desktops use the phone's routes (relay room and LAN on 8798) and its cryp
 ### Devices store
 
 Replace `relay-phones.json` with `devices.json`: `{ devices: [{ key, kind: "phone" | "computer", name, pairedAt,
-lastSeen }], removed: [{ key, at }] }`, mode 0600. On first read, existing phone keys migrate as `{ kind: "phone",
+lastSeen }], removed: [{ key, removedAt }] }`, mode 0600. On first read, existing phone keys migrate as `{ kind: "phone",
 name: null }` and show as "Phone", and the old file is deleted. `MAX_DEVICES` stays 32. `isKnown` and `add` keep their
 shapes; every accepted hello updates the name (so migrated phones pick theirs up) and `lastSeen` (written at most once
 a minute). The hello says `kind: "desktop"`; the store records that device as `kind: "computer"`.

@@ -248,7 +248,13 @@ export type AdvisorResultContext = {
   outcome: "completed" | "failed" | "cancelled";
 };
 
-export type ChatContext = AdvisorResultContext | LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
+/** Something on GitHub that stops an open PR from merging and that the agent can fix. */
+export type PullRequestBlocker = "conflicts" | "changes-requested" | "checks-failed" | "behind";
+
+/** A PR-blocker pill the user clicked. Milagre wrote the message and the skill prompt the agent got. */
+export type PullRequestActionContext = { kind: "pr-action"; action: PullRequestBlocker; pr: number; url: string };
+
+export type ChatContext = AdvisorResultContext | LinkedContext | { kind: "git-action" } | HandoffContext | PullRequestActionContext | "handover" | null;
 
 /**
  * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
@@ -510,6 +516,8 @@ export interface ChatSendRequest {
   replies?: "concise" | "normal";
   /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
   tldrEnabled?: boolean;
+  /** A PR-blocker pill's action. Milagre checks it and writes the body, prompt and context itself, ignoring the ones sent. */
+  prAction?: { action: PullRequestBlocker; pr: number; url: string };
 }
 
 /** A code editor found on this Mac. */

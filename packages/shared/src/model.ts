@@ -188,6 +188,8 @@ export interface ChatMessage {
   outcome?: "completed" | "failed" | "cancelled";
   /** The tool calls the agent made in this reply, and its thinking, in the order they started. */
   steps?: ChatStep[];
+  /** The host's sidecar with the long details of these steps (each marked `hasDetail`); read with the chat:message command. */
+  detailFile?: string;
   operationId?: string;
 }
 
@@ -270,9 +272,10 @@ export interface ChatStep {
   /** The command and its output, a unified diff, or the thinking summary, capped at 20,000 characters. */
   detail?: string;
   /**
-   * The phone leaves a tool's detail out and sets this. A saved message's full text comes from GET /message; a step of
-   * a turn still streaming has no full message to fetch until the turn ends (the phone keeps only the tail of the last
-   * few steps and of running ones).
+   * The detail is left out and kept elsewhere. A saved message keeps a long detail in a sidecar on the host (desktop:
+   * the chat:message command; phone: GET /message). The phone also leaves out what the host still has inline, and for a
+   * turn still streaming it keeps only the tail of the last few steps and of running ones, with no full message to
+   * fetch until the turn ends.
    */
   hasDetail?: boolean;
   /** The file a read or edit worked on, as the tool named it; the title shows only its name. For an image step, the generated image. */

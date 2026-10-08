@@ -1,7 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
-const { hydrateSubagents, migrateImages } = require("./project-content.cjs");
+const { hydrateSubagents, migrateImages, restoreDetails } = require("./project-content.cjs");
 const { syncDirectory } = require("./project-store.cjs");
 
 // Before #117, a linked worktree opened as a project kept its chats in its own .milagre/coordination.json. Since #117
@@ -153,7 +153,8 @@ async function readOldChats(worktreePath) {
   }
   const state = JSON.parse(text);
   if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("not a coordination state");
-  return hydrateSubagents(worktreePath, state);
+  // Its messages move to the main checkout's file, so their details come back inline from this folder's sidecars.
+  return restoreDetails(worktreePath, await hydrateSubagents(worktreePath, state));
 }
 
 /**

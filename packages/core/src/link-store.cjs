@@ -2,7 +2,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { validLinkId } = require("@milagre/shared/chat-scopes");
 const { ProjectStates } = require("./project-states.cjs");
-const { readProjectState, saveProjectState } = require("./project-store.cjs");
+const { readProjectState, saveProjectState, compactProjectDetails } = require("./project-store.cjs");
 
 function createLinkStore({ dataDir }) {
   const root = path.join(dataDir, "links");
@@ -20,6 +20,7 @@ function createLinkStore({ dataDir }) {
       }
     },
     save: (id, state) => saveProjectState(directory(id), state, { durable: true }),
+    compact: (id, next, previous) => compactProjectDetails(directory(id), next, previous),
   });
   return {
     directory,

@@ -232,7 +232,10 @@ class ChatHost {
 
   /** Capture newly saved replies after publication, outside the state mutation queue. */
   async captureImages(projectPath, state, messages) {
-    for (const message of messages) {
+    if (!messages.length) return;
+    // The state kept can hold slimmer copies of the messages a change made (see ProjectStates.compact): use those.
+    const kept = new Map(state.messages.map((message) => [message.id, message]));
+    for (const message of messages.map((made) => kept.get(made.id) ?? made)) {
       const captured = await this.images.capture(projectPath, state, message);
       if (captured === message) continue;
       const saved = await this.states

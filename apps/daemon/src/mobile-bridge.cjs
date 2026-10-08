@@ -547,9 +547,17 @@ async function startMobileBridge({
           return;
         }
         if (req.method === "GET" && target.pathname === "/message") {
-          const scope = await readScope(target.searchParams.get("projectPath"));
-          const message = (scope.link ?? scope.project).state.messages.find((item) => item.id === Number(target.searchParams.get("id")));
-          if (!message) throw failure(404, "That message is no longer in this Project.");
+          // One message with its tool output read back from its sidecar, without encoding the whole state to find it.
+          const owner = target.searchParams.get("projectPath");
+          await confine?.check(owner);
+          if (!validScope(owner)) throw failure(400, "Choose a valid Project or Link");
+          let message;
+          try {
+            message = await client.call("chat:message", [owner, Number(target.searchParams.get("id"))]);
+          } catch (error) {
+            if (/no longer in this Project/.test(error.message)) throw failure(404, "That message is no longer in this Project.");
+            throw error;
+          }
           reply(200, { result: message });
           return;
         } else if (req.method === "POST" && ["/rpc", "/attachments"].includes(target.pathname)) {

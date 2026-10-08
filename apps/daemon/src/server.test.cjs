@@ -20,10 +20,11 @@ function largeChat({ worktreeId, sessionId, firstId, replies = 900 }) {
     messages.push({
       id: firstId + index,
       session_id: sessionId,
-      body: `Reply ${index}`,
+      // Long replies make the size: long tool output moves to sidecars, out of the state.
+      body: `Reply ${index} `.padEnd(20_000, "reply line\n"),
       context: null,
       role: "assistant",
-      steps: [{ id: `step-${index}`, kind: "shell", title: "Ran `npm test`", status: "done", detail: `${index} `.padEnd(20_000, "output line\n") }],
+      steps: [{ id: `step-${index}`, kind: "shell", title: "Ran `npm test`", status: "done", detail: `$ npm test\n${index} passed` }],
     });
   }
   return {
@@ -331,7 +332,7 @@ test("a Project state over 16 MB opens through the client, and a change to it ke
   const opened = await desktop.call("project:open", [project]);
   assert.ok(Buffer.byteLength(JSON.stringify(opened)) > MAX_FRAME_BYTES);
   assert.equal(opened.state.messages.length, 900);
-  assert.equal(opened.state.messages[899].steps[0].detail.length, 20_000);
+  assert.equal(opened.state.messages[899].body.length, 20_000);
   assert.equal((await desktop.call("project:current")).state.messages.length, 900);
   await desktop.call("chat:patch", [project, 2, { title: "Renamed" }]);
   const changed = await waitFor(() => events.find((event) => event.channel === "project:state"));

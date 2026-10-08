@@ -45,44 +45,49 @@ function createDevices(dataDir, { now = Date.now } = {}) {
     return next;
   };
 
-  async function migrate() {
+  // The older key list as nameless phones, or null when there is none to take over.
+  async function legacyDevices() {
     let phones;
     try {
       assertPrivate(legacyFile);
       phones = JSON.parse(await fs.readFile(legacyFile, "utf8")).phones;
     } catch {
-      return;
+      return null;
     }
-    if (!Array.isArray(phones)) return;
-    devices = phones
+    if (!Array.isArray(phones)) return null;
+    return phones
       .filter((key) => typeof key === "string")
       .slice(-MAX_DEVICES)
       .map((key) => ({ key, kind: "phone", name: null, pairedAt: null, lastSeen: null }));
-    try {
-      await write();
-      // Gone once copied: a downgraded daemon must not bring back a phone removed here.
-      await fs.rm(legacyFile, { force: true });
-    } catch {
-      /* kept in memory; the next change writes it */
-    }
   }
 
+  // Built in locals and swapped in at the end, so the store never reads as empty while the file is being read.
   async function read() {
     await writes;
-    devices = [];
-    removed = new Map();
     let value;
     try {
       assertPrivate(file);
       value = JSON.parse(await fs.readFile(file, "utf8"));
     } catch (error) {
       // Missing: maybe an older list to take over. Unreadable or not private: nothing is known, as before.
-      if (error.code === "ENOENT") await migrate();
+      const migrated = error.code === "ENOENT" ? await legacyDevices() : null;
+      devices = migrated ?? [];
+      removed = new Map();
+      if (!migrated) return;
+      try {
+        await write();
+        // Gone once copied: a downgraded daemon must not bring back a phone removed here.
+        await fs.rm(legacyFile, { force: true });
+      } catch {
+        /* kept in memory; the next change writes it */
+      }
       return;
     }
-    devices = (Array.isArray(value?.devices) ? value.devices : []).map(readDevice).filter(Boolean).slice(-MAX_DEVICES);
+    const nextRemoved = new Map();
     for (const entry of Array.isArray(value?.removed) ? value.removed : [])
-      if (typeof entry?.key === "string" && Number.isFinite(entry.removedAt)) removed.set(entry.key, entry.removedAt);
+      if (typeof entry?.key === "string" && Number.isFinite(entry.removedAt)) nextRemoved.set(entry.key, entry.removedAt);
+    devices = (Array.isArray(value?.devices) ? value.devices : []).map(readDevice).filter(Boolean).slice(-MAX_DEVICES);
+    removed = nextRemoved;
   }
   const ready = () => (loaded ??= read());
   const find = (key) => devices.find((device) => device.key === key);

@@ -163,3 +163,33 @@ test("remove forgets a device and remembers when; adding it back or a reset clea
   assert.equal(again.count(), 0);
   assert.equal(again.removedAt("phoneB"), null);
 });
+
+test("list during an in-flight load still returns the previous devices", async () => {
+  const dir = await tmp("devices-reload");
+  const devices = createDevices(dir, { now: () => 5 });
+  await devices.load();
+  await devices.add("phoneA", { name: "A" });
+  await fs.writeFile(path.join(dir, "devices.json"), JSON.stringify({ devices: [{ key: "phoneB", kind: "phone" }], removed: [] }), { mode: 0o600 });
+  const load = { settled: false };
+  const loading = devices.load().then(() => (load.settled = true));
+  const seen = [];
+  while (!load.settled) {
+    seen.push(
+      devices
+        .list()
+        .map((device) => device.key)
+        .join(","),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await loading;
+  assert.ok(seen.length > 0);
+  assert.ok(
+    seen.every((keys) => keys === "phoneA"),
+    `list was ${JSON.stringify(seen)}`,
+  );
+  assert.deepEqual(
+    devices.list().map((device) => device.key),
+    ["phoneB"],
+  );
+});

@@ -11,6 +11,7 @@ const { WebSocketServer, WebSocket } = require("ws");
 const { chatInProject } = require("@milagre/shared/agent-runs");
 const { isLinkScopeKey, scopeFromKey } = require("@milagre/shared/chat-scopes");
 const { chatsNeedingAttention } = require("@milagre/shared/attention");
+const { pullRequestRefs } = require("@milagre/shared/chats");
 const { connect } = require("./client.cjs");
 const { createConfinement } = require("./confine.cjs");
 
@@ -73,6 +74,7 @@ const METHODS = new Set([
   "chat:archive-finished-subagents",
   "attachment:preview",
   "worktree:pull-request",
+  "worktree:pull-requests",
   "project:branches",
   "skills:list",
   "skills:read",
@@ -98,6 +100,16 @@ const TRANSCRIPT_TEXT = 600;
  * /message. A reply keeps the detail of its last thinking step, which it can show in place of an answer; each subagent
  * keeps the start of its last few transcript entries.
  */
+function projectPullRequestRefs(project) {
+  const messages = new Map();
+  for (const message of project.state.messages) {
+    const list = messages.get(message.session_id) || [];
+    list.push(message);
+    messages.set(message.session_id, list);
+  }
+  return Object.fromEntries([...messages].map(([id, list]) => [id, pullRequestRefs(list)]).filter(([, refs]) => refs.length));
+}
+
 function forPhone(project) {
   const state = project?.state;
   if (!state) return project;
@@ -122,7 +134,7 @@ function forPhone(project) {
         : session,
     ]),
   );
-  return { ...project, state: { ...state, messages, sessions } };
+  return { ...project, pullRequestRefs: projectPullRequestRefs(project), state: { ...state, messages, sessions } };
 }
 /** A drawer-only projection. Empty message bodies are metadata, never a readable transcript. */
 function forChatList(project, runs) {
@@ -164,7 +176,11 @@ function forChatList(project, runs) {
       },
     ]),
   );
-  return { previewOnly: true, project: { ...project, state: { ...project.state, sessions, messages, tasks: {} } }, runs: { ...runs, runs: marks } };
+  return {
+    previewOnly: true,
+    project: { ...project, pullRequestRefs: projectPullRequestRefs(project), state: { ...project.state, sessions, messages, tasks: {} } },
+    runs: { ...runs, runs: marks },
+  };
 }
 
 // Steps at the end of a streaming turn, and any still running, keep this much of the end of their output.

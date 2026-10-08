@@ -5,7 +5,14 @@ import type { AgentRuns } from "@milagre/shared/agent-runs";
 import { openLive, type Live, type LiveOptions } from "./live.ts";
 import type { RelayTransport } from "./relay-transport.ts";
 
-export type OpenProject = { path: string; name: string; state: CoordinatorState; link?: OpenLink };
+export type OpenProject = {
+  path: string;
+  name: string;
+  state: CoordinatorState;
+  link?: OpenLink;
+  /** Derived before the host removes shell output from phone snapshots. Absent on older hosts. */
+  pullRequestRefs?: Record<number, string[]>;
+};
 /** A Project's streaming turns; `seq` numbers the last event they hold. */
 export type Runs = { runs: AgentRuns; seq?: number };
 export type Snapshot = { project: OpenProject; runs: Runs; previewOnly?: false };

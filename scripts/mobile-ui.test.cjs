@@ -1066,7 +1066,7 @@ test("launch restoration shows the splash animation while the saved Chat opens",
   assert.ok(find(tree, (node) => node.props.accessibilityRole === "progressbar" && node.props.accessibilityLabel === "Reopening your Chat..."));
 });
 
-function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [] } = {}) {
+function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId } = {}) {
   const react = hookHost();
   const routes = [];
   const secondaryRoutes = [];
@@ -1096,6 +1096,17 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     ...extra,
   };
   const native = { Alert: { alert, prompt() {} } };
+  const external = [];
+  const { ChatPullRequestChips } = load("chat-pull-request-chips.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Pressable: "Pressable", Text: "Text", View: "View" },
+    "expo-linking": { openURL: async (url) => external.push(url) },
+    "@hugeicons/core-free-icons": {},
+    "@milagre/shared/chats": require("@milagre/shared/chats"),
+    "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "./icons": { Icon: "Icon" },
+    "./ui": { PullDown: "PullDown", colors: { ink2: "ink2", green: "green", purple: "purple", red: "red", orange: "orange" } },
+  });
   // Confirmations use the real sheet store, shown through the host's alert in the order the sheet would list them.
   const confirmStore = load("confirm-store.ts", {});
   confirmStore.setConfirmPresenter(() => {
@@ -1121,11 +1132,17 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "@milagre/shared/chats": { ...require("@milagre/shared/chats"), isListedChat: () => true },
     "@milagre/shared/message-search": require("@milagre/shared/message-search"),
     "./session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
-    "./indicators": { chatMark: () => "idle" },
+    "./indicators": require("../apps/mobile/src/indicators.ts"),
     "./status-indicators": { ChatMarkIcon: "ChatMarkIcon" },
+    "./use-chat-pull-requests": { useChatPullRequests: () => ({}) },
+    "./chat-pull-request-chips": { ChatPullRequestChips },
     "./icons": { Icon: "Icon", SpinnerRing: "SpinnerRing" },
     "./loading-logo": { LoadingLogo: "LoadingLogo" },
-    "./ui": { ...Object.fromEntries(["ErrorNotice", "Field", "IconButton", "PillButton", "PullDown"].map((name) => [name, name])), colors: {}, styles: {} },
+    "./ui": {
+      ...Object.fromEntries(["ErrorNotice", "Field", "IconButton", "PillButton", "PullDown"].map((name) => [name, name])),
+      colors: { ink: "ink", ink2: "ink2", accent: "accent", accentInk: "accentInk", orange: "orange", red: "red" },
+      styles: {},
+    },
     "./archive-progress": archiveProgress,
     "./attention": { AttentionDot: "AttentionDot", useAttention: () => [] },
     "@milagre/shared/agent-runs": { projectOfKey: (key) => key.slice(0, key.lastIndexOf("#")) },
@@ -1148,6 +1165,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const render = () => {
     react.begin();
     const tree = ProjectNavigation({
+      activeChatId,
       onNavigate: (route, secondary) => {
         routes.push(route);
         secondaryRoutes.push(secondary);
@@ -1164,8 +1182,147 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const open = (node) => find(node, (child) => child.type === "PullDown" && child.props.onPress);
   const more = (node) => find(node, (child) => child.type === "PullDown" && !child.props.onPress);
   const filter = () => find(render(), (node) => node.type === "PullDown" && node.props.label === "Filter Chats");
-  return { state, session, routes, secondaryRoutes, opened, calls, render, rows, row, open, more, filter };
+  return { state, session, routes, secondaryRoutes, opened, calls, external, render, rows, row, open, more, filter };
 }
+
+test("mobile chat rows keep unread emphasis during a running turn and match desktop read title contrast", () => {
+  const nav = navigationHost(Promise.resolve());
+  const titleStyle = () => Object.assign({}, ...find(nav.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.style);
+  assert.equal(titleStyle().color, "ink2", "read, inactive Chats use the secondary ink");
+  nav.state.project.state.sessions[3].unread = true;
+  nav.state.runs.runs["/last#3"] = { questions: [], approvals: [] };
+  assert.equal(titleStyle().color, "ink");
+  assert.equal(titleStyle().fontWeight, "600", "running does not hide unread title emphasis");
+  const active = navigationHost(Promise.resolve(), { activeChatId: 3 });
+  assert.equal(Object.assign({}, ...find(active.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.style).color, "ink");
+});
+
+test("mobile chat status labels use the same tone as their status icons", () => {
+  const nav = navigationHost(Promise.resolve());
+  const list = nav.rows();
+  const item = list.props.data.find((row) => row.kind === "chat");
+  for (const [mark, label, color] of [
+    ["running", "Running", "accentInk"],
+    ["question", "Needs reply", "accentInk"],
+    ["waiting", "Needs approval", "orange"],
+    ["interrupted", "Interrupted", "orange"],
+    ["failed", "Failed", "red"],
+    ["unread", "Unread", "accentInk"],
+  ]) {
+    const row = list.props.renderItem({ item: { ...item, mark } });
+    const status = find(row, (node) => node.type === "Text" && node.props.children === label);
+    assert.equal(Object.assign({}, ...status.props.style).color, color, label);
+  }
+});
+
+test("mobile chat rows show clickable PR numbers with desktop status colors", async () => {
+  const nav = navigationHost(Promise.resolve());
+  const list = nav.rows();
+  const item = list.props.data.find((row) => row.kind === "chat");
+  for (const [extra, tone, label] of [
+    [{}, "green", ""],
+    [{ state: "MERGED" }, "purple", ""],
+    [{ hasConflicts: true }, "red", "Conflicts"],
+    [{ isBehind: true }, "orange", "Out of date"],
+    [{ checks: "running" }, "orange", "CI running"],
+    [{ readyToMerge: true }, "green", "Ready"],
+  ]) {
+    const pr = { number: 246, title: "Fix Chat colors", url: "https://github.com/example/project/pull/246", state: "OPEN", ...extra };
+    const row = list.props.renderItem({ item: { ...item, pullRequests: [pr] } });
+    assert.equal(
+      find(row, (node) => node.type === "Text" && node.props.children === item.worktree),
+      undefined,
+      "PR replaces the branch line",
+    );
+    const chipsNode = find(row, (node) => typeof node.type === "function" && node.props.pullRequests);
+    const chips = chipsNode?.type(chipsNode.props);
+    const chip = find(chips, (node) => node.type === "Pressable" && node.props.accessibilityRole === "link");
+    assert.ok(chip, "a PR has its own tap target outside the Chat tap target");
+    assert.ok(find(chip, (node) => node.type === "Text" && node.props.children.includes(246)));
+    assert.equal(find(chip, (node) => node.type === "Icon").props.tone, tone);
+    if (label) assert.ok(find(chip, (node) => node.type === "Text" && node.props.children === label));
+    await chip.props.onPress({ stopPropagation() {} });
+    assert.equal(nav.external.at(-1), pr.url);
+    assert.equal(nav.routes.length, 0, "opening a PR does not navigate to the Chat");
+  }
+  const plain = list.props.renderItem({ item: { ...item, pullRequests: [] } });
+  assert.ok(
+    find(plain, (node) => node.type === "Text" && node.props.children === item.worktree),
+    "Chats without PRs keep their branch name",
+  );
+  const prs = [246, 247, 248].map((number) => ({ number, title: `PR ${number}`, url: `https://github.com/example/project/pull/${number}`, state: "OPEN" }));
+  const multi = list.props.renderItem({ item: { ...item, pullRequests: prs, mark: "running" } });
+  const component = find(multi, (node) => typeof node.type === "function" && node.props.pullRequests);
+  const chips = component.type(component.props);
+  assert.equal(
+    find(chips, (node) => node.type === "Text" && Array.isArray(node.props.children) && node.props.children.includes(248)),
+    undefined,
+    "extra PRs do not create another line",
+  );
+  const more = find(chips, (node) => node.type === "PullDown");
+  assert.ok(more, "extra PRs remain available in a menu");
+  more.props.onSelect(prs[2].url);
+  assert.equal(nav.external.at(-1), prs[2].url);
+  assert.ok(
+    find(chips, (node) => node.type === "Text" && node.props.children === "Running"),
+    "PR rows keep the Chat status on their second line",
+  );
+});
+
+test("mobile list PR lookups combine branch and historical statuses and stop while backgrounded", async () => {
+  const react = hookHost();
+  const app = {
+    currentState: "active",
+    addEventListener: (_event, fn) => (
+      (listener = fn),
+      {
+        remove() {
+          listener = null;
+        },
+      }
+    ),
+  };
+  let listener;
+  const called = [];
+  const client = {
+    call: async (method, args) => {
+      called.push([method, args]);
+      const pr = { number: method === "worktree:pull-request" ? 248 : 246, state: method === "worktree:pull-request" ? "OPEN" : "MERGED" };
+      return method === "worktree:pull-request" ? pr : [pr];
+    },
+  };
+  const { useChatPullRequests } = load("use-chat-pull-requests.ts", {
+    react,
+    "expo-router": { useFocusEffect: (fn) => react.effect(fn, [fn]) },
+    "react-native": { AppState: app },
+    "./pr-status": require("../apps/mobile/src/pr-status.ts"),
+  });
+  let targets = [{ path: "/w", refs: ["246"] }];
+  const render = () => {
+    react.begin();
+    return useChatPullRequests(client, targets);
+  };
+  render();
+  react.flush();
+  await new Promise((resolve) => setImmediate(resolve));
+  const status = render()["/w"];
+  assert.equal(status.branch.number, 248);
+  assert.equal(status.found["246"].number, 246);
+  assert.deepEqual(called, [
+    ["worktree:pull-request", ["/w"]],
+    ["worktree:pull-requests", ["/w", ["246"]]],
+  ]);
+  app.currentState = "background";
+  targets = [{ path: "/next", refs: [] }];
+  render();
+  react.flush();
+  assert.equal(called.length, 2, "backgrounded lists do not start GitHub requests");
+  app.currentState = "active";
+  listener();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(render()["/next"].branch.number, 248, "foreground resumes PR lookup");
+  react.cleanup();
+});
 
 test("a sidebar Chat opens at once, leaving its Project to load in the Chat", () => {
   const nav = navigationHost(deferred().promise);

@@ -9,6 +9,7 @@ import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
   Cancel01Icon,
+  CheckListIcon,
   FilterHorizontalIcon,
   FolderAddIcon,
   GitBranchIcon,
@@ -466,6 +467,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         <Text style={s.secondary}>Add project</Text>
       </Pressable>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <IconButton label="Choose projects" icon={CheckListIcon} size={44} disabled={busy} onPress={() => onNavigate("/choose-projects", true)} />
         <IconButton label="Link projects" icon={Link04Icon} size={44} disabled={busy} onPress={() => onNavigate("/link-projects", true)} />
         <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => onNavigate("/settings", true)} />
       </View>

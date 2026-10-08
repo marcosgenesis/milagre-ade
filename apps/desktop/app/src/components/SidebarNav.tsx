@@ -22,6 +22,7 @@ import {
   Add01Icon,
   ArrowDown01Icon,
   Cancel01Icon,
+  CheckListIcon,
   Copy01Icon,
   FolderAddIcon,
   FolderOpenIcon,
@@ -331,6 +332,134 @@ function ScopeMenuButton({ name, items }: { name: string; items: ScopeMenuItem[]
                       <span className={`min-w-0 flex-1 truncate text-[13.5px] ${item.destructive ? "text-red" : "text-ink"}`}>{item.label}</span>
                     </button>
                   </Fragment>
+                ))}
+              </GlideMenu>
+            </ScrollArea>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+type PickerProject = { path: string; name: string; initial: string; current: boolean; shown: boolean; listed: boolean };
+
+/** The all-Projects sidebar's project chooser: a checkbox per Project. Unchecked is the Project's own hidden flag, shared with the phone. */
+function ProjectPickerButton({
+  projects,
+  imageOf,
+  currentImage,
+  collapsed,
+  onShow,
+}: {
+  projects: PickerProject[];
+  imageOf: (path: string) => string | null | undefined;
+  currentImage?: string | null;
+  collapsed: boolean;
+  onShow: (path: string, show: boolean) => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ bottom: 0, left: 0 });
+  const hiddenCount = projects.filter((project) => !project.shown).length;
+
+  // Above the button, which sits at the bottom of the sidebar; collapsed, beside the rail.
+  const place = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return false;
+    setPosition(
+      collapsed ? { bottom: window.innerHeight - rect.bottom, left: rect.right + 8 } : { bottom: window.innerHeight - rect.top + 6, left: rect.left },
+    );
+    return true;
+  };
+  const close = () => setOpen(false);
+  const openPanel = () => {
+    if (place()) setOpen(true);
+  };
+
+  useDismiss(open, close, (target) => !!target.closest("[data-project-picker], [data-project-picker-panel]"), place);
+  useLayoutEffect(() => {
+    if (open) panelRef.current?.querySelector<HTMLElement>("[data-menu-row]:not(:disabled)")?.focus();
+  }, [open]);
+
+  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const rows = [...(panelRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
+    const index = rows.indexOf(document.activeElement as HTMLElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      rows[(index + step + rows.length) % rows.length]?.focus();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+      buttonRef.current?.focus();
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+    }
+  };
+
+  return (
+    <>
+      <Tooltip label={hiddenCount ? `Choose projects (${hiddenCount} hidden)` : "Choose projects"}>
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-label="Choose projects"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          data-project-picker
+          onClick={() => (open ? close() : openPanel())}
+          className={`${BOTTOM_BAR_BUTTON} relative ${collapsed ? "size-8" : "size-9"} ${open ? "bg-hover-2 text-ink" : ""}`}
+        >
+          <HugeIcon icon={CheckListIcon} size={17} />
+          {hiddenCount > 0 && <span aria-hidden className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-accent" />}
+        </button>
+      </Tooltip>
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="menu"
+            aria-label="Projects in the sidebar"
+            onKeyDown={moveFocus}
+            data-project-picker-panel
+            className="fixed z-50 flex max-h-[min(420px,calc(100vh-16px))] w-64 flex-col overflow-hidden rounded-[14px] bg-surface shadow-overlay"
+            style={{
+              bottom: position.bottom,
+              left: position.left,
+              animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both",
+              transformOrigin: "bottom left",
+            }}
+          >
+            <p className="shrink-0 px-3.5 pt-3 pb-1 text-[11px] font-medium text-ink-3">Show in sidebar</p>
+            <ScrollArea className="p-1.5 pt-0">
+              <GlideMenu className="flex flex-col gap-px" rowSelector="[data-menu-row]:not(:disabled)" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
+                {projects.map((project) => (
+                  <button
+                    key={project.path}
+                    data-menu-row
+                    data-project-choice={project.path}
+                    role="menuitemcheckbox"
+                    aria-checked={project.shown}
+                    type="button"
+                    disabled={!project.listed}
+                    title={project.current && !project.shown ? "Shown while it's the open project" : project.path}
+                    onClick={() => onShow(project.path, !project.shown)}
+                    className="relative z-10 flex h-9 w-full items-center gap-2 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40"
+                  >
+                    <span
+                      aria-hidden
+                      className={`flex size-4 shrink-0 items-center justify-center rounded-[4px] transition-colors duration-100 ${project.shown ? "bg-ink text-surface" : "border-[1.5px] border-ink-3"}`}
+                    >
+                      {project.shown && <HugeIcon icon={Tick02Icon} size={12} />}
+                    </span>
+                    <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-[6px] bg-ink text-[10px] font-semibold text-surface">
+                      <WorkspaceIcon src={project.current ? currentImage : imageOf(project.path)} fallback={project.initial} />
+                    </span>
+                    <span className={`min-w-0 flex-1 truncate text-[13.5px] ${project.shown ? "text-ink" : "text-ink-3"}`}>{project.name}</span>
+                    {project.current && <span className="shrink-0 text-[11px] text-ink-3">Open</span>}
+                  </button>
                 ))}
               </GlideMenu>
             </ScrollArea>
@@ -789,7 +918,8 @@ export default memo(function SidebarNav({
     Object.assign(lastLists, { links: namedLinks, registered: registeredProjects, recent: recentProjects, recentLoaded, order: scopeOrder.current });
   });
   const scopes = [...orderedProjects, ...namedLinks.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link }))];
-  const scopeImage = useProjectImages(sidebarAllProjects ? scopes.filter((scope) => !scope.link).map((scope) => scope.key) : NO_PATHS);
+  // Every Project, hidden ones too, since the project chooser lists them all.
+  const scopeImage = useProjectImages(sidebarAllProjects ? projects.map((row) => row.path) : NO_PATHS);
   const showAll = sidebarAllProjects && !collapsed;
   const scopeStates = useScopeStates(
     showAll,
@@ -866,6 +996,25 @@ export default memo(function SidebarNav({
       () => {},
     );
   };
+
+  // Checked in the project chooser; the flag lives with the Project, so the phone's list follows.
+  const showProject = (path: string, show: boolean) => {
+    setRecentProjects((list) => list.map((project) => (project.path === path ? { ...project, hidden: !show } : project)));
+    window.milagre?.setProjectHidden?.(path, !show).then(
+      (list) => {
+        if (Array.isArray(list)) setRecentProjects(list);
+        window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
+      },
+      () => setListsChanged((count) => count + 1),
+    );
+  };
+  // By name, like the phone's: the recent list reorders as Projects open, and a row must not move under the pointer.
+  const pickerProjects = projects
+    .map((row) => {
+      const recent = recentProjects.find((project) => project.path === row.path);
+      return { ...row, shown: !recent?.hidden, listed: !!recent };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.path.localeCompare(b.path));
 
   // A Project's ⋯ rows: the four actions, and removing it from the list unless it's the open one. A Link gets its name copied and can be edited.
   const scopeMenu = (scope: { key: string; name: string; link: NamedProjectLink | null }, current: boolean): ScopeMenuItem[] => {
@@ -1211,6 +1360,15 @@ export default memo(function SidebarNav({
                   <IconFolderAdd size={17} />
                 </button>
               </Tooltip>
+              {sidebarAllProjects && (
+                <ProjectPickerButton
+                  projects={pickerProjects}
+                  imageOf={scopeImage}
+                  currentImage={selectedLink ? undefined : workspace.image}
+                  collapsed={collapsed}
+                  onShow={showProject}
+                />
+              )}
               {sidebarAllProjects && onLinkProject && (
                 <Tooltip label="Link projects">
                   <button

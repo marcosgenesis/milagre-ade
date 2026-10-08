@@ -5,7 +5,7 @@ import { RefreshIcon } from "@hugeicons/core-free-icons";
 import type { ProviderUsage } from "../../model";
 import { useSettings } from "../../lib/settings";
 import { PROVIDER_NAMES, formatPercent, formatResetsIn, formatUpdatedAgo, shownPercent, shownSuffix } from "./format";
-import { ProviderMark } from "./ProviderMark";
+import { ProviderLogo } from "../ProviderLogo";
 import { UsageBar } from "./UsageBar";
 
 export const USAGE_CARD_WIDTH = 288;
@@ -56,7 +56,7 @@ export function UsageCard({ id, usage, loading, position, onRefresh, onPointerEn
     >
       <div className="flex items-start gap-2 px-4 pb-3 pt-3.5">
         <span className="mt-0.5 flex text-ink">
-          <ProviderMark provider={usage.provider} size={16} />
+          <ProviderLogo provider={usage.provider} size={16} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="break-words text-[14px] font-semibold leading-5" data-usage-account>

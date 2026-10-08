@@ -14,7 +14,8 @@ export function useLinear(client: Client | null): { active: boolean } {
       }
       let live = true;
       Promise.all([client.call<{ enabled: boolean }>("linear:enabled:read", []), client.call<LinearStatus>("linear:status", [])]).then(
-        ([value, status]) => live && setActive(value.enabled && status.connected),
+        // An older Mac answers null for commands it lacks: Linear stays off.
+        ([value, status]) => live && setActive(value?.enabled === true && status?.connected === true),
         () => live && setActive(false),
       );
       return () => {

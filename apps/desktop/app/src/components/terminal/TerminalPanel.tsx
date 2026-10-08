@@ -95,10 +95,13 @@ export function TerminalPanel({ chatId, places, notify }: { chatId: string | nul
     if (picking) requestAnimationFrame(() => plus.current?.querySelector<HTMLButtonElement>("[data-picker-row]")?.focus());
   }, [picking]);
 
+  // The choice hangs from its + button, so it moves with it and a scroll doesn't close it: opening the panel scrolls the
+  // Chat's messages to keep their end in view, which would close the choice (and the panel with it) at once.
   useDismiss(
     picking,
     () => chatId && setTerminalPicking(chatId, false),
     (target) => Boolean(plus.current?.contains(target)),
+    () => {},
   );
 
   if (!chatId || !open) return null;

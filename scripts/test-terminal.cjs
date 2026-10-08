@@ -1,6 +1,7 @@
 // Run with node scripts/test-terminal.cjs. Drives the Terminal panel in Electron against real shells: ⌘J opens the
 // first Terminal in the Chat's Worktree, typing runs commands, + adds a tab, ⌘W asks before ending a busy Terminal
-// and ends an idle one, and `exit` closes the last tab and the panel.
+// and ends an idle one, and `exit` closes the last tab and the panel. A shared Chat with a long conversation asks which
+// Worktree, and the choice stays open while the Chat makes room for the panel.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -8,6 +9,7 @@ const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 
 const CHAT = "/fixture#1";
+const LINK_CHAT = "link:fixture#1";
 // ⌘ on macOS, Ctrl elsewhere: the main process only takes the close key with the platform's own modifier.
 const COMMAND = process.platform === "darwin" ? "meta" : "control";
 
@@ -23,16 +25,21 @@ import "/src/styles.css";
 window.notices = [];
 window.setDark = (dark) => document.documentElement.classList.toggle("dark", dark);
 const noop = () => {};
+// A shared Chat's conversation, long enough that its messages scroll when the panel takes room.
+const longMessages = Array.from({ length: 60 }, (_, index) => ({ id: index + 1, session_id: 1, context: null, role: index % 2 ? "assistant" : "user", body: \`Step \${index} of the migration.\` }));
 const messages = [
   { id: 1, session_id: 1, context: null, role: "user", body: "Start the dev server and check the logs." },
   { id: 2, session_id: 1, context: null, role: "assistant", body: "Open a Terminal with ⌘T and run npm run dev; the output stays there." },
 ];
 function Fixture() {
-  useTerminalSync(${JSON.stringify(CHAT)});
+  const [places, setPlaces] = useState(null);
+  window.showLink = setPlaces;
+  const chatId = places ? ${JSON.stringify(LINK_CHAT)} : ${JSON.stringify(CHAT)};
+  useTerminalSync(chatId);
   const [model] = useState(MODEL_CATALOG[0]);
   // The chat pane as App lays it out: the Chat, then its Terminals, in one column.
   return <div data-chat-pane style={{ display: "flex", flexDirection: "column", height: "100vh", padding: 12, paddingTop: 48, boxSizing: "border-box", overflow: "hidden" }}>
-    <ChatComposer messages={messages}
+    <ChatComposer key={chatId} messages={places ? longMessages : messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft="" onDraftChange={noop} onSend={noop} isSending={false} sendBlocked={false} subagents={[]}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
@@ -40,7 +47,7 @@ function Fixture() {
       fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop}
       onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}
       isolation="local" onIsolationChange={noop} branches={[]} baseBranch="main" onBaseBranchChange={noop} newChatError={null} />
-    <TerminalPanel chatId={${JSON.stringify(CHAT)}} notify={(message) => window.notices.push(message)} />
+    <TerminalPanel chatId={chatId} places={places ?? undefined} notify={(message) => window.notices.push(message)} />
     <PanelToggles right={12} />
   </div>;
 }
@@ -74,6 +81,8 @@ async function electronChecks() {
   const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "milagre-terminal-ui-")));
   const worktree = path.join(scratch, "dev-server");
   fs.mkdirSync(worktree);
+  const linkPlaces = ["api", "web"].map((label) => ({ path: path.join(scratch, label), label }));
+  for (const place of linkPlaces) fs.mkdirSync(place.path);
   app.setPath("userData", path.join(scratch, "profile"));
   const preloadFile = path.join(scratch, "preload.cjs");
   fs.writeFileSync(preloadFile, preload);
@@ -87,6 +96,7 @@ async function electronChecks() {
   });
   const terminals = createTerminals({
     resolveChat: async (chatId) => {
+      if (chatId === LINK_CHAT) return linkPlaces;
       if (chatId !== CHAT) throw new Error("Unknown Chat");
       return [{ path: worktree, label: "dev-server" }];
     },
@@ -197,9 +207,31 @@ async function electronChecks() {
     await type("exit\r");
     await waitFor('!document.querySelector("[data-terminal-panel]")', "the panel closed after exit");
     assert.deepEqual((await terminals.list({ chatId: CHAT })).terminals, []);
+
+    // A shared Chat asks which Worktree. Its messages scroll to stay at the end as the panel takes room, and that
+    // scroll must not close the choice (it used to, and the panel flickered shut on every ⌘J).
+    await evaluate(`window.showLink(${JSON.stringify(linkPlaces)})`);
+    await waitFor('document.querySelector("[data-chat-pane]").textContent.includes("Step 59")', "the shared Chat");
+    press("J", ["meta"]);
+    await waitFor('!!document.querySelector("[data-picker-row]")', "the Worktree choice");
+    await delay(800);
+    assert.deepEqual(
+      await evaluate('[...document.querySelectorAll("[data-picker-row]")].map((row) => row.textContent)').then((rows) => rows.map((row) => row.slice(0, 3))),
+      ["api", "web"],
+      "The Worktree choice stays open while the Chat makes room",
+    );
+    await screenshot("terminal-link-choice-dark");
+    await evaluate('[...document.querySelectorAll("[data-picker-row]")][1].click()');
+    await waitFor('document.activeElement?.classList.contains("xterm-helper-textarea")', "focus in the shared Chat's Terminal");
+    await type("pwd\r");
+    await waitFor(`${shown}.includes(${JSON.stringify(linkPlaces[1].path)})`, "the Terminal in the chosen Worktree");
+    assert.match(await evaluate(`${tabs}[0]`), /web/, "The tab names its Worktree");
+    await type("exit\r");
+    await waitFor('!document.querySelector("[data-terminal-panel]")', "the shared Chat's panel closed after exit");
+
     assert.deepEqual(await evaluate("window.notices"), []);
     console.log(
-      "PASS: ⌘J opens a Terminal in the Worktree, runs commands with colors, fits the PTY, hides and shows, + adds a tab, ⌘W asks before ending a busy one, exit closes the panel",
+      "PASS: ⌘J opens a Terminal in the Worktree, runs commands with colors, fits the PTY, hides and shows, + adds a tab, ⌘W asks before ending a busy one, exit closes the panel, a shared Chat's Worktree choice stays open and opens there",
     );
     await terminals.dispose();
     app.exit(0);

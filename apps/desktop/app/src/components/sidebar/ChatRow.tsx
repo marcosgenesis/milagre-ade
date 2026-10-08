@@ -268,7 +268,7 @@ export const ChatRow = memo(function ChatRow({
             aria-label={archiving ? `Archiving ${item.label}` : undefined}
             aria-current={active ? "page" : undefined}
             className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
-              active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
+              active ? "bg-hover-2" : "hover:bg-hover-2"
             } ${archiving ? "opacity-30" : ""}`}
           >
             <span className="sidebar-chat-initials relative size-6 shrink-0 items-center justify-center rounded-[6px] bg-field text-[10px] font-semibold text-ink-2">

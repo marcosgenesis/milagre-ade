@@ -1663,12 +1663,12 @@ function ChatList({
       )}
       {pinned.length > 0 && (
         <div data-pinned-chats className="mb-2">
-          <GlideGroup>{pinned.map(row)}</GlideGroup>
+          <div className="flex flex-col gap-px">{pinned.map(row)}</div>
         </div>
       )}
       {collapsed && pinned.length > 0 && <div className="mx-auto mb-2 h-px w-5 bg-line" />}
       {header}
-      <GlideGroup>{rest.map((item, index) => row(item, pinned.length + index))}</GlideGroup>
+      <div className="flex flex-col gap-px">{rest.map((item, index) => row(item, pinned.length + index))}</div>
 
       {drag?.target?.id &&
         mark &&

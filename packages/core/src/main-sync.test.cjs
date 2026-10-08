@@ -182,3 +182,54 @@ test("a failed checkout lookup fails instead of moving main", async (t) => {
   assert.equal(result.outcome, "failed");
   assert.equal(git("rev-parse", "main"), behind);
 });
+
+// A client whose answers can be swapped for one git call, to reach states a real repository only passes through.
+function clientWith({ out, run } = {}) {
+  const real = createGit();
+  return {
+    ...real,
+    read: { ...real.read, out: (cwd, args) => out?.(cwd, args) ?? real.read.out(cwd, args) },
+    write: { ...real.write, run: (cwd, args, options) => run?.(cwd, args) ?? real.write.run(cwd, args, options) },
+  };
+}
+
+test("a checkout that left main just before the merge is not fast-forwarded", async (t) => {
+  const { project, git, behind } = await fixture(t, { onWork: true });
+  const workBefore = git("rev-parse", "work");
+  // The lookup still names the project as main's checkout, but its HEAD is on `work` by the time of the merge.
+  const client = clientWith({ out: (_cwd, args) => (args.includes("--format=%(worktreepath)") ? Promise.resolve(project) : undefined) });
+  const result = await syncMainBranch(project, { client });
+  assert.equal(result.outcome, "skipped");
+  assert.equal(result.message, "The main checkout is no longer on main");
+  assert.equal(git("rev-parse", "work"), workBefore);
+  assert.equal(git("rev-parse", "main"), behind);
+});
+
+test("a rejected SSH key is reported as git says it, not as an unreachable remote", async (t) => {
+  const { project } = await fixture(t);
+  const message = "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.";
+  const client = clientWith({ run: (_cwd, args) => (args[0] === "fetch" ? Promise.resolve({ ok: false, message, stderr: message, stdout: "" }) : undefined) });
+  const result = await syncMainBranch(project, { client });
+  assert.equal(result.outcome, "failed");
+  assert.equal(result.message, "git@github.com: Permission denied (publickey).");
+});
+
+test("a Project opened through a symlink still calls its checkout the main checkout", async (t) => {
+  const { root, project } = await fixture(t);
+  const link = path.join(root, "link");
+  await fs.symlink(project, link);
+  await fs.writeFile(path.join(project, "README.md"), "edited\n");
+  const result = await syncMainBranch(link);
+  assert.equal(result.message, "The main checkout has uncommitted changes");
+});
+
+test("a worktree that has main checked out but whose folder is gone is reported as missing", async (t) => {
+  const { root, project, git, behind } = await fixture(t, { onWork: true });
+  const other = path.join(root, "other");
+  git("worktree", "add", "-q", other, "main");
+  await fs.rm(other, { recursive: true, force: true });
+  const result = await syncMainBranch(project);
+  assert.equal(result.outcome, "skipped");
+  assert.equal(result.message, "other is missing. Run git worktree prune to forget it");
+  assert.equal(git("rev-parse", "main"), behind);
+});

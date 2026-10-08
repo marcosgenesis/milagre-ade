@@ -24,6 +24,8 @@ const firstLine = (text) =>
     .replace(/^(error|fatal): /, "");
 
 function fetchFailure(remote, result) {
+  // A rejected key or password also prints "Could not read from remote", but git's own first line says what to fix.
+  if (/permission denied|authentication failed|could not read username|terminal prompts disabled/i.test(result.message)) return firstLine(result.message);
   if (
     result.timedOut ||
     /could not resolve host|could not read from remote|unable to access|connection|does not appear to be a git repository/i.test(result.message)
@@ -79,7 +81,17 @@ async function syncMainBranch(projectPath, { client = createGit(), now = Date.no
       const message = /refusing to fetch into/i.test(moved.message) ? `${branch} is in the middle of a rebase or bisect` : `${branch} moved during sync`;
       return result("skipped", { message, commit: short(before) });
     }
-    const where = path.resolve(checkout) === path.resolve(projectPath) ? "The main checkout" : path.basename(checkout);
+    // Git reports real paths (/private/tmp, not /tmp), so a Project opened through a symlink compares by its real path.
+    const realOf = (folder) => fs.realpath(folder).catch(() => path.resolve(folder));
+    const where = (await realOf(checkout)) === (await realOf(projectPath)) ? "The main checkout" : path.basename(checkout);
+    // Still registered, folder deleted: git keeps the branch checked out there until it is pruned.
+    if (
+      !(await fs.access(checkout).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return result("skipped", { message: `${where} is missing. Run git worktree prune to forget it`, commit: short(before) });
     const busy = await operationInProgress(client, checkout);
     if (busy) return result("skipped", { message: `${where} is in the middle of a ${busy}`, commit: short(before) });
     const status = await client.read.run(checkout, ["status", "--porcelain=v1", "--untracked-files=no"]);
@@ -88,6 +100,9 @@ async function syncMainBranch(projectPath, { client = createGit(), now = Date.no
       const message = where === "The main checkout" ? "The main checkout has uncommitted changes" : `${where} has uncommitted changes on ${branch}`;
       return result("skipped", { message, commit: short(before) });
     }
+    // The merge acts on whatever HEAD has now: if the checkout just switched away from the branch, leave it alone.
+    const head = await client.read.out(checkout, ["symbolic-ref", "--quiet", "HEAD"]);
+    if (head !== local) return result("skipped", { message: `${where} is no longer on ${branch}`, commit: short(before) });
     const merged = await client.write.run(checkout, ["merge", "--ff-only", "--quiet", after]);
     if (!merged.ok) return result("skipped", { message: firstLine(merged.message) || `Could not fast-forward ${branch}`, commit: short(before) });
     return result("updated", { commit: short(after) });

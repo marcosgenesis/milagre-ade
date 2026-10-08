@@ -100,6 +100,8 @@ function load(file, modules, extra = "") {
       return modules[id];
     },
     process: { env: {} },
+    // The host's Error, so `failure instanceof Error` holds for errors a test's fake client throws.
+    Error,
     URL,
     TextDecoder,
     setTimeout,
@@ -4178,18 +4180,18 @@ test("mobile provider discovery uses the selected scope and ignores late respons
 test("mobile Project Accounts opens from Settings as a native stack screen", () => {
   const opened = [];
   const { SettingsView } = load("app/settings.tsx", {
-    react: { useState: (value) => [value, () => {}], useEffect() {} },
+    react: { useState: (value) => [value, () => {}], useCallback: (fn) => fn },
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
     "react-native": { View: "View" },
-    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} } },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect() {} },
     "@hugeicons/core-free-icons": {},
     "../session": { useSession: () => ({ recent: [], client: null }) },
     "../project-icon": { ProjectIcon: "ProjectIcon" },
     "../push": { usePush: () => ({}) },
     "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
     "../icons": { Icon: "Icon" },
-    "../ui": { ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
     "../attention": { useAttentionButton: () => [true, () => {}] },
   });
   find(SettingsView({ onOpen: (page) => opened.push(page) }), (n) => n.props.title === "Project Accounts").props.onPress();
@@ -4671,4 +4673,50 @@ test("mobile subagent rows show current activity and preserve terminal states", 
   const failed = SubagentItem({ agent: { ...agent, status: "failed" } });
   assert.equal(failed.props.status, "Needs attention");
   assert.equal(failed.props.state, "failed");
+});
+
+test("mobile main sync switch re-reads the Mac's default on focus and shows a refused save", async () => {
+  const react = hookHost();
+  const focused = [];
+  let saved = false;
+  const client = {
+    async call(method) {
+      if (method === "main-sync:default:read") return { syncMain: saved };
+      throw new Error("This demo computer only opens its demo project.");
+    },
+  };
+  const { SettingsView } = load("app/settings.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect: (fn) => focused.push(fn) },
+    "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../push": { usePush: () => ({}) },
+    "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
+    "../icons": { Icon: "Icon" },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../attention": { useAttentionButton: () => [true, () => {}] },
+  });
+  const render = () => {
+    react.begin();
+    return SettingsView({ onOpen() {} });
+  };
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const toggle = () => find(render(), (n) => n.props?.title === "Sync main branch before new Worktrees");
+  render();
+  focused.at(-1)();
+  await settle();
+  assert.equal(toggle().props.selected, false);
+  // Turned on from the Mac while the phone was elsewhere: coming back to the screen shows it.
+  saved = true;
+  focused.at(-1)();
+  await settle();
+  assert.equal(toggle().props.selected, true);
+  toggle().props.onPress();
+  await settle();
+  assert.equal(toggle().props.selected, true, "a refused save puts the switch back");
+  assert.equal(find(render(), (n) => n.type === "ErrorNotice").props.message, "This demo computer only opens its demo project.");
 });

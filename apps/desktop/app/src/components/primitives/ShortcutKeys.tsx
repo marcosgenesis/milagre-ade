@@ -40,7 +40,10 @@ export function ShortcutKeys({
   /** Smaller keys, for a hint under one of a row of close icon buttons. */
   compact?: boolean;
 } & ComponentPropsWithRef<"kbd">) {
-  const keys = shortcut.match(/Control|Ctrl|Shift|Alt|Meta|Enter|Escape|Esc|[^\s+]/gi) ?? [];
+  const all = shortcut.match(/Control|Ctrl|Shift|Alt|Meta|Enter|Escape|Esc|[^\s+]/gi) ?? [];
+  // Off the Mac a compact hint leaves out Ctrl, the key held to show it, and draws Shift as its arrow: "Ctrl Shift E"
+  // would run into the next button's hint.
+  const keys = compact && !isMac ? all.filter((key) => names[key.toLowerCase()] !== "Control") : all;
   return (
     <kbd
       {...props}
@@ -54,7 +57,7 @@ export function ShortcutKeys({
           <span key={index} aria-hidden="true" className="inline-flex min-w-[7px] items-center justify-center">
             {name === "Command" ? (
               <HugeiconsIcon icon={CommandIcon} size={compact ? 10 : 14} strokeWidth={1.8} />
-            ) : paths[name] && (isMac || name !== "Shift") ? (
+            ) : paths[name] && (isMac || compact || name !== "Shift") ? (
               <svg
                 width={compact ? 10 : 14}
                 height={compact ? 10 : 14}

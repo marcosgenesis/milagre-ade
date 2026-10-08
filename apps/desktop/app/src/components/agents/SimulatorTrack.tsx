@@ -9,7 +9,7 @@ import { createSimulatorBridge, createSimulatorReceiverHtml, type SimulatorTheme
 import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
-import { dockLayer, useCloseWhenDesignsExpand, useDockArea } from "./dock-area";
+import { dockLayer, useCloseWhenDesignsExpand, useDockArea, useSidePanelRoom } from "./dock-area";
 import { useSidePanel } from "./PanelToggles";
 import { DockSlide } from "./DockSlide";
 
@@ -40,6 +40,7 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
   const dock = useDockArea();
   const reduced = useReducedMotion();
   useCloseWhenDesignsExpand(close);
+  useSidePanelRoom("simulator", opened && docked, DOCK_WIDTH + 12, close);
   const bounds = useAnchoredPopover({
     opened: opened && !docked,
     setOpened: (value) => {

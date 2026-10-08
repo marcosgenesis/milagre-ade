@@ -24,7 +24,7 @@ import {
 } from "@milagre/shared/artifact";
 import type { ArtifactRef, ChatStep } from "../../model";
 import Tooltip from "../primitives/Tooltip";
-import { DESIGNS_EXPANDED, dockLayer, useDockArea } from "./dock-area";
+import { DESIGNS_EXPANDED, dockLayer, useDockArea, useSidePanelRoom } from "./dock-area";
 import { useSidePanel } from "./PanelToggles";
 import { DockSlide } from "./DockSlide";
 import { ArtifactCanvas, ArtifactFrame, useArtifact, type CanvasHandle, type CanvasView, type DesignPin, type PinControls } from "./ArtifactCanvas";
@@ -445,6 +445,8 @@ export function ArtifactsProvider({
   );
   // The canvas belongs to the chat: while something else takes the chat's place, it steps aside and comes back with it.
   const [anchor, chatShown] = useShown();
+  const closeDesigns = useCallback(() => setOpenedIn(null), []);
+  useSidePanelRoom("designs", !!opened && !!chatId && chatShown, DOCK_WIDTH + 12, closeDesigns);
   return (
     <Artifacts.Provider value={value}>
       <span ref={anchor} aria-hidden className="pointer-events-none absolute top-0 left-0 h-px w-px" />

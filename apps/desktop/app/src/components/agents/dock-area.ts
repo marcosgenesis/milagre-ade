@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Where the panels docked beside the chat go: the workspace between the sidebar and the git changes panel, which an
@@ -48,6 +48,67 @@ export function useCloseWhenDesignsExpand(close: () => void) {
     window.addEventListener(DESIGNS_EXPANDED, close);
     return () => window.removeEventListener(DESIGNS_EXPANDED, close);
   }, [close]);
+}
+
+// Narrower than this, the chat beside the side panels is no use.
+const MIN_CHAT_WIDTH = 420;
+
+/**
+ * Which open side panels close so the chat keeps its room, oldest first: while the panels and the chat don't fit in
+ * `room` (the window's width right of the sidebar), with more than two open. Two always stay: on a wide window all
+ * three do.
+ */
+export function panelsToClose(open: { name: string; width: number; openedAt: number }[], room: number): string[] {
+  const left = [...open].sort((a, b) => a.openedAt - b.openedAt);
+  const closing: string[] = [];
+  const width = () => left.reduce((total, panel) => total + panel.width, 0);
+  while (left.length > 2 && room - width() < MIN_CHAT_WIDTH) closing.push(left.shift()!.name);
+  return closing;
+}
+
+// The side panels open now (the designs, a docked simulator, the git changes panel), each with when it opened.
+const openPanels = new Map<string, { width: number; openedAt: number; close: () => void }>();
+let opening = 0;
+function makeRoom() {
+  const main = document.querySelector<HTMLElement>("[data-workspace-main]") ?? document.querySelector<HTMLElement>("[data-chat-pane]");
+  const room = window.innerWidth - (main?.getBoundingClientRect().left ?? 0);
+  for (const name of panelsToClose(
+    [...openPanels].map(([name, panel]) => ({ name, ...panel })),
+    room,
+  )) {
+    const panel = openPanels.get(name);
+    openPanels.delete(name);
+    panel?.close();
+  }
+}
+let watching = false;
+
+/**
+ * A side panel that counts against the window's room: on a window too narrow for every side panel beside a usable
+ * chat, the third one opening closes the one opened first, and so does the window narrowing. `width` is what it takes,
+ * gap included.
+ */
+export function useSidePanelRoom(name: string, open: boolean, width: number, close: () => void) {
+  const latest = useRef({ width, close });
+  latest.current = { width, close };
+  useEffect(() => {
+    if (!watching) {
+      watching = true;
+      window.addEventListener("resize", makeRoom);
+    }
+    if (!open) return;
+    openPanels.set(name, {
+      get width() {
+        return latest.current.width;
+      },
+      openedAt: ++opening,
+      close: () => latest.current.close(),
+    });
+    makeRoom();
+    return () => {
+      openPanels.delete(name);
+    };
+  }, [name, open]);
 }
 
 /**

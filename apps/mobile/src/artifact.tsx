@@ -3,19 +3,12 @@ import { Pressable, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DomWebView } from "@expo/dom-webview";
-import { File, Paths } from "expo-file-system";
 import { ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, CheckmarkCircle02Icon, PaintBoardIcon } from "@hugeicons/core-free-icons";
-import {
-  artifactDocument,
-  designFeedbackMessage,
-  type Artifact,
-  type ArtifactComment,
-  type ArtifactSummary,
-  type DesignComment,
-} from "@milagre/shared/artifact";
+import { artifactShell, designFeedbackMessage, type Artifact, type ArtifactComment, type ArtifactSummary, type DesignComment } from "@milagre/shared/artifact";
 import type { ArtifactRef } from "@milagre/shared/model";
 import type { ArtifactStep } from "@milagre/shared/reply-parts";
 import { postDesignMessage } from "./design-outbox";
+import { File, Paths } from "expo-file-system";
 import { useSession } from "./session";
 import { Icon } from "./icons";
 import { CircleButton, PillButton, colors, styles } from "./ui";
@@ -385,8 +378,10 @@ export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?
 }
 
 /**
- * The design from a cache file of its own, under the same policy as the desktop: no requests of its own, so it can't
- * send anything anywhere. The Expo modules bridge stays off, and nothing it posts is read.
+ * The design inside artifactShell, from a cache file of its own. The page has no script; the design runs in its
+ * sandboxed frame with an opaque origin, so it can't read the phone's files (this web view grants a file: page read
+ * access to all of them), make requests, or navigate the page or its own frame away. The Expo modules bridge stays
+ * off, and nothing the page posts is read.
  */
 function ArtifactWebView({ html }: { html: string }) {
   const [uri, setUri] = useState<string | null>(null);
@@ -394,7 +389,7 @@ function ArtifactWebView({ html }: { html: string }) {
   useEffect(() => {
     const file = new File(Paths.cache, `artifact-${Date.now()}-${Math.random().toString(36).slice(2)}.html`);
     try {
-      file.write(artifactDocument(html));
+      file.write(artifactShell(html));
       setUri(file.uri);
     } catch {
       setFailed(true);

@@ -104,14 +104,31 @@ export const ARTIFACT_CSP = [
   "base-uri 'none'",
 ].join("; ");
 
-/** The design's HTML with the policy as the first thing in its head, where it applies to everything after it. */
+/**
+ * The design's HTML with the policy as the first thing the parser meets after the doctype, before anything the design
+ * wrote: searching for its <head> could land inside a comment or a script string and leave the design without one. A
+ * <meta> ahead of <html> still goes into the head, and applies to everything after it.
+ */
 export function artifactDocument(html: string): string {
   const policy = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`;
-  const head = /<head(\s[^>]*)?>/i.exec(html);
-  if (head) return html.slice(0, head.index + head[0].length) + policy + html.slice(head.index + head[0].length);
-  const root = /<html(\s[^>]*)?>/i.exec(html);
-  if (root) return `${html.slice(0, root.index + root[0].length)}<head>${policy}</head>${html.slice(root.index + root[0].length)}`;
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  // Leading comments and whitespace, then the doctype; without one the design gets standards mode.
+  const doctype = /^(?:\s|<!--[\s\S]*?-->)*<!doctype[^>]*>/i.exec(html);
   const at = doctype ? doctype[0].length : 0;
-  return `${html.slice(0, at)}${doctype ? "" : "<!doctype html>"}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${policy}</head>${html.slice(at)}`;
+  // A bare fragment (no <html> of its own) also gets the charset and a phone-sized viewport a page would set.
+  const page = /<html[\s>]/i.test(html) ? "" : '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+  return `${doctype ? html.slice(0, at) : "<!doctype html>"}${policy}${page}${html.slice(at)}`;
+}
+
+/** Escapes text for an HTML attribute value in double quotes. */
+const attribute = (text: string) => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+
+/**
+ * A page that shows the design in a sandboxed frame, for a web view with no sandbox of its own (the phone's). The
+ * frame runs the design's scripts but has no same origin and no say over the page around it, so it can't navigate
+ * it. The frame inherits the page's policy, so the page carries the design's (the page itself has no script), plus
+ * frame-src 'none': the frame loads nothing but the design, so the design can't navigate it away either. With an
+ * opaque origin, the design can't read the files beside the page, whatever the web view lets the page itself read.
+ */
+export function artifactShell(html: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}; frame-src 'none'"><style>html,body{margin:0;height:100%;background:#fff}iframe{display:block;width:100%;height:100%;border:0}</style></head><body><iframe sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="${attribute(artifactDocument(html))}"></iframe></body></html>`;
 }

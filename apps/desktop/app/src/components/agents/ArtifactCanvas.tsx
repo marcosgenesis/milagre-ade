@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft01Icon, ArrowRight01Icon, CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
-import { artifactDocument, type Artifact } from "@milagre/shared/artifact";
+import { ARTIFACT_CSP, artifactDocument, type Artifact } from "@milagre/shared/artifact";
 import type { ArtifactRef } from "../../model";
 import Tooltip from "../primitives/Tooltip";
 
@@ -61,6 +61,8 @@ export function ArtifactFrame({ html, title, preview = false }: { html: string; 
       title={title}
       srcDoc={document}
       sandbox="allow-scripts"
+      // The policy a second time, as the embedder's (Chromium holds the document to it), beside the <meta> inside.
+      {...{ csp: ARTIFACT_CSP }}
       referrerPolicy="no-referrer"
       tabIndex={preview ? -1 : undefined}
       className={`block size-full border-0 bg-white ${preview ? "pointer-events-none" : ""}`}

@@ -105,7 +105,7 @@ function load(file, modules, extra = "") {
   });
   return exports;
 }
-const jsx = (type, props) => ({ type, props });
+const jsx = (type, props, key) => ({ type, props, key });
 const archiveProgress = load("archive-progress.tsx", {
   "react/jsx-runtime": { jsx, jsxs: jsx },
   "react-native": { Text: "Text", View: "View" },
@@ -3868,7 +3868,7 @@ test("a design card opens its Chat's design full screen; a new Chat's card can't
   assert.equal(h.render("ArtifactCard", { step, chatId: "/p#new:1" }).props.disabled, true);
 });
 
-test("the design sheet loads the version it opened under the design policy, in a cached file it removes", async () => {
+test("the design sheet loads the version it opened under the design policy, framed in a page of its own", async () => {
   const calls = [];
   const client = {
     url: "mac",
@@ -3890,10 +3890,17 @@ test("the design sheet loads the version it opened under the design policy, in a
   assert.ok(view, "the design shows once loaded");
   const web = artifactHost(client);
   web.render("TestArtifactWebView", { html: view.props.html });
-  const frame = web.render("TestArtifactWebView", { html: view.props.html });
-  assert.equal(frame.type, "DomWebView");
+  const frame = find(web.render("TestArtifactWebView", { html: view.props.html }), (node) => node.type === "DomWebView");
+  assert.ok(frame);
   assert.equal(frame.props.useExpoModulesBridge, false);
-  assert.match(web.files.get(frame.props.source.uri), /<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'/);
+  // A page with no script of its own, framing the design in a sandbox that can't navigate away; removed when done.
+  const page = web.files.get(frame.props.source.uri);
+  assert.match(page, /frame-src 'none'/);
+  assert.match(
+    page,
+    /<iframe sandbox="allow-scripts"[^>]* srcdoc="<!doctype html><meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src 'none'/,
+  );
+  assert.doesNotMatch(page.replace(/srcdoc="[^"]*"/, ""), /<script/);
   web.cleanup();
   assert.equal(web.files.size, 0);
   h.cleanup();

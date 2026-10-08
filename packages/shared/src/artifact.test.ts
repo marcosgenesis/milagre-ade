@@ -1,24 +1,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ARTIFACT_CSP, artifactDocument, chosenDesign, designFeedbackMessage, parseDesignFeedback } from "./artifact.ts";
+import { ARTIFACT_CSP, artifactDocument, artifactShell, chosenDesign, designFeedbackMessage, parseDesignFeedback } from "./artifact.ts";
 import { replyActivity } from "./reply-parts.ts";
 
 const policy = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`;
 
-test("the policy opens the design's head", () => {
+test("the policy comes first, after the doctype, ahead of anything the design wrote", () => {
   assert.equal(
-    artifactDocument('<!doctype html><html><head lang="en"><title>x</title></head></html>'),
-    `<!doctype html><html><head lang="en">${policy}<title>x</title></head></html>`,
+    artifactDocument('<!-- hi --><!doctype html><html><head lang="en"><title>x</title></head></html>'),
+    `<!-- hi --><!doctype html>${policy}<html><head lang="en"><title>x</title></head></html>`,
+  );
+  assert.equal(artifactDocument("<html><body>hi</body></html>"), `<!doctype html>${policy}<html><body>hi</body></html>`);
+  assert.match(
+    artifactDocument("<div>hi</div>"),
+    /^<!doctype html><meta http-equiv="Content-Security-Policy"[^>]+><meta charset="utf-8"><meta name="viewport"[^>]+><div>hi<\/div>$/,
   );
 });
 
-test("a design without a head gets one inside its html element", () => {
-  assert.equal(artifactDocument("<html><body>hi</body></html>"), `<html><head>${policy}</head><body>hi</body></html>`);
-});
-
-test("a fragment becomes a document that starts with the policy", () => {
-  const html = artifactDocument("<div>hi</div>");
-  assert.match(html, /^<!doctype html><head>.*Content-Security-Policy.*<\/head><div>hi<\/div>$/);
+test("a decoy <head> in a comment or a script string can't take the policy", () => {
+  for (const html of ["<html><!-- <head> --><head></head><body></body></html>", '<html><script>var s="<head>"</script><head></head></html>']) {
+    const document = artifactDocument(html);
+    assert.ok(document.startsWith(`<!doctype html>${policy}<html>`), document);
+  }
 });
 
 test("the policy blocks requests the design makes itself", () => {
@@ -109,4 +112,14 @@ test("comments with ids tell the agent how to resolve them, and read back with t
   );
   assert.match(message, /resolve it with artifact_resolve_comment and its comment id\.$/);
   assert.deepEqual(parseDesignFeedback(message)?.comments, [{ design, x: 0.5, y: 0.25, text: "Bigger button", id: "0a1b2c3d" }]);
+});
+
+test("the phone's shell frames the design with no say over the page, and loads nothing else", () => {
+  const shell = artifactShell('<p class="a">"hi" & bye</p>');
+  assert.match(shell, /frame-src 'none'/);
+  assert.match(shell, /<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="/);
+  assert.doesNotMatch(shell, /allow-same-origin|allow-top-navigation/);
+  assert.doesNotMatch(shell.replace(/srcdoc="[^"]*"/, ""), /<script/, "the page itself runs nothing");
+  const srcdoc = /srcdoc="([^"]*)"/.exec(shell)?.[1] ?? "";
+  assert.ok(srcdoc.includes("&quot;hi&quot; &amp; bye"), srcdoc);
 });

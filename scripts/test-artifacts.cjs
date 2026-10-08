@@ -7,7 +7,8 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 
-const design = (version, accent) => `<!doctype html><html><head><title>Login</title><style>
+// A decoy <head> in a comment comes first: the policy must still apply (the fetch below stays blocked).
+const design = (version, accent) => `<!doctype html><html><!-- <head> --><head><title>Login</title><style>
   body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: #f4f1ec; display: grid; place-items: center; min-height: 100vh; }
   .card { width: 340px; background: white; border-radius: 18px; padding: 32px; box-shadow: 0 12px 40px #0001; }
   h1 { margin: 0 0 6px; font-size: 24px; } p { color: #6b6560; margin: 0 0 24px; }
@@ -21,7 +22,8 @@ const design = (version, accent) => `<!doctype html><html><head><title>Login</ti
 const phone = `<!doctype html><html><head><title>Home</title><style>
   body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: #1f2a24; color: white; min-height: 100vh; padding: 48px 24px; box-sizing: border-box; }
   h1 { font-size: 32px; margin: 0 0 24px; } .habit { background: #ffffff14; border-radius: 16px; padding: 18px; margin-bottom: 12px; font-size: 17px; }
-</style></head><body><h1>Good morning</h1><div class="habit">Drink water</div><div class="habit">Morning run</div><div class="habit">Read 20 pages</div></body></html>`;
+</style></head><body><h1>Good morning</h1><div class="habit">Drink water</div><div class="habit">Morning run</div><div class="habit">Read 20 pages</div>
+<script>setTimeout(() => { location.href = "https://example.com/escape"; }, 200);</script></body></html>`;
 
 const fixture = `
 import React, { useState } from "react";
@@ -101,6 +103,8 @@ async function browserChecks() {
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-artifacts-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 1280, height: 820, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
+  // The app's own guard: a design's frame can't navigate away from its srcdoc.
+  require("../apps/desktop/electron/links.cjs").guardNavigation(window.webContents, { appUrl: new URL(process.argv[2]).origin + "/", openExternal: () => {} });
   window.webContents.on("console-message", (details) => {
     if (details.level === "error" && !/Content Security Policy|example\.com/.test(details.message)) console.error(details.message);
   });
@@ -145,6 +149,15 @@ async function browserChecks() {
     );
     assert.deepEqual(preview, { sandbox: "allow-scripts", csp: true }, "the preview runs without same origin, under the policy");
     await waitFor("window.requests.length === 2");
+    // The phone design tried to load a remote page into its frame; it is still the design.
+    await delay(600);
+    assert.deepEqual(
+      window.webContents.mainFrame.framesInSubtree
+        .map((frame) => frame.url)
+        .filter((url) => !url.startsWith("about:") && !url.startsWith(new URL(process.argv[2]).origin)),
+      [],
+      "no frame left its design",
+    );
     assert.deepEqual(await evaluate("window.requests"), ["blocked", "blocked"], "a design can't make requests of its own");
     assert.ok(
       await evaluate(

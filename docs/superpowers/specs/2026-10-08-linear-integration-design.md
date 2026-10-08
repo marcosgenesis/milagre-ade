@@ -57,16 +57,22 @@ New folder `packages/core/src/linear/`, daemon side only.
   it and try again" when it's taken.
 
 Commands: `linear:status` (`{ connected: false }` or `{ connected: true, viewer, organization }`),
-`linear:connect`, `linear:disconnect` (revokes at `https://api.linear.app/oauth/revoke`, then deletes the
-file even if the revoke fails). Status changes emit `linear:status-changed` to every client.
+`linear:connect`, `linear:disconnect` (deletes the file, then revokes at `https://api.linear.app/oauth/revoke`
+on a best-effort basis). A second `linear:connect` while one is waiting cancels the first and starts again, since
+the user may have closed the browser tab and the callback port is fixed. Status changes emit
+`linear:status-changed` to desktop windows. Phones get no daemon events outside an open Project, so phone
+Settings re-reads status on focus. Phones may call `linear:status` and `linear:enabled:*`, never connect or
+disconnect.
 
 UI:
 
 - Desktop Settings gets a Linear section: Connect button, or "Connected as Victor to Acme" with Disconnect.
 - Phone Settings shows the same status. When disconnected it reads "Connect Linear from Settings on your Mac"
   with no button.
-- Both are hidden while Settings › Experimental › Linear is off. The toggle lives with the other Experimental
-  settings and syncs to phones the same way `sidebarAllProjects` does.
+- The toggle is stored by the daemon (`linear:enabled:read` / `linear:enabled:save`, in
+  `<dataDir>/linear/settings.json`), the way the main sync default is, so the Mac and its phones share it.
+  `sidebarAllProjects` can't be the model: it lives in the desktop's localStorage. A confined phone reads it but
+  can't change it. While it is off, the Linear connection controls are hidden on both platforms.
 
 ## Issues
 
@@ -156,7 +162,9 @@ no token, and a short message string on network or API errors; none of them thro
 | Offline or Linear down | Chips keep the last cached issue; the picker shows the error inline with Retry. |
 | Rate limited (HTTP 429 / `RATELIMITED`) | Same as offline, and no new request for 60 seconds. |
 | Picked issue deleted before start | `worktree:create` fails with "ENG-123 no longer exists in Linear" and creates nothing. |
-| OAuth callback with wrong `state` or an error | Connect fails with Linear's error message; nothing saved. |
+| OAuth callback with wrong `state` (a stale tab) | Ignored; the tab says to start again and the open attempt keeps waiting. |
+| Linear returns an error to the callback (user pressed Cancel) | Connect fails with Linear's message; nothing saved. |
+| User closes the browser tab | The attempt waits 5 minutes, or the next Connect replaces it at once. |
 
 ## Testing
 

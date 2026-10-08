@@ -2,6 +2,7 @@ const nacl = require("tweetnacl");
 const { randomBytes } = require("node:crypto");
 const { b64url, fromB64url } = require("@milagre/shared/relay-crypto");
 const { createPhoneChannels } = require("./phone-channels.cjs");
+const { PEER_BUDGET } = require("./peer-channel.cjs");
 
 // helloMs: a phone connection that has not finished its hello by then is closed, so idle sockets cannot fill the room.
 // replacedMs: the wait after the relay closes a ready session as replaced (4409): another Mac holds the same identity
@@ -18,6 +19,8 @@ const DEFAULT_TIMING = {
   jitter: true,
 };
 const REPLACED = 4409;
+// Headroom for one full phone response (lan-host.cjs MAX_BUFFERED) plus a desktop's own budget.
+const RELAY_PEER_BUDGET = 64 * 1024 * 1024 + PEER_BUDGET;
 const defaultRandom = (n) => new Uint8Array(randomBytes(n));
 
 /**
@@ -70,8 +73,12 @@ function startRelayHost({
     const ws = new WebSocket(`${relayUrl}/v1/host?id=${identity.hostId}`, { handshakeTimeout: idleMs });
     const current = { socket: ws, conns: new Map(), ready: false, lastHeard: Date.now(), timer: null, readyTimer: null, stableTimer: null, over: false };
     current.send = (bytes) => sendRaw(current, bytes);
-    // Every channel shares this socket, so a desktop that stops reading is measured by what it holds in all.
+    // Every channel shares this socket, so its buffer holds whatever phones have in flight too: a single phone response
+    // (MAX_RESPONSE, about 43 MiB on the wire) can sit there while a healthy desktop is connected. A desktop's budget
+    // therefore starts above that. A desktop that stalls on the relay never shows here at all (the relay forwards to each
+    // peer on its own), so catching that one is the relay's job; this only bounds what the Mac itself can pile up.
     current.queued = () => current.socket.bufferedAmount;
+    current.peerBudget = RELAY_PEER_BUDGET;
     session = current;
 
     const finish = (code) => {

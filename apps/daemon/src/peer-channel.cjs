@@ -1,6 +1,8 @@
 const { createFrameReader, createFrameWriter, MAX_FRAME_BYTES } = require("@milagre/shared/peer-frames");
 
-// What a paired desktop may leave unsent before its channel is dropped: what wire() lets a socket queue (protocol.cjs).
+// What a paired desktop may leave unsent before its channel is dropped. It counts the characters of the texts about to
+// be sealed (a whole frame, or each part with its base64 data), so a frame past the limit costs more than its raw JSON;
+// the carrier's own overhead is not counted. Twice the frame limit, as in wire() (protocol.cjs).
 const PEER_BUDGET = 2 * MAX_FRAME_BYTES;
 const PONG = new TextEncoder().encode('{"t":"pong"}');
 

@@ -33,7 +33,8 @@ const routeOk = (path) => typeof path === "string" && path.startsWith("/") && !p
  * One encrypted channel per device, whatever carries its bytes: the public relay (frames multiplexed on the Mac's
  * relay socket) or the LAN listener (one socket per device). A `session` is `{ conns, send(bytes), queued?(conn) }`;
  * `send` takes a whole frame (type, conn id, payload) and delivers it to that device, and `queued` says how many bytes
- * it holds unsent toward one. `send` must also handle CLOSE frames: the channel emits them (after a refusal, or when it
+ * it holds unsent toward one (`peerBudget`, optional, replaces a desktop's default limit on that when `queued` is
+ * shared among devices). `send` must also handle CLOSE frames: the channel emits them (after a refusal, or when it
  * drops a connection) and the carrier has to close that device's socket.
  * A phone speaks HTTP-over-channel to the loopback bridge. A desktop (hello `kind: "desktop"`, saved as a "computer")
  * is one more client of the daemon instead: `openPeer(carrier)` opens its connection and peer-channel.cjs carries its
@@ -108,8 +109,8 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
     record.channel = accepted.channel;
     record.state = "open";
     clearTimeout(record.helloTimer);
-    sendFrame(current, DATA, conn, accepted.reply);
     record.kind = kind;
+    sendFrame(current, DATA, conn, accepted.reply);
     if (kind === "computer") {
       try {
         record.peer = openPeerChannel({
@@ -117,6 +118,7 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
           channel: record.channel,
           deliver: (sealed) => sendFrame(current, DATA, conn, sealed),
           queued: () => current.queued?.(conn) ?? 0,
+          budget: current.peerBudget,
           isOpen: () => current.conns.get(conn) === record,
           drop: () => dropConn(current, conn, true),
         });
@@ -322,7 +324,8 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
     const record = current.conns.get(conn);
     if (!record) return;
     if (record.state === "hello") {
-      void hello(current, conn, record, payload);
+      // Anything unexpected past the guarded steps drops this channel; it must never become an unhandled rejection.
+      void hello(current, conn, record, payload).catch(() => dropConn(current, conn, true));
       return;
     }
     if (record.state !== "open") return dropConn(current, conn, true);

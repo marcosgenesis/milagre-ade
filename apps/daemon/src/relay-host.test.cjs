@@ -23,7 +23,7 @@ const {
   startLocalRelay: startRelay,
 } = require("./relay-test-kit.cjs");
 
-async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token = TOKEN, timing, onStatus, openPeer } = {}) {
+async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token = TOKEN, timing, onStatus, openPeer, WebSocket } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-host-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const identity = await readIdentity(dir);
@@ -39,6 +39,7 @@ async function startMac(t, { relayUrl, bridgeUrl, canPair = () => false, token =
     canPair: (key) => canPair(key),
     timing,
     openPeer,
+    ...(WebSocket ? { WebSocket } : {}),
     onStatus: (status) => {
       statuses.push(status);
       onStatus?.(status);
@@ -618,4 +619,42 @@ test("a daemon connection that ends while it is being opened is closed, not leak
   await desktop.closed;
   await until(() => connections[0]?.closed, "the connection closed");
   assert.deepEqual(mac.host.connectedKeys(), []);
+});
+
+test("a phone response in flight on the shared relay socket does not drop a connected desktop", async (t) => {
+  // What one ~30 MiB phone response holds on the Mac's relay socket (about 40 MiB on the wire) while a desktop is connected.
+  const busy = { amount: 0 };
+  class BusySocket extends require("ws").WebSocket {
+    get bufferedAmount() {
+      return busy.amount || super.bufferedAmount;
+    }
+  }
+  const daemon = fakePeerDaemon();
+  const { relay, mac } = await paired(t, { mac: { openPeer: daemon.openPeer, WebSocket: BusySocket } });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  busy.amount = 40 * 1024 * 1024;
+  assert.deepEqual((await desktop.call("daemon:status")).result, { echo: [] });
+  assert.equal(daemon.connections[0].closed, false, "the desktop's channel stands");
+  assert.deepEqual(mac.host.connectedKeys(), [b64url(desktop.key.publicKey)]);
+  busy.amount = 0;
+});
+
+test("a device store that throws while a hello is read drops that channel and the host carries on", async (t) => {
+  const { relay, mac, connect } = await paired(t, { mac: { openPeer: fakePeerDaemon().openPeer } });
+  const known = boxKeyPair(random);
+  await mac.phones.add(b64url(known.publicKey), { kind: "phone", name: "known" });
+  const original = mac.phones.kindOf;
+  mac.phones.kindOf = () => {
+    throw new Error("store broke");
+  };
+  const phone = connectPhone({ relayUrl: relay.url, identity: mac.identity, key: known });
+  t.after(() => phone.close());
+  // Closed with no reply, or refused: either way the channel is gone.
+  await Promise.race([phone.closed, phone.hello().catch(() => null)]);
+  await phone.closed;
+  mac.phones.kindOf = original;
+  assert.equal(mac.host.status(), "online", "the host carries on");
+  await connect();
 });

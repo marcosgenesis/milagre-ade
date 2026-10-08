@@ -10,7 +10,7 @@
   "main": "apps/desktop/electron/main.cjs",
   "scripts": {
     "dev": "npm run dev --workspace milagre",
-    "build": "node scripts/prepare-simulator-helper.cjs && npm run typecheck --workspace @milagre/shared && npm run build --workspace milagre",
+    "build": "node scripts/prepare-simulator-helper.cjs && node scripts/prepare-node-pty.cjs && npm run typecheck --workspace @milagre/shared && npm run build --workspace milagre",
     "start": "npm run start --workspace milagre",
     "typecheck": "npm run typecheck --workspace @milagre/shared && npm run typecheck --workspace milagre",
     "test": "node scripts/test.cjs",
@@ -37,7 +37,7 @@
     "lint": "oxlint",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "prepare": "node -e \"require('node:fs').existsSync('.git') && require('node:child_process').execSync('lefthook install', { stdio: 'inherit' })\"",
+    "prepare": "node scripts/prepare-node-pty.cjs && node -e \"require('node:fs').existsSync('.git') && require('node:child_process').execSync('lefthook install', { stdio: 'inherit' })\"",
     "knip": "knip"
   },
   "devDependencies": {
@@ -67,6 +67,7 @@
       "node_modules/@milagre/core/src/bundled-skills/**/*",
       "node_modules/expo-device-hub/**/*",
       "node_modules/node-datachannel/**/*",
+      "node_modules/node-pty/**/*",
       "node_modules/ws/**/*",
       "node_modules/mediabunny/**/*",
       "node_modules/@fastify/busboy/**/*"
@@ -78,7 +79,9 @@
       "package.json",
       "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**",
       "!**/node_modules/shiki/**",
-      "!**/node_modules/@shikijs/**"
+      "!**/node_modules/@shikijs/**",
+      "!**/node_modules/node-pty/{deps,src,third_party,scripts}/**",
+      "!**/node_modules/node-pty/**/*.pdb"
     ],
     "directories": {
       "output": "release",
@@ -93,12 +96,18 @@
         "zip"
       ],
       "hardenedRuntime": true,
+      "files": [
+        "!**/node_modules/node-pty/prebuilds/win32-*/**"
+      ],
       "notarize": true
     },
     "dmg": {
       "title": "Milagre"
     },
     "win": {
+      "files": [
+        "!**/node_modules/node-pty/prebuilds/darwin-*/**"
+      ],
       "target": [
         "nsis"
       ],
@@ -120,6 +129,9 @@
       ],
       "artifactName": "Milagre-${version}-${arch}.${ext}",
       "executableName": "milagre",
+      "files": [
+        "!**/node_modules/node-pty/prebuilds/**"
+      ],
       "category": "Development",
       "maintainer": "Milagre contributors",
       "icon": "apps/desktop/build/icons",

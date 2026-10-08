@@ -1454,3 +1454,8 @@ code.step-shimmer {
     animation: none;
   }
 }
+
+/* The Terminal panel's surface shows through xterm: its stylesheet paints the viewport black whatever the theme says. */
+[data-terminal-body] .xterm .xterm-viewport {
+  background-color: transparent;
+}

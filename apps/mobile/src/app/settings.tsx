@@ -158,7 +158,7 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
       )}
       {session.client && linear !== null && (
         <>
-          <Text style={[styles.label, { marginTop: 16 }]}>Beta</Text>
+          <Text style={[styles.label, { marginTop: 16 }]}>Experimental</Text>
           <View style={[styles.card, { gap: 4 }]}>
             <Toggle title={LINEAR_TITLE} selected={linear.enabled} onPress={() => void changeLinear(!linear.enabled)} />
             <Text style={styles.caption}>{LINEAR_HINT}</Text>

@@ -4262,6 +4262,7 @@ test("mobile Project Accounts opens from Settings as a native stack screen", () 
   const { SettingsView } = load("app/settings.tsx", {
     react: { useState: (value) => [value, () => {}], useCallback: (fn) => fn },
     "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/linear": { LINEAR_TITLE: "Linear", LINEAR_HINT: "", linearStatusLine: () => "Not connected" },
     "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
     "react-native": { View: "View" },
     "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect() {} },
@@ -4821,6 +4822,7 @@ test("mobile main sync switch re-reads the Mac's default on focus and shows a re
   const { SettingsView } = load("app/settings.tsx", {
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/linear": { LINEAR_TITLE: "Linear", LINEAR_HINT: "", linearStatusLine: () => "Not connected" },
     "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
     "react-native": { View: "View", Text: "Text" },
     "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect: (fn) => focused.push(fn) },
@@ -4840,18 +4842,63 @@ test("mobile main sync switch re-reads the Mac's default on focus and shows a re
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   const toggle = () => find(render(), (n) => n.props?.title === "Sync main branch before new Worktrees");
   render();
-  focused.at(-1)();
+  // Each render registers the main sync read, then Linear's; run both.
+  focused.slice(-2).forEach((fn) => fn());
   await settle();
   assert.equal(toggle().props.selected, false);
   // Turned on from the Mac while the phone was elsewhere: coming back to the screen shows it.
   saved = true;
-  focused.at(-1)();
+  // Each render registers the main sync read, then Linear's; run both.
+  focused.slice(-2).forEach((fn) => fn());
   await settle();
   assert.equal(toggle().props.selected, true);
   toggle().props.onPress();
   await settle();
   assert.equal(toggle().props.selected, true, "a refused save puts the switch back");
   assert.equal(find(render(), (n) => n.type === "ErrorNotice").props.message, "This demo computer only opens its demo project.");
+});
+
+test("mobile Settings shows the Linear switch under Experimental, like desktop", async () => {
+  const react = hookHost();
+  const focused = [];
+  const client = {
+    async call(method) {
+      if (method === "linear:enabled:read") return { enabled: true };
+      if (method === "linear:status") return { connected: false };
+      return { syncMain: false };
+    },
+  };
+  const { SettingsView } = load("app/settings.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/linear": { LINEAR_TITLE: "Linear", LINEAR_HINT: "", linearStatusLine: () => "Not connected" },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect: (fn) => focused.push(fn) },
+    "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../push": { usePush: () => ({}) },
+    "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
+    "../icons": { Icon: "Icon" },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../attention": { useAttentionButton: () => [true, () => {}] },
+  });
+  const render = () => {
+    react.begin();
+    return SettingsView({ onOpen() {} });
+  };
+  render();
+  // Each render registers the main sync read, then Linear's; run both.
+  focused.slice(-2).forEach((fn) => fn());
+  await new Promise((resolve) => setImmediate(resolve));
+  const tree = render();
+  assert.ok(find(tree, (n) => n.props?.title === "Linear"));
+  assert.ok(find(tree, (n) => n.type === "Text" && n.props.children === "Experimental"));
+  assert.equal(
+    find(tree, (n) => n.type === "Text" && n.props.children === "Beta"),
+    undefined,
+  );
 });
 
 test("mobile advisor Stop and Retry call the owning Chat and show failures without hiding records", async () => {

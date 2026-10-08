@@ -54,7 +54,7 @@ export const PANEL_TRANSLUCENCY_RANGE = { min: 10, max: 90, step: 5 };
 const clampTo = (value: unknown, range: { min: number; max: number }, fallback: number) =>
   typeof value === "number" && Number.isFinite(value) ? Math.min(range.max, Math.max(range.min, value)) : fallback;
 const DEFAULTS: AppSettings = {
-  theme: "light",
+  theme: "system",
   defaultModelId: MODEL_CATALOG[0].id,
   defaultPermissionMode: "ask",
   usageDisplay: "used",

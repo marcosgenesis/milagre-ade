@@ -224,10 +224,14 @@ async function startDesktop() {
     const result = await dialog.showOpenDialog({ title: "Open project", properties: ["openDirectory", "createDirectory"] });
     return result.canceled || !result.filePaths[0] ? null : runtime.openProject(result.filePaths[0]);
   });
+  const { getWindowState, manageWindowState } = require("./window-state.cjs");
   function createWindow() {
+    const { state, statePath } = getWindowState();
     const window = new BrowserWindow({
-      width: 1240,
-      height: 820,
+      width: state.width,
+      height: state.height,
+      x: state.x,
+      y: state.y,
       minWidth: 980,
       minHeight: 680,
       title: "Milagre",
@@ -240,6 +244,7 @@ async function startDesktop() {
         nodeIntegration: false,
       },
     });
+    manageWindowState(window, statePath);
 
     const indexFile = path.join(__dirname, "../dist/index.html");
     const appUrl = app.isPackaged ? pathToFileURL(indexFile).href : process.env.MILAGRE_DEV_SERVER_URL || "http://127.0.0.1:5173";

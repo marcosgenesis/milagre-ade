@@ -75,7 +75,19 @@ function virtualClient(daemon, options = {}) {
 }
 
 test("the paired-desktop policy denies pairing, device management, push and stopping the daemon, and nothing else", () => {
-  for (const method of ["phone:status", "phone:reset", "phone:open-pairing", "devices:list", "devices:remove", "push:register", "push:focus", "daemon:stop"])
+  for (const method of [
+    "phone:status",
+    "phone:reset",
+    "phone:open-pairing",
+    "devices:list",
+    "devices:remove",
+    "devices:pending",
+    "devices:allow",
+    "devices:deny",
+    "push:register",
+    "push:focus",
+    "daemon:stop",
+  ])
     assert.equal(peerPolicy.denies(method), true, method);
   for (const method of [
     "daemon:status",

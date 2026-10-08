@@ -38,10 +38,22 @@ test("a desktop pairs through the relay in the pairing window and drives this Ma
   assert.ok(status.capabilities.includes("desktop-peer-v1"));
   assert.ok(status.methods.includes("project:recent"));
   assert.ok(status.methods.includes("peer:routes"));
-  for (const denied of ["devices:list", "devices:remove", "phone:status", "phone:open-pairing", "push:register", "daemon:stop"])
+  for (const denied of [
+    "devices:list",
+    "devices:remove",
+    "devices:pending",
+    "devices:allow",
+    "devices:deny",
+    "phone:status",
+    "phone:open-pairing",
+    "push:register",
+    "daemon:stop",
+  ])
     assert.equal(status.methods.includes(denied), false, denied);
   assert.deepEqual((await desktop.call("devices:remove", [key])).error, { code: "NOT_AVAILABLE_REMOTELY", message: "Not available on a remote computer" });
   assert.equal((await mac.client.call("devices:list")).length, 1, "the refused call removed nothing");
+  for (const method of ["devices:pending", "devices:allow", "devices:deny"])
+    assert.equal((await desktop.call(method, [key])).error?.code, "NOT_AVAILABLE_REMOTELY", `${method} is the owner's alone`);
 
   // A change made in this Mac's window reaches the desktop as an event.
   const opened = await mac.client.call("project:open", [mac.project]);

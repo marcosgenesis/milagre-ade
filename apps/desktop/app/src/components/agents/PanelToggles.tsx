@@ -1,14 +1,14 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { PaintBoardIcon, SmartphoneIcon } from "@hugeicons/core-free-icons";
+import { ComputerTerminal01Icon, PaintBoardIcon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 import Tooltip from "../primitives/Tooltip";
 import { isModalOpen } from "../../lib/modal";
 
 /** A side panel the open Chat can show: whether it is open, and what shows or hides it. */
 export type SidePanel = { open: boolean; toggle: () => void };
-type PanelName = "designs" | "simulator";
+type PanelName = "terminal" | "designs" | "simulator";
 
-// The Chat's designs and its simulator register here while they have something to show, so the window's top-right
+// The Chat's Terminals, designs and simulator register here while they have something to show, so the window's top-right
 // corner can offer a button for each without owning their state.
 let panels: Partial<Record<PanelName, SidePanel>> = {};
 const listeners = new Set<() => void>();
@@ -49,10 +49,12 @@ export function useSidePanels() {
   return useSyncExternalStore(subscribe, snapshot);
 }
 
-// ⌘⇧D is the changes panel's, ⌘⇧T the theme's and ⌘⇧L the canvas's (App handles those).
-const BUTTONS: { name: PanelName; label: string; icon: typeof PaintBoardIcon; shortcut: string; key: string }[] = [
-  { name: "designs", label: "designs", icon: PaintBoardIcon, shortcut: "⌘⇧E", key: "e" },
-  { name: "simulator", label: "simulator", icon: SmartphoneIcon, shortcut: "⌘⇧S", key: "s" },
+// ⌘⇧D is the changes panel's, ⌘⇧T the theme's and ⌘⇧L the canvas's (App handles those). The Terminals take ⌘J, as
+// in VS Code; ⌘T, which adds one, is App's.
+const BUTTONS: { name: PanelName; label: string; icon: typeof PaintBoardIcon; shortcut: string; key: string; shift: boolean }[] = [
+  { name: "terminal", label: "Terminals", icon: ComputerTerminal01Icon, shortcut: "⌘J", key: "j", shift: false },
+  { name: "designs", label: "designs", icon: PaintBoardIcon, shortcut: "⌘⇧E", key: "e", shift: true },
+  { name: "simulator", label: "simulator", icon: SmartphoneIcon, shortcut: "⌘⇧S", key: "s", shift: true },
 ];
 
 /**
@@ -65,7 +67,7 @@ export const CORNER_PITCH = 40;
 export const sidePanelCount = (shown: Partial<Record<PanelName, SidePanel>>) => BUTTONS.filter(({ name }) => shown[name]).length;
 
 /**
- * The top-right buttons for the Chat's designs and simulator, left of the changes toggle, `right` pixels from the
+ * The top-right buttons for the Chat's Terminals, designs and simulator, left of the changes toggle, `right` pixels from the
  * window's edge. A button shows only while its Chat has something for it.
  */
 export function PanelToggles({ right }: { right: number }) {
@@ -74,8 +76,8 @@ export function PanelToggles({ right }: { right: number }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || isModalOpen()) return;
-      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
-      const button = BUTTONS.find(({ key }) => key === event.key.toLowerCase());
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      const button = BUTTONS.find(({ key, shift }) => key === event.key.toLowerCase() && shift === event.shiftKey);
       const panel = button && panels[button.name];
       if (!panel) return;
       event.preventDefault();

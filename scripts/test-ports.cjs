@@ -116,6 +116,39 @@ async function realProcessCheck() {
   }
 }
 
+// A server started in a Chat's Terminal shows with the Chat's ports, and stopping it leaves the Terminal open.
+async function terminalPortCheck() {
+  const fs = require("node:fs");
+  const { PortWatcher } = require("../packages/core/src/agents/ports.cjs");
+  const { createTerminals, terminalEnvironment } = require("../packages/core/src/terminals.cjs");
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-ports-terminal-")));
+  const terminals = createTerminals({
+    resolveChat: async () => [{ path: cwd, label: "terminal" }],
+    shell: () => ({ file: "/bin/zsh", args: ["-f"] }),
+    environment: () => terminalEnvironment({ PATH: process.env.PATH, HOME: cwd }),
+  });
+  const roots = () => new Map([...terminals.shells()].map(([chatId, shells]) => [chatId, { shells }]));
+  const watcher = new PortWatcher({ roots, publish: () => {}, pollMs: 60_000 });
+  try {
+    const { id } = await terminals.open({ chatId: "/fixture#3" });
+    await terminals.input({ terminalId: id, data: `${JSON.stringify(process.execPath)} -e "require('net').createServer().listen(0, '127.0.0.1')"\r` });
+    let ports;
+    for (let attempt = 0; attempt < 40 && !ports; attempt++) {
+      await delay(250);
+      await watcher.poll();
+      ports = watcher.snapshot()["/fixture#3"];
+    }
+    assert.ok(ports?.length === 1, `The Terminal's server shows with its Chat's ports: ${JSON.stringify(watcher.snapshot())}`);
+    assert.equal(await watcher.stopPort("/fixture#3", ports[0].pid), true);
+    assert.throws(() => process.kill(ports[0].pid, 0), /ESRCH/, "The server stopped");
+    assert.equal((await terminals.list({ chatId: "/fixture#3" })).terminals.length, 1, "Stopping the port keeps the Terminal");
+    console.log(`PASS: a server started in a Terminal shows as the Chat's port ${ports[0].port}, and stopping it keeps the Terminal`);
+  } finally {
+    watcher.close();
+    await terminals.dispose();
+  }
+}
+
 async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   const { guardNavigation } = require("../apps/desktop/electron/links.cjs");
@@ -245,6 +278,7 @@ async function browserChecks() {
 
 async function main() {
   await realProcessCheck();
+  await terminalPortCheck();
   const { createServer } = await import("vite");
   const { spawn } = require("node:child_process");
   const server = await createServer({

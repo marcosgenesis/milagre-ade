@@ -55,6 +55,13 @@ const PATHS = Object.freeze({
   "browser:control": denied,
   "browser:input": denied,
   "browser:close": denied,
+  // A Terminal runs any command as the owner of this computer. A demo Project never opens one.
+  "terminal:list": denied,
+  "terminal:open": denied,
+  "terminal:read": denied,
+  "terminal:input": denied,
+  "terminal:resize": denied,
+  "terminal:close": denied,
   // A design is read through its Chat, which must be in the folder.
   "artifact:get": ([value]) => [chatProject(value?.chatId)],
   "artifact:list": ([value]) => [chatProject(value?.chatId)],

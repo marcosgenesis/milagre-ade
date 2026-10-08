@@ -29,7 +29,8 @@ function Fixture() {
   window.setModel = (id) => setModel(MODEL_CATALOG.find((item) => item.id === id));
   const messages = Array.from({ length: count }, (_, index) => ({
     id: sessionId * 1000 + index + 1, session_id: sessionId, context: null, role: "assistant",
-    body: "PR aberta com sucesso: [#9 — fix: update app icon asset](https://github.com/example/project/pull/9). " + index,
+    body: "PR aberta com sucesso: [#9 — fix: update app icon asset](https://github.com/example/project/pull/9). " + index
+      + " The fix is in PR #289: https://github.com/the-ptf/milagre-ade/pull/289. Code: \`https://example.org\`.",
   }));
   return <div style={{ height: "100%", padding: 12 }}>
     {/* Exercise the fully expanded history, as when Find is open; paging has its own regression. */}
@@ -72,6 +73,17 @@ async function browserChecks() {
   try {
     await window.loadURL(process.argv[2]);
     await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length > 0');
+    assert.ok(
+      await evaluate(`(() => {
+        const links = [...document.querySelectorAll('.markdown a')];
+        return links.some(a => a.getAttribute('href') === 'https://github.com/the-ptf/milagre-ade/pull/289'
+          && a.textContent === 'https://github.com/the-ptf/milagre-ade/pull/289'
+          && getComputedStyle(a).textDecorationLine.includes('underline'))
+          && links.some(a => a.getAttribute('href') === 'https://github.com/example/project/pull/9')
+          && !links.some(a => a.getAttribute('href') === 'https://example.org');
+      })()`),
+      "Desktop replies detect bare URLs without trailing punctuation, preserve labeled links and keep code inert",
+    );
     await delay(250);
     if (process.env.MILAGRE_SCREENSHOT_DIR)
       await window.webContents

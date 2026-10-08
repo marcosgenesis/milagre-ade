@@ -23,6 +23,19 @@ function normalizeIcon(value) {
   return typeof value === "string" && value.length <= MAX_ICON && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(value) ? value : null;
 }
 
+const SYNC_OUTCOMES = new Set(["updated", "up-to-date", "skipped", "failed"]);
+// The last main branch sync (see main-sync.cjs). Anything that doesn't look like one reads as none.
+function normalizeMainSync(value) {
+  if (!value || typeof value !== "object" || !Number.isFinite(value.at) || !SYNC_OUTCOMES.has(value.outcome) || typeof value.branch !== "string") return null;
+  return {
+    at: value.at,
+    outcome: value.outcome,
+    branch: value.branch,
+    ...(typeof value.commit === "string" ? { commit: value.commit } : {}),
+    ...(typeof value.message === "string" ? { message: value.message } : {}),
+  };
+}
+
 function createProjectSettings(file) {
   let queue = Promise.resolve();
 
@@ -46,24 +59,39 @@ function createProjectSettings(file) {
     }
   }
 
-  // Saves run one at a time. `change` edits the project's entry; an entry left empty is removed.
-  function update(projectPath, change) {
-    const save = queue
+  // Saves run one at a time. `change` edits the whole file's data.
+  function save(change) {
+    const next = queue
       .catch(() => {})
       .then(async () => {
         const data = await read({ strict: true });
-        const key = path.resolve(projectPath);
-        const entry = { ...data.projects[key] };
-        change(entry);
-        if (Object.keys(entry).length > 0) data.projects[key] = entry;
-        else delete data.projects[key];
+        change(data);
         await fs.mkdir(path.dirname(file), { recursive: true });
         const temporary = `${file}.${process.pid}.tmp`;
         await fs.writeFile(temporary, JSON.stringify(data, null, 2));
         await fs.rename(temporary, file);
       });
-    queue = save;
-    return save;
+    queue = next;
+    return next;
+  }
+
+  // `change` edits the project's entry; an entry left empty is removed.
+  function update(projectPath, change) {
+    return save((data) => {
+      const key = path.resolve(projectPath);
+      const entry = { ...data.projects[key] };
+      change(entry);
+      if (Object.keys(entry).length > 0) data.projects[key] = entry;
+      else delete data.projects[key];
+    });
+  }
+
+  async function readMainSync(projectPath) {
+    const data = await read({ strict: false });
+    const entry = data.projects[path.resolve(projectPath)] ?? {};
+    const override = typeof entry.syncMain === "boolean" ? entry.syncMain : null;
+    const defaultValue = data.defaults?.syncMain === true;
+    return { override, defaultValue, enabled: override ?? defaultValue, last: normalizeMainSync(entry.mainSync) };
   }
 
   return {
@@ -110,6 +138,34 @@ function createProjectSettings(file) {
         else delete entry.icon;
       });
       return { icon: value };
+    },
+    // Whether new Worktrees sync main first: the Project's own choice, else the global default (off).
+    getMainSync: readMainSync,
+    // null removes the Project's choice, which brings the global default back.
+    async setMainSyncOverride(projectPath, value) {
+      await update(projectPath, (entry) => {
+        if (typeof value === "boolean") entry.syncMain = value;
+        else delete entry.syncMain;
+      });
+      return readMainSync(projectPath);
+    },
+    async getMainSyncDefault() {
+      const data = await read({ strict: false });
+      return { syncMain: data.defaults?.syncMain === true };
+    },
+    async setMainSyncDefault(value) {
+      await save((data) => {
+        const defaults = data.defaults && typeof data.defaults === "object" ? data.defaults : {};
+        data.defaults = { ...defaults, syncMain: value === true };
+      });
+      return { syncMain: value === true };
+    },
+    async recordMainSync(projectPath, result) {
+      const value = normalizeMainSync(result);
+      await update(projectPath, (entry) => {
+        if (value) entry.mainSync = value;
+        else delete entry.mainSync;
+      });
     },
   };
 }

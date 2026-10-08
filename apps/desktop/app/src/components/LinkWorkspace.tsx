@@ -8,7 +8,9 @@ import { AttentionButton, ChangesToggle, DiffBar } from "./changes/ChangesChrome
 import { DiffToolbar, useDiffPreferences } from "./changes/DiffPrefs";
 import { useDiffComments } from "./changes/useDiffComments";
 import { formatCommentsMessage } from "../lib/diff-comments";
-import { messageCommands } from "../lib/message-commands";
+import { messageCommands, messageCommandsFrom } from "../lib/message-commands";
+import { useChatMessages } from "../lib/chat-messages";
+import { isLean } from "../lib/state-events";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import type { AgentPorts, LinkState, OpenLink, WorktreeBinding } from "@milagre/shared/model";
 import { chatKeyForScope, scopeKey } from "@milagre/shared/chat-scopes";
@@ -129,7 +131,19 @@ export function LinkWorkspace({
   const attentionChats = useMemo(() => (attentionKey ? attentionKey.split("\n") : []), [attentionKey]);
   const { showAttentionButton } = useSettings();
   const attentionPaths = useMemo(() => [...new Set(attentionChats.map(projectOfKey))], [attentionChats]);
-  const messages = state.messages.filter((message) => message.session_id === sessionId);
+  // A host that keeps messages by Chat (chat-pages-v1) sends states without them: the open Chat reads its own.
+  const lean = isLean(state);
+  const chatWindow = useChatMessages(lean ? owner : null, sessionId);
+  const messages = useMemo(
+    () => (lean ? chatWindow.messages : state.messages.filter((message) => message.session_id === sessionId)),
+    [lean, chatWindow.messages, state.messages, sessionId],
+  );
+  const remoteCount = lean ? chatWindow.total - chatWindow.messages.length : 0;
+  const earlierMessages = useMemo(
+    () => (remoteCount > 0 ? { count: remoteCount, load: chatWindow.loadEarlier, loadAll: chatWindow.loadAll } : undefined),
+    [remoteCount, chatWindow.loadEarlier, chatWindow.loadAll],
+  );
+  const chatMessagesOf = (id: number) => (lean ? (id === sessionId ? messages : []) : state.messages.filter((message) => message.session_id === id));
   const imageDraft = usePastedImages(`${owner}:${sessionId ?? "new"}`);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -491,6 +505,7 @@ export function LinkWorkspace({
                     store={draftStore}
                     projectPath={root}
                     messageScope={owner}
+                    earlier={earlierMessages}
                     messages={messages}
                     imageDraft={imageDraft}
                     onSend={() => void send()}
@@ -665,7 +680,15 @@ export function LinkWorkspace({
               run: () => onSwitchProject(project.path),
             })),
           ]}
-          searchMessages={(query) => messageCommands(state.messages, query, new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)}
+          searchMessages={
+            lean ? undefined : (query) => messageCommands(state.messages, query, new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)
+          }
+          searchMessagesAsync={
+            lean
+              ? async (query) =>
+                  messageCommandsFrom(await window.milagre.searchChats(owner, query), new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)
+              : undefined
+          }
           onClose={() => setCommandsOpen(false)}
           onError={setError}
         />
@@ -676,13 +699,7 @@ export function LinkWorkspace({
           cwd={gitDialog.member.worktreePath}
           base={gitDialog.member.base}
           provider={state.sessions[gitDialog.sessionId]?.provider}
-          chat={gitChatContext(
-            chatTitle(
-              state.sessions[gitDialog.sessionId],
-              state.messages.filter((message) => message.session_id === gitDialog.sessionId),
-            ),
-            state.messages.filter((message) => message.session_id === gitDialog.sessionId),
-          )}
+          chat={gitChatContext(chatTitle(state.sessions[gitDialog.sessionId], chatMessagesOf(gitDialog.sessionId)), chatMessagesOf(gitDialog.sessionId))}
           turnRunning={Boolean(agents.runs[chatKeyForScope(scope, gitDialog.sessionId)])}
           onClose={() => setGitDialog(null)}
           onSendToAgent={(text) => {

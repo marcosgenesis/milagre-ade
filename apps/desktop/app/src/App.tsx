@@ -8,7 +8,7 @@ import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shared/attention";
 import { reportChatAction } from "./lib/chat-action";
-import { stateEvents } from "./lib/state-events";
+import { isLean, stateEvents } from "./lib/state-events";
 import { chatSummary } from "@milagre/shared/chat-summary";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { cliName } from "@milagre/shared/providers";
@@ -91,7 +91,8 @@ import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
-import { messageCommands } from "./lib/message-commands";
+import { messageCommands, messageCommandsFrom } from "./lib/message-commands";
+import { useChatMessages } from "./lib/chat-messages";
 import { RECENT_PROJECTS_CHANGED, type RecentProject } from "./lib/project-list";
 import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
@@ -446,12 +447,22 @@ function App() {
     imageDraft.restore(restoringSend.message.images ?? [], restoringSend.message.files ?? []);
     setRestoringSend(null);
   }, [restoringSend]);
+  // A host that keeps messages by Chat (chat-pages-v1) sends states without them: the open Chat reads its own.
+  const lean = isLean(state);
+  const chatWindow = useChatMessages(lean ? project?.path : null, selectedSession && selectedSession.id > 0 ? selectedSession.id : null);
   const messages = useMemo(
-    () => (state && selectedSession ? state.messages.filter((message) => message.session_id === selectedSession.id) : NO_MESSAGES),
-    [state?.messages, selectedSession?.id],
+    () =>
+      state && selectedSession ? (lean ? chatWindow.messages : state.messages.filter((message) => message.session_id === selectedSession.id)) : NO_MESSAGES,
+    [state?.messages, selectedSession?.id, lean, chatWindow.messages],
   );
   const pendingHere = pendingSend?.view === chatView.current && pendingSend.projectPath === project?.path;
   const pendingCanonicalId = state && pendingSend?.projectPath === project?.path ? pendingChatSessionId(state, pendingSend) : null;
+  const canonicalWindow = useChatMessages(lean && pendingCanonicalId !== null ? project?.path : null, pendingCanonicalId);
+  const remoteCount = lean ? chatWindow.total - chatWindow.messages.length : 0;
+  const earlierMessages = useMemo(
+    () => (remoteCount > 0 ? { count: remoteCount, load: chatWindow.loadEarlier, loadAll: chatWindow.loadAll } : undefined),
+    [remoteCount, chatWindow.loadEarlier, chatWindow.loadAll],
+  );
   // A large Project's state can reach the window after the send's reply; dropping the preview then would hide the new chat until it does.
   useEffect(() => {
     if (!pendingSend?.sent) return;
@@ -468,13 +479,17 @@ function App() {
     () =>
       pendingHere && pendingSend
         ? pendingCanonicalId !== null
-          ? state!.messages.filter((message) => message.session_id === pendingCanonicalId)
+          ? lean
+            ? canonicalWindow.messages
+            : state!.messages.filter((message) => message.session_id === pendingCanonicalId)
           : [...messages, pendingSend.message]
         : messages,
     // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state!.messages (non-null assertion) and the list names state?.messages, the same value; the compiler infers state itself from the assertion
-    [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages],
+    [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages, lean, canonicalWindow.messages],
   );
-  preferredProviderRef.current = messages.length > 0 ? selectedSession?.provider : undefined;
+  // How many messages the open Chat has: its summary's count while its window is still loading from the host.
+  const chatCount = lean ? (selectedSession?.summary?.count ?? messages.length) : messages.length;
+  preferredProviderRef.current = chatCount > 0 ? selectedSession?.provider : undefined;
 
   const agentRuns = useAgentRuns(receiveState, (chatId) => {
     const owner = projectOfKey(chatId);
@@ -840,12 +855,16 @@ function App() {
   }
 
   // "Commit and open PR…" opens the chat, with the dialog over it.
-  function openGitDialog(sessionId: number) {
+  async function openGitDialog(sessionId: number) {
     const latest = openState();
     const session = latest?.sessions[sessionId];
     const worktree = session ? latest.worktrees[session.worktree_id] : undefined;
     if (!latest || !session || !worktree) return;
-    const sessionMessages = latest.messages.filter((message) => message.session_id === sessionId);
+    // The dialog reads the Chat's recent turns (its test commands, what was asked); a lean state has them on the host.
+    const sessionMessages =
+      isLean(latest) && project
+        ? (await window.milagre.readChatMessages(project.path, sessionId, { turns: 30 }).catch(() => ({ messages: [] as ChatMessage[] }))).messages
+        : latest.messages.filter((message) => message.session_id === sessionId);
     openChat(sessionId);
     setGitDialog({
       sessionId,
@@ -1173,7 +1192,7 @@ function App() {
     setNewChatError(null);
     // The picker decides the provider: a chat on another one hands off to it.
     const model = selectedModel;
-    const firstMessage = messages.length === 0;
+    const firstMessage = chatCount === 0;
     const submittedDraft = draftStore.get();
     // A chat bound for a worktree that doesn't exist yet shows no worktree (and none of its PRs) until it does.
     const prepared = preparedTarget.current?.view === view && preparedTarget.current.projectPath === project.path ? preparedTarget.current : null;
@@ -1312,7 +1331,7 @@ function App() {
   // Text the find bar starts with, from a ⌘K message result; ⌘F clears it.
   const [findSeed, setFindSeed] = useState<string | undefined>();
   const findRef = useRef({ open: false, canOpen: false });
-  findRef.current = { open: findOpen, canOpen: view === "chat" && messages.length > 0 };
+  findRef.current = { open: findOpen, canOpen: view === "chat" && chatCount > 0 };
   function openFind(seed?: string) {
     if (!findRef.current.canOpen) return;
     setFindSeed(seed);
@@ -1745,7 +1764,7 @@ function App() {
           run: () => openChatInEditor(sessionId),
         },
         { id: "reveal", label: "Reveal folder", group: "Current chat", icon: "folder", keywords: "finder explorer worktree", run: () => revealChat(sessionId) },
-        ...(messages.length
+        ...(chatCount
           ? [
               {
                 id: "find",
@@ -1977,6 +1996,7 @@ function App() {
                   imageDraft={imageDraft}
                   projectPath={selectedWorktree?.path ?? project.path}
                   messageScope={project.path}
+                  earlier={earlierMessages}
                   onSend={() => void sendMessage()}
                   onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
                   onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
@@ -2108,8 +2128,21 @@ function App() {
         {commandPaletteOpen && (
           <CommandPalette
             commands={buildCommands(project)}
-            searchMessages={(query) =>
-              messageCommands(sidebarState?.messages ?? NO_MESSAGES, query, new Map(chats.map((chat) => [Number(chat.id), chat.label])), openMessage)
+            searchMessages={
+              lean
+                ? undefined
+                : (query) =>
+                    messageCommands(sidebarState?.messages ?? NO_MESSAGES, query, new Map(chats.map((chat) => [Number(chat.id), chat.label])), openMessage)
+            }
+            searchMessagesAsync={
+              lean && project
+                ? async (query) =>
+                    messageCommandsFrom(
+                      await window.milagre.searchChats(project.path, query),
+                      new Map(chats.map((chat) => [Number(chat.id), chat.label])),
+                      openMessage,
+                    )
+                : undefined
             }
             onClose={() => setCommandPaletteOpen(false)}
             onError={setNotice}

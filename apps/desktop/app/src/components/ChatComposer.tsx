@@ -245,8 +245,10 @@ const MessageTranscript = memo(function MessageTranscript({
   onOpenLinkedChat,
   findOpen,
   models,
+  earlier,
 }: Pick<
   ChatComposerProps,
+  | "earlier"
   | "messages"
   | "pendingMessageId"
   | "isSending"
@@ -295,12 +297,24 @@ const MessageTranscript = memo(function MessageTranscript({
     restore();
     return () => cancelAnimationFrame(frame);
   }, [page]);
-  function showEarlier() {
+  // Messages the host still holds before the ones here (chat-pages-v1); find in chat reads them all.
+  const remote = earlier?.count ?? 0;
+  useEffect(() => {
+    if (findOpen && remote > 0) void earlier?.loadAll();
+  }, [findOpen, remote, earlier]);
+  async function showEarlier() {
     const column = earlierButton.current?.parentElement;
     const element = column?.querySelector<HTMLElement>('[data-slot="message"]');
     const viewport = column?.closest<HTMLElement>('[aria-label="Conversation"]');
     if (element && viewport) anchor.current = { element, viewport, top: element.getBoundingClientRect().top };
-    setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
+    if (start > 0 || !earlier) {
+      setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
+      return;
+    }
+    // None left here: read the next turns from the host, then show everything held (no message has this id, and unlike
+    // NaN it equals itself, so the page comparison below settles).
+    await earlier.load();
+    setPage({ chat: chatId, firstId: Number.NEGATIVE_INFINITY });
   }
   const streamingMessage: AppChatMessage | undefined =
     isSending && (streamingText || streamingSteps?.length)
@@ -315,14 +329,14 @@ const MessageTranscript = memo(function MessageTranscript({
   const openingIds = openingMessages.current.ids;
   return (
     <>
-      {start > 0 && (
+      {start + remote > 0 && (
         <button
           ref={earlierButton}
           type="button"
-          onClick={showEarlier}
+          onClick={() => void showEarlier()}
           className="self-center rounded-control border border-line px-3 py-1.5 text-xs text-ink-2 hover:bg-hover"
         >
-          Show earlier messages ({start})
+          Show earlier messages ({start + remote})
         </button>
       )}
       {transcript.map((message) => (
@@ -358,6 +372,8 @@ interface ChatComposerProps {
   onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
+  /** Messages of the Chat the host holds before `messages` (chat-pages-v1): how many, and reading them. */
+  earlier?: { count: number; load: () => Promise<void>; loadAll: () => Promise<void> };
   /** The Project or Link (scope key) the messages belong to, for step output the host keeps out of the state. */
   messageScope?: string;
   messages: AppChatMessage[];
@@ -612,6 +628,7 @@ export function ChatComposer({
   imageDraft,
   projectPath,
   messageScope,
+  earlier,
   messages,
   pendingMessageId,
   draft,
@@ -694,8 +711,10 @@ export function ChatComposer({
     if (isNewChat) setScrolled(false);
   }, [isNewChat]);
 
+  // The runtime knows a Chat by its Project's path, not the Worktree's `projectPath` it runs in.
+  const runtimeChat = typeof chatId === "number" && chatId > 0 && projectPath ? (agentChatId ?? `${messageScope ?? projectPath}#${chatId}`) : null;
   // Designs are read through the Chat's key, which a new Chat and a shared Link Chat don't have here.
-  const artifactChat = typeof chatId === "number" && chatId > 0 && projectPath && scopeKind !== "link" ? `${projectPath}#${chatId}` : null;
+  const artifactChat = scopeKind !== "link" ? runtimeChat : null;
   const artifactSteps = useMemo(() => [...messages.flatMap((message) => message.steps ?? []), ...(streamingSteps ?? [])], [messages, streamingSteps]);
   const userMessages = useMemo(() => messages.filter((message) => message.role === "user").map(({ id, body }) => ({ id, body })), [messages]);
 
@@ -765,6 +784,7 @@ export function ChatComposer({
                   <StepDetailsScope scope={messageScope}>
                     <MessageTranscript
                       findOpen={findOpen}
+                      earlier={earlier}
                       messages={messages}
                       pendingMessageId={pendingMessageId}
                       isSending={isSending}
@@ -836,9 +856,7 @@ export function ChatComposer({
             <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
             <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
             <BrowserTrack key={`browser-${agentChatId ?? chatId}`} chatId={agentChatId} />
-            {!isNewChat && typeof chatId === "number" && chatId > 0 && projectPath && (
-              <SimulatorTrack key={`simulator-${projectPath}-${chatId}`} chatId={`${projectPath}#${chatId}`} />
-            )}
+            {!isNewChat && runtimeChat && <SimulatorTrack key={`simulator-${runtimeChat}`} chatId={runtimeChat} />}
             <SubagentTrack
               key={chatId}
               agents={subagents}

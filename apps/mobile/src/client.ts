@@ -17,6 +17,9 @@ export type OpenProject = {
 };
 /** A Project's streaming turns; `seq` numbers the last event they hold. */
 export type Runs = { runs: AgentRuns; seq?: number };
+/** A page of a Chat's messages, from a host that keeps them by Chat (the snapshot then has none: messagesInChats). */
+export type ChatPage = { messages: ChatMessage[]; hasMore: boolean; total: number };
+export type ChatSearchMatch = { message: { id: number; session_id: number }; score: number; snippet: string; highlight: [number, number]; term: string };
 export type Snapshot = { project: OpenProject; runs: Runs; previewOnly?: false };
 /** Drawer metadata only. Never use it as the Chat screen's snapshot. Older hosts return a full Snapshot. */
 export type ProjectPreview = Omit<Snapshot, "previewOnly"> & { previewOnly: true };
@@ -175,8 +178,10 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     const held = numbered.get(owner);
     // In a header, so the route stays the one an older host answers with an ETag (and a 304 when nothing changed).
     const since = held ? `${held.epoch}:${held.version}` : "none";
+    // X-Milagre-Chat-Pages: the snapshot without messages; the chat screen reads its Chat's as pages (chatMessages).
     const answer = await request<SnapshotAnswer | NumberedAnswer>(`/snapshot?projectPath=${encodeURIComponent(owner)}`, undefined, timeoutMs, {
       "X-Milagre-Snapshot-Since": since,
+      "X-Milagre-Chat-Pages": "1",
     });
     if (!("epoch" in answer) || typeof answer.version !== "number") {
       numbered.delete(owner);
@@ -359,6 +364,16 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     /** The image source to show: the authenticated URL directly, or the cached file through the relay. */
     image: (projectPath: string, path: string): { uri: string; headers?: Record<string, string> } | Promise<{ uri: string }> =>
       relay || lanNow() ? relayImage(projectPath, path) : media(projectPath, path),
+    /** A page of one Chat's messages: its latest turns, or those before the message `before`. */
+    chatMessages: (projectPath: string, chatId: number, options: { before?: number; turns?: number } = {}) =>
+      request<ChatPage>(
+        `/chat-messages?projectPath=${encodeURIComponent(projectPath)}&chatId=${chatId}` +
+          (options.before !== undefined ? `&before=${options.before}` : "") +
+          (options.turns !== undefined ? `&turns=${options.turns}` : ""),
+      ),
+    /** Matches across the Chats of a Project or Link, best first: where each is and what matched. */
+    searchChats: (projectPath: string, query: string) =>
+      request<ChatSearchMatch[]>(`/search?projectPath=${encodeURIComponent(projectPath)}&q=${encodeURIComponent(query)}`),
     /** One message with its tools' full output; the snapshot leaves that out. */
     message: (projectPath: string, id: number) => request<ChatMessage>(`/message?projectPath=${encodeURIComponent(projectPath)}&id=${id}`),
     snapshot: async (projectPath: string) => phoneSnapshot(await readSnapshot(projectPath)),

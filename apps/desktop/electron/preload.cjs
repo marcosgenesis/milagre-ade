@@ -83,6 +83,15 @@ const bridge = {
   saveFilesToCopy: (projectPath, patterns) => ipcRenderer.invoke("files-to-copy:save", projectPath, patterns),
   readWorktreeSetup: (projectPath) => ipcRenderer.invoke("worktree-setup:read", projectPath),
   saveWorktreeSetup: (projectPath, command) => ipcRenderer.invoke("worktree-setup:save", projectPath, command),
+  readMainSync: (projectPath) => ipcRenderer.invoke("main-sync:read", projectPath),
+  saveMainSync: (projectPath, override) => ipcRenderer.invoke("main-sync:save", projectPath, override),
+  readMainSyncDefault: () => ipcRenderer.invoke("main-sync:default:read"),
+  saveMainSyncDefault: (value) => ipcRenderer.invoke("main-sync:default:save", value),
+  onMainSyncStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("main-sync:status", listener);
+    return () => ipcRenderer.removeListener("main-sync:status", listener);
+  },
   onWorktreeRenamed: (callback) => {
     const listener = (_event, rename) => callback(rename);
     ipcRenderer.on("worktree:renamed", listener);
@@ -164,6 +173,8 @@ const bridge = {
   getRuns: () => ipcRenderer.invoke("chat:runs"),
   getMessage: (scope, id) => ipcRenderer.invoke("chat:message", scope, id),
   readState: (scope) => ipcRenderer.invoke("state:read", scope),
+  readChatMessages: (scope, chatId, options) => ipcRenderer.invoke("chat:messages", scope, chatId, options),
+  searchChats: (scope, query, options) => ipcRenderer.invoke("chat:search", scope, query, options),
   listAccountScopes: () => ipcRenderer.invoke("accounts:scopes"),
   getProjectAccounts: (scopeKey, refresh) => ipcRenderer.invoke("accounts:scope", scopeKey, refresh),
   assignProjectAccount: (scopeKey, provider, accountId) => ipcRenderer.invoke("accounts:assign", scopeKey, provider, accountId),

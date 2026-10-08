@@ -33,7 +33,10 @@ test("persistent host keeps its token and saved Chat across restart with private
   const { createClient } = await import("../apps/mobile/src/client.ts");
   const mobile = createClient({ address: next.url, token: next.token });
   const reopened = await mobile.call("project:open", [project]);
-  assert.equal((await mobile.snapshot(reopened.path)).project.state.messages.at(-1).body, "Saved before restart");
+  // The snapshot leaves messages out; the Chat's come as a page.
+  const saved = (await mobile.snapshot(reopened.path)).project.state;
+  const chatId = Number(Object.keys(saved.sessions).find((id) => saved.sessions[id].summary?.count));
+  assert.equal((await mobile.chatMessages(reopened.path, chatId)).messages.at(-1).body, "Saved before restart");
   await assert.rejects(startMobileHost({ dataDir, port: 0 }), /owned/);
 });
 

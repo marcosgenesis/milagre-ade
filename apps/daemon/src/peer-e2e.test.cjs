@@ -10,6 +10,25 @@ const { connect } = require("./client.cjs");
 const { readIdentity } = require("./relay-identity.cjs");
 const { startLocalRelay, connectDesktop, connectPhone, until } = require("./relay-test-kit.cjs");
 
+const PIECE = 512 * 1024;
+
+/** Waits for `promise`, failing the test instead of hanging the suite when it never settles. */
+function within(promise, label, ms = 10_000) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** True when every 512 KiB piece boundary of `json`'s UTF-8 bytes (the frame writer's split) falls inside a character. */
+function cutsEveryBoundary(json) {
+  const bytes = Buffer.from(json);
+  const boundaries = [];
+  for (let at = PIECE; at < bytes.length; at += PIECE) boundaries.push(at);
+  return boundaries.length >= 2 && boundaries.every((at) => (bytes[at] & 0xc0) === 0x80);
+}
+
 /**
  * A throwaway Mac: its own data folder, a local relay in place of relay.milagre.cloud, the LAN on a port the OS picks
  * on 127.0.0.1, and a clock the test moves (pairing windows). Never Victor's data folder, 8797 or 8798.
@@ -19,7 +38,6 @@ async function macWithRelay(t) {
   const dataDir = path.join(directory, "profile");
   const project = path.join(directory, "project");
   await fs.mkdir(project);
-  execFileSync("git", ["init", "-b", "main", project], { stdio: "ignore" });
   const clock = { now: 1_000_000 };
   const sockets = [];
   let daemon;
@@ -34,6 +52,7 @@ async function macWithRelay(t) {
       await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+  execFileSync("git", ["init", "-b", "main", project], { stdio: "ignore" });
   const relay = await startLocalRelay(t);
   daemon = await startDaemon({
     dataDir,
@@ -86,14 +105,32 @@ test("a desktop pairs through the relay in the pairing window and drives this Ma
   await mac.client.call("chat:patch", [mac.project, chatId, { title: "Set on this Mac" }]);
   await desktop.event("project:state", (payload) => payload.path === mac.project && payload.state?.sessions?.[chatId]?.title === "Set on this Mac");
 
-  // A request and its reply over 768 KiB travel in parts through the relay, and piece boundaries cut characters.
-  const big = "ação🙂".repeat(150_000);
+  // A request and its reply over 768 KiB travel in parts through the relay. Each frame's JSON is built here exactly as it
+  // goes on the wire, with an ASCII pad (the chosen k) so that every 512 KiB piece boundary, in the request and in the
+  // reply, lands on a UTF-8 continuation byte: the pieces cut characters, whatever the temp folder's path length.
+  const id = desktop.frames.filter((frame) => frame.id !== undefined).length + 1; // the desktop's next request id
+  const content = "ação" + "🙂".repeat(350_000); // 1.4 MB: boundaries at 512 KiB and 1 MiB
+  const requestJson = (value) => JSON.stringify({ v: 1, id, method: "worktree:pull-requests", args: [mac.project, [value]] });
+  const replyJson = (value) => JSON.stringify({ v: 1, id, result: [value] });
+  let big;
+  for (let k = 0; k < 400 && big === undefined; k++) {
+    const candidate = "a".repeat(k) + content;
+    if (cutsEveryBoundary(requestJson(candidate)) && cutsEveryBoundary(replyJson(candidate))) big = candidate;
+  }
+  assert.ok(big, "a pad length that cuts a character at every piece boundary of both frames");
+  assert.ok(cutsEveryBoundary(requestJson(big)), "the request's piece boundaries fall inside characters");
+  assert.ok(cutsEveryBoundary(replyJson(big)), "the reply's piece boundaries fall inside characters");
   const before = desktop.messages.filter((message) => message.t === "part").length;
-  assert.deepEqual((await desktop.call("worktree:pull-requests", [mac.project, [big]])).result, [big]);
+  const reply = await desktop.call("worktree:pull-requests", [mac.project, [big]]);
+  assert.equal(reply.id, id);
+  assert.equal(JSON.stringify(reply), replyJson(big), "the reply frame is the one whose boundaries were checked");
+  assert.deepEqual(reply.result, [big]);
   assert.ok(desktop.messages.filter((message) => message.t === "part").length - before >= 3, "the reply came in parts");
 
   // Phone status changes broadcast phone:status, with the link and its token: none of it reaches the desktop, while an
   // allowed event sent after them does (events arrive in order, so the earlier ones had their chance).
+  const heard = [];
+  mac.client.on("event", (event) => heard.push(event.channel));
   await mac.client.call("phone:open-pairing");
   await mac.client.call("phone:set-lan", [false]);
   await mac.client.call("phone:set-lan", [true]);
@@ -101,6 +138,8 @@ test("a desktop pairs through the relay in the pairing window and drives this Ma
   await mac.client.call("chat:patch", [mac.project, chatId, { title: "Set after the phone changes" }]);
   await desktop.event("project:state", (payload) => payload.state?.sessions?.[chatId]?.title === "Set after the phone changes");
   await desktop.call("daemon:status");
+  // The Mac's own window did hear phone:status in the same stretch, so the desktop's silence is the filter, not a quiet daemon.
+  assert.ok(heard.includes("phone:status"), "phone:status was emitted");
   assert.deepEqual(
     desktop.frames.filter((frame) => frame.event?.channel?.startsWith("phone:")),
     [],
@@ -147,8 +186,8 @@ test("removing a desktop closes it on the relay and the LAN, and it pairs again 
   const key = b64url(desktop.key.publicKey);
 
   await mac.client.call("devices:remove", [key]);
-  assert.equal((await desktop.closed).code, 1000);
-  assert.equal((await lan.closed).code, 1000);
+  assert.equal((await within(desktop.closed, "the desktop socket to close")).code, 1000);
+  assert.equal((await within(lan.closed, "the lan socket to close")).code, 1000);
   assert.deepEqual(await mac.client.call("devices:list"), []);
   // The window it was removed in is still open; its redial is refused on both routes.
   assert.deepEqual((await mac.dial(connectDesktop, { key: desktop.key }).hello()).error, { t: "error", code: "unknown-phone" });
@@ -174,7 +213,7 @@ test("a phone removed while the pairing window is open stays out until a later w
     [[key, "phone", "Victor's iPhone"]],
   );
   await mac.client.call("devices:remove", [key]);
-  assert.equal((await phone.closed).code, 1000);
+  assert.equal((await within(phone.closed, "the phone socket to close")).code, 1000);
   // Settings › Devices still shows the QR, so the window is open: the phone redials at once and is refused.
   assert.deepEqual((await mac.dial(connectPhone, { key: phone.key }).hello()).error, { t: "error", code: "unknown-phone" });
   mac.clock.now += 1000;

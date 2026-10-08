@@ -1039,10 +1039,13 @@ export function MainSyncDefaultSetting() {
   const [syncMain, setSyncMain] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    window.milagre.readMainSyncDefault().then(
-      (value) => setSyncMain(value.syncMain),
-      () => setSyncMain(false),
-    );
+    // Started inside a promise so a bridge without the command (an older host) reads as off instead of throwing.
+    Promise.resolve()
+      .then(() => window.milagre.readMainSyncDefault())
+      .then(
+        (value) => setSyncMain(value?.syncMain === true),
+        () => setSyncMain(false),
+      );
   }, []);
   async function change(next: boolean) {
     setError(null);
@@ -1074,18 +1077,21 @@ export function MainSyncSetting({ projectPath }: { projectPath: string }) {
   }, []);
   useEffect(() => {
     let live = true;
-    window.milagre.readMainSync(projectPath).then(
-      (value) => live && setSync(value),
-      (failure) => live && setError(ipcErrorMessage(failure)),
-    );
-    const stop = window.milagre.onMainSyncStatus((status) => {
+    // Started inside a promise, like the default above, so a bridge without the command shows an error, not a crash.
+    Promise.resolve()
+      .then(() => window.milagre.readMainSync(projectPath))
+      .then(
+        (value) => live && setSync(value ?? null),
+        (failure) => live && setError(ipcErrorMessage(failure)),
+      );
+    const stop = window.milagre.onMainSyncStatus?.((status) => {
       if (status.projectPath !== projectPath) return;
       setNow(Date.now());
       setSync((current) => (current ? { ...current, last: status.last } : current));
     });
     return () => {
       live = false;
-      stop();
+      stop?.();
     };
   }, [projectPath]);
   async function change(choice: MainSyncChoice) {

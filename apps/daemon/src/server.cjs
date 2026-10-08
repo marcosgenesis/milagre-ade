@@ -216,10 +216,10 @@ async function startDaemon({
   const clients = new Map();
   const views = new Map();
   let eventSeq = 0;
-  // Sockets that take state patches, and per scope the last state sent and its number. The numbers start again with
+  // Connections that take state patches, and per scope the last state sent and its number. The numbers start again with
   // each host (epoch), so a client that reconnects to a new one reads its states again.
-  // Socket -> { messages }: false for a client that reads messages by Chat (chat:messages) and takes states without them.
-  const patchSockets = new Map();
+  // Connection -> { messages }: false for a client that reads messages by Chat (chat:messages) and takes states without them.
+  const patchClients = new Map();
   const epoch = randomUUID();
   const sentStates = new Map();
   // Per scope, what a snapshot holds besides the state (a Project's path and name, a Link's definition).
@@ -260,9 +260,9 @@ async function startDaemon({
     if (!clients.size) return;
     // An event that still doesn't fit is skipped, never the connection. Each form is encoded once, when a client takes it.
     let whole;
-    for (const [socket, connection] of clients) {
+    for (const [key, connection] of clients) {
       try {
-        const taker = patchSockets.get(socket);
+        const taker = patchClients.get(key);
         const frame = patched && taker ? (taker.messages ? patched.full() : patched.lean()) : (whole ??= eventFrame(channel, payload, seq, inlineLimit));
         connection.send(null, frame.json, frame.bytes);
       } catch (error) {
@@ -281,7 +281,7 @@ async function startDaemon({
     const previous = sentStates.get(scope);
     const version = (previous?.version ?? 0) + 1;
     sentStates.set(scope, { version, state: payload.state });
-    if (![...patchSockets.keys()].some((socket) => clients.has(socket))) return null;
+    if (![...patchClients.keys()].some((key) => clients.has(key))) return null;
     const { state, ...rest } = payload;
     const frame = (body) => eventFrame(channel, body, seq, Infinity);
     const numbered = (patchBody) => {
@@ -332,54 +332,38 @@ async function startDaemon({
     onPaired: (info) => broadcast("phone:paired", info),
     ...phoneOptions,
   });
-  const server = net.createServer((socket) => {
-    if (stopping || (requireAuthentication && unauthenticated >= 32)) {
-      socket.destroy();
-      return;
-    }
-    sockets.add(socket);
-    let authenticated = !requireAuthentication;
+  /**
+   * One client of the daemon, whatever carries its frames: the Unix socket below, and (PR 2) a paired desktop's channel.
+   * The carrier supplies `send(message, json, bytes)`, which writes one frame as wire()'s send does (it may throw
+   * FRAME_TOO_LARGE, and returns false once closed); `end()`, which closes after what is queued; `destroy()`, which
+   * closes now; and `isClosed()`. `requireAuthentication`: the first requests must be the daemon:authenticate handshake
+   * (the socket on Windows). `policy.denies(method)` refuses a method before it runs and leaves it out of daemon:status;
+   * the socket has none. The carrier hands the result each parsed request (`receive`), a framing error (`invalid`) and,
+   * once, its own close (`close`).
+   */
+  function acceptConnection({ send, end, destroy, isClosed, requireAuthentication: mustAuthenticate = false, policy = null }) {
+    let authenticated = !mustAuthenticate;
     let challenge;
     let authenticationRejected = false;
+    let closed = false;
     if (!authenticated) unauthenticated++;
-    const authenticationTimeout = authenticated ? null : setTimeout(() => socket.destroy(), authTimeoutMs);
+    const authenticationTimeout = authenticated ? null : setTimeout(destroy, authTimeoutMs);
     authenticationTimeout?.unref();
     const inflight = new Set();
     // Requests whose reply waits for paging room: they don't hold a MAX_PENDING slot, so a reader's page reads get through.
     const awaitingPages = new Set();
     // Result pages and paged snapshots share one store and its rules.
     const resultPages = createResultPages(maxFrameBytes, { ttlMs: pagesTtlMs, budgetChars: pagesBudgetChars });
-    socket.once("close", () => {
-      resultPages.clear();
-    });
     const view = { focused: false, projectPath: null, chatId: null };
-    // Never accept an actor supplied in RPC arguments. Each authenticated socket owns its viewer capabilities.
+    // Never accept an actor supplied in RPC arguments. Each authenticated connection owns its viewer capabilities.
     const context = Object.freeze({ clientId: randomUUID() });
-    if (authenticated) views.set(socket, view);
-    const connection = wire(socket, {
-      maxFrameBytes,
-      onInvalid(error) {
-        connection.send({ v: VERSION, id: null, error: { code: error.code, message: error.message } });
-        socket.end();
-      },
-      onMessage(request) {
-        void dispatch(request).catch((error) => {
-          onError(error);
-          socket.destroy();
-        });
-      },
-    });
-    if (authenticated) clients.set(socket, connection);
-    socket.on("error", () => {});
-    socket.on("close", () => {
-      clearTimeout(authenticationTimeout);
-      if (!authenticated) unauthenticated--;
-      sockets.delete(socket);
-      clients.delete(socket);
-      views.delete(socket);
-      patchSockets.delete(socket);
-      Promise.resolve(runtime.disconnect?.(context.clientId)).catch(onError);
-    });
+    // This connection in clients, views and patchClients.
+    const key = Symbol("connection");
+    const connection = { send };
+    if (authenticated) {
+      clients.set(key, connection);
+      views.set(key, view);
+    }
     async function dispatch(request) {
       const validId = Number.isSafeInteger(request?.id) || (typeof request?.id === "string" && request.id.length <= 128);
       const id = validId ? request.id : null;
@@ -409,14 +393,14 @@ async function startDaemon({
         ) {
           authenticationRejected = true;
           fail("UNAUTHORIZED", "Local daemon authentication is required");
-          socket.end();
+          end();
           return;
         }
         authenticated = true;
         unauthenticated--;
         clearTimeout(authenticationTimeout);
-        clients.set(socket, connection);
-        views.set(socket, view);
+        clients.set(key, connection);
+        views.set(key, view);
         connection.send({ v: VERSION, id, result: { authenticated: true } });
         return;
       }
@@ -432,9 +416,13 @@ async function startDaemon({
         fail("CLOSING", "The daemon is closing");
         return;
       }
+      if (policy?.denies(request.method)) {
+        fail("NOT_AVAILABLE_REMOTELY", "Not available on a remote computer");
+        return;
+      }
       if (inflight.has(id) || inflight.size - awaitingPages.size >= MAX_PENDING) {
         fail("TOO_MANY_REQUESTS", "Request ID is in use or too many requests are pending");
-        socket.end();
+        end();
         return;
       }
       inflight.add(id);
@@ -449,7 +437,7 @@ async function startDaemon({
       // Serialised once. A client that reads pages (`pages: true`) gets anything over a quarter of a frame as a page
       // count; one that can't gets it whole up to the frame limit, and a clear FRAME_TOO_LARGE error past it.
       async function reply(result) {
-        const resultJson = encode(patchSockets.get(socket)?.messages === false ? leanResult(result) : result);
+        const resultJson = encode(patchClients.get(key)?.messages === false ? leanResult(result) : result);
         if (request.pages === true && !PAGE_METHODS.has(request.method) && resultJson.length > inlineLimit) {
           const pages = await capturePages(resultJson);
           if (pages) connection.send({ v: VERSION, id, pages });
@@ -467,7 +455,7 @@ async function startDaemon({
             dataDir,
             socketPath,
             capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1", "mobile-push-v1", STATE_PATCHES, CHAT_PAGES],
-            methods: [...runtime.methods, ...PHONE_METHODS, ...PUSH_METHODS, ...STATE_METHODS],
+            methods: [...runtime.methods, ...PHONE_METHODS, ...PUSH_METHODS, ...STATE_METHODS].filter((method) => !policy?.denies(method)),
           };
         else if (request.method === "phone:status") result = phone.status();
         // Settings shows the reply, which arrives after the status events: answer with the settled status, not the
@@ -491,7 +479,7 @@ async function startDaemon({
         else if (request.method === "push:focus") result = push.focus(request.args[0]);
         else if (request.method === "daemon:snapshot") {
           const whole = runtime.snapshot();
-          const snapshot = { ...(patchSockets.get(socket)?.messages === false ? leanResult(whole) : whole), eventSeq };
+          const snapshot = { ...(patchClients.get(key)?.messages === false ? leanResult(whole) : whole), eventSeq };
           if (request.args[0]?.paged === true) {
             // Serialize once: all pages describe the same instant and watermark.
             const pages = await capturePages(JSON.stringify(snapshot));
@@ -501,9 +489,9 @@ async function startDaemon({
         } else if (request.method === "daemon:snapshot-page" || request.method === "daemon:result-page") result = resultPages.page(...request.args);
         else if (request.method === "daemon:flush") result = await runtime.flush();
         else if (request.method === "daemon:state-patches") {
-          patchSockets.set(socket, { messages: request.args[0]?.messages !== false });
+          patchClients.set(key, { messages: request.args[0]?.messages !== false });
           result = { epoch };
-        } else if (request.method === "state:read") result = await readState(request.args[0], { messages: patchSockets.get(socket)?.messages !== false });
+        } else if (request.method === "state:read") result = await readState(request.args[0], { messages: patchClients.get(key)?.messages !== false });
         else if (request.method === "daemon:focus") {
           const next = request.args[0];
           if (!next || typeof next.focused !== "boolean") throw new Error("Expected a focused boolean");
@@ -521,7 +509,7 @@ async function startDaemon({
         else if (request.method === "project:current" && view.projectPath) result = await runtime.invoke("project:snapshot", [view.projectPath]);
         else result = await runtime.invoke(request.method, request.args, context);
         // An open may finish after its caller disconnects. Dispose that late session as well.
-        if (socket.destroyed && /^(simulator|browser):/.test(request.method)) await runtime.disconnect?.(context.clientId);
+        if (isClosed() && /^(simulator|browser):/.test(request.method)) await runtime.disconnect?.(context.clientId);
         if (request.method === "link:open" && result?.link) view.linkId = result.link.id;
         if (["project:open", "project:current", "project:switch"].includes(request.method) && result?.path) view.projectPath = result.path;
         await reply(result ?? null);
@@ -532,6 +520,51 @@ async function startDaemon({
         inflight.delete(id);
       }
     }
+    return {
+      receive(request) {
+        void dispatch(request).catch((error) => {
+          onError(error);
+          destroy();
+        });
+      },
+      invalid(error) {
+        connection.send({ v: VERSION, id: null, error: { code: error.code, message: error.message } });
+        end();
+      },
+      close() {
+        if (closed) return;
+        closed = true;
+        resultPages.clear();
+        clearTimeout(authenticationTimeout);
+        if (!authenticated) unauthenticated--;
+        clients.delete(key);
+        views.delete(key);
+        patchClients.delete(key);
+        Promise.resolve(runtime.disconnect?.(context.clientId)).catch(onError);
+      },
+    };
+  }
+
+  const server = net.createServer((socket) => {
+    if (stopping || (requireAuthentication && unauthenticated >= 32)) {
+      socket.destroy();
+      return;
+    }
+    sockets.add(socket);
+    let framed;
+    const client = acceptConnection({
+      send: (message, json, bytes) => framed.send(message, json, bytes),
+      end: () => socket.end(),
+      destroy: () => socket.destroy(),
+      isClosed: () => socket.destroyed,
+      requireAuthentication,
+    });
+    framed = wire(socket, { maxFrameBytes, onInvalid: (error) => client.invalid(error), onMessage: (request) => client.receive(request) });
+    socket.on("error", () => {});
+    socket.on("close", () => {
+      sockets.delete(socket);
+      client.close();
+    });
   });
   let socketPath;
   async function close() {
@@ -575,6 +608,6 @@ async function startDaemon({
     await close();
     throw error;
   }
-  return { socketPath, close };
+  return { socketPath, close, acceptConnection };
 }
 module.exports = { startDaemon, createResultPages };

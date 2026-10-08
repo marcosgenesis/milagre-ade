@@ -1031,7 +1031,9 @@ export default function ChatScreen() {
                     onPress={() => router.push({ pathname: "/permission-sheet", params: { chatId, ...(run ? { busy: "1" } : {}) } })}
                   />
                   <View style={{ flex: 1 }} />
-                  {contextUsage && contextUsage.size > 0 && <ContextRing {...contextUsage} />}
+                  {contextUsage && contextUsage.size > 0 && params.id && (
+                    <ContextRing {...contextUsage} onPress={() => router.push({ pathname: "/context-sheet", params: { id: params.id } })} />
+                  )}
                   {run && !draft.trim() && !attachments.length && (
                     <IconButton
                       label="Stop"

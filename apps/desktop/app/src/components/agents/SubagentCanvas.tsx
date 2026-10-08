@@ -1,6 +1,7 @@
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon, Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { agentActivityLabel, subagentActivityLabel } from "@milagre/shared/agent-activity";
 import type { Subagent, SubagentCommunication } from "@milagre/shared/model";
 import { subagentActive, subagentFinished } from "../../lib/subagents";
 import { ScrollArea } from "../primitives/ScrollArea";
@@ -21,15 +22,6 @@ import {
 } from "./subagent-canvas-layout";
 import "./subagent-canvas.css";
 
-const labels: Record<Subagent["status"], string> = {
-  initializing: "Waking up",
-  running: "Working",
-  waiting: "Waiting",
-  completed: "Done",
-  failed: "Needs attention",
-  cancelled: "Stopped",
-  unknown: "Status unavailable",
-};
 const colors = ["mint", "blue", "peach", "lilac"];
 type Gesture = { pointerId: number; start: Point; origin: Point; nodeId?: string; moved: boolean };
 
@@ -39,12 +31,14 @@ export const SubagentCanvas = memo(function SubagentCanvas({
   agents,
   working,
   waiting,
+  activity,
   onClose,
 }: {
   opened: boolean;
   agents: Subagent[];
   working: boolean;
   waiting: boolean;
+  activity?: string;
   onClose: () => void;
 }) {
   const panel = useRef<HTMLElement>(null);
@@ -271,7 +265,7 @@ export const SubagentCanvas = memo(function SubagentCanvas({
     {
       id: MAIN_AGENT,
       title: "God",
-      status: waiting && working ? "Waiting" : working ? "Working" : godAwake ? "Awake" : "Sleeping",
+      status: waiting && working ? "Waiting" : working ? agentActivityLabel(activity) : godAwake ? "Awake" : "Sleeping",
       activity: waiting && working ? "Waiting for subagent results" : working ? "Working on your request" : "No turn in progress",
       active: working,
       sleeping: !working,
@@ -282,8 +276,8 @@ export const SubagentCanvas = memo(function SubagentCanvas({
     ...visible.map((agent) => ({
       id: agent.id,
       title: canvasAgentName(indices.get(agent.id)!),
-      status: labels[agent.status],
-      activity: `${agent.title}\n${agent.latestActivity || labels[agent.status]}`,
+      status: subagentActivityLabel(agent),
+      activity: `${agent.title}\n${agent.latestActivity || subagentActivityLabel(agent)}`,
       active: subagentActive(agent),
       sleeping: false,
       dead: subagentFinished(agent),
@@ -382,24 +376,6 @@ export const SubagentCanvas = memo(function SubagentCanvas({
                 data-status={node.agent?.status ?? (working ? "running" : "completed")}
                 style={{ left: points[node.id].x, top: points[node.id].y }}
               >
-                {node.active && (
-                  <span
-                    className="subagent-thinking-bubble"
-                    data-speaking={Boolean(message)}
-                    aria-label={message ? `Message to ${name(message.toId)}` : node.status}
-                  >
-                    <svg viewBox="0 0 64 46" aria-hidden="true">
-                      <path d="M 12 32 C 2 32 1 23 7 19 C 2 10 12 3 20 7 C 24 0 38 1 42 7 C 54 2 63 11 57 19 C 66 27 55 38 47 33 C 39 41 29 38 25 34 C 18 40 10 38 12 32 Z" />
-                      <ellipse cx="13" cy="41" rx="4" ry="2.8" />
-                      <circle cx="5" cy="45" r="1.5" />
-                    </svg>
-                    <span>
-                      <i />
-                      <i />
-                      <i />
-                    </span>
-                  </span>
-                )}
                 {node.sleeping && !(node.id === MAIN_AGENT && godAwake) && (
                   <span className="subagent-sleep" aria-hidden="true">
                     <i>z</i>

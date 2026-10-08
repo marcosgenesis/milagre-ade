@@ -1380,7 +1380,10 @@ function pullDownHost() {
   const modifiers = new Proxy({}, { get: (_, name) => (name === "shapes" ? { rectangle: () => "rectangle" } : (value) => ({ name, value })) });
   const { PullDown } = load("ui.tsx", {
     react: { forwardRef: (fn) => fn },
-    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react/jsx-runtime": {
+      jsx: (type, props, key) => (typeof type === "function" && type.name === "NativeMenuSection" ? type(props) : jsx(type, props, key)),
+      jsxs: (type, props, key) => (typeof type === "function" && type.name === "NativeMenuSection" ? type(props) : jsx(type, props, key)),
+    },
     "react-native": {
       Platform: { OS: "ios" },
       Keyboard: { dismiss() {} },
@@ -1391,7 +1394,7 @@ function pullDownHost() {
     },
     "@expo/ui": {},
     "@expo/ui/swift-ui": Object.fromEntries(
-      ["Button", "Host", "Menu", "Picker", "Section", "Text", "Toggle", "HStack", "Image", "Rectangle"].map((name) => [name, `IOS${name}`]),
+      ["Button", "Host", "Menu", "Picker", "Section", "Text", "Toggle", "HStack", "Image", "Label", "Rectangle"].map((name) => [name, `IOS${name}`]),
     ),
     "@expo/ui/swift-ui/modifiers": modifiers,
     "@expo/ui/community/menu": { MenuView: "MenuView" },
@@ -1401,6 +1404,7 @@ function pullDownHost() {
     "./icons": { Icon: "Icon" },
     "./confirm-store": { confirmSheet: (...args) => sheets.push(args) },
     "./choice-store": require("../apps/mobile/src/choice-store.ts"),
+    "./native-picker-icon": { NativePickerIcon: "NativePickerIcon" },
   });
   return { PullDown, sheets };
 }
@@ -1460,6 +1464,40 @@ test("header switchers keep the shared native overlay without hosting React view
   t.mock.timers.tick(250);
   assert.deepEqual(selected, ["other"]);
   assert.equal(sheets.length, 0);
+});
+
+test("isolation uses desktop artwork inside SwiftUI labels and preserves delayed selection", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { PullDown } = pullDownHost();
+  const screen = chatHost();
+  const trigger = find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose isolation");
+  const rendered = PullDown(trigger.props);
+  const menu = find(rendered, (node) => node.type === "IOSMenu");
+  const labels = [];
+  find(menu, (node) => {
+    if (node.type === "IOSLabel") labels.push(node);
+    return false;
+  });
+  assert.deepEqual(
+    Array.from(labels, (node) => node.props.title),
+    ["Local", "New worktree"],
+  );
+  assert.deepEqual(
+    Array.from(labels, (node) => node.props.icon.props.name),
+    ["laptop", "fork"],
+  );
+  assert.equal(
+    find(menu.props.label, (node) => node.type === "View"),
+    undefined,
+    "React views stay outside SwiftUI",
+  );
+  assert.equal(menu.props.label.type, "IOSRectangle", "the desktop SVG trigger stays outside SwiftUI");
+  const choices = find(menu, (node) => node.type === "IOSPicker");
+  assert.equal(choices.props.selection, "local");
+  choices.props.onSelectionChange("worktree");
+  assert.equal(find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose isolation").props.nativeTrigger.title, "Local");
+  t.mock.timers.tick(250);
+  assert.equal(find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Choose isolation").props.nativeTrigger.title, "New worktree");
 });
 
 test("the branch picker opens searchable choices while short action menus remain native", () => {

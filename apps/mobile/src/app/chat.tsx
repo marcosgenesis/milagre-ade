@@ -15,7 +15,6 @@ import {
   GitForkIcon,
   LaptopIcon,
   StopIcon,
-  UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
 import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
@@ -874,17 +873,26 @@ export default function ChatScreen() {
                       nativeTrigger={{
                         title: isolation === "local" ? "Local" : "New worktree",
                         systemImage: isolation === "local" ? "laptopcomputer" : "arrow.triangle.branch",
+                        icon: isolation === "local" ? "laptop" : "fork",
                         disabled: targetDisabled,
                       }}
                       sections={[
                         {
                           title: "Isolation",
                           items: [
-                            { id: "local", title: "Local", systemImage: "laptopcomputer", checked: isolation === "local", disabled: targetDisabled },
+                            {
+                              id: "local",
+                              title: "Local",
+                              systemImage: "laptopcomputer",
+                              icon: "laptop",
+                              checked: isolation === "local",
+                              disabled: targetDisabled,
+                            },
                             {
                               id: "worktree",
                               title: "New worktree",
                               systemImage: "arrow.triangle.branch",
+                              icon: "fork",
                               checked: isolation === "worktree",
                               disabled: targetDisabled,
                             },
@@ -907,7 +915,7 @@ export default function ChatScreen() {
                       >
                         <Icon icon={isolation === "local" ? LaptopIcon : GitForkIcon} tone="ink2" size={14} />
                         <Text style={styles.label}>{isolation === "local" ? "Local" : "New worktree"}</Text>
-                        <Icon icon={UnfoldMoreIcon} tone="ink3" size={13} />
+                        <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
                       </View>
                     </PullDown>
                     <PullDown
@@ -960,7 +968,7 @@ export default function ChatScreen() {
                         <Text numberOfLines={1} style={[styles.label, { flexShrink: 1 }]}>
                           {branchName}
                         </Text>
-                        <Icon icon={UnfoldMoreIcon} tone="ink3" size={13} />
+                        <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
                       </View>
                     </PullDown>
                   </View>

@@ -21,6 +21,7 @@ import {
   HStack as IOSHStack,
   Host as IOSHost,
   Image as IOSImage,
+  Label as IOSLabel,
   Menu as IOSMenu,
   Picker as IOSPicker,
   Rectangle,
@@ -47,6 +48,7 @@ import {
   tag,
   controlSize,
   rotationEffect,
+  opacity,
 } from "@expo/ui/swift-ui/modifiers";
 import { MenuView, type MenuAction } from "@expo/ui/community/menu";
 import * as Haptics from "expo-haptics";
@@ -54,6 +56,7 @@ import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { colors as palette, fonts } from "./theme";
 import { confirmSheet } from "./confirm-store";
 import { showChoiceSheet } from "./choice-store";
+import { NativePickerIcon, type NativePickerIconName } from "./native-picker-icon";
 import { Icon, type IconData, type Tone } from "./icons";
 
 export const colors = { ...palette, bg: palette.page, panel: palette.surface, text: palette.ink, muted: palette.ink2, error: palette.red };
@@ -462,10 +465,20 @@ export function CircleButton({ label, icon, onPress, filled = false }: { label: 
     </Pressable>
   );
 }
-export type MenuItem = { id: string; title: string; systemImage?: string; checked?: boolean; destructive?: boolean; disabled?: boolean; subtitle?: string };
+type MenuItem = {
+  id: string;
+  title: string;
+  systemImage?: string;
+  icon?: NativePickerIconName;
+  checked?: boolean;
+  destructive?: boolean;
+  disabled?: boolean;
+  subtitle?: string;
+};
 export type MenuSection = { title?: string; items: MenuItem[] };
 type NativeMenuTrigger = {
   title?: string;
+  icon?: NativePickerIconName;
   systemImage: string;
   disabled?: boolean;
   maxWidth?: number;
@@ -473,6 +486,50 @@ type NativeMenuTrigger = {
   menuTint?: ColorValue;
   rotation?: number;
 };
+/** Custom native choice labels need a Picker so UIKit retains its selected checkmark. */
+function NativeMenuSection({ section, onSelect }: { section: MenuSection; onSelect: (id: string) => void }) {
+  const customChoices = section.items.length > 0 && section.items.every((item) => item.icon && item.checked !== undefined);
+  if (customChoices)
+    return (
+      <IOSPicker label="" selection={section.items.find((item) => item.checked)?.id} onSelectionChange={onSelect} modifiers={[pickerStyle("inline")]}>
+        <IOSSection title={section.title}>
+          {section.items.map((item) => (
+            <IOSLabel
+              key={item.id}
+              title={item.title}
+              icon={<NativePickerIcon name={item.icon!} />}
+              modifiers={[tag(item.id), nativeDisabled(!!item.disabled)]}
+            />
+          ))}
+        </IOSSection>
+      </IOSPicker>
+    );
+  return (
+    <IOSSection title={section.title}>
+      {section.items.map((item) =>
+        item.checked !== undefined ? (
+          <IOSToggle
+            key={item.id}
+            label={item.title}
+            systemImage={item.systemImage as never}
+            isOn={item.checked}
+            onIsOnChange={() => onSelect(item.id)}
+            modifiers={[nativeDisabled(!!item.disabled)]}
+          />
+        ) : (
+          <IOSButton
+            key={item.id}
+            label={item.title}
+            systemImage={item.systemImage as never}
+            role={item.destructive ? "destructive" : undefined}
+            onPress={() => onSelect(item.id)}
+            modifiers={[nativeDisabled(!!item.disabled)]}
+          />
+        ),
+      )}
+    </IOSSection>
+  );
+}
 /** A row's actions or a short list of choices, in the confirmation bottom sheet with Cancel last. */
 export function showActions({
   title,
@@ -540,37 +597,13 @@ export function PullDown({
         {children}
       </Pressable>
     );
-  if (Platform.OS === "ios" && nativeTrigger && !onPress) {
+  if (Platform.OS === "ios" && nativeTrigger && !nativeTrigger.icon && !onPress) {
     // Composer menus use only SwiftUI views. No React child is handed to SwiftUI, avoiding the Fabric reparenting crash.
     const select = (id: string) => {
       tap();
       setTimeout(() => onSelect(id), 250);
     };
-    const body = sections.map((section, index) => (
-      <IOSSection key={index} title={section.title}>
-        {section.items.map((item) =>
-          item.checked !== undefined ? (
-            <IOSToggle
-              key={item.id}
-              label={item.title}
-              systemImage={item.systemImage as never}
-              isOn={item.checked}
-              onIsOnChange={() => select(item.id)}
-              modifiers={[nativeDisabled(!!item.disabled)]}
-            />
-          ) : (
-            <IOSButton
-              key={item.id}
-              label={item.title}
-              systemImage={item.systemImage as never}
-              role={item.destructive ? "destructive" : undefined}
-              onPress={() => select(item.id)}
-              modifiers={[nativeDisabled(!!item.disabled)]}
-            />
-          ),
-        )}
-      </IOSSection>
-    ));
+    const body = sections.map((section, index) => <NativeMenuSection key={index} section={section} onSelect={select} />);
     const trigger = nativeTrigger.title ? (
       <IOSHStack
         spacing={6}
@@ -611,31 +644,7 @@ export function PullDown({
       setTimeout(() => onSelect(id), 250);
     };
     // A tap menu keeps the order it is given (desktop's order), instead of iOS reversing it when it opens upward.
-    const item = (entry: MenuItem) =>
-      entry.checked !== undefined ? (
-        <IOSToggle
-          key={entry.id}
-          label={entry.title}
-          systemImage={entry.systemImage as never}
-          isOn={entry.checked}
-          onIsOnChange={() => select(entry.id)}
-          modifiers={entry.disabled ? [nativeDisabled(true)] : undefined}
-        />
-      ) : (
-        <IOSButton
-          key={entry.id}
-          label={entry.title}
-          systemImage={entry.systemImage as never}
-          role={entry.destructive ? "destructive" : undefined}
-          onPress={() => select(entry.id)}
-          modifiers={entry.disabled ? [nativeDisabled(true)] : undefined}
-        />
-      );
-    const body = sections.map((section, index) => (
-      <IOSSection key={index} title={section.title}>
-        {section.items.map(item)}
-      </IOSSection>
-    ));
+    const body = sections.map((section, index) => <NativeMenuSection key={index} section={section} onSelect={select} />);
     // The system draws menus below the keyboard, so a touch on the trigger lowers it first.
     return (
       <View style={style} onTouchStart={() => Keyboard.dismiss()}>
@@ -644,9 +653,18 @@ export function PullDown({
         </View>
         <IOSHost style={StyleSheet.absoluteFill} testID={label} ignoreSafeArea="all">
           <IOSMenu
-            label={<Rectangle modifiers={[foregroundStyle("#00000001"), contentShape(shapes.rectangle()), accessibilityLabel(label)]} />}
+            label={
+              <Rectangle
+                modifiers={[
+                  foregroundStyle("#00000001"),
+                  ...(nativeTrigger?.icon ? [opacity(0.001)] : []),
+                  contentShape(shapes.rectangle()),
+                  accessibilityLabel(`${label}${nativeTrigger?.title ? `: ${nativeTrigger.title}` : ""}`),
+                ]}
+              />
+            }
             onPrimaryAction={onPress}
-            modifiers={[menuOrder("fixed")]}
+            modifiers={[menuOrder("fixed"), nativeDisabled(!!nativeTrigger?.disabled)]}
           >
             {title ? <IOSSection title={title}>{body}</IOSSection> : body}
           </IOSMenu>

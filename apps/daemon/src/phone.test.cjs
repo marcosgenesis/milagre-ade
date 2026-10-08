@@ -781,3 +781,63 @@ test("a confined phone (allowedRoot) never starts a LAN host", async (t) => {
   assert.equal(started.length, 0);
   assert.equal(phone.status().lan.enabled, false);
 });
+
+test("devices lists what paired, with the route each is connected on now", async (t) => {
+  const { phone, relays, lans } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const key = "k".repeat(43);
+  await relays[0].options.phones.add(key, { kind: "phone", name: "Victor's iPhone" });
+  assert.deepEqual(
+    (await phone.devices()).map((device) => [device.key, device.kind, device.name, device.route]),
+    [[key, "phone", "Victor's iPhone", null]],
+  );
+  relays[0].connectedKeys = () => [key];
+  assert.equal((await phone.devices())[0].route, "relay");
+  lans[0].connectedKeys = () => [key];
+  assert.equal((await phone.devices())[0].route, "lan", "the local network wins when both carry it");
+});
+
+test("the device list reads the saved devices while phone access is off", async (t) => {
+  const { phone, dataDir } = await fixture(t);
+  await createDevices(dataDir).add("k".repeat(43), { name: "iPad mini" });
+  assert.deepEqual(
+    (await phone.devices()).map((device) => [device.name, device.route]),
+    [["iPad mini", null]],
+  );
+});
+
+test("removing a device forgets it, closes its channels, and lets it pair again only in a window opened later", async (t) => {
+  const { phone, relays, lans, clock, changes } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const dropped = [];
+  relays[0].drop = (key) => dropped.push(`relay:${key}`);
+  lans[0].drop = (key) => dropped.push(`lan:${key}`);
+  const key = "k".repeat(43);
+  await relays[0].options.phones.add(key, { name: "Victor's iPhone" });
+  clock.now = 1000;
+  const before = changes.length;
+  assert.deepEqual(await phone.removeDevice(key), []);
+  assert.deepEqual(dropped, [`relay:${key}`, `lan:${key}`]);
+  assert.ok(changes.length > before, "a removal is announced as a phone status, so Settings reads the list again");
+  assert.equal(relays[0].options.canPair(key), false, "the window it was removed in stays closed to it");
+  assert.equal(relays[0].options.canPair("o".repeat(43)), true, "other new devices still pair");
+  clock.now = 2000;
+  await phone.openPairing();
+  assert.equal(relays[0].options.canPair(key), true);
+  await assert.rejects(phone.removeDevice("short"), /device key/);
+});
+
+test("a removed phone reaching routes through a trusted route is not added back", async (t) => {
+  const { phone, relays, dataDir } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const key = "k".repeat(43);
+  await relays[0].options.phones.add(key);
+  await phone.removeDevice(key);
+  await phone.routes(key);
+  const after = createDevices(dataDir);
+  await after.load();
+  assert.equal(after.isKnown(key), false);
+});

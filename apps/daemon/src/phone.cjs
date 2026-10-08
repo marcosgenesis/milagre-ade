@@ -34,7 +34,8 @@ const message = (error) => (error instanceof Error ? error.message : String(erro
  * Without a Cloudflare tunnel the Mac reaches the phone through the public relay (`remote: 'relay'`); `status()` then also
  * carries the relay's `relay` state, `pairingUntil` (ms epoch), the end of the window in which new phones may pair, and
  * `pairedPhones`, how many phones have paired since the last Reset. `onPaired({ pairedPhones })` runs when a phone pairs
- * for the first time. While the phone is on, identities a Reset replaced keep their old relay rooms for RETIRED_MS, only
+ * for the first time. `devices()` lists every paired device with the route it uses now, and `removeDevice(key)` forgets
+ * one and closes its channels. While the phone is on, identities a Reset replaced keep their old relay rooms for RETIRED_MS, only
  * to tell the phones that dial them that this Mac was reset.
  * Whatever the remote route, a running phone also listens on the local network (`lanPort`, unless `lan` is switched off
  * with `setLan` or the phone is confined): `status().lan` reports it, and a phone asks `routes` for the Mac's addresses.
@@ -68,7 +69,8 @@ function createPhone({
   let remote = "none";
   let relayStatus = "offline";
   let pairingUntil = 0;
-  let relayPhones; // the paired-phone list, one instance so a reset clears what the running host sees
+  let pairingOpenedAt = 0;
+  let relayPhones; // the devices store, one instance so a reset or removal changes what the running hosts see
   let generation = 0; // a bridge or retry from an earlier run must not touch this one
   let attempts = 0;
   let retryTimer;
@@ -138,8 +140,28 @@ function createPhone({
   }
 
   const openPairing = () => {
-    pairingUntil = now() + PAIRING_WINDOW_MS;
+    pairingOpenedAt = now();
+    pairingUntil = pairingOpenedAt + PAIRING_WINDOW_MS;
   };
+
+  /** The devices store, read once; each launch reads it again. */
+  async function deviceStore() {
+    if (!relayPhones) {
+      relayPhones = createDevices(dataDir, { now });
+      await relayPhones.load();
+    }
+    return relayPhones;
+  }
+
+  /**
+   * Whether the device with `key` may pair now. Showing the QR opens the window, so a phone removed while Settings is
+   * open would redial and pair again at once: a device removed since the window opened waits for the next one.
+   */
+  function mayPair(key) {
+    if (now() >= pairingUntil) return false;
+    const removedAt = relayPhones?.removedAt(key) ?? null;
+    return removedAt === null || removedAt < pairingOpenedAt;
+  }
 
   // The LAN host, tunnel and relay go first so none of them answers 502 from a bridge that is already gone.
   async function closeLive(old) {
@@ -209,7 +231,7 @@ function createPhone({
     if (typeof phoneKey !== "string" || !PHONE_KEY.test(phoneKey)) throw Object.assign(new Error("Expected this phone's key"), { status: 400 });
     const current = live;
     if (!current) throw Object.assign(new Error("Phone access is starting. Try again."), { status: 409 });
-    if (!current.phones.isKnown(phoneKey)) await relayPhones.add(phoneKey);
+    if (!current.phones.isKnown(phoneKey) && relayPhones.removedAt(phoneKey) === null) await relayPhones.add(phoneKey);
     const port = current.lan?.port;
     return { hostId: current.identity.hostId, key: b64url(current.identity.box.publicKey), lan: port ? addresses().map((ip) => `ws://${ip}:${port}`) : [] };
   }
@@ -245,8 +267,9 @@ function createPhone({
       const known = relayPhones;
       const phones = {
         isKnown: (id) => known.isKnown(id),
-        async add(id) {
-          await known.add(id);
+        seen: (id, info) => known.seen(id, info),
+        async add(id, info) {
+          await known.add(id, info);
           // A pairing the old host saw while a reset tore it down is about to be forgotten: nothing to announce.
           if (mine !== generation) return;
           changed();
@@ -268,7 +291,7 @@ function createPhone({
           phones,
           token: config.token,
           bridgeUrl: bridge.url,
-          canPair: () => now() < pairingUntil,
+          canPair: (key) => mayPair(key),
           onStatus: (next) => {
             if (mine !== generation) return;
             relayStatus = next;
@@ -322,10 +345,31 @@ function createPhone({
     });
   }
 
+  /** Every paired device, oldest first, with the route it is connected on now (the local network first), or null. */
+  async function devices() {
+    const store = await deviceStore();
+    const lan = new Set(live?.lan?.connectedKeys?.() ?? []);
+    const relay = new Set(live?.relay?.connectedKeys?.() ?? []);
+    return store.list().map((device) => ({ ...device, route: lan.has(device.key) ? "lan" : relay.has(device.key) ? "relay" : null }));
+  }
+
   return {
     status,
     routes,
     settled: () => queue,
+    devices,
+    /** Forgets a device and closes its channels on every carrier. It may pair again only in a pairing window opened later. */
+    async removeDevice(key) {
+      if (typeof key !== "string" || !PHONE_KEY.test(key)) throw new Error("Expected a device key");
+      await enqueue(async () => {
+        const store = await deviceStore();
+        await store.remove(key);
+        live?.relay?.drop?.(key);
+        live?.lan?.drop?.(key);
+        changed();
+      });
+      return devices();
+    },
     async setEnabled(enabled) {
       if (typeof enabled !== "boolean") throw new Error("Expected enabled to be true or false");
       await enqueue(async () => {
@@ -356,10 +400,7 @@ function createPhone({
         try {
           config.token = randomBytes(32).toString("hex");
           await save();
-          if (!relayPhones) {
-            relayPhones = createDevices(dataDir, { now });
-            await relayPhones.load();
-          }
+          await deviceStore();
           const hadPhones = relayPhones.count() > 0;
           // Phones paired through the relay are bound to the old token, so they go with it.
           await relayPhones.clear();

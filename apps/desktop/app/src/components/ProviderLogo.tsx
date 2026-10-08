@@ -2,9 +2,6 @@ import { useId } from "react";
 import { ANTIGRAVITY_LOGO, CLAUDE_LOGO, CODEX_LOGO } from "@milagre/shared/provider-logos";
 import type { ModelProvider } from "../model";
 
-// The filled Antigravity arch alone, for ProviderMark's one-color marks.
-export const ANTIGRAVITY_PATH = ANTIGRAVITY_LOGO.d;
-
 /** Each agent's brand mark in its own colors (shapes in @milagre/shared/provider-logos). */
 export function ProviderLogo({ provider, size = 15 }: { provider: ModelProvider; size?: number }) {
   // Gradient, mask and filter ids are per instance: two logos on one page must not share them.

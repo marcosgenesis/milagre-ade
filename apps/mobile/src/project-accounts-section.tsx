@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { ArrowDown01Icon, Tick02Icon, Briefcase01Icon, UserIcon, UserMultipleIcon } from "@hugeicons/core-free-icons";
 import type { ModelProvider, ProjectAccountScope, ProjectAccountsSnapshot } from "@milagre/shared/model";
@@ -9,43 +9,66 @@ import { Icon, ProviderLogo } from "./icons";
 import { ProjectIcon, ProjectIcons } from "./project-icon";
 import { ListRow, PageScroll, PullDown, colors, styles } from "./ui";
 
+const statusLabel = (state: string, message?: string) =>
+  state === "signed-out"
+    ? "Not signed in"
+    : state === "signing-in"
+      ? "Finish sign-in on computer"
+      : state === "unknown"
+        ? "Not checked"
+        : message || "Account unavailable";
+
+const divider = { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line };
+
 export function ProjectAccountsSection() {
   const session = useSession();
   return <ProjectAccountsForComputer key={session.client?.url || "disconnected"} />;
 }
 
-function ProjectAccountsForComputer() {
+// The same choice inside a Project's own settings, fixed to that Project.
+export function ProjectAccountsGroup({ path }: { path: string }) {
+  const session = useSession();
+  if (!session.client) return null;
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={styles.label}>Accounts</Text>
+      <View style={[styles.card, { paddingVertical: 4, gap: 0 }]}>
+        <ProjectAccountRows key={`${session.client.url}:${path}`} scopeKey={path} />
+      </View>
+      <Footnote />
+    </View>
+  );
+}
+
+function Footnote() {
+  return (
+    <Text style={[styles.caption, { lineHeight: 17 }]}>
+      Running turns keep their original account. The next turn uses the one chosen here.{" "}
+      <Text accessibilityRole="link" style={{ color: colors.ink2, textDecorationLine: "underline" }} onPress={() => router.push("/accounts")}>
+        Manage saved accounts
+      </Text>
+    </Text>
+  );
+}
+
+/* One row per provider. The row shows the account the next turn uses;
+ * a second line appears only when that account needs attention. */
+function ProjectAccountRows({ scopeKey }: { scopeKey: string }) {
   const session = useSession();
   const client = session.client;
-  const [scopes, setScopes] = useState<ProjectAccountScope[]>([]);
-  const [scopeKey, setScopeKey] = useState(session.snapshot?.project.path || "");
   const [snapshot, setSnapshot] = useState<ProjectAccountsSnapshot | null>(null);
-  const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const request = useRef(0);
+  // Cleared on unmount so a late reply from a previous Project or Link changes nothing.
   const activeScope = useRef(scopeKey);
   useEffect(() => {
     activeScope.current = scopeKey;
-  }, [scopeKey]);
-  useEffect(() => {
-    if (!client) return;
-    let live = true;
-    void client
-      .call<ProjectAccountScope[]>("accounts:scopes")
-      .then((value) => {
-        if (!live) return;
-        setScopes(value);
-        setScopeKey((current) => (value.some((scope) => scope.key === current) ? current : value[0]?.key || ""));
-      })
-      .catch(() => {
-        if (live) setError("Could not load Projects & Links. Check the computer connection.");
-      });
     return () => {
-      live = false;
+      activeScope.current = "";
     };
-  }, [client, retry]);
+  }, [scopeKey]);
   const load = useCallback(
     async (refresh = false) => {
       if (!client || !scopeKey) return;
@@ -57,7 +80,7 @@ function ProjectAccountsForComputer() {
           setError("");
         }
       } catch {
-        if (version === request.current) setError("Could not load project accounts. Try refreshing.");
+        if (version === request.current && activeScope.current === scopeKey) setError("Could not load project accounts. Try refreshing.");
       }
     },
     [client, scopeKey],
@@ -65,7 +88,7 @@ function ProjectAccountsForComputer() {
   const invalidate = useCallback(() => {
     request.current++;
   }, []);
-  // This effect fetches the newly selected scope from the connected computer.
+  // This effect fetches the scope's accounts from the connected computer.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
@@ -112,6 +135,129 @@ function ProjectAccountsForComputer() {
       if (activeScope.current === scopeKey) setBusy(false);
     }
   };
+  if (error)
+    return (
+      <View style={{ paddingVertical: 8 }}>
+        <Text accessibilityRole="alert" style={[styles.text, { color: colors.red }]}>
+          {error}
+        </Text>
+        <ListRow compact title="Retry" onPress={() => setRetry((value) => value + 1)} />
+      </View>
+    );
+  if (!visible) return <Text style={[styles.muted, { paddingVertical: 12 }]}>Checking accounts...</Text>;
+  return visible.providers.map((group, index) => {
+    const effective = group.accounts.find((account) => account.id === group.effectiveId);
+    const fallback = group.accounts.find((account) => account.id === group.defaultId);
+    const missing = group.accountId !== null && (!effective || effective.missing === true);
+    const shown = group.accountId === null ? fallback : effective;
+    const type = accountType(shown?.plan);
+    const typeIcon = type === "Business" ? Briefcase01Icon : type === "Team" ? UserMultipleIcon : UserIcon;
+    const name = providerName(group.provider);
+    const attention = missing
+      ? "The assigned account is unavailable. Choose another saved account."
+      : effective && effective.state !== "ready"
+        ? statusLabel(effective.state, effective.message)
+        : "";
+    return (
+      <View key={group.provider} style={[{ paddingVertical: 10, gap: 6 }, index > 0 && divider]}>
+        <PullDown
+          label={`${name} account`}
+          sections={[
+            {
+              items: [
+                {
+                  id: "__default__",
+                  title: `Use computer default${fallback?.email ? ` · ${fallback.email}` : ""}`,
+                  systemImage: "desktopcomputer",
+                  checked: group.accountId === null,
+                  disabled: busy,
+                },
+                ...group.accounts
+                  .filter((account) => !account.missing)
+                  .map((account) => ({
+                    id: account.id,
+                    title: account.email || account.label,
+                    subtitle: account.state === "ready" ? undefined : statusLabel(account.state, account.message),
+                    systemImage: accountType(account.plan) === "Business" ? "briefcase" : accountType(account.plan) === "Team" ? "person.2" : "person",
+                    checked: group.accountId === account.id,
+                    disabled: busy || account.state !== "ready",
+                  })),
+              ],
+            },
+          ]}
+          onSelect={(id) => {
+            void assign(group.provider, id === "__default__" ? null : id);
+          }}
+        >
+          <View style={{ flexDirection: "row", gap: 12, alignItems: "center", minHeight: 44 }}>
+            <ProviderLogo provider={group.provider} size={20} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[styles.text, { fontWeight: "500", fontSize: 15, lineHeight: 20 }]}>{name}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                {type ? <Icon icon={typeIcon} tone="ink3" size={13} /> : null}
+                <Text numberOfLines={1} style={[styles.caption, { flexShrink: 1, fontSize: 13, color: missing ? colors.red : colors.ink2 }]}>
+                  {missing ? "Unavailable account" : shown?.email || shown?.label || "No computer default"}
+                </Text>
+                {group.accountId === null ? (
+                  <Text style={[styles.caption, { fontSize: 11, backgroundColor: colors.line, paddingHorizontal: 5, borderRadius: 4, overflow: "hidden" }]}>
+                    Default
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+            <Icon icon={ArrowDown01Icon} tone="ink3" size={18} />
+          </View>
+        </PullDown>
+        {attention ? (
+          <Text accessibilityRole="alert" style={[styles.caption, { color: colors.red, paddingLeft: 32 }]}>
+            {attention}
+          </Text>
+        ) : effective?.message ? (
+          <Text style={[styles.caption, { paddingLeft: 32 }]}>{effective.message}</Text>
+        ) : null}
+        {effective && !missing && effective.state !== "ready" && effective.id !== "default" ? (
+          <View style={{ paddingLeft: 32 }}>
+            <ListRow
+              compact
+              title={effective.state === "signing-in" ? "Finish sign-in on computer" : "Re-authenticate"}
+              disabled={busy || effective.state === "signing-in"}
+              onPress={() => {
+                void reauthenticate(group.provider, effective.id);
+              }}
+            />
+          </View>
+        ) : null}
+      </View>
+    );
+  });
+}
+
+function ProjectAccountsForComputer() {
+  const session = useSession();
+  const client = session.client;
+  const [scopes, setScopes] = useState<ProjectAccountScope[]>([]);
+  const [scopeKey, setScopeKey] = useState(session.snapshot?.project.path || "");
+  const [expanded, setExpanded] = useState(false);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (!client) return;
+    let live = true;
+    void client
+      .call<ProjectAccountScope[]>("accounts:scopes")
+      .then((value) => {
+        if (!live) return;
+        setScopes(value);
+        setError("");
+        setScopeKey((current) => (value.some((scope) => scope.key === current) ? current : value[0]?.key || ""));
+      })
+      .catch(() => {
+        if (live) setError("Could not load Projects & Links. Check the computer connection.");
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, retry]);
   const selected = scopes.find((scope) => scope.key === scopeKey);
   const photo = (scope: ProjectAccountScope) =>
     scope.kind === "link" ? (
@@ -121,149 +267,57 @@ function ProjectAccountsForComputer() {
     );
   if (!client) return <Text style={styles.muted}>Connect to a computer to choose project accounts.</Text>;
   return (
-    <View style={{ gap: 20 }}>
-      <View style={{ gap: 8 }}>
-        <Text style={styles.caption}>Projects &amp; Links</Text>
-        <View style={styles.card}>
-          <ListRow
-            compact
-            title={selected?.name || "Choose a Project or Link"}
-            leading={selected ? photo(selected) : undefined}
-            trailing={<Icon icon={ArrowDown01Icon} size={18} />}
-            onPress={() => setExpanded((value) => !value)}
-          />
-          {expanded ? (
-            <PageScroll nestedScrollEnabled style={{ maxHeight: 280 }} contentContainerStyle={{ padding: 0 }}>
-              {(["project", "link"] as const).map((kind) => (
-                <View key={kind}>
-                  {scopes.some((scope) => scope.kind === kind) ? <Text style={styles.caption}>{kind === "project" ? "Projects" : "Links"}</Text> : null}
-                  {scopes
-                    .filter((scope) => scope.kind === kind)
-                    .map((scope) => (
-                      <ListRow
-                        key={scope.key}
-                        compact
-                        title={scope.name}
-                        leading={photo(scope)}
-                        trailing={scope.key === scopeKey ? <Icon icon={Tick02Icon} size={18} /> : undefined}
-                        onPress={() => {
-                          activeScope.current = scope.key;
-                          setScopeKey(scope.key);
-                          setBusy(false);
-                          setError("");
-                          setExpanded(false);
-                        }}
-                      />
-                    ))}
-                </View>
-              ))}
-            </PageScroll>
-          ) : null}
-        </View>
-      </View>
-      {error ? (
-        <View>
-          <Text accessibilityRole="alert" style={styles.text}>
-            {error}
-          </Text>
-          <ListRow compact title="Retry" onPress={() => setRetry((value) => value + 1)} />
-        </View>
-      ) : null}
-      {!visible && scopeKey && !error ? <Text style={styles.muted}>Checking accounts...</Text> : null}
-      {visible?.providers.map((group) => {
-        const effective = group.accounts.find((account) => account.id === group.effectiveId);
-        const fallback = group.accounts.find((account) => account.id === group.defaultId);
-        const type = accountType(effective?.plan);
-        const typeIcon = type === "Business" ? Briefcase01Icon : type === "Team" ? UserMultipleIcon : UserIcon;
-        return (
-          <View key={group.provider} style={{ gap: 8 }}>
-            <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-              <ProviderLogo provider={group.provider} size={18} />
-              <Text style={styles.text}>{providerName(group.provider)}</Text>
-            </View>
-            <PullDown
-              label={`${providerName(group.provider)} account`}
-              sections={[
-                {
-                  items: [
-                    {
-                      id: "__default__",
-                      title: `Use computer default${fallback?.email ? ` · ${fallback.email}` : ""}`,
-                      systemImage: "desktopcomputer",
-                      checked: group.accountId === null,
-                      disabled: busy,
-                    },
-                    ...group.accounts.map((account) => ({
-                      id: account.id,
-                      title: account.email || account.label,
-                      subtitle:
-                        account.state === "signed-out"
-                          ? "Not signed in"
-                          : account.state === "signing-in"
-                            ? "Finish sign-in on computer"
-                            : account.state === "unknown"
-                              ? "Not checked"
-                              : account.state === "error"
-                                ? account.message || "Account unavailable"
-                                : undefined,
-                      systemImage: accountType(account.plan) === "Business" ? "briefcase" : accountType(account.plan) === "Team" ? "person.2" : "person",
-                      checked: group.accountId === account.id,
-                      disabled: busy || account.state !== "ready",
-                    })),
-                  ],
-                },
-              ]}
-              onSelect={(id) => {
-                void assign(group.provider, id === "__default__" ? null : id);
-              }}
-            >
-              <View style={[styles.card, { flexDirection: "row", gap: 10, alignItems: "center", minHeight: 54 }]}>
-                <View style={{ flex: 1, gap: 3 }}>
-                  <Text numberOfLines={1} style={styles.text}>
-                    {group.accountId === null ? "Use computer default" : effective?.email || effective?.label || "Account unavailable"}
-                  </Text>
-                  {group.accountId === null ? <Text style={styles.caption}>{fallback?.email || fallback?.label || "No computer default"}</Text> : null}
-                </View>
-                {type ? <Icon icon={typeIcon} tone="ink3" size={17} /> : null}
-                <Icon icon={ArrowDown01Icon} tone="ink3" size={18} />
+    <View style={{ gap: 8 }}>
+      <Text style={styles.caption}>Choose which saved accounts a Project or Link uses on this computer.</Text>
+      <View style={[styles.card, { paddingVertical: 4, gap: 0 }]}>
+        <ListRow
+          compact
+          title={selected?.name || "Choose a Project or Link"}
+          subtitle={selected?.kind === "link" ? "Link · accounts are independent of its Projects" : selected ? "Project" : undefined}
+          leading={selected ? photo(selected) : undefined}
+          trailing={<Icon icon={ArrowDown01Icon} tone="ink3" size={18} />}
+          onPress={() => setExpanded((value) => !value)}
+        />
+        {expanded ? (
+          <PageScroll nestedScrollEnabled style={{ maxHeight: 280 }} contentContainerStyle={{ padding: 0 }}>
+            {(["project", "link"] as const).map((kind) => (
+              <View key={kind}>
+                {scopes.some((scope) => scope.kind === kind) ? <Text style={styles.caption}>{kind === "project" ? "Projects" : "Links"}</Text> : null}
+                {scopes
+                  .filter((scope) => scope.kind === kind)
+                  .map((scope) => (
+                    <ListRow
+                      key={scope.key}
+                      compact
+                      title={scope.name}
+                      leading={photo(scope)}
+                      trailing={scope.key === scopeKey ? <Icon icon={Tick02Icon} size={18} /> : undefined}
+                      onPress={() => {
+                        setScopeKey(scope.key);
+                        setExpanded(false);
+                      }}
+                    />
+                  ))}
               </View>
-            </PullDown>
-            {effective?.message ? (
-              <Text accessibilityRole={effective.state === "error" ? "alert" : undefined} style={styles.caption}>
-                {effective.message}
+            ))}
+          </PageScroll>
+        ) : null}
+        <View style={divider}>
+          {error ? (
+            <View style={{ paddingVertical: 8 }}>
+              <Text accessibilityRole="alert" style={[styles.text, { color: colors.red }]}>
+                {error}
               </Text>
-            ) : effective && effective.state !== "ready" ? (
-              <Text style={styles.caption}>
-                {effective.state === "signed-out"
-                  ? "Not signed in"
-                  : effective.state === "signing-in"
-                    ? "Finish sign-in on computer"
-                    : effective.state === "unknown"
-                      ? "Not checked"
-                      : "Account unavailable"}
-              </Text>
-            ) : null}
-            {group.accounts
-              .filter((account) => account.state !== "ready" && account.id !== "default" && !account.missing)
-              .map((account) => (
-                <ListRow
-                  key={account.id}
-                  compact
-                  title={`${account.state === "signing-in" ? "Finish sign-in on computer" : "Re-authenticate"}: ${account.email || account.label}`}
-                  disabled={busy || account.state === "signing-in"}
-                  onPress={() => {
-                    void reauthenticate(group.provider, account.id);
-                  }}
-                />
-              ))}
-          </View>
-        );
-      })}
-      {!scopeKey && !error ? <Text style={styles.muted}>Open a Project on your computer to choose its accounts.</Text> : null}
-      <Text style={styles.caption}>Running turns keep their original account. The next turn uses the account selected here.</Text>
-      <View style={{ borderTopWidth: 1, borderColor: colors.line }}>
-        <ListRow compact title="Manage saved accounts" onPress={() => router.push("/accounts")} />
+              <ListRow compact title="Retry" onPress={() => setRetry((value) => value + 1)} />
+            </View>
+          ) : scopeKey ? (
+            <ProjectAccountRows key={scopeKey} scopeKey={scopeKey} />
+          ) : (
+            <Text style={[styles.muted, { paddingVertical: 12 }]}>Open a Project on your computer to choose its accounts.</Text>
+          )}
+        </View>
       </View>
+      <Footnote />
     </View>
   );
 }

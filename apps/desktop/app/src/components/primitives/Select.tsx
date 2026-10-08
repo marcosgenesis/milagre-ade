@@ -11,6 +11,8 @@ export type SelectOption<T extends string> = {
   label: string;
   description?: string;
   icon?: ReactNode;
+  // Shown in the trigger instead of the label when this option is selected.
+  display?: ReactNode;
   // Consecutive options with the same group sit under one heading.
   group?: string;
   disabled?: boolean;
@@ -118,7 +120,7 @@ export function Select<T extends string>({
         className={`flex h-8 items-center gap-2 rounded-control border border-line pr-2.5 pl-3 text-[13px] font-medium text-ink transition-colors hover:bg-hover ${open ? "bg-hover" : "bg-surface"}`}
       >
         {selected?.icon}
-        <span className="truncate">{selected?.label ?? ""}</span>
+        {selected?.display ?? <span className="truncate">{selected?.label ?? ""}</span>}
         <span className="text-ink-3">
           <HugeiconsIcon icon={ArrowDown01Icon} size={14} strokeWidth={1.8} color="currentColor" />
         </span>

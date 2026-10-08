@@ -9,10 +9,10 @@ const random = (n: number) => new Uint8Array(randomBytes(n));
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const TOKEN = "a".repeat(64);
-const OLDER_CODE = "This phone was paired with an older code. Scan the new one in Settings → Phone.";
-const RESET = "This Mac was reset. Scan its new pairing code in Settings → Phone.";
-const CLOSED_PAIRING = "Pairing is closed on your Mac. Open Settings → Phone on it and scan the code again.";
-const OFFLINE = "Your Mac isn't reachable. Open Milagre on it and check Settings → Phone.";
+const OLDER_CODE = "This phone was paired with an older code. Scan the new one in Settings → Devices.";
+const RESET = "This Mac was reset. Scan its new pairing code in Settings → Devices.";
+const CLOSED_PAIRING = "Pairing is closed on your Mac. Open Settings → Devices on it and scan the code again.";
+const OFFLINE = "Your Mac isn't reachable. Open Milagre on it and check Settings → Devices.";
 const LOST = "Connection lost. Reconnect to your computer. Check the Chat before sending again.";
 /** Everything queued as microtasks has run. */
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));

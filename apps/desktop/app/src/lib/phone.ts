@@ -1,6 +1,6 @@
 import type { PhoneStatus } from "../electron";
 
-/** The one line under "Allow your phone to connect". */
+/** The one line under "Allow devices to connect". */
 export function phoneStatusLine(status: PhoneStatus | null): string {
   if (!status) return "Checking…";
   switch (status.state) {

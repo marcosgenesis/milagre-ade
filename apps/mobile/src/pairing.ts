@@ -20,7 +20,7 @@ export function parsePairing(input: string): Pairing {
   if (!/^[a-f0-9]{64}$/i.test(token)) throw new Error("This pairing link has no valid token. Restart the host on your Mac and scan the new code.");
   if (params.relay !== undefined || params.host !== undefined || params.key !== undefined) {
     // A link names one way to reach the Mac; one with both was not made by Milagre.
-    if (params.address !== undefined) throw new Error("This pairing link is damaged. Scan the code again in Settings → Phone on your Mac.");
+    if (params.address !== undefined) throw new Error("This pairing link is damaged. Scan the code again in Settings → Devices on your Mac.");
     const relay = validRelay({ url: params.relay, hostId: params.host, key: params.key });
     return { address: relayAddress(relay.hostId), token, name: (params.name || "").trim().slice(0, 80) || "Mac", relay };
   }

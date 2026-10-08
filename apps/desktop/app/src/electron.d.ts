@@ -360,7 +360,7 @@ declare global {
       notifyCompletion: (notice: { chatId: string; title: string; subtitle?: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */
       onOpenChat: (callback: (chatId: string) => void) => () => void;
-      /** The "phone paired" notification was clicked: the window is back, and Settings → Phone should open. */
+      /** The "phone paired" notification was clicked: the window is back, and Settings → Devices should open. */
       onOpenPhoneSettings: (callback: () => void) => () => void;
     };
   }

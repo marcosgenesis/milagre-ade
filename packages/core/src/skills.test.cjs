@@ -194,7 +194,16 @@ test("bundles tldr with its checklist for machines without installed skills", as
     skills.map(({ name, scope, provider }) => ({ name, scope, provider })),
     [
       { name: "design", scope: "bundled", provider: "milagre" },
-      ...["milagre", "milagre-advisor", "milagre-committee", "milagre-help"].map((name) => ({ name, scope: "bundled", provider: "milagre" })),
+      ...[
+        "milagre",
+        "milagre-address-review",
+        "milagre-advisor",
+        "milagre-committee",
+        "milagre-fix-ci",
+        "milagre-help",
+        "milagre-resolve-conflicts",
+        "milagre-update-branch",
+      ].map((name) => ({ name, scope: "bundled", provider: "milagre" })),
       { name: "orchestrate", scope: "bundled", provider: "milagre" },
       { name: "simulator", scope: "bundled", provider: "milagre" },
       { name: "tldr", scope: "bundled", provider: "milagre" },
@@ -232,4 +241,23 @@ test("Milagre orchestration skills expand with readable packaged references and 
   }
   const custom = await skill(project, ".agents", "milagre-advisor", "Custom advisor");
   assert.equal((await discoverSkills(project, { home })).skills.find((s) => s.name === "milagre-advisor").path, custom);
+});
+
+test("PR action skills expand from a pill's prompt, and a project skill overrides them", async (t) => {
+  const { project, home, skill } = await fixture(t);
+  const { skills } = await discoverSkills(project, { home });
+  for (const name of ["milagre-fix-ci", "milagre-address-review", "milagre-resolve-conflicts", "milagre-update-branch"]) {
+    const info = skills.find((s) => s.name === name);
+    assert.ok(info, name);
+    const prompt = `Fix CI on pull request #77 (https://github.com/o/r/pull/77). /${name}`;
+    const expanded = await expandSkillPrompt(project, prompt, { home });
+    assert.ok(expanded.startsWith(prompt));
+    const content = await fs.readFile(info.path, "utf8");
+    assert.ok(expanded.includes(content));
+    assert.doesNotMatch(content, /[\u2013\u2014]/, `${name} has no em or en dashes`);
+    for (const match of content.matchAll(/\]\(([^)]+\.md)\)/g)) await fs.access(path.resolve(path.dirname(info.path), match[1]));
+  }
+  const custom = await skill(project, ".claude", "milagre-fix-ci", "Our own CI steps");
+  assert.equal((await discoverSkills(project, { home })).skills.find((s) => s.name === "milagre-fix-ci").path, custom);
+  assert.ok((await expandSkillPrompt(project, "Fix CI. /milagre-fix-ci", { home })).includes("Our own CI steps"));
 });

@@ -12,6 +12,12 @@ const MAX_HELD = 10_000;
 // delay doubling from reconnectMs each time. Past that the window says it couldn't, and reconnects keep only connecting.
 const START_ATTEMPTS = 3;
 const RESTARTED_HOST = "Milagre's background host stopped unexpectedly, so it was started again.";
+// A host that has them sends what changed in a state event, not the whole state; the window applies it (state-events.ts).
+const STATE_PATCHES = "state-patches-v1";
+/** Asks a host that can for state patches; an older one keeps sending whole states. */
+async function takeStatePatches(connection, status) {
+  if (status.capabilities?.includes(STATE_PATCHES)) await connection.call("daemon:state-patches");
+}
 
 // The Project an event belongs to, when it names one.
 function projectOfEvent({ channel, payload }) {
@@ -32,6 +38,7 @@ async function connectDesktopRuntime(options) {
   /** @type {import('@milagre/daemon/bootstrap').DaemonClient | null} */
   let client = await startHost(options);
   const status = client.status ?? (await client.call("daemon:status"));
+  await takeStatePatches(client, status);
   const methods = [...status.methods];
   let hostOutdated = !status.capabilities?.includes(RESULT_PAGES);
   let closed = false;
@@ -195,7 +202,9 @@ async function connectDesktopRuntime(options) {
         connection.close();
         return undefined;
       }
-      adopt(connection.status ?? (await connection.call("daemon:status")));
+      const next = connection.status ?? (await connection.call("daemon:status"));
+      adopt(next);
+      await takeStatePatches(connection, next);
       client = connection;
       recovering = true;
       capturingSnapshot = false;

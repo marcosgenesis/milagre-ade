@@ -552,13 +552,14 @@ function NewChatHeader({
           )}
           {menu === "branch" && (
             <PickerPanel
-              title={isolation === "local" ? "Choose a branch" : "Branch from"}
+              title={isolation === "local" ? "Choose a worktree" : "Branch from"}
               query={query}
               onQueryChange={setQuery}
-              placeholder="Search branches…"
-              emptyLabel="No branches found."
+              placeholder={isolation === "local" ? "Search worktrees" : "Search branches"}
+              searchPlacement="bottom"
+              emptyLabel={isolation === "local" ? "No worktrees found." : "No branches found."}
               isEmpty={branchRows.length === 0}
-              className="absolute top-[calc(100%+0.375rem)] w-[320px]"
+              className="absolute top-[calc(100%+0.375rem)] w-[420px] max-w-[calc(100vw-2rem)]"
               style={popoverStyle}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
@@ -574,6 +575,7 @@ function NewChatHeader({
                   label={row.name}
                   description={row.description}
                   selected={row.selected}
+                  wrapLabel
                   onClick={() => {
                     row.choose();
                     close();

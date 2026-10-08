@@ -6,6 +6,7 @@ import { phoneSnapshot } from "./chat-scope.ts";
 import type { AgentRuns } from "@milagre/shared/agent-runs";
 import { openLive, type Live, type LiveOptions } from "./live.ts";
 import type { RelayTransport } from "./relay-transport.ts";
+import { localEndpoint, relayAddress, validAccess, validRelay, type Access, type RelayLink } from "@milagre/shared/pairing-link";
 
 export type OpenProject = {
   path: string;
@@ -27,47 +28,9 @@ export type RegisteredProject = { id: string; path: string; name: string };
 /** `hidden`: the user keeps this Project out of the Projects list (and desktop's all-Projects sidebar). */
 export type RecentProject = { path: string; name?: string; hidden?: boolean; link?: NamedProjectLink; projects?: RegisteredProject[] };
 
-/** A Cloudflare Access service token: the edge drops any request to the host's tunnel without it. */
-export type Access = { id: string; secret: string };
-export function validAccess(value: unknown): Access | undefined {
-  const access = value as Partial<Access> | undefined;
-  if (!access?.id && !access?.secret) return undefined;
-  if (!/^[a-f0-9]{32}\.access$/.test(String(access.id)) || !/^[A-Za-z0-9_-]{32,128}$/.test(String(access.secret)))
-    throw new Error("This computer's Cloudflare access token is not valid. Scan its code again.");
-  return { id: String(access.id), secret: String(access.secret) };
-}
-
-export function localEndpoint(input: string): string {
-  let url: URL;
-  try {
-    url = new URL(input.trim());
-  } catch {
-    throw new Error("Enter your computer's HTTPS address or a local simulator address.");
-  }
-  const local = url.protocol === "http:" && ["127.0.0.1", "10.0.2.2"].includes(url.hostname);
-  if ((!local && url.protocol !== "https:") || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
-    throw new Error("Use an HTTPS address, or 127.0.0.1 on iOS / 10.0.2.2 on Android for a local simulator. Enter the token separately.");
-  }
-  return url.origin;
-}
-
-/** How the phone reaches a Mac with no tunnel: the public relay, the Mac's id there, and its pinned box key. */
-export type RelayLink = { url: string; hostId: string; key: string };
-export function validRelay(value: unknown): RelayLink {
-  const relay = value as Partial<RelayLink> | undefined;
-  const damaged = () => new Error("This pairing code is damaged. Scan the code again in Settings → Devices on your Mac.");
-  let url: URL;
-  try {
-    url = new URL(String(relay?.url ?? ""));
-  } catch {
-    throw damaged();
-  }
-  if (url.protocol !== "wss:" || url.username || url.password || url.search || url.hash || url.pathname !== "/") throw damaged();
-  if (!/^[A-Za-z0-9_-]{22}$/.test(String(relay?.hostId)) || !/^[A-Za-z0-9_-]{43}$/.test(String(relay?.key))) throw damaged();
-  return { url: url.origin, hostId: String(relay!.hostId), key: String(relay!.key) };
-}
-/** A relay computer's address and saved id: there is no URL to show, so its id on the relay stands in. */
-export const relayAddress = (hostId: string) => `relay://${hostId}`;
+// The pairing link's parts moved to @milagre/shared with parsePairing; the phone's modules still import them from here.
+export { localEndpoint, relayAddress, validAccess, validRelay };
+export type { Access, RelayLink };
 
 /** What a client needs to reach one computer: a direct address, or the relay. */
 export type ClientHost = { address: string; token: string; access?: Access; relay?: RelayLink };

@@ -23,6 +23,10 @@ class AttentionNotifier {
     this.setBadge = setBadge;
     /** @type {Electron.Notification | null} */
     this.phonePaired = null;
+    /** @type {Electron.Notification | null} */
+    this.computerWaiting = null;
+    // Keys of the computers waiting for Allow that were already announced.
+    this.computersAnnounced = new Set();
     this.previews = new Map();
     this.completed = new Map();
     this.completionNotifications = new Map();
@@ -141,6 +145,32 @@ class AttentionNotifier {
     return true;
   }
 
+  /**
+   * Computers waiting for Allow (devices:pending): a new one is announced once, while no Milagre window has focus (the
+   * prompt is on screen otherwise). The notice closes when nothing waits any more; its click brings the window back.
+   * @param {Array<{ key?: unknown; name?: unknown }>} [requests]
+   */
+  notifyComputerWaiting(requests = []) {
+    const waiting = (Array.isArray(requests) ? requests : []).filter((request) => typeof request?.key === "string");
+    const keys = new Set(waiting.map((request) => /** @type {string} */ (request.key)));
+    for (const key of this.computersAnnounced) if (!keys.has(key)) this.computersAnnounced.delete(key);
+    if (!keys.size) {
+      this.computerWaiting?.close();
+      this.computerWaiting = null;
+      return false;
+    }
+    const fresh = waiting.find((request) => !this.computersAnnounced.has(/** @type {string} */ (request.key)));
+    for (const key of keys) this.computersAnnounced.add(key);
+    if (!fresh || this.isAppFocused()) return false;
+    const name = capped(fresh.name, MAX_TITLE) || "A computer";
+    const notification = this.createNotification({ title: `${name} wants to drive this Mac's chats`, subtitle: "", body: "Open Milagre to allow or deny it." });
+    this.computerWaiting?.close();
+    this.computerWaiting = notification;
+    notification.on("click", () => this.openPhoneSettings());
+    notification.show();
+    return true;
+  }
+
   close(key) {
     const notification = this.open.get(key);
     this.open.delete(key);
@@ -151,6 +181,8 @@ class AttentionNotifier {
     for (const key of [...this.open.keys()]) this.close(key);
     for (const notification of this.completionNotifications.values()) notification.close();
     this.completionNotifications.clear();
+    this.computerWaiting?.close();
+    this.computerWaiting = null;
     this.completed.clear();
     this.previews.clear();
     this.setBadge("");

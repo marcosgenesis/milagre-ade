@@ -113,6 +113,14 @@
       "types": "./src/peer-frames.d.mts",
       "default": "./src/peer-frames.mjs"
     },
+    "./pairing-link": {
+      "types": "./src/pairing-link.d.mts",
+      "default": "./src/pairing-link.mjs"
+    },
+    "./route-supervisor": {
+      "types": "./src/route-supervisor.d.mts",
+      "default": "./src/route-supervisor.mjs"
+    },
     "./model-options": "./src/model-options.ts",
     "./model-copy": "./src/model-copy.ts",
     "./provider-logos": "./src/provider-logos.ts",

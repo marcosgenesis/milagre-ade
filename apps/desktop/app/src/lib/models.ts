@@ -30,7 +30,7 @@ export function capabilitiesFrom(reported: AgentModels | null): ModelCapabilitie
         { efforts, ...(defaultEffort ? { defaultEffort } : {}), ultracode, fastMode },
       ]),
     );
-  return { codex: byId("codex"), claude: byId("claude") };
+  return { codex: byId("codex"), claude: byId("claude"), antigravity: byId("antigravity") };
 }
 
 /** `wanted` when the list has it; otherwise the recommended model of `provider`, any model of it, or the first model. */
@@ -43,8 +43,9 @@ export function resolveModel(models: ModelOption[], wanted: string | undefined, 
   );
 }
 
-/** The provider an id belongs to, for an id no list offers any more (Claude ids start with "claude"). */
+/** The provider an id belongs to, for an id no list offers any more (Claude ids start with "claude", Antigravity ids with "gemini"). */
 export function providerForId(id: string | undefined): ModelProvider {
+  if (id?.startsWith("gemini")) return "antigravity";
   return id?.startsWith("claude") ? "claude" : "codex";
 }
 

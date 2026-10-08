@@ -128,6 +128,11 @@ const bridge = {
   getModels: (scopeKey) => ipcRenderer.invoke("agent:models", scopeKey),
   getCliStatus: (scopeKey) => ipcRenderer.invoke("agent:cli-status", scopeKey),
   updateCli: (provider) => ipcRenderer.invoke("agent:update-cli", provider),
+  onCliProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on("agent:cli-progress", listener);
+    return () => ipcRenderer.removeListener("agent:cli-progress", listener);
+  },
   interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
   respondToPermission: (chatId, requestId, decision) => ipcRenderer.invoke("agent:respond-permission", { chatId, requestId, decision }),
   answerQuestion: (chatId, requestId, answers, summary) => ipcRenderer.invoke("agent:answer-question", { chatId, requestId, answers, summary }),

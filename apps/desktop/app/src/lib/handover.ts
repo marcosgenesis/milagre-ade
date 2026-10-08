@@ -1,10 +1,13 @@
-import { providerName } from "@milagre/shared/providers";
+import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { isHandoverChat } from "@milagre/shared/chats";
 import type { AgentSession, LinkChatSession, ChatMessage, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { modelForChat } from "./agent-runs.ts";
 import { chatTitle } from "./chat-list.ts";
 
-export const otherProvider = (provider: ModelProvider): ModelProvider => (provider === "codex" ? "claude" : "codex");
+/** The providers a chat on `provider` can be handed over to: every other one, in picker order. */
+export const handoverTargets = (provider: ModelProvider): ModelProvider[] => (PROVIDERS as readonly ModelProvider[]).filter((item) => item !== provider);
+/** The provider a handover goes to when the user hasn't picked one: the first of the others in picker order (Codex <-> Claude). */
+export const defaultHandoverTarget = (provider: ModelProvider): ModelProvider => handoverTargets(provider)[0];
 export const providerLabel = providerName;
 
 /** Why the handover row is disabled, or null. A running turn would leave work out of the brief. */
@@ -24,7 +27,7 @@ export { isHandoverChat };
 
 export type HandoverLinks = {
   to?: { id: number; title: string; provider: ModelProvider };
-  from?: { id: number; title: string };
+  from?: { id: number; title: string; provider?: ModelProvider };
   pending: boolean;
   live: boolean;
 };
@@ -43,7 +46,7 @@ export function handoverLinks(
   const to = session?.handedOverTo != null ? state.sessions[session.handedOverTo] : undefined;
   const from = session?.handedOverFrom != null ? state.sessions[session.handedOverFrom] : undefined;
   if (to?.provider) links.to = { id: to.id, title: titleOf(to), provider: to.provider };
-  if (from) links.from = { id: from.id, title: titleOf(from) };
+  if (from) links.from = { id: from.id, title: titleOf(from), ...(from.provider ? { provider: from.provider } : {}) };
   return links;
 }
 
@@ -58,6 +61,11 @@ const MODE_BEHAVIOR: Record<ModelProvider, Record<PermissionMode, string>> = {
     ask: "asks before edits and commands your Claude settings don't already allow",
     auto: "applies edits inside this worktree without asking and asks before most commands and anything outside it",
     full: "skips every approval prompt, so nothing limits files or network",
+  },
+  antigravity: {
+    ask: "asks before edits and commands",
+    auto: "edits files without asking and asks before commands",
+    full: "runs everything without asking, so nothing limits files or network",
   },
 };
 

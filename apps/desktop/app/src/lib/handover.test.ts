@@ -1,11 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentSession, ChatMessage, ModelOption } from "../model";
-import { handoverBlocker, handoverLinks, handoverModel, handoverNotes, isHandoverChat, otherProvider } from "./handover.ts";
+import { handoverBlocker, handoverLinks, handoverModel, handoverNotes, defaultHandoverTarget, handoverTargets, isHandoverChat } from "./handover.ts";
 
-test("the other provider", () => {
-  assert.equal(otherProvider("claude"), "codex");
-  assert.equal(otherProvider("codex"), "claude");
+test("a chat can be handed over to every other provider, Codex and Claude to each other by default", () => {
+  assert.deepEqual(handoverTargets("claude"), ["codex", "antigravity"]);
+  assert.deepEqual(handoverTargets("codex"), ["claude", "antigravity"]);
+  assert.deepEqual(handoverTargets("antigravity"), ["codex", "claude"]);
+  assert.equal(defaultHandoverTarget("claude"), "codex");
+  assert.equal(defaultHandoverTarget("codex"), "claude");
+  assert.equal(defaultHandoverTarget("antigravity"), "codex");
+});
+
+test("Antigravity's modes are described in the handover note", () => {
+  assert.equal(handoverNotes({ from: "claude", to: "antigravity", permissionMode: "ask" })[2], "On Antigravity, Ask asks before edits and commands.");
+  assert.equal(
+    handoverNotes({ from: "claude", to: "antigravity", permissionMode: "auto" })[2],
+    "On Antigravity, Auto edits files without asking and asks before commands.",
+  );
+  assert.equal(
+    handoverNotes({ from: "claude", to: "antigravity", permissionMode: "full" })[2],
+    "On Antigravity, Full runs everything without asking, so nothing limits files or network.",
+  );
 });
 
 test("a running turn blocks handover before a CLI problem does", () => {
@@ -17,7 +33,7 @@ test("a running turn blocks handover before a CLI problem does", () => {
   assert.equal(handoverBlocker({ running: false, cli: null }), null);
 });
 
-const option = (id: string, provider: "claude" | "codex"): ModelOption => ({ id, name: id, provider, description: "" });
+const option = (id: string, provider: "claude" | "codex" | "antigravity"): ModelOption => ({ id, name: id, provider, description: "" });
 const catalog = [option("claude-opus-5-5", "claude"), option("codex-a", "codex"), option("codex-b", "codex")];
 const message = (session_id: number, model: string) => ({ id: session_id, session_id, body: "hi", context: null, role: "assistant" as const, model });
 
@@ -36,7 +52,7 @@ const sessions = {
 test("both chats link to each other by title", () => {
   const state = { sessions, messages: [] };
   assert.deepEqual(handoverLinks(sessions[3], state), { to: { id: 7, title: "main", provider: "codex" }, pending: false, live: false });
-  assert.deepEqual(handoverLinks(sessions[7], state), { from: { id: 3, title: "Fix login" }, pending: true, live: true });
+  assert.deepEqual(handoverLinks(sessions[7], state), { from: { id: 3, title: "Fix login", provider: "claude" }, pending: true, live: true });
 });
 
 test("a link to a chat that is gone is dropped", () => {

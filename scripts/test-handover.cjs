@@ -18,7 +18,7 @@ function Fixture() {
   window.opened = () => opened;
   window.block = setBlocked;
   return <div style={{ width: 360, padding: "64px 12px 12px", display: "flex", flexDirection: "column", gap: 12 }}>
-    <section data-shot="row"><HandoverRow provider="codex" blocked={blocked} onClick={() => setOpened("handover")} /></section>
+    <section data-shot="row"><HandoverRow targets={[{ provider: "codex", blocked }, { provider: "antigravity", blocked: null }]} onChoose={(provider) => setOpened("handover:" + provider)} /></section>
     <section data-shot="to"><HandoverLinkBar to={{ id: 7, title: "Fix login redirect", provider: "codex" }} onOpen={setOpened} /></section>
     <section data-shot="note">{noteOpen && <HandoverNote from="codex" to="claude" permissionMode="auto" onDismiss={() => setNoteOpen(false)} />}</section>
     <section data-shot="notice">{noticeOpen && <Notice data-plain-notice onDismiss={() => setNoticeOpen(false)}>The worktree's setup command failed.</Notice>}</section>
@@ -59,7 +59,10 @@ async function browserChecks() {
     assert.match(await evaluate('document.querySelector("[data-handover-row]").textContent'), /Handover to Codex.*New chat with this chat's context/);
     await shot("picker-row");
     await evaluate('document.querySelector("[data-handover-row]").click()');
-    assert.equal(await evaluate("window.opened()"), "handover");
+    assert.equal(await evaluate("window.opened()"), "handover:codex");
+    assert.match(await evaluate('document.querySelector("[data-handover-row][data-provider=antigravity]").textContent'), /Handover to Antigravity/);
+    await evaluate('document.querySelector("[data-handover-row][data-provider=antigravity]").click()');
+    assert.equal(await evaluate("window.opened()"), "handover:antigravity");
     const reason = "The agent is still running. Stop the turn or wait for it to finish to hand over.";
     await evaluate(`window.block(${JSON.stringify(reason)})`);
     await waitFor('document.querySelector("[data-handover-row]").disabled');

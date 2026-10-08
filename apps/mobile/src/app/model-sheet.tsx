@@ -73,6 +73,7 @@ export default function ModelSheet() {
               <Pressable
                 key={provider}
                 accessibilityRole="tab"
+                accessibilityLabel={providerName(provider)}
                 accessibilityState={{ selected: on, disabled: off }}
                 accessibilityHint={off ? `This Chat runs on ${providerName(locked!)}. Start a new Chat to use ${providerName(provider)}.` : undefined}
                 disabled={off}
@@ -92,7 +93,6 @@ export default function ModelSheet() {
                 }}
               >
                 <ProviderLogo provider={provider} size={14} tone={on ? "ink" : "ink3"} />
-                <Text style={{ color: on ? colors.ink : colors.ink3, fontSize: 13, fontWeight: "600" }}>{providerName(provider)}</Text>
                 <Text style={{ color: colors.ink3, fontSize: 11 }}>{modelsFor(provider, session.models).length}</Text>
               </Pressable>
             );

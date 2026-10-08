@@ -11,32 +11,46 @@ import { ScrollArea } from "./primitives/ScrollArea";
 import Tooltip from "./primitives/Tooltip";
 
 /**
- * Replaces the provider tabs once a chat has messages: opens a new chat on the other provider with this one's context.
- * When `blocked` holds a reason the row is disabled and the reason shows as a tooltip; a disabled button gets no
- * pointer events, so the hover lands on the tooltip's wrapper instead.
+ * Replaces the provider tabs once a chat has messages: opens a new chat on another provider with this one's context.
+ * Each other provider gets its own row, so the user picks the target. When a target is `blocked` its row is disabled
+ * and the reason shows as a tooltip; a disabled button gets no pointer events, so the hover lands on the tooltip's
+ * wrapper instead.
  */
-export function HandoverRow({ provider, blocked, onClick }: { provider: ModelProvider; blocked: string | null; onClick: () => void }) {
-  const row = (
-    <button
-      type="button"
-      data-handover-row
-      disabled={blocked !== null}
-      aria-description={blocked ?? undefined}
-      onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left hover:bg-hover disabled:pointer-events-none disabled:opacity-40"
-    >
-      <ProviderLogo provider={provider} size={16} />
-      <span className="flex min-w-0 flex-col">
-        <span className="text-xs font-semibold text-ink">Handover to {providerLabel(provider)}</span>
-        <span className="truncate text-[11px] text-ink-3">New chat with this chat's context</span>
-      </span>
-    </button>
-  );
-  if (blocked === null) return row;
+export function HandoverRow({
+  targets,
+  onChoose,
+}: {
+  targets: Array<{ provider: ModelProvider; blocked: string | null }>;
+  onChoose: (provider: ModelProvider) => void;
+}) {
   return (
-    <Tooltip label={blocked} wrap className="w-full cursor-not-allowed">
-      {row}
-    </Tooltip>
+    <div role="group" aria-label="Hand over to" className="flex flex-col gap-1">
+      {targets.map(({ provider, blocked }) => {
+        const row = (
+          <button
+            type="button"
+            data-handover-row
+            data-provider={provider}
+            disabled={blocked !== null}
+            aria-description={blocked ?? undefined}
+            onClick={() => onChoose(provider)}
+            className="flex w-full items-center gap-2.5 rounded-control bg-inset px-2.5 py-2 text-left hover:bg-hover disabled:pointer-events-none disabled:opacity-40"
+          >
+            <ProviderLogo provider={provider} size={16} />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-xs font-semibold text-ink">Handover to {providerLabel(provider)}</span>
+              <span className="truncate text-[11px] text-ink-3">New chat with this chat's context</span>
+            </span>
+          </button>
+        );
+        if (blocked === null) return <div key={provider}>{row}</div>;
+        return (
+          <Tooltip key={provider} label={blocked} wrap className="w-full cursor-not-allowed">
+            {row}
+          </Tooltip>
+        );
+      })}
+    </div>
   );
 }
 

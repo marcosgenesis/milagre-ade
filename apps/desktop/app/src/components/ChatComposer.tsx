@@ -30,7 +30,7 @@ import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { HandoverBriefChip, HandoverFromLabel, HandoverLinkBar, HandoverNote } from "./Handover";
 import { LinkedMessageHeader, linkedContext } from "./LinkedMessage";
-import { otherProvider, type HandoverLinks } from "../lib/handover";
+import { defaultHandoverTarget, type HandoverLinks } from "../lib/handover";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
@@ -828,7 +828,7 @@ export function ChatComposer({
           {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
           {showHandoverNote && lockedProvider && (
             <HandoverNote
-              from={otherProvider(lockedProvider)}
+              from={handover?.from?.provider ?? defaultHandoverTarget(lockedProvider)}
               to={lockedProvider}
               permissionMode={permissionMode}
               onDismiss={() => setDismissedNotes((ids) => [...ids, noteKey])}

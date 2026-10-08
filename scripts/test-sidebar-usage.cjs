@@ -19,6 +19,7 @@ function Fixture() {
   window.setCollapsed = setCollapsed;
   const snapshot = { providers: [
     { provider: "claude", status: "ok", windows: [{ ...session, usedPercent: 0 }, { ...weekly, usedPercent: 82 }] },
+    { provider: "antigravity", status: "unavailable", windows: [], message: "Google doesn't report Antigravity quota." },
     { provider: "codex", status: "ok", windows: hasSession ? [session, weekly] : [weekly], bankedResets: 3 },
   ] };
   return <aside className="bg-surface rounded-[8px]" data-sidebar-collapsed={collapsed} style={{ width: collapsed ? 44 : 224, padding: 8, margin: 24 }}>

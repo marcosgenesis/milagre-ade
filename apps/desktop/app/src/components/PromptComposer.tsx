@@ -1,4 +1,4 @@
-import { PROVIDERS, providerName } from "@milagre/shared/providers";
+import { PROVIDERS, cliName, providerName } from "@milagre/shared/providers";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -12,7 +12,7 @@ import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { useDismiss } from "../lib/use-dismiss";
 import { ProviderLogo } from "./ProviderLogo";
 import { HandoverBriefChip, HandoverRow } from "./Handover";
-import { handoverBlocker, otherProvider, providerLabel } from "../lib/handover";
+import { handoverBlocker, handoverTargets, providerLabel } from "../lib/handover";
 import { Attachments } from "./Attachments";
 import { useProjectFiles } from "./useProjectFiles";
 import { promptToken, fileMentionPath, removePromptToken, insertPromptToken } from "../lib/file-mentions";
@@ -502,15 +502,17 @@ export function PromptComposer({
             header={
               lockedProvider !== undefined && onHandover && canHandover ? (
                 <HandoverRow
-                  provider={otherProvider(lockedProvider)}
-                  blocked={handoverBlocker({ running, cli: cliMessage(cliStatus?.[otherProvider(lockedProvider)]) ?? null })}
-                  onClick={() => {
+                  targets={handoverTargets(lockedProvider).map((target) => ({
+                    provider: target,
+                    blocked: handoverBlocker({ running, cli: cliMessage(cliStatus?.[target]) ?? null }),
+                  }))}
+                  onChoose={(target) => {
                     setModelOpen(false);
-                    onHandover(otherProvider(lockedProvider));
+                    onHandover(target);
                   }}
                 />
               ) : (
-                <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
+                <div className="grid gap-1 rounded-control bg-inset p-1" style={{ gridTemplateColumns: `repeat(${PROVIDERS.length}, minmax(0, 1fr))` }}>
                   {PROVIDERS.map((item) => (
                     <button
                       key={item}
@@ -519,13 +521,13 @@ export function PromptComposer({
                       title={
                         lockedProvider !== undefined && item !== lockedProvider
                           ? `This chat runs on ${providerName(lockedProvider)}. Start a new chat to use ${providerName(item)}.`
-                          : (cliMessage(cliStatus?.[item]) ?? undefined)
+                          : (cliMessage(cliStatus?.[item]) ?? providerName(item))
                       }
+                      aria-label={providerName(item)}
                       className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`}
                       onClick={() => setProvider(item)}
                     >
                       <ProviderLogo provider={item} size={14} />
-                      {providerName(item)}
                       {cliTabLabel(cliStatus?.[item]) ? (
                         <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span>
                       ) : (
@@ -550,25 +552,30 @@ export function PromptComposer({
                     ),
                   )}
                 </p>
-                {cliStatus?.[provider]?.state === "outdated" && onUpdateCli && (
-                  <div className="flex items-center justify-end pt-0.5">
-                    <button
-                      type="button"
-                      disabled={updatingCli === provider}
-                      onClick={() => onUpdateCli(provider)}
-                      className="flex items-center gap-1.5 rounded-chip border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
-                    >
-                      {updatingCli === provider ? (
-                        <>
-                          <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
-                          <span>Updating…</span>
-                        </>
-                      ) : (
-                        <span>Update {providerName(provider)}</span>
-                      )}
-                    </button>
-                  </div>
-                )}
+                {onUpdateCli &&
+                  (cliStatus?.[provider]?.state === "outdated" ||
+                    (provider === "antigravity" && ["missing", "broken"].includes(cliStatus?.[provider]?.state ?? ""))) && (
+                    <div className="flex items-center justify-end pt-0.5">
+                      <button
+                        type="button"
+                        disabled={updatingCli === provider}
+                        onClick={() => onUpdateCli(provider)}
+                        className="flex items-center gap-1.5 rounded-chip border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
+                      >
+                        {updatingCli === provider ? (
+                          <>
+                            <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                            <span>{cliStatus?.[provider]?.state === "outdated" ? "Updating…" : "Installing…"}</span>
+                          </>
+                        ) : (
+                          <span>
+                            {cliStatus?.[provider]?.state === "outdated" ? "Update" : cliStatus?.[provider]?.state === "broken" ? "Reinstall" : "Install"}{" "}
+                            {provider === "antigravity" ? cliName(provider) : providerName(provider)}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  )}
               </div>
             )}
             {modelRows.map((model) => (
@@ -725,7 +732,10 @@ export function PromptComposer({
                 onKeyDown={handleKeyDown}
                 placeholder={
                   running
-                    ? "Steer the agent…"
+                    ? // Antigravity can't be steered mid-turn (ACP has no steering); a message waits for the next turn.
+                      provider === "antigravity"
+                      ? "Queue a message for the next turn…"
+                      : "Steer the agent…"
                     : handoverBrief && lockedProvider
                       ? `Add instructions for ${providerLabel(lockedProvider)}, or send the brief as is`
                       : "Prompt or mention a file with @"

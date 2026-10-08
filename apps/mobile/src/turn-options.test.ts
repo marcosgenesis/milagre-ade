@@ -5,6 +5,7 @@ import { modelsFor, selectedModel, sendOptions } from "./turn-options.ts";
 
 const reported: AgentModels = {
   claude: null,
+  antigravity: null,
   codex: [
     {
       id: "reported-model",
@@ -45,4 +46,23 @@ test("models without effort omit it, and supported fast mode is explicit", () =>
     fastMode: true,
     permissionMode: "auto",
   });
+});
+
+test("Antigravity lists one model per family and sends the chosen thinking level as its effort", () => {
+  const models = modelsFor("antigravity", reported);
+  assert.deepEqual(
+    models.map((model) => model.id),
+    ["gemini-3.8-flash", "gemini-3.1-pro", "gemini-3.7-flash", "gemini-3.6-flash"],
+  );
+  const pro = selectedModel("antigravity", "gemini-3.1-pro", reported);
+  assert.deepEqual(pro.efforts, ["low", "high"]);
+  assert.deepEqual(sendOptions(pro, { effort: "low", fastMode: true, permissionMode: "ask" }), {
+    provider: "antigravity",
+    model: "gemini-3.1-pro",
+    effort: "low",
+    fastMode: false,
+    permissionMode: "ask",
+  });
+  // Pro has no Medium, so it falls back to its default, High.
+  assert.equal(sendOptions(pro, { effort: "medium", fastMode: false, permissionMode: "ask" }).effort, "high");
 });

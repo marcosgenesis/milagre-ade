@@ -77,7 +77,14 @@ export function AccountsForComputer() {
       {!snapshot && !error ? <Text style={styles.muted}>Checking accounts...</Text> : null}
       {snapshot?.providers.map((group) => (
         <View key={group.provider} style={{ gap: 8 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              paddingHorizontal: 4,
+            }}
+          >
             <ProviderLogo provider={group.provider} size={18} />
             <Text accessibilityRole="header" style={[styles.text, { fontWeight: "600" }]}>
               {providerName(group.provider)}
@@ -113,14 +120,21 @@ export function AccountsForComputer() {
               return (
                 <View
                   key={account.id}
-                  style={{ borderTopWidth: index ? 1 : 0, borderColor: colors.line, backgroundColor: selected ? colors.hover : undefined }}
+                  style={{
+                    borderTopWidth: index ? 1 : 0,
+                    borderColor: colors.line,
+                    backgroundColor: selected ? colors.hover : undefined,
+                  }}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center" }}>
                     <Pressable
                       accessibilityRole="radio"
                       accessibilityLabel={name}
                       accessibilityHint={`${type ? `${type} account. ` : ""}Switches this provider across Projects on your computer`}
-                      accessibilityState={{ checked: selected, disabled: busy || account.state !== "ready" }}
+                      accessibilityState={{
+                        checked: selected,
+                        disabled: busy || account.state !== "ready",
+                      }}
                       disabled={busy || account.state !== "ready"}
                       onPress={() => {
                         if (!selected) void act("select", group.provider, account.id);
@@ -139,8 +153,24 @@ export function AccountsForComputer() {
                     >
                       <Icon icon={selected ? CheckmarkCircle02Icon : CircleIcon} tone={selected ? "ink" : "ink3"} size={20} />
                       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                          <Text numberOfLines={1} style={[styles.text, { flexShrink: 1, fontSize: 15, fontWeight: selected ? "600" : "400" }]}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.text,
+                              {
+                                flexShrink: 1,
+                                fontSize: 15,
+                                fontWeight: selected ? "600" : "400",
+                              },
+                            ]}
+                          >
                             {name}
                           </Text>
                           {type ? <Icon icon={typeIcon} tone="ink3" size={15} /> : null}
@@ -152,17 +182,28 @@ export function AccountsForComputer() {
                         ) : null}
                       </View>
                     </Pressable>
-                    {account.id !== "default" && (
+                    {(account.id !== "default" || group.provider === "antigravity") && (
                       <PullDown
                         label={`Actions for ${name}`}
                         title={name}
                         style={{ padding: 4 }}
-                        nativeTrigger={{ systemImage: "ellipsis", iconSize: 14, menuTint: colors.ink, rotation: 90, disabled: busy }}
+                        nativeTrigger={{
+                          systemImage: "ellipsis",
+                          iconSize: 14,
+                          menuTint: colors.ink,
+                          rotation: 90,
+                          disabled: busy,
+                        }}
                         sections={[
                           {
                             items: [
                               account.state === "signing-in"
-                                ? { id: "cancel", title: "Cancel sign-in", systemImage: "xmark", disabled: busy }
+                                ? {
+                                    id: "cancel",
+                                    title: "Cancel sign-in",
+                                    systemImage: "xmark",
+                                    disabled: busy,
+                                  }
                                 : {
                                     id: "login",
                                     title: "Re-authenticate",
@@ -170,7 +211,16 @@ export function AccountsForComputer() {
                                     systemImage: "arrow.clockwise",
                                     disabled: busy || signingIn,
                                   },
-                              { id: "remove", title: "Remove", systemImage: "trash", disabled: busy },
+                              ...(account.id === "default"
+                                ? []
+                                : [
+                                    {
+                                      id: "remove",
+                                      title: "Remove",
+                                      systemImage: "trash",
+                                      disabled: busy,
+                                    },
+                                  ]),
                             ],
                           },
                         ]}
@@ -178,7 +228,14 @@ export function AccountsForComputer() {
                           if (action === "login" || action === "cancel" || action === "remove") void act(action, group.provider, account.id);
                         }}
                       >
-                        <View style={{ width: 44, height: 48, alignItems: "center", justifyContent: "center" }}>
+                        <View
+                          style={{
+                            width: 44,
+                            height: 48,
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
                           <Icon icon={MoreVerticalIcon} tone="ink2" size={14} />
                         </View>
                       </PullDown>

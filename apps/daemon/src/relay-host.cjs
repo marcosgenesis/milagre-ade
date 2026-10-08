@@ -40,9 +40,10 @@ function startRelayHost({
   random = defaultRandom,
   onStatus,
   timing,
+  openPeer,
 }) {
   const { pingMs, idleMs, helloMs, backoff, replacedMs, stableMs, jitter } = { ...DEFAULT_TIMING, ...timing };
-  const channels = createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, retired, WebSocket, fetch: fetchBridge, random, helloMs });
+  const channels = createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, retired, WebSocket, fetch: fetchBridge, random, helloMs, openPeer });
   let status = "connecting";
   let closed = false;
   let attempt = 0;
@@ -69,6 +70,8 @@ function startRelayHost({
     const ws = new WebSocket(`${relayUrl}/v1/host?id=${identity.hostId}`, { handshakeTimeout: idleMs });
     const current = { socket: ws, conns: new Map(), ready: false, lastHeard: Date.now(), timer: null, readyTimer: null, stableTimer: null, over: false };
     current.send = (bytes) => sendRaw(current, bytes);
+    // Every channel shares this socket, so a desktop that stops reading is measured by what it holds in all.
+    current.queued = () => current.socket.bufferedAmount;
     session = current;
 
     const finish = (code) => {

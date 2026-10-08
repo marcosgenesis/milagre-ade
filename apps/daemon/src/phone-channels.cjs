@@ -1,5 +1,6 @@
 const { hostAccept, RelayAuthError } = require("@milagre/shared/relay-crypto");
 const { splitBody, createAssembler, MAX_RESPONSE } = require("@milagre/shared/relay-rpc");
+const { openPeerChannel } = require("./peer-channel.cjs");
 
 const OPEN = 1,
   DATA = 2,
@@ -29,12 +30,16 @@ const tooManyRequests = encoder.encode(JSON.stringify({ v: 1, error: { message: 
 const routeOk = (path) => typeof path === "string" && path.startsWith("/") && !path.startsWith("//");
 
 /**
- * One encrypted channel per phone, whatever carries its bytes: the public relay (frames multiplexed on the Mac's
- * relay socket) or the LAN listener (one socket per phone). A `session` is `{ conns, send(bytes) }`; `send` takes a
- * whole frame (type, conn id, payload) and delivers it to that phone. `send` must also handle CLOSE frames: the channel
- * emits them (after a refusal, or when it drops a connection) and the carrier has to close that phone's socket.
+ * One encrypted channel per device, whatever carries its bytes: the public relay (frames multiplexed on the Mac's
+ * relay socket) or the LAN listener (one socket per device). A `session` is `{ conns, send(bytes), queued?(conn) }`;
+ * `send` takes a whole frame (type, conn id, payload) and delivers it to that device, and `queued` says how many bytes
+ * it holds unsent toward one. `send` must also handle CLOSE frames: the channel emits them (after a refusal, or when it
+ * drops a connection) and the carrier has to close that device's socket.
+ * A phone speaks HTTP-over-channel to the loopback bridge. A desktop (hello `kind: "desktop"`, saved as a "computer")
+ * is one more client of the daemon instead: `openPeer(carrier)` opens its connection and peer-channel.cjs carries its
+ * frames. Without `openPeer` desktops are turned away. `phones` is the devices store (`isKnown`, `kindOf`, `add`, `seen`).
  */
-function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, retired = false, WebSocket, fetch: fetchBridge, random, helloMs }) {
+function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, retired = false, WebSocket, fetch: fetchBridge, random, helloMs, openPeer }) {
   const sendFrame = (current, type, conn, payload) => current.send(frame(type, conn, payload));
   function sendMessage(current, conn, record, message) {
     if (current.conns.get(conn) !== record || !record.channel) return;
@@ -58,6 +63,8 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
     current.conns.delete(conn);
     clearTimeout(record.helloTimer);
     closeLives(record);
+    // A desktop's daemon connection goes with its channel.
+    record.peer?.close();
     if (notify) sendFrame(current, CLOSE, conn);
   }
 
@@ -77,18 +84,24 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
       if (error instanceof RelayAuthError) return refuse(current, conn, error.code);
       return refuse(current, conn, "bad-hello");
     }
-    // A desktop speaks another protocol over this channel. Until this Mac does, it turns desktops away unsaved.
-    if (accepted.kind !== "phone") return refuse(current, conn, "bad-hello", { reason: "kind" });
+    // The hello says "desktop"; the store says "computer".
+    const kind = accepted.kind === "desktop" ? "computer" : "phone";
+    // A desktop drives the daemon itself. A host with no daemon to hand it (a confined demo) turns it away unsaved.
+    if (kind === "computer" && !openPeer) return refuse(current, conn, "bad-hello", { reason: "kind" });
+    // A device keeps the kind it paired as: a phone's key saying "desktop" would trade the bridge's allow-list for the
+    // whole daemon.
+    const stored = accepted.firstPairing ? null : phones.kindOf(accepted.phoneKey);
+    if (stored && stored !== kind) return refuse(current, conn, "bad-hello", { reason: "kind" });
     // Set before any wait, so a removal that lands meanwhile finds this channel.
     record.key = accepted.phoneKey;
     if (accepted.firstPairing) {
       try {
-        await phones.add(accepted.phoneKey, { kind: "phone", name: accepted.name });
+        await phones.add(accepted.phoneKey, { kind, name: accepted.name });
       } catch {
         return dropConn(current, conn, true);
       }
     } else {
-      // When it was last here, and its name if it changed. A failed write never closes a known phone's channel.
+      // When it was last here, and its name if it changed. A failed write never closes a known device's channel.
       void Promise.resolve(phones.seen?.(accepted.phoneKey, { name: accepted.name })).catch(() => {});
     }
     if (current.conns.get(conn) !== record) return;
@@ -96,6 +109,15 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
     record.state = "open";
     clearTimeout(record.helloTimer);
     sendFrame(current, DATA, conn, accepted.reply);
+    if (kind === "computer")
+      record.peer = openPeerChannel({
+        openPeer,
+        channel: record.channel,
+        deliver: (sealed) => sendFrame(current, DATA, conn, sealed),
+        queued: () => current.queued?.(conn) ?? 0,
+        isOpen: () => current.conns.get(conn) === record,
+        drop: () => dropConn(current, conn, true),
+      });
   }
 
   /** Keys of the devices whose channel on this carrier finished its hello. */
@@ -224,6 +246,8 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
 
   function handleMessage(current, conn, record, message) {
     if (!message || typeof message !== "object") throw new Error("Not a message");
+    // A desktop's channel speaks peer messages only (peer-channel.cjs), never HTTP-over-channel.
+    if (record.peer) return record.peer.receive(message);
     switch (message.t) {
       case "req":
         requestPart(current, conn, record, message);
@@ -269,6 +293,7 @@ function createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, reti
         assembler: createAssembler(),
         helloTimer: null,
         key: null,
+        peer: null,
       };
       current.conns.set(conn, record);
       record.helloTimer = setTimeout(() => {

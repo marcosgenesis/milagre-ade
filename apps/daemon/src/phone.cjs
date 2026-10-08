@@ -267,6 +267,7 @@ function createPhone({
       const known = relayPhones;
       const phones = {
         isKnown: (id) => known.isKnown(id),
+        kindOf: (id) => known.kindOf(id),
         seen: (id, info) => known.seen(id, info),
         async add(id, info) {
           await known.add(id, info);

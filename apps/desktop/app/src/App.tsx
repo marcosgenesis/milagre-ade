@@ -2,7 +2,7 @@ import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { LinkWorkspace } from "./components/LinkWorkspace";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
-import type { LinkState, OpenLink } from "@milagre/shared/model";
+import type { LinkState, NamedProjectLink, OpenLink } from "@milagre/shared/model";
 import { scopeKey, isLinkScopeKey, scopeFromKey } from "@milagre/shared/chat-scopes";
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
@@ -92,7 +92,7 @@ import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import { messageCommands } from "./lib/message-commands";
-import type { RecentProject } from "./lib/project-list";
+import { RECENT_PROJECTS_CHANGED, type RecentProject } from "./lib/project-list";
 import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
 import { createDraftStore, draftKey } from "./lib/draft-store";
@@ -152,7 +152,8 @@ function App() {
   const selectedLinkRef = useRef(selectedLink);
   selectedLinkRef.current = selectedLink;
   const [linkInitialSession, setLinkInitialSession] = useState<number | undefined>();
-  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  // `true` creates a Link; a Link edits that one.
+  const [linkDialogOpen, setLinkDialogOpen] = useState<boolean | NamedProjectLink>(false);
   // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const scopeDrafts = useMemo(createScopeDrafts, []);
   const [linkStates, setLinkStates] = useState<Record<string, LinkState>>({});
@@ -1532,12 +1533,34 @@ function App() {
     );
   }
 
+  async function editLink(id: string) {
+    try {
+      const link = (await window.milagre.listNamedLinks()).find((item) => item.id === id);
+      if (!link) throw new Error("Link no longer exists");
+      setLinkDialogOpen(link);
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    }
+  }
+  // An edited Link that is open reloads in place, so its header and member Projects follow.
+  async function linkEdited(link: NamedProjectLink) {
+    window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
+    if (selectedLinkRef.current?.link.id !== link.id) return;
+    try {
+      const next = await window.milagre.openNamedLink(link.id);
+      if (selectedLinkRef.current?.link.id === link.id) setSelectedLink(next);
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    }
+  }
   const linkDialog = linkDialogOpen ? (
     <LinkProjectDialog
+      link={typeof linkDialogOpen === "object" ? linkDialogOpen : undefined}
       onClose={() => setLinkDialogOpen(false)}
       onCreated={(link) => {
+        const edited = typeof linkDialogOpen === "object";
         setLinkDialogOpen(false);
-        void selectLink(link.id);
+        void (edited ? linkEdited(link) : selectLink(link.id));
       }}
     />
   ) : null;
@@ -1591,6 +1614,7 @@ function App() {
           onSwitchProject={(path) => void switchProject(path)}
           onSwitchLink={(id) => void selectLink(id)}
           onLinkProject={() => setLinkDialogOpen(true)}
+          onEditLink={(id) => void editLink(id)}
           onOpenProject={() => void openProject()}
           onSettings={() => {
             setSettingsSection("project-accounts");
@@ -1830,6 +1854,7 @@ function App() {
               workspaceImage={projectImage(project.path)}
               onSwitchLink={(id) => void selectLink(id)}
               onLinkProject={() => setLinkDialogOpen(true)}
+              onEditLink={(id) => void editLink(id)}
               onOpenProject={openProjectFromSidebar}
               recents={chats}
               activeId={

@@ -20,14 +20,17 @@ import { LinkProjectDialog } from '/src/components/LinkProjectDialog';
 import '/src/styles.css';
 const projects = ${JSON.stringify(projects)};
 window.milagre = {
-  listProjects: () => new Promise(resolve => { window.finishProjectLoading = () => resolve(projects); ${preview ? "setTimeout(window.finishProjectLoading, 1600);" : ""} }),
+  listProjects: () => window.projectsLoaded ? Promise.resolve(projects) : new Promise(resolve => { window.finishProjectLoading = () => { window.projectsLoaded = true; resolve(projects); }; ${preview ? "setTimeout(window.finishProjectLoading, 1600);" : ""} }),
   getProjectImage: async () => null,
   createNamedLink: async request => ({ ...request, id: 'preview-link', createdAt: new Date().toISOString() }),
+  updateNamedLink: async request => { window.updated = request; return { ...request, createdAt: new Date().toISOString() }; },
 };
 function Fixture() {
   const [open, setOpen] = useState(true);
   const [created, setCreated] = useState('');
+  const [editing, setEditing] = useState(null);
   window.openLinkDialog = () => setOpen(true);
+  window.editLinkDialog = link => { setEditing(link); setOpen(true); };
   return <main className="flex min-h-screen items-center justify-center bg-surface-2 p-8 text-ink">
     <div className="rounded-[16px] bg-surface p-8 shadow-raised">
       <p className="text-[12px] text-ink-3">Preview</p>
@@ -36,7 +39,7 @@ function Fixture() {
       <button className="mt-5 rounded-control bg-ink px-4 py-2 text-[13px] text-surface" onClick={() => setOpen(true)}>Open Link projects</button>
       {created && <p className="mt-3 text-[13px]">{created}</p>}
     </div>
-    {open && <LinkProjectDialog onClose={() => setOpen(false)} onCreated={link => { setCreated(link.name + ' links ' + link.projectIds.length + ' Projects'); setOpen(false); }} />}
+    {open && <LinkProjectDialog key={editing?.id ?? 'new'} link={editing ?? undefined} onClose={() => setOpen(false)} onCreated={link => { setCreated(link.name + ' links ' + link.projectIds.length + ' Projects'); setOpen(false); }} />}
   </main>;
 }
 createRoot(document.getElementById('root')).render(<Fixture />);
@@ -108,7 +111,32 @@ async function browserChecks() {
       "The last Project is reachable by scrolling",
     );
     await screenshot("link-project-list-scrolled");
-    console.log("PASS: loading skeleton, no false empty state, four-row limit, and scroll access to all eight Projects.");
+
+    // Editing: a member whose folder is gone is listed so it can be removed, and another Project can be added.
+    await evaluate(`document.querySelector('dialog form button[type=button]').click()`);
+    await waitFor(`!document.querySelector('dialog')`);
+    await evaluate(
+      `window.editLinkDialog({ id: 'food', name: 'RDFood', projectIds: ['/preview/food-api/.git', '/preview/food-web/.git', '/preview/gone-service/.git'], createdAt: '2026-10-01T00:00:00.000Z' })`,
+    );
+    await waitFor(`document.querySelectorAll('dialog input[type=checkbox]').length === 9`);
+    assert.equal(await evaluate(`document.querySelector('#link-dialog-title').textContent`), "Edit Link");
+    assert.equal(await evaluate(`document.querySelector('#link-name').value`), "RDFood");
+    assert.equal(await evaluate(`document.querySelectorAll('dialog input[type=checkbox]:checked').length`), 3, "Current members start checked");
+    const toggle = (name) =>
+      evaluate(`[...document.querySelectorAll('dialog label')].find(row => row.textContent.includes(${JSON.stringify(name)})).querySelector('input').click()`);
+    assert.ok(await evaluate(`[...document.querySelectorAll('dialog label')].some(row => row.textContent.includes('gone-serviceUnavailable'))`));
+    await toggle("gone-service");
+    await toggle("rd-food-merchant");
+    await screenshot("link-edit");
+    await evaluate(`document.querySelector('dialog button[type=submit]').click()`);
+    await waitFor(`!!window.updated`);
+    assert.deepEqual(await evaluate("window.updated"), {
+      id: "food",
+      name: "RDFood",
+      projectIds: ["/preview/food-api/.git", "/preview/food-web/.git", "/preview/rd-food-merchant/.git"],
+    });
+    await waitFor(`document.body.textContent.includes('RDFood links 3 Projects')`);
+    console.log("PASS: loading skeleton, no false empty state, four-row limit, scroll access to all eight Projects, and editing a Link's members.");
     app.exit(0);
   } catch (error) {
     console.error(error);

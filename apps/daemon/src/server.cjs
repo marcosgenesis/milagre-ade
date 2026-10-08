@@ -13,6 +13,7 @@ const { VERSION, MAX_FRAME_BYTES, MAX_PENDING, pageSize, wire } = require("./pro
 const { createPhone } = require("./phone.cjs");
 const { createMobilePush } = require("./mobile-push.cjs");
 const { createExpoPush } = require("./expo-push.cjs");
+const { peerPolicy } = require("./peer-policy.cjs");
 const { attentionContext } = require("@milagre/shared/attention");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 
@@ -21,6 +22,10 @@ const PUSH_METHODS = Object.freeze(["push:register", "push:unregister", "push:fo
 const PHONE_METHODS = Object.freeze(["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing", "phone:set-lan"]);
 // Paired phones and computers, listed and removed from this Mac's own window only (Settings > Devices).
 const DEVICE_METHODS = Object.freeze(["devices:list", "devices:remove"]);
+// A paired desktop's own channel (peer-channel.cjs): rpc / evt / part messages over the relay or the LAN.
+const DESKTOP_PEER = "desktop-peer-v1";
+// Asked by a paired desktop, which has no phone:* methods: where it can reach this Mac (relay identity, LAN routes).
+const PEER_METHODS = Object.freeze(["peer:routes"]);
 // A client that asks for them (daemon:state-patches) gets what changed in a state event, not the whole state; see
 // state-patch.mjs. state:read gives it a whole state and its version when it has none or missed one.
 const STATE_PATCHES = "state-patches-v1";
@@ -300,6 +305,8 @@ async function startDaemon({
     let tailedFrame;
     const tailed = tailedAgentEvent(channel, payload);
     for (const [key, connection] of clients) {
+      // A paired desktop hears nothing on a channel it may not call: phone:status carries the pairing link and its token.
+      if (connection.policy?.denies(channel)) continue;
       try {
         const taker = patchClients.get(key);
         const frame =
@@ -378,10 +385,12 @@ async function startDaemon({
     dataDir,
     onChange: (status) => broadcast("phone:status", status),
     onPaired: (info) => broadcast("phone:paired", info),
+    // Each paired desktop is one more client of this daemon, with the paired-desktop deny set.
+    openPeer: (carrier) => acceptConnection({ ...carrier, policy: peerPolicy }),
     ...phoneOptions,
   });
   /**
-   * One client of the daemon, whatever carries its frames: the Unix socket below, and (PR 2) a paired desktop's channel.
+   * One client of the daemon, whatever carries its frames: the Unix socket below, and a paired desktop's channel (peer-channel.cjs).
    * The carrier supplies `send(message, json, bytes)`, which writes one frame as wire()'s send does (it may throw
    * FRAME_TOO_LARGE, and returns false once closed); `end()`, which closes after what is queued; `destroy()`, which
    * closes now; and `isClosed()`. `requireAuthentication`: the first requests must be the daemon:authenticate handshake
@@ -408,7 +417,7 @@ async function startDaemon({
     const context = Object.freeze({ clientId: randomUUID() });
     // This connection in clients, views and patchClients.
     const key = Symbol("connection");
-    const connection = { send };
+    const connection = { send, policy };
     if (authenticated) {
       clients.set(key, connection);
       views.set(key, view);
@@ -504,8 +513,20 @@ async function startDaemon({
             protocolVersion: VERSION,
             dataDir,
             socketPath,
-            capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1", "mobile-push-v1", STATE_PATCHES, CHAT_PAGES, SUBAGENT_TAILS],
-            methods: [...runtime.methods, ...PHONE_METHODS, ...DEVICE_METHODS, ...PUSH_METHODS, ...STATE_METHODS].filter((method) => !policy?.denies(method)),
+            // A capability tied to a method this connection may not call is not advertised to it (mobile push is push:*).
+            capabilities: [
+              "desktop-v1",
+              "snapshot-pages-v1",
+              "result-pages-v1",
+              ...(policy?.denies("push:register") ? [] : ["mobile-push-v1"]),
+              STATE_PATCHES,
+              CHAT_PAGES,
+              SUBAGENT_TAILS,
+              DESKTOP_PEER,
+            ],
+            methods: [...runtime.methods, ...PHONE_METHODS, ...DEVICE_METHODS, ...PUSH_METHODS, ...STATE_METHODS, ...PEER_METHODS].filter(
+              (method) => !policy?.denies(method),
+            ),
           };
         else if (request.method === "phone:status") result = phone.status();
         // Settings shows the reply, which arrives after the status events: answer with the settled status, not the
@@ -526,6 +547,7 @@ async function startDaemon({
         else if (request.method === "phone:set-lan") result = await phone.setLan(request.args[0]);
         else if (request.method === "devices:list") result = await phone.devices();
         else if (request.method === "devices:remove") result = await phone.removeDevice(request.args[0]);
+        else if (request.method === "peer:routes") result = phone.peerRoutes();
         else if (request.method === "push:register") result = await push.register(request.args[0]);
         else if (request.method === "push:unregister") result = await push.unregister(request.args[0]);
         else if (request.method === "push:focus") result = push.focus(request.args[0]);

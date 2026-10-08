@@ -30,6 +30,10 @@
   ],
   "type": "module",
   "exports": {
+    "./pr-action": {
+      "types": "./src/pr-action.d.mts",
+      "default": "./src/pr-action.mjs"
+    },
     "./prompt-skills": {
       "types": "./src/prompt-skills.d.mts",
       "default": "./src/prompt-skills.mjs"
@@ -103,6 +107,10 @@
     "./relay-rpc": {
       "types": "./src/relay-rpc.d.mts",
       "default": "./src/relay-rpc.mjs"
+    },
+    "./peer-frames": {
+      "types": "./src/peer-frames.d.mts",
+      "default": "./src/peer-frames.mjs"
     },
     "./model-options": "./src/model-options.ts",
     "./model-copy": "./src/model-copy.ts",

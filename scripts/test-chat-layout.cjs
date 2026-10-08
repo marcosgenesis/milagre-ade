@@ -21,6 +21,8 @@ function Fixture() {
   const [fastMode, setFastMode] = useState(false);
   const [prAction, setPrAction] = useState(null);
   const [sending, setSending] = useState(false);
+  const [extra, setExtra] = useState([]);
+  window.setExtraMessages = setExtra;
   window.setPrAction = setPrAction;
   window.setSending = setSending;
   window.resolveClicks ??= 0;
@@ -34,7 +36,7 @@ function Fixture() {
   }));
   return <div style={{ height: "100%", padding: 12 }}>
     {/* Exercise the fully expanded history, as when Find is open; paging has its own regression. */}
-    <ChatComposer findOpen messages={messages}
+    <ChatComposer findOpen messages={[...messages, ...extra]}
       imageDraft={{ images: [], files: [], removeFile: noop, attachFiles: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
       projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false}
       pullRequestAction={prAction ? { ...prAction, onRun: () => window.resolveClicks++ } : undefined}
@@ -198,6 +200,30 @@ async function browserChecks() {
     await waitFor(`!(${resolveButton}).disabled`);
     await delay(250);
     await window.webContents.capturePage().then((image) => require("node:fs").writeFileSync("/tmp/milagre-conflict-pill.png", image.toPNG()));
+    await evaluate(`window.setExtraMessages([{ id: 999999, session_id: 1, role: "user", body: "Fix CI on pull request #77",
+      context: { kind: "pr-action", action: "checks-failed", pr: 77, url: "https://github.com/the-ptf/milagre-ade/pull/77" } }])`);
+    await waitFor('!!document.querySelector("[data-slot=pr-action][data-action=checks-failed]")');
+    assert.ok(await evaluate('document.querySelector("[data-slot=pr-action]").textContent.includes("Fix CI")'));
+    assert.equal(await evaluate('document.querySelector("[data-slot=pr-action] a").getAttribute("href")'), "https://github.com/the-ptf/milagre-ade/pull/77");
+    assert.equal(
+      await evaluate('[...document.querySelectorAll("[data-slot=message] .bg-field")].some((el) => el.textContent.includes("pull request #77"))'),
+      false,
+      "A PR action renders as a card, not a bubble",
+    );
+    assert.equal(
+      await evaluate('document.querySelector("[data-slot=pr-action]").closest("[data-slot=message]").dataset.linked'),
+      undefined,
+      "A PR action is the user's own message, not one from a Link",
+    );
+    if (process.env.MILAGRE_SCREENSHOT_DIR) {
+      await evaluate('document.querySelector("[data-slot=pr-action]").scrollIntoView({ block: "center" })');
+      await delay(250);
+      const shot = await window.webContents.capturePage();
+      require("node:fs").mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+      require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-card.png"), shot.toPNG());
+    }
+    // The rail checks below count every message.
+    await evaluate("window.setExtraMessages([])");
     const updateButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Update branch')`;
     await evaluate('window.setPrAction({ label: "Update branch", tone: "orange" })');
     await waitFor(`!!(${updateButton})`);

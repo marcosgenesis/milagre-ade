@@ -1,4 +1,4 @@
-import { PROVIDERS, providerName } from "@milagre/shared/providers";
+import { pickerProviders, providerName } from "@milagre/shared/providers";
 import { contextWindowFor, effortFor } from "@milagre/shared/model-options";
 import { formatTokens } from "@milagre/shared/usage";
 import { effortCopy } from "@milagre/shared/model-copy";
@@ -76,7 +76,7 @@ export default function ModelSheet() {
           accessibilityRole="tablist"
           style={{ flexDirection: "row", padding: 3, gap: 3, borderRadius: 11, borderCurve: "continuous", backgroundColor: colors.canvas }}
         >
-          {PROVIDERS.map((provider) => {
+          {pickerProviders(session.cliStatus, initial.provider, draft.provider).map((provider) => {
             const on = provider === draft.provider;
             return (
               <Pressable

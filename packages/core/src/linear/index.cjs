@@ -37,7 +37,7 @@ function createLinear({
   }
 
   // Best effort: a token Linear can't be told about is gone from this Mac either way.
-  const revoke = (token, hint) => revokeToken({ fetchImpl, apiBase, clientId, token, hint }).catch(() => {});
+  const revoke = (token, hint) => revokeToken({ fetchImpl, apiBase, token, hint });
 
   async function signIn(attempt) {
     const pkce = createPkce();
@@ -101,9 +101,8 @@ function createLinear({
       store.clearToken();
       if (!token) return status();
       changed();
-      // The refresh token carries the grant; the access token goes too so it stops working before it expires.
-      await revoke(token.refreshToken, "refresh_token");
-      await revoke(token.accessToken, "access_token");
+      // Revoking the refresh token ends the whole grant; the access token is only a fallback if Linear refused that.
+      if (!(await revoke(token.refreshToken, "refresh_token"))) await revoke(token.accessToken, "access_token");
       return status();
     },
     async dispose() {

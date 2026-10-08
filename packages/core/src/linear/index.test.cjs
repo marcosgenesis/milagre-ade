@@ -142,17 +142,32 @@ test("three connects in a row: only the newest survives", async (t) => {
   assert.equal(opened, 1);
 });
 
-test("disconnect revokes the refresh token first, then the access token", async (t) => {
+test("disconnect revokes the refresh token once and stops there when Linear accepts it", async (t) => {
   const { service, linear } = setup(t);
   await service.connect();
   await service.disconnect();
+  assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token" }]);
+});
+
+test("disconnect falls back to the access token when revoking the refresh token is refused", async (t) => {
+  const linear = fakeLinear();
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith("/oauth/revoke") && new URLSearchParams(init.body).get("token_type_hint") === "refresh_token") {
+      linear.revokes.push({ token: "r1", failed: true });
+      return json(400, {});
+    }
+    return linear.fetchImpl(url, init);
+  };
+  const { service } = setup(t, { fetchImpl, openBrowser: linear.approve });
+  await service.connect();
+  assert.deepEqual(await service.disconnect(), { connected: false });
   assert.deepEqual(linear.revokes, [
-    { token: "r1", token_type_hint: "refresh_token", client_id: "cid" },
-    { token: "a1", token_type_hint: "access_token", client_id: "cid" },
+    { token: "r1", failed: true },
+    { token: "a1", token_type_hint: "access_token" },
   ]);
 });
 
-test("disconnect still revokes the access token when revoking the refresh token fails", async (t) => {
+test("disconnect falls back to the access token when revoking the refresh token throws", async (t) => {
   const linear = fakeLinear();
   const fetchImpl = async (url, init) => {
     if (url.endsWith("/oauth/revoke") && new URLSearchParams(init.body).get("token_type_hint") === "refresh_token") {
@@ -166,7 +181,7 @@ test("disconnect still revokes the access token when revoking the refresh token 
   assert.deepEqual(await service.disconnect(), { connected: false });
   assert.deepEqual(linear.revokes, [
     { token: "r1", failed: true },
-    { token: "a1", token_type_hint: "access_token", client_id: "cid" },
+    { token: "a1", token_type_hint: "access_token" },
   ]);
 });
 
@@ -178,7 +193,7 @@ test("a sign-in that fails after the token exchange revokes the new grant and sa
   };
   const { service, changes } = setup(t, { fetchImpl, openBrowser: linear.approve });
   await assert.rejects(service.connect(), { code: "failed", message: "Linear sign-in failed: Viewer unavailable" });
-  assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token", client_id: "cid" }]);
+  assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token" }]);
   assert.deepEqual(service.status(), { connected: false });
   assert.equal(changes(), 0);
 });
@@ -206,5 +221,5 @@ test("a sign-in cancelled while its token is being exchanged saves nothing and r
   await rejected;
   assert.deepEqual(service.status(), { connected: false });
   assert.equal(changes(), 0);
-  assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token", client_id: "cid" }]);
+  assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token" }]);
 });

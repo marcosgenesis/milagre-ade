@@ -116,14 +116,20 @@ function refreshTokens({ fetchImpl, apiBase, clientId, refreshToken, now }) {
   return tokenRequest({ fetchImpl, apiBase, params: { grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId }, now });
 }
 
-// Ends one token's grant. Revoking the refresh token ends the whole grant; the access token alone expires in a day.
-async function revokeToken({ fetchImpl, apiBase, clientId, token, hint }) {
-  await fetchImpl(`${apiBase}/oauth/revoke`, {
-    method: "POST",
-    headers: hint === "access_token" ? { ...FORM, authorization: `Bearer ${token}` } : FORM,
-    body: new URLSearchParams({ token, token_type_hint: hint, client_id: clientId }).toString(),
-    signal: AbortSignal.timeout(10_000),
-  });
+// Ends one token's grant and says whether Linear accepted it. Linear takes only `token` and `token_type_hint`:
+// with a client_id or a Bearer header the access token kept working. Revoking the refresh token ends the whole grant.
+async function revokeToken({ fetchImpl, apiBase, token, hint }) {
+  try {
+    const response = await fetchImpl(`${apiBase}/oauth/revoke`, {
+      method: "POST",
+      headers: FORM,
+      body: new URLSearchParams({ token, token_type_hint: hint }).toString(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return response.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 module.exports = { createPkce, authorizeUrl, listenForCallback, exchangeCode, refreshTokens, revokeToken };

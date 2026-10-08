@@ -171,14 +171,33 @@ test("a refresh posts the refresh token and returns the new one Linear sends bac
   });
 });
 
-test("revoking posts the token with its type hint, and the Bearer header only for an access token", async () => {
+test("revoking posts only the token and its type hint, with no client_id and no authorization header", async () => {
   const sent = [];
-  const fetchImpl = async (url, init) => (sent.push({ url, init }), json(200, {}));
-  await revokeToken({ fetchImpl, apiBase: "https://api.test", clientId: "cid", token: "r1", hint: "refresh_token" });
-  await revokeToken({ fetchImpl, apiBase: "https://api.test", clientId: "cid", token: "a1", hint: "access_token" });
+  const fetchImpl = async (url, init) => (sent.push({ url, init }), json(200, { success: true }));
+  assert.equal(await revokeToken({ fetchImpl, apiBase: "https://api.test", token: "r1", hint: "refresh_token" }), true);
+  assert.equal(await revokeToken({ fetchImpl, apiBase: "https://api.test", token: "a1", hint: "access_token" }), true);
   assert.equal(sent[0].url, "https://api.test/oauth/revoke");
-  assert.deepEqual(Object.fromEntries(new URLSearchParams(sent[0].init.body)), { token: "r1", token_type_hint: "refresh_token", client_id: "cid" });
-  assert.equal(sent[0].init.headers.authorization, undefined);
-  assert.deepEqual(Object.fromEntries(new URLSearchParams(sent[1].init.body)), { token: "a1", token_type_hint: "access_token", client_id: "cid" });
-  assert.equal(sent[1].init.headers.authorization, "Bearer a1");
+  assert.equal(sent[0].init.method, "POST");
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(sent[0].init.body)), { token: "r1", token_type_hint: "refresh_token" });
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(sent[1].init.body)), { token: "a1", token_type_hint: "access_token" });
+  for (const { init } of sent) {
+    assert.equal(init.headers.authorization, undefined);
+    assert.equal(init.headers.Authorization, undefined);
+    assert.equal(init.headers["content-type"] ?? init.headers["Content-Type"], "application/x-www-form-urlencoded");
+  }
+});
+
+test("revoking reports whether Linear accepted it, and never throws", async () => {
+  const args = { apiBase: "https://api.test", token: "r1", hint: "refresh_token" };
+  assert.equal(await revokeToken({ ...args, fetchImpl: async () => json(400, {}) }), false);
+  assert.equal(await revokeToken({ ...args, fetchImpl: async () => json(500, {}) }), false);
+  assert.equal(
+    await revokeToken({
+      ...args,
+      fetchImpl: async () => {
+        throw new Error("offline");
+      },
+    }),
+    false,
+  );
 });

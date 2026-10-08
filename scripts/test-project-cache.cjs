@@ -101,6 +101,8 @@ const stubs = {
     "export const savedHosts = { list: async () => [] }; export const savedNavigation = { read: async () => null }; export const readPermission = async () => null; export const savePermission = async () => {};",
   "./live": "export const syncProject = () => () => {};",
   "./ui": ui,
+  "expo-router": "import { useEffect } from 'react'; export const useFocusEffect = effect => useEffect(effect, [effect]);",
+  "expo-linking": "export const openURL = async () => {};",
   "expo-clipboard": "export const setStringAsync = async () => {};",
   "react-native-safe-area-context": "export const useSafeAreaInsets = () => ({ top: 0, bottom: 0 });",
   "./status-indicators": "export const ChatMarkIcon = () => null;",

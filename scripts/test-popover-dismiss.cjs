@@ -80,8 +80,8 @@ async function browserChecks() {
     await waitFor(`!!document.querySelector('[data-picker-panel] input')`);
     await screenshot("model-picker-open");
     assert.equal(
-      await evaluate(`[...document.querySelectorAll('[data-picker-panel] .grid-cols-2 > button')].map((tab) => tab.disabled).join()`),
-      "false,false",
+      await evaluate(`[...document.querySelectorAll('[data-picker-panel] [data-provider-tabs] > button')].map((tab) => tab.disabled).join()`),
+      "false,false,false",
       "A provider tab stays clickable while its CLI needs an update",
     );
     await click("[data-picker-panel] input");

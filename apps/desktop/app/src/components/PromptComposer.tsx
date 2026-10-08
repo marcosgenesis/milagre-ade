@@ -456,7 +456,11 @@ export function PromptComposer({
             className="absolute w-[360px]"
             style={anchorStyle}
             header={
-              <div className="grid gap-1 rounded-control bg-inset p-1" style={{ gridTemplateColumns: `repeat(${PROVIDERS.length}, minmax(0, 1fr))` }}>
+              <div
+                data-provider-tabs
+                className="grid gap-1 rounded-control bg-inset p-1"
+                style={{ gridTemplateColumns: `repeat(${PROVIDERS.length}, minmax(0, 1fr))` }}
+              >
                 {PROVIDERS.map((item) => (
                   <button
                     key={item}

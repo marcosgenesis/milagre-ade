@@ -406,7 +406,7 @@ export default function ChatScreen() {
       title: "Start from a Linear issue",
       placeholder: "Search issues",
       emptyLabel: "No issues found.",
-      leading: <LinearLogo size={18} />,
+      leading: <LinearLogo size={18} tone="ink" />,
       items: issues.map((issue) => ({ id: issue.key, title: `${issue.key} ${issue.title}`, subtitle: issue.state.name })),
       onSelect: (key) => {
         const issue = issues.find((item) => item.key === key);

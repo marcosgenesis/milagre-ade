@@ -53,11 +53,11 @@ export function ProviderLogo({ provider, size = 15 }: { provider: ModelProvider;
   );
 }
 
-/** Linear's mark, on Linear issue chips and pickers. */
+/** Linear's mark, on Linear issue chips and pickers, in the color of the text beside it. */
 export function LinearLogo({ size = 12 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className="shrink-0" data-linear-logo>
-      <path d={LINEAR_LOGO.d} fill={LINEAR_LOGO.fill} />
+      <path d={LINEAR_LOGO.d} fill="currentColor" />
     </svg>
   );
 }

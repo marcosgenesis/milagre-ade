@@ -136,11 +136,12 @@ export function EffortMeter({ level, total, tone = "ink2" }: { level: number; to
   );
 }
 
-/** Linear's mark, on Linear issue chips and pickers (same shape as desktop's LinearLogo). */
-export function LinearLogo({ size = 12 }: { size?: number }) {
+/** Linear's mark, on Linear issue chips and pickers (same shape as desktop's LinearLogo), in the color of the text beside it. */
+export function LinearLogo({ size = 12, tone = "ink2" }: { size?: number; tone?: Tone }) {
+  const palette = hex(useColorScheme());
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <Path d={LINEAR_LOGO.d} fill={LINEAR_LOGO.fill} />
+      <Path d={LINEAR_LOGO.d} fill={palette[tone]} />
     </Svg>
   );
 }

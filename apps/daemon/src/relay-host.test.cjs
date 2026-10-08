@@ -766,3 +766,47 @@ test("a computer that leaves while it waits drops its request", async (t) => {
   await until(() => you.asked[0].signal.aborted, "the request dropped");
   assert.equal(mac.phones.count(), 0);
 });
+
+test("a request that throws is aborted, so nothing is left waiting for it", async (t) => {
+  const signals = [];
+  const { relay, mac } = await paired(t, {
+    mac: {
+      openPeer: fakePeerDaemon().openPeer,
+      allowComputer: async (request) => {
+        signals.push(request.signal);
+        throw new Error("boom");
+      },
+    },
+  });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).error, "turned away");
+  assert.equal(signals[0].aborted, true, "the request was told to stop");
+  assert.equal(mac.phones.count(), 0);
+});
+
+test("waiting() runs once however often it is called, and not at all after the request is over", async (t) => {
+  let request;
+  const { relay, mac } = await paired(t, {
+    mac: {
+      openPeer: fakePeerDaemon().openPeer,
+      allowComputer: (asked) =>
+        new Promise((resolve) => {
+          request = { ...asked, resolve };
+          asked.waiting();
+          asked.waiting();
+        }),
+      timing: { helloMs: 200, pendingRepeatMs: 20 },
+    },
+  });
+  const desktop = connectDesktop({ relayUrl: relay.url, identity: mac.identity });
+  t.after(() => desktop.close());
+  const hello = desktop.hello({ ms: 10_000 });
+  await until(() => desktop.notices.length >= 3, "notices");
+  request.resolve("allowed");
+  assert.ok((await hello).channel);
+  request.waiting();
+  // A notice sent once the channel is open is not sealed: the desktop's reader fails on it.
+  await sleep(120);
+  assert.equal(desktop.error, null, "no notice repeats once the owner has answered");
+});

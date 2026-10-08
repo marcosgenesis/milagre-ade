@@ -118,11 +118,15 @@ function createPhoneChannels({
         name: accepted.name,
         signal: abort.signal,
         waiting() {
+          // Once per request, and not after it is over.
+          if (record.pendingTimer || record.abort !== abort) return;
           notice();
           record.pendingTimer = setInterval(notice, pendingRepeatMs);
         },
       });
     } catch {
+      // The request may have registered before it threw: tell it to stop, so it doesn't keep holding a slot.
+      abort.abort();
       return "dropped";
     } finally {
       clearInterval(record.pendingTimer);

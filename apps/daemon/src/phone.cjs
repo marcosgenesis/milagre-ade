@@ -124,7 +124,13 @@ function createPhone({
         resolve(verdict);
       }
       pending.set(key, entry);
-      waiting?.();
+      try {
+        waiting?.();
+      } catch {
+        // It can't be told to wait (its channel is gone): it must not stay listed.
+        settle("dropped");
+        return;
+      }
       pendingChanged();
     });
   }

@@ -979,6 +979,28 @@ test("a computer's second hello replaces its first request, and a fifth computer
   assert.equal(await second.verdict, "allowed");
 });
 
+test("a request that can't be told to wait is dropped, not left listed", async (t) => {
+  const { phone, announced, relays } = await asking(t);
+  const verdict = await relays[0].options.allowComputer({
+    key: "deskA",
+    name: "studio",
+    signal: new AbortController().signal,
+    waiting() {
+      throw new Error("its channel is gone");
+    },
+  });
+  assert.equal(verdict, "dropped");
+  assert.deepEqual(phone.pendingDevices(), []);
+  assert.ok(
+    announced.every((list) => list.length === 0),
+    "it was never announced as waiting",
+  );
+  // And its slot is free again.
+  const next = relays[0].options.allowComputer({ key: "deskB", signal: new AbortController().signal, waiting() {} });
+  phone.denyDevice("deskB");
+  assert.equal(await next, "denied");
+});
+
 test("turning phone access off drops every waiting request", async (t) => {
   const { phone, ask } = await asking(t);
   const waiting = ask("deskA", "studio");

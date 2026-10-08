@@ -63,8 +63,9 @@ async function fixture(t) {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
-  const make = () => {
+  const make = (extra = {}) => {
     const runtime = createRuntime({
+      ...extra,
       dataDir,
       cwd: projects[0],
       registryRoots: [],
@@ -254,4 +255,43 @@ test("cached usage resolves the requested account pair without leaking the viewe
   await runtime.openProject(projects[0]);
   assert.equal(await usage(projects[1]), 81);
   await assert.rejects(runtime.invoke("usage:cached", [path.join(dataDir, "unregistered")]));
+});
+
+test("Antigravity usage is read for, and cached apart per, the Account a Project selects", async (t) => {
+  const { make, projects, saved, save, dataDir, profile } = await fixture(t);
+  const agy = randomUUID();
+  saved.accounts.push({ id: agy, provider: "antigravity", label: "Work Google" });
+  saved.scopes[projects[0]].antigravity = agy;
+  await save();
+  const windows = (usedPercent) => [{ id: "gemini:weekly", label: "Gemini weekly", shortLabel: "wk", usedPercent, resetsAt: null }];
+  const reads = [];
+  const result = (provider, usedPercent) => ({ provider, status: "ok", windows: windows(usedPercent), updatedAt: new Date().toISOString() });
+  const runtime = make({
+    usageReaders: {
+      claude: async () => ({ provider: "claude", status: "unavailable", windows: [], updatedAt: new Date().toISOString() }),
+      codex: async () => ({ provider: "codex", status: "unavailable", windows: [], updatedAt: new Date().toISOString() }),
+      antigravity: async ({ env }) => {
+        reads.push(env.GEMINI_HOME);
+        return result("antigravity", env.GEMINI_HOME === profile(agy) ? 40 : 7);
+      },
+    },
+  });
+  for (const project of projects) await runtime.openProject(project);
+  const antigravity = (snapshot) => snapshot.providers.find((provider) => provider.provider === "antigravity");
+
+  const own = antigravity(await runtime.invoke("usage:read", [projects[0]]));
+  assert.equal(own.windows[0].usedPercent, 40);
+  assert.deepEqual(own.account, { id: agy, label: "Work Google" });
+  const inherited = antigravity(await runtime.invoke("usage:read", [projects[1]]));
+  assert.equal(inherited.windows[0].usedPercent, 7);
+  assert.equal(inherited.account.id, "default");
+  assert.deepEqual(reads, [profile(agy), path.join(dataDir, "accounts", "antigravity-default")]);
+
+  // Each selection has its own saved numbers, and the default selection keeps the original cache file.
+  assert.equal(antigravity(await runtime.invoke("usage:cached", [projects[0]])).windows[0].usedPercent, 40);
+  assert.equal(antigravity(await runtime.invoke("usage:cached", [projects[1]])).windows[0].usedPercent, 7);
+  await runtime.close();
+  const names = await fs.readdir(dataDir);
+  assert.ok(names.includes(`usage-${saved.scopes[projects[0]].claude}-default-${agy}.json`));
+  assert.ok(names.includes("usage-" + saved.selected.claude + "-default.json"));
 });

@@ -4,7 +4,12 @@ import type { ChatMessage, LinkedContext } from "../model";
 
 /** The message's Link context when another Chat (or Milagre, for a Link) wrote it rather than the user or the agent. */
 export function linkedContext({ context }: Pick<ChatMessage, "context">): LinkedContext | null {
-  return typeof context === "object" && context !== null && context.kind !== "git-action" && context.kind !== "handoff" && context.kind !== "advisor-result"
+  return typeof context === "object" &&
+    context !== null &&
+    context.kind !== "git-action" &&
+    context.kind !== "handoff" &&
+    context.kind !== "advisor-result" &&
+    context.kind !== "pr-action"
     ? context
     : null;
 }

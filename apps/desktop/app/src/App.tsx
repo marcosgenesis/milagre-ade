@@ -27,6 +27,7 @@ import {
   PermissionDecision,
   QuestionAnswers,
   PermissionMode,
+  PullRequestActionContext,
   EffortLevel,
   AgentCliStatus,
   AgentModels,
@@ -51,7 +52,8 @@ import {
   sessionIdFromKey,
 } from "./lib/agent-runs";
 import { attachmentPrompt } from "./lib/media";
-import { BLOCKERS, blockerPrompt, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
+import { BLOCKERS, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
+import { pullRequestActionBody, pullRequestActionContext } from "@milagre/shared/pr-action";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
 import { chatMark, chatTitle, orderChats } from "./lib/chat-list";
 import type { SessionPatch } from "@milagre/shared/project-edits";
@@ -520,6 +522,11 @@ function App() {
   const pullRequestBlocker = selectedPullRequest
     ? pullRequestBlockers(selectedPullRequest).find((blocker) => !isBlockerDismissed(dismissedBlockers, blocker, selectedPullRequest))
     : undefined;
+  // The pill's action, checked here too: a PR without a number yet shows no pill instead of sending a broken one.
+  const pullRequestActionRequest =
+    selectedPullRequest && pullRequestBlocker
+      ? pullRequestActionContext({ action: pullRequestBlocker, pr: selectedPullRequest.number, url: selectedPullRequest.url })
+      : null;
   const run = project && selectedSession ? agentRuns.runs[chatKey(project.path, selectedSession.id)] : undefined;
   const waitingStepIds = useMemo(() => run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : [])), [run?.approvals]);
   const agentPorts = useAgentPorts();
@@ -1183,6 +1190,7 @@ function App() {
     images: ImageAttachment[] = imageDraft.images,
     files: string[] = imageDraft.files,
     preserveComposer = false,
+    prAction?: PullRequestActionContext,
   ): Promise<boolean> {
     if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
     sendInFlight.current = true;
@@ -1206,6 +1214,7 @@ function App() {
       files,
       model: model.id,
       provider: model.provider,
+      context: prAction ?? null,
     });
     setPendingSend({
       ...preview,
@@ -1249,6 +1258,7 @@ function App() {
         files,
         prompt: attachmentPrompt(body, files),
         ...options,
+        ...(prAction ? { prAction: { action: prAction.action, pr: prAction.pr, url: prAction.url } } : {}),
       });
       if (preparedTarget.current?.view === view) preparedTarget.current = null;
       sent = true;
@@ -2001,13 +2011,13 @@ function App() {
                   onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
                   onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
                   pullRequestAction={
-                    selectedSession && selectedPullRequest && pullRequestBlocker
+                    selectedSession && selectedPullRequest && pullRequestBlocker && pullRequestActionRequest
                       ? {
                           label: BLOCKERS[pullRequestBlocker].action,
                           tone: BLOCKERS[pullRequestBlocker].tone,
                           onRun: () => {
                             dismissBlockerAction(selectedPullRequest, pullRequestBlocker);
-                            void executeSend(blockerPrompt(pullRequestBlocker, selectedPullRequest), permissionMode, [], [], true);
+                            void executeSend(pullRequestActionBody(pullRequestActionRequest), permissionMode, [], [], true, pullRequestActionRequest);
                           },
                         }
                       : undefined

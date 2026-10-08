@@ -377,6 +377,7 @@ export default function ChatScreen() {
       setPicking(false);
     }
   }
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref, read only from effects and the choice sheet.
   sendDesign.current = () => {
     const message = designKey ? peekDesignMessage(designKey) : null;
     if (!message || !designKey) return;
@@ -385,6 +386,7 @@ export default function ChatScreen() {
       if (sent === true) designMessageSent(designKey, message);
     });
   };
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref, read only when an issue is picked in the choice sheet.
   startIssue.current = (issue) => void send(issueFirstMessage(issue, draft), true, undefined, issue.key);
   /** Lists the open issues in the choice sheet; picking one starts the Chat from it. */
   async function chooseIssue() {

@@ -564,6 +564,13 @@ test("a confined bridge refuses phone:routes even when it has the hook", async (
   assert.equal((await f.rpc("phone:routes", [{ phoneKey: "p".repeat(43) }])).status, 403);
 });
 
+// The global default reaches every Project on the Mac, so a demo-confined phone can read it but not change it.
+test("a confined phone reads the main sync default but can't change it", async () => {
+  const confine = createConfinement({ allowedRoot: os.tmpdir() });
+  await confine.checkCall("main-sync:default:read", []);
+  await assert.rejects(confine.checkCall("main-sync:default:save", [true]), { status: 403, message: REFUSED });
+});
+
 test("advisor controls are allowlisted and confined to the owning Project", async (t) => {
   const f = await fixture(t);
   for (const method of ["advisor:stop", "advisor:retry"]) {

@@ -341,3 +341,19 @@ test("previewFilesToCopy lists what the effective patterns match", async (t) => 
   assert.equal(included.worktreeInclude, ".env.local\n");
   assert.deepEqual(included.matches, [".env.local"]);
 });
+
+// A main branch sync has just fetched the base's upstream, so the Worktree doesn't wait on a second fetch.
+test("createWorktree skips its own fetch when the upstream was just fetched", async (t) => {
+  const { root, project, git } = await trailingClone(t);
+  const stale = git("rev-parse", "origin/main").trim();
+  const created = await createWorktree({
+    projectPath: project,
+    baseBranch: "main",
+    prompt: "x",
+    root: path.join(root, "worktrees"),
+    suffix: "nf1",
+    fetched: true,
+  });
+  assert.equal(git("rev-parse", created.branch).trim(), stale);
+  assert.equal(git("rev-parse", "origin/main").trim(), stale);
+});

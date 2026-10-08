@@ -267,13 +267,25 @@ function connectDesktop({ relayUrl, identity, token = TOKEN, key = boxKeyPair(ra
     messages,
     frames,
     error: null,
-    /** Resolves with the channel, or with { error } when the Mac refused the hello. */
-    async hello() {
+    notices: [],
+    /** Resolves with the channel, or with { error } when the Mac refused the hello. Waits through pending notices (Allow). */
+    async hello({ ms = 5000 } = {}) {
       await opened;
       const { message, ephemeral } = phoneHello({ phone: key, host: identity.box.publicKey, token, random, name, kind: "desktop" });
       const reply = await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("Timed out waiting for the hello's reply")), 5000);
+        let timer;
+        const arm = () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => reject(new Error("Timed out waiting for the hello's reply")), ms);
+        };
+        arm();
         onReply = (bytes) => {
+          // A computer's first hello waits for Allow; the Mac says so, and again every few seconds.
+          if (bytes[0] === 0x05) {
+            desktop.notices.push(JSON.parse(new TextDecoder().decode(bytes.subarray(1))));
+            arm();
+            return;
+          }
           clearTimeout(timer);
           onReply = null;
           resolve(bytes);
@@ -333,6 +345,75 @@ function fakePeerDaemon() {
     },
   };
 }
+/**
+ * A throwaway Mac: its own data folder, a local relay in place of relay.milagre.cloud, the LAN on a port the OS picks
+ * on 127.0.0.1 (none with `lan: false`), and a clock the test moves (pairing windows). Never Victor's data folder, 8797
+ * or 8798. `autoAllow`: this Mac's window allows every computer that asks, as its owner would.
+ */
+async function startTestMac(t, { autoAllow = true, lan = true } = {}) {
+  const fs = require("node:fs/promises");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { execFileSync } = require("node:child_process");
+  const { startDaemon } = require("./server.cjs");
+  const { connect } = require("./client.cjs");
+  const { readIdentity } = require("./relay-identity.cjs");
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "peer-e2e-")));
+  const dataDir = path.join(directory, "profile");
+  const project = path.join(directory, "project");
+  await fs.mkdir(project);
+  const clock = { now: 1_000_000 };
+  const sockets = [];
+  let daemon;
+  let client;
+  // Registered before the relay's own hook, so the daemon closes while the relay still answers; the folder goes last.
+  t.after(async () => {
+    for (const socket of sockets) socket.close();
+    client?.close();
+    try {
+      await daemon?.close();
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+  execFileSync("git", ["init", "-b", "main", project], { stdio: "ignore" });
+  const relay = await startLocalRelay(t);
+  daemon = await startDaemon({
+    dataDir,
+    version: "9.8.7",
+    runtimeOptions: { cwd: project, environmentReady: Promise.resolve(), titleModels: {}, readPullRequests: async (_worktree, refs) => refs },
+    phoneOptions: {
+      relayUrl: relay.url,
+      localPort: 0,
+      lanPort: lan ? 0 : null,
+      lanHostname: "127.0.0.1",
+      addresses: () => ["127.0.0.1"],
+      now: () => clock.now,
+    },
+  });
+  client = await connect({ dataDir });
+  if (autoAllow)
+    client.on("event", ({ channel, payload }) => {
+      if (channel !== "devices:pending") return;
+      for (const request of payload?.requests ?? []) void client.call("devices:allow", [request.key]).catch(() => {});
+    });
+  // Turning phone access on opens the pairing window, as showing the QR in Settings › Devices does.
+  await client.call("phone:set-enabled", [true]);
+  await until(async () => {
+    const status = await client.call("phone:status");
+    return status.state === "on" && status.relay === "online";
+  }, "phone access on and the relay online");
+  const identity = await readIdentity(dataDir);
+  const token = JSON.parse(await fs.readFile(path.join(dataDir, "mobile.json"), "utf8")).token;
+  /** Dials this Mac with `connectTo` (connectDesktop or connectPhone), through the relay unless `relayUrl` says otherwise. */
+  const dial = (connectTo, options = {}) => {
+    const socket = connectTo({ relayUrl: relay.url, identity, token, ...options });
+    sockets.push(socket);
+    return socket;
+  };
+  return { clock, client, project, identity, token, dial, relay, dataDir };
+}
+
 module.exports = {
   random,
   TOKEN,
@@ -345,4 +426,5 @@ module.exports = {
   startLocalRelay,
   connectDesktop,
   fakePeerDaemon,
+  startTestMac,
 };

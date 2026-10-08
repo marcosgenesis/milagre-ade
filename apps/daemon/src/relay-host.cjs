@@ -13,6 +13,7 @@ const DEFAULT_TIMING = {
   pingMs: 20_000,
   idleMs: 45_000,
   helloMs: 15_000,
+  pendingRepeatMs: 20_000,
   backoff: [1000, 2000, 5000, 10_000, 30_000],
   replacedMs: 60_000,
   stableMs: 30_000,
@@ -44,9 +45,24 @@ function startRelayHost({
   onStatus,
   timing,
   openPeer,
+  allowComputer,
 }) {
-  const { pingMs, idleMs, helloMs, backoff, replacedMs, stableMs, jitter } = { ...DEFAULT_TIMING, ...timing };
-  const channels = createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, retired, WebSocket, fetch: fetchBridge, random, helloMs, openPeer });
+  const { pingMs, idleMs, helloMs, backoff, replacedMs, stableMs, jitter, pendingRepeatMs } = { ...DEFAULT_TIMING, ...timing };
+  const channels = createPhoneChannels({
+    identity,
+    phones,
+    token,
+    bridgeUrl,
+    canPair,
+    retired,
+    WebSocket,
+    fetch: fetchBridge,
+    random,
+    helloMs,
+    openPeer,
+    allowComputer,
+    pendingRepeatMs,
+  });
   let status = "connecting";
   let closed = false;
   let attempt = 0;

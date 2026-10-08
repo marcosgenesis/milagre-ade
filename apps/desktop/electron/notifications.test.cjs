@@ -179,3 +179,25 @@ test("a computer's first pairing says another Mac can now drive this one, and it
   assert.equal(shown[0].closed, true);
   assert.equal(shown[1].options.title, "New phone paired");
 });
+
+test("a computer waiting for Allow is announced once while Milagre is in the background, and its click opens the window", () => {
+  const { notifier, shown, opened, state } = setup();
+  const studio = { key: "s".repeat(43), name: "studio", at: 1 };
+  assert.equal(notifier.notifyComputerWaiting([studio]), true);
+  assert.equal(shown[0].options.title, "studio wants to drive this Mac's chats");
+  assert.equal(shown[0].options.body, "Open Milagre to allow or deny it.");
+  shown[0].emit("click");
+  assert.deepEqual(opened, ["settings:phone"]);
+  // The same request again (another computer joined the list) says nothing more about it.
+  const lab = { key: "l".repeat(43), name: null, at: 2 };
+  assert.equal(notifier.notifyComputerWaiting([studio, lab]), true);
+  assert.equal(shown[1].options.title, "A computer wants to drive this Mac's chats");
+  assert.equal(shown[0].closed, true, "one notice at a time");
+  assert.equal(notifier.notifyComputerWaiting([studio, lab]), false);
+  // Answered: the notice goes.
+  assert.equal(notifier.notifyComputerWaiting([]), false);
+  assert.equal(shown[1].closed, true);
+  // With the window focused the prompt is on screen; no notification.
+  state.focused = true;
+  assert.equal(notifier.notifyComputerWaiting([{ key: "x".repeat(43), name: "x", at: 3 }]), false);
+});

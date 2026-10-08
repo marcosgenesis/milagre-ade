@@ -1,3 +1,4 @@
+import { providerName } from "./providers.mjs";
 import type { Subagent } from "./model.ts";
 
 /** Compact action labels shared by the canvas and mobile's subagent rows.
@@ -35,4 +36,14 @@ export function subagentActivityLabel(agent: Pick<Subagent, "status" | "latestAc
     cancelled: "Stopped",
     unknown: "Status unavailable",
   }[agent.status];
+}
+
+/** Host-owned advisors have controls independent of their parent's provider-native children. */
+export function advisorAction(agent: Pick<Subagent, "status" | "source" | "retryable">): "stop" | "retry" | null {
+  if (agent.source !== "milagre-advisor") return null;
+  if (["initializing", "running", "waiting"].includes(agent.status)) return "stop";
+  return agent.retryable ? "retry" : null;
+}
+export function subagentRoleLabel(agent: Pick<Subagent, "source" | "provider">): string | undefined {
+  return agent.source === "milagre-advisor" ? `${providerName(agent.provider ?? "claude")} advisor` : undefined;
 }

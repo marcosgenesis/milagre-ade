@@ -8,6 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { CodexRpc } = require("./codex-rpc.cjs");
 const { CODEX_FAST_TIER } = require("./models.cjs");
+const { advisorPolicy, advisorCodexConfig, ANALYSIS_INSTRUCTIONS } = require("./advisor-policy.cjs");
 const {
   milagreInstructions,
   RESUME_FAILED_MESSAGE,
@@ -125,6 +126,7 @@ class CodexSession {
     workspaceRoots,
     workspaceInstructions,
     tldrEnabled = true,
+    analysisOnly = false,
     linked = null,
     clientVersion = "0.0.0",
     interruptGraceMs = 3000,
@@ -139,6 +141,7 @@ class CodexSession {
       workspaceRoots,
       workspaceInstructions,
       tldrEnabled,
+      analysisOnly,
       linked,
       clientVersion,
       interruptGraceMs,
@@ -197,7 +200,7 @@ class CodexSession {
   }
 
   async beginTurn({ prompt, images = [], model, permissionMode, effort, fastMode = false }) {
-    const policy = codexPolicy(permissionMode, this.cwd, this.workspaceRoots);
+    const policy = this.analysisOnly ? advisorPolicy("codex", this.linked?.tools ?? []) : codexPolicy(permissionMode, this.cwd, this.workspaceRoots);
     this.permissions.setMode(permissionMode);
     try {
       this.starting ??= this.start(model, policy);
@@ -212,6 +215,7 @@ class CodexSession {
         "turn/start",
         {
           threadId: this.state.threadId,
+          ...(this.analysisOnly ? { environments: [] } : {}),
           input: turnInput(prompt, files),
           model,
           ...(effort ? { effort } : {}),
@@ -289,18 +293,31 @@ class CodexSession {
     rpc.on("request", ({ id, method, params }) => this.handleServerRequest(id, method, params));
     rpc.on("exit", ({ detail, signal }) => this.handleExit(detail, signal));
     rpc.start();
-    await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion }, capabilities: null });
+    await rpc.request("initialize", {
+      clientInfo: { name: "milagre", title: "Milagre", version: this.clientVersion },
+      capabilities: this.analysisOnly ? { experimentalApi: true } : null,
+    });
     rpc.notify("initialized");
     await this.checkLogin(rpc);
     // The Chat's linked tools reach Codex as an MCP server in the thread's config (see linked-mcp-server.cjs).
     const url = this.linked ? await this.linked.url().catch(() => null) : null;
-    const config = url ? { ...THREAD_CONFIG, mcp_servers: { milagre: { url, tool_timeout_sec: 86400 } } } : THREAD_CONFIG;
+    // A constrained session must discover and disable every inherited server. Failure cannot fall back
+    // to the ordinary Chat policy because that would expose the user's external tools to an advisor.
+    const inherited = this.analysisOnly ? (await rpc.request("config/read", { cwd: this.cwd })).config : null;
+    const config = this.analysisOnly
+      ? advisorCodexConfig(inherited, url)
+      : url
+        ? { ...THREAD_CONFIG, mcp_servers: { milagre: { url, tool_timeout_sec: 86400 } } }
+        : THREAD_CONFIG;
     const threadParams = {
       cwd: this.cwd,
       model,
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,
-      developerInstructions: milagreInstructions(this.tldrEnabled, this.workspaceInstructions),
+      developerInstructions: [milagreInstructions(this.tldrEnabled, this.workspaceInstructions), this.analysisOnly ? ANALYSIS_INSTRUCTIONS : ""]
+        .filter(Boolean)
+        .join("\n\n"),
+      ...(this.analysisOnly ? { environments: [] } : {}),
       config,
     };
     const thread = this.resumeId ? await this.resume(threadParams) : (await this.requestThread("thread/start", threadParams)).thread;
@@ -325,6 +342,7 @@ class CodexSession {
   // chat unusable. On an RPC error the call is tried again with less: first without the linked tools' MCP
   // server (the Chat then only receives Delegations), then without any config (no question tool either).
   async requestThread(method, params) {
+    if (this.analysisOnly) return this.rpc.request(method, params, { timeoutMs: 60_000 });
     const { mcp_servers: linkedServer, ...rest } = params.config ?? {};
     const { config: _config, ...bare } = params;
     const attempts = [params, ...(linkedServer ? [{ ...params, config: rest }] : []), ...(params.config ? [bare] : [])];
@@ -490,7 +508,8 @@ class CodexSession {
     const answer = (decision) => this.reply(id, { decision: codexDecision(decision) });
     const approval = method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval";
     // A request that arrives once its turn has stopped has nobody to ask.
-    if (approval && (!this.turnActive || this.cancelRequested || this.closed)) answer("cancelled");
+    if (approval && this.analysisOnly) answer("deny");
+    else if (approval && (!this.turnActive || this.cancelRequested || this.closed)) answer("cancelled");
     else if (method === "item/commandExecution/requestApproval") this.permissions.add(codexCommandRequest(id, params), answer);
     else if (method === "item/fileChange/requestApproval") {
       const request = codexFileRequest(id, params, this.fileChanges.get(params.itemId));
@@ -500,7 +519,8 @@ class CodexSession {
           request.files.length > 0 &&
           (this.workspaceRoots ? insideWorkspace([this.cwd, ...this.workspaceRoots], request.files, this.cwd) : insideRoot(this.cwd, request.files)),
       });
-    } else if (method === "item/tool/requestUserInput") this.askQuestion(id, params);
+    } else if (method === "item/tool/requestUserInput" && this.analysisOnly) this.reply(id, codexQuestionResponse("dismissed"));
+    else if (method === "item/tool/requestUserInput") this.askQuestion(id, params);
     // Granting extra sandbox permissions is out of scope: grant none, for this turn only.
     else if (method === "item/permissions/requestApproval") this.reply(id, { permissions: {}, scope: "turn" });
     else {
@@ -540,6 +560,7 @@ class CodexSession {
   // Codex fixes its approval policy when a turn starts, so a switch mid-turn is applied here (see
   // PendingPermissions); the next turn starts with the new policy.
   setPermissionMode(permissionMode) {
+    if (this.analysisOnly) return;
     this.permissions.setMode(permissionMode);
   }
 

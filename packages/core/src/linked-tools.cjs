@@ -9,7 +9,7 @@ const { NEGOTIATION_ROUNDS } = require("@milagre/shared/limits");
 const { createGit } = require("./git/client.cjs");
 const { buildLinkedSummary } = require("./linked-summary.cjs");
 
-const git = createGit().read;
+const git = createGit({ analysisOnly: true }).read;
 const MAX_OUTPUT = 40_000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MESSAGES = 30;
@@ -305,7 +305,7 @@ function inputSchema(definition) {
 /** Runs a definition with arguments checked against its input; failures come back as the tool's error text. */
 async function runTool(definition, args) {
   try {
-    const parsed = z.object(definition.input).parse(args ?? {});
+    const parsed = (definition.strict ? z.strictObject(definition.input) : z.object(definition.input)).parse(args ?? {});
     return { text: String(await definition.run(parsed)), isError: false };
   } catch (error) {
     const text =

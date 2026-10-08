@@ -10,4 +10,4 @@ export function withDiffStats(state: CoordinatorState, stats: Record<number, Dif
 export function renameWorktree(state: CoordinatorState, rename: Pick<WorktreeRename, "path" | "from" | "name">): CoordinatorState;
 export function subagentFinished(agent: Subagent): boolean;
 export function archiveSubagent(state: CoordinatorState, sessionId: number, id: string, archived: boolean): CoordinatorState;
-export function archiveFinishedSubagents(state: CoordinatorState, sessionId: number): CoordinatorState;
+export function archiveFinishedSubagents(state: CoordinatorState, sessionId: number, options?: { keepAdvisors?: boolean }): CoordinatorState;

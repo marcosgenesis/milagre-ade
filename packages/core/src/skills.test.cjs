@@ -194,6 +194,7 @@ test("bundles tldr with its checklist for machines without installed skills", as
     skills.map(({ name, scope, provider }) => ({ name, scope, provider })),
     [
       { name: "design", scope: "bundled", provider: "milagre" },
+      ...["milagre", "milagre-advisor", "milagre-committee", "milagre-help"].map((name) => ({ name, scope: "bundled", provider: "milagre" })),
       { name: "orchestrate", scope: "bundled", provider: "milagre" },
       { name: "simulator", scope: "bundled", provider: "milagre" },
       { name: "tldr", scope: "bundled", provider: "milagre" },
@@ -214,4 +215,21 @@ test("installed tldr overrides the bundled slash skill without duplicates", asyn
   const expanded = await expandSkillPrompt(project, "/tldr", { home });
   assert.ok(expanded.includes("My custom writing rules"));
   assert.ok(!expanded.includes("Two passes fused"));
+});
+
+test("Milagre orchestration skills expand with readable packaged references and keep override precedence", async (t) => {
+  const { project, home, skill } = await fixture(t);
+  const { skills } = await discoverSkills(project, { home });
+  for (const name of ["milagre", "milagre-advisor", "milagre-committee", "milagre-help"]) {
+    const info = skills.find((s) => s.name === name);
+    assert.ok(info);
+    assert.equal(info.provider, "milagre");
+    const expanded = await expandSkillPrompt(project, `/${name} assess the current task`, { home });
+    assert.ok(expanded.includes(`Resolve relative references from: ${path.dirname(info.path)}`));
+    const content = await fs.readFile(info.path, "utf8");
+    assert.ok(expanded.includes(content));
+    for (const match of content.matchAll(/\]\(([^)]+\.md)\)/g)) await fs.access(path.resolve(path.dirname(info.path), match[1]));
+  }
+  const custom = await skill(project, ".agents", "milagre-advisor", "Custom advisor");
+  assert.equal((await discoverSkills(project, { home })).skills.find((s) => s.name === "milagre-advisor").path, custom);
 });

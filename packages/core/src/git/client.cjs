@@ -64,23 +64,32 @@ function callbackExec(exec) {
   };
 }
 
-function createGit({ execFile = execute, env = process.env, platform = process.platform, realpath = fs.realpath } = {}) {
-  function executeGit(cwd, args, { profile = "READ", input } = {}) {
+function createGit({ execFile = execute, env = process.env, platform = process.platform, realpath = fs.realpath, analysisOnly = false } = {}) {
+  function executeGit(cwd, args, { profile = "READ", input, config = [] } = {}) {
     const limits = LIMITS[profile];
     if (!limits) throw new Error(`Unknown Git limit profile: ${profile}`);
     return new Promise((resolve) => {
       try {
+        // Analysis runs in the host, so provider sandboxes cannot protect it from Git's configured helpers.
+        const processEnv = analysisOnly ? Object.fromEntries(Object.entries(env).filter(([name]) => !name.toUpperCase().startsWith("GIT_"))) : env;
+        const readArgs = analysisOnly && ["diff", "log", "show"].includes(args[0]) ? [args[0], "--no-ext-diff", "--no-textconv", ...args.slice(1)] : args;
         const child = execFile(
           "git",
-          ["-C", cwd, ...args],
+          [
+            "-C",
+            cwd,
+            ...(analysisOnly ? ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "submodule.recurse=false"] : []),
+            ...config.flatMap((value) => ["-c", value]),
+            ...readArgs,
+          ],
           {
             cwd,
             ...limits,
             encoding: "utf8",
             env: {
-              ...env,
+              ...processEnv,
               GIT_TERMINAL_PROMPT: "0",
-              GIT_SSH_COMMAND: env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes",
+              GIT_SSH_COMMAND: processEnv.GIT_SSH_COMMAND || "ssh -o BatchMode=yes",
             },
           },
           (error, stdout, stderr) => resolve(outcome(error, stdout, stderr)),
@@ -94,7 +103,19 @@ function createGit({ execFile = execute, env = process.env, platform = process.p
   }
   async function run(cwd, args, options) {
     if (!isRead(args)) throw new Error(`Git ${args[0]} requires the write surface; this surface is read-only.`);
-    return executeGit(cwd, args, options);
+    if (!analysisOnly) return executeGit(cwd, args, options);
+    // Even status/diff can clean worktree files. Read configuration without running filters,
+    // then neutralize every configured driver, including required and long-running filters.
+    const filters = await executeGit(cwd, ["config", "--null", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"]);
+    if (!filters.ok && filters.code !== 1) return filters;
+    const drivers = new Set(
+      filters.stdout
+        .split("\0")
+        .filter(Boolean)
+        .map((key) => key.slice(0, key.lastIndexOf("."))),
+    );
+    const config = [...drivers].flatMap((driver) => [`${driver}.clean=`, `${driver}.smudge=`, `${driver}.process=`, `${driver}.required=false`]);
+    return executeGit(cwd, args, { ...options, config });
   }
   const check = (result) => {
     if (!result.ok) throw new GitError(result);
@@ -176,7 +197,10 @@ function createGit({ execFile = execute, env = process.env, platform = process.p
   }
   const commonDir = async (cwd) => fs.realpath(path.resolve(cwd, (await text(cwd, ["rev-parse", "--git-common-dir"])).trim()));
   const read = Object.freeze({ run, checked, text, out, commitOf, refExists, resolveBase, worktreeList, commonDir });
-  const writeRun = (cwd, args, options) => executeGit(cwd, args, { profile: "WRITE", ...options });
+  const writeRun = (cwd, args, options) => {
+    if (analysisOnly) throw new Error("Analysis Git is read-only.");
+    return executeGit(cwd, args, { profile: "WRITE", ...options });
+  };
   const write = Object.freeze({ run: writeRun, checked: async (cwd, args, options) => check(await writeRun(cwd, args, options)) });
   return Object.freeze({ ...read, read, write });
 }

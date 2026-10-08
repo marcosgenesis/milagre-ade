@@ -319,6 +319,7 @@ test("answers to a question are saved as the user's message after the reply so f
   await waitUntil(() => host.runs[chatId]?.text === "Which layout?");
 
   const messageId = await host.recordAnswers(chatId, "Layout: grid");
+  assert.equal(published.at(-1).event.type, "answers-sent");
   await host.states.flush();
   assert.deepEqual(chatMessages(saved.get(ALPHA), chat.sessionId), [
     { role: "user", body: "plan it" },
@@ -1047,25 +1048,28 @@ test("a rejected send removes its undelivered message and never leaves a phantom
   await h.states.close();
 });
 
-test("a rejected answer preserves the question, current reply and concurrent tokens", async () => {
+test("answers show and resolve before their save, which a failure leaves dirty to try again", async () => {
   const h = durableHarness();
   const { sessionId } = await h.host.send(message(ALPHA, "Ask me"));
   const chatId = ALPHA + "#" + sessionId;
   await h.host.receive(chatId, { type: "text-delta", text: "Question" });
-  await h.host.receive(chatId, { type: "question-request", requestId: "q", questions: [] });
+  await h.host.receive(chatId, {
+    type: "question-request",
+    requestId: "q",
+    questions: [{ id: "a", header: "Key", question: "Which key?", options: [], multiSelect: false, allowOther: true, secret: true }],
+  });
   let release;
   h.block(new Promise((resolve) => (release = resolve)));
   h.fail(true);
-  const answer = h.host.recordAnswers(chatId, "My answer");
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-  await h.host.receive(chatId, { type: "text-delta", text: " details" });
+  const messageId = await h.host.recordAnswers(chatId, "••••••", { requestId: "q", answers: { a: ["hunter2"] } });
+  const shown = (await h.states.get(ALPHA)).messages.find((item) => item.id === messageId);
+  assert.deepEqual(shown.answered, [{ header: "Key", question: "Which key?", answers: ["••••••"] }]);
+  assert.equal(h.host.runs[chatId].text, "");
   h.block(null);
   release();
-  await assert.rejects(answer, /disk full/);
-  assert.equal(h.host.runs[chatId].text, "Question details");
-  assert.equal(h.host.runs[chatId].questions[0].requestId, "q");
-  assert.equal((await h.states.get(ALPHA)).messages.length, 1);
   h.fail(false);
+  await h.states.flush();
+  assert.ok((await h.states.get(ALPHA)).messages.some((item) => item.id === messageId));
   await h.states.close();
 });
 

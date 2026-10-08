@@ -17,10 +17,12 @@ import {
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
+import type { ChatMessage } from "@milagre/shared/model";
 import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
+import { messageSender } from "@milagre/shared/advisor-result";
 import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 import type { Client, OpenProject } from "../client";
-import { lastUserModel } from "@milagre/shared/agent-runs";
+import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
 import { blockerPrompt, pullRequestBlockers } from "@milagre/shared/pr-blockers";
 import { useComposer, usePendingChats, useSession } from "../session";
 import { pickAttachments } from "../attachment-picker";
@@ -69,6 +71,8 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
   const [actionBusy, setBusy] = useState(false);
+  // Answers just sent: the card leaves and the answers show at once, until the host's copy arrives.
+  const [sentAnswers, setSentAnswers] = useState<{ requestId: string; message: ChatMessage | null; count: number } | null>(null);
   const sendingRef = useRef(false);
   const [picking, setPicking] = useState(false);
   const [dockHeight, setDockHeight] = useState(140);
@@ -194,7 +198,7 @@ export default function ChatScreen() {
         index,
         label: isHandoff(messages[index])
           ? `Go to ${handoffSides(messages[index].context, handoffModels).restored ? "context restored" : "context handoff"} ${index + 1} of ${messages.length}.`
-          : `Go to ${messages[index].role} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
+          : `Go to ${messageSender(messages[index])} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
       })),
     [messages, handoffModels],
   );
@@ -656,6 +660,9 @@ export default function ChatScreen() {
     </Stack.Toolbar>
   );
   const question = run?.questions[0];
+  const answering = !!question && sentAnswers?.requestId === question.requestId;
+  // The host's message replaces the preview as soon as the transcript grows by it.
+  const answerPreview = answering && sentAnswers.count === messages.length ? sentAnswers.message : null;
   const pendingInput = pending && pendingCanonicalId === null ? pending.preview.message : null;
   const liveReply = run ? (
     <ChatReply
@@ -770,6 +777,7 @@ export default function ChatScreen() {
             </View>,
           ])}
           {!pendingInput && liveReply}
+          {answerPreview && <ChatReply key="answers" message={answerPreview} media={media} chatId={chatId} onActivity={openActivity} />}
           {(run || pending) && (
             <ThinkingIndicator
               startedAt={pending?.preview.startedAt ?? run?.startedAt}
@@ -806,7 +814,7 @@ export default function ChatScreen() {
             onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))}
             style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: dockPadding, gap: 8 }}
           >
-            {!question && (
+            {(!question || answering) && (
               <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 4, gap: 8 }}>
                 {pr && blockers.length > 0 && chat && (
                   <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />
@@ -831,19 +839,31 @@ export default function ChatScreen() {
                 }
               />
             ))}
-            {question ? (
-              <Questions
-                key={question.requestId}
-                request={question}
-                busy={actionBusy}
-                submit={(answers, summary) =>
-                  void action(async () => {
-                    const accepted = await client.call("agent:answer-question", [{ chatId, requestId: question.requestId, answers, summary }]);
-                    if (!accepted) throw new Error("This question is no longer pending. Refresh the Chat.");
-                  }, true)
-                }
-              />
-            ) : (
+            {question && (
+              // Hidden, not unmounted, while the answers travel: if they don't arrive, the card comes back as it was.
+              <View style={answering ? { display: "none" } : undefined}>
+                <Questions
+                  key={question.requestId}
+                  request={question}
+                  busy={actionBusy || answering}
+                  submit={(answers, summary) => {
+                    const answered = answeredQuestions(question, answers);
+                    setSentAnswers({
+                      requestId: question.requestId,
+                      message: answered && { id: -1, session_id: Number(params.id), body: summary, context: null, role: "user", answered },
+                      count: messages.length,
+                    });
+                    void action(async () => {
+                      const accepted = await client.call("agent:answer-question", [{ chatId, requestId: question.requestId, answers, summary }]);
+                      if (!accepted) throw new Error("This question is no longer pending. Refresh the Chat.");
+                    }, true).then((ok) => {
+                      if (!ok) setSentAnswers((current) => (current?.requestId === question.requestId ? null : current));
+                    });
+                  }}
+                />
+              </View>
+            )}
+            {(!question || answering) && (
               <View
                 style={{
                   backgroundColor: "transparent",

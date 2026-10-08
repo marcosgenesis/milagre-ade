@@ -1,6 +1,6 @@
 import { Text } from "react-native";
 import { AiBrainIcon } from "@hugeicons/core-free-icons";
-import { subagentActivityLabel } from "@milagre/shared/agent-activity";
+import { subagentActivityLabel, subagentRoleLabel } from "@milagre/shared/agent-activity";
 import type { Subagent } from "@milagre/shared/model";
 import { ActivityItem } from "./activity-item";
 import { colors, styles } from "./ui";
@@ -16,7 +16,7 @@ export function SubagentItem({ agent }: { agent: Subagent }) {
           ? "failed"
           : "idle";
   return (
-    <ActivityItem title={agent.title} icon={AiBrainIcon} state={state} status={subagentActivityLabel(agent)} disclosureOnly>
+    <ActivityItem title={agent.title} icon={AiBrainIcon} state={state} status={subagentActivityLabel(agent)} note={subagentRoleLabel(agent)} disclosureOnly>
       {!!agent.latestActivity && (
         <Text selectable style={styles.caption}>
           {agent.latestActivity}

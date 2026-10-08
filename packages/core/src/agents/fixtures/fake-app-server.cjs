@@ -64,6 +64,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return send({ id, result: { userAgent: "fake/0.158.0" } });
     case "initialized":
       return undefined;
+    case "config/read":
+      return send({ id, result: { config: { mcp_servers: { personal: { command: "outside-tools" } } } } });
     // logged-out: no login while OpenAI auth is required; custom-provider: a provider that needs no OpenAI login.
     case "account/read":
       if (scenario === "logged-out") return send({ id, result: { account: null, requiresOpenaiAuth: true } });

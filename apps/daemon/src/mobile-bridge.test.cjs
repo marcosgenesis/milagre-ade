@@ -217,7 +217,7 @@ test("the phone can load the real skill catalog for its project", async (t) => {
   const catalog = (await response.json()).result;
   assert.ok(catalog.skills.some((skill) => skill.name === "phone-skill" && skill.description === "A skill from the project."));
   assert.ok(
-    catalog.skills.some((skill) => skill.name === "tldr"),
+    ["tldr", "milagre", "milagre-advisor", "milagre-committee", "milagre-help"].every((name) => catalog.skills.some((skill) => skill.name === name)),
     "bundled skills reach the phone",
   );
   assert.equal((await rpc("skills:list", [os.homedir()])).status, 409, "the daemon still requires a known folder");
@@ -617,7 +617,18 @@ test("the phone snapshot leaves out tool output and old subagent transcript, kee
   const transcript = Array.from({ length: 9 }, (_, i) => ({ id: String(i), kind: "message", text: i === 8 ? "y".repeat(2000) : `line ${i}` }));
   const project = {
     path: "/p",
-    state: { messages: [{ id: 1, session_id: 1, body: "hi", steps }], sessions: { 1: { id: 1, subagents: [{ id: "s", transcript }] } } },
+    state: {
+      messages: [{ id: 1, session_id: 1, body: "hi", steps }],
+      sessions: {
+        1: {
+          id: 1,
+          subagents: [
+            { id: "s", transcript },
+            { id: "advisor", source: "milagre-advisor", transcript: [{ id: "result", kind: "message", text: "z".repeat(45_000) }] },
+          ],
+        },
+      },
+    },
   };
   const phone = forPhone(project);
   assert.deepEqual(
@@ -634,6 +645,8 @@ test("the phone snapshot leaves out tool output and old subagent transcript, kee
     ["5", "6", "7", "8"],
   );
   assert.equal(phone.state.sessions[1].subagents[0].transcript.at(-1).text.length, 601);
+  assert.equal(phone.state.sessions[1].subagents[1].transcript[0].text.length, 40_000, "advisor output remains readable within its shared bound");
+  assert.equal(project.state.sessions[1].subagents[1].transcript[0].text.length, 45_000);
   assert.equal(project.state.messages[0].steps[1].detail.length, 5000, "the daemon's state is untouched");
 });
 

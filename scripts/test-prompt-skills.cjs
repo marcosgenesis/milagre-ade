@@ -14,6 +14,7 @@ const noop = () => {};
 window.sent = [];
 window.milagre = { listSkills: async root => ({ skills: root === '/other' ? [] : [
   { name: 'tldr', description: 'Rewrite for a skimming reader', scope: 'bundled', provider: 'milagre', path: '/skills/tldr/SKILL.md' },
+  ...['milagre','milagre-advisor','milagre-committee','milagre-help'].map(name => ({ name, description: 'Milagre orchestration and help', scope: 'bundled', provider: 'milagre', path: '/skills/' + name + '/SKILL.md' })),
   { name: 'plugin:review-code', description: 'Review code', scope: 'user', provider: 'codex', path: '/skills/review/SKILL.md' },
 ], warnings: [] }) };
 function Fixture() {
@@ -24,7 +25,7 @@ function Fixture() {
   window.setProject = setRoot;
   window.setExpanded = setExpanded;
   const model = MODEL_CATALOG[0];
-  return <div style={{ width: '100%', maxWidth: 720, margin: '120px auto' }}>
+  return <div style={{ width: '100%', maxWidth: 720, margin: '260px auto' }}>
     <PromptComposer projectPath={root} draft={draft} onDraftChange={setDraft}
       imageDraft={{ images: [], files: [], loading: false, error: '', onPaste: noop, remove: noop, removeFile: noop }}
       onSend={() => { window.sent.push(draft); setDraft(''); }} sendBlocked={false}
@@ -40,7 +41,7 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   app.setPath("userData", fs.mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-prompt-skills-")));
   await app.whenReady();
-  const window = new BrowserWindow({ width: 1000, height: 500, show: false, webPreferences: { backgroundThrottling: false } });
+  const window = new BrowserWindow({ width: 1000, height: 700, show: false, webPreferences: { backgroundThrottling: false } });
   const evaluate = (source) => window.webContents.executeJavaScript(source);
   const errors = [];
   window.webContents.on("console-message", (details) => {
@@ -86,6 +87,13 @@ async function browserChecks() {
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`!!document.querySelector('textarea')`);
+    await type("/milagre");
+    await waitFor(`document.querySelectorAll('[aria-label="Commands and skills"] button').length === 4`);
+    assert.deepEqual(
+      await evaluate(`[...document.querySelectorAll('[aria-label="Commands and skills"] button')].map(b => b.querySelector('span')?.textContent).sort()`),
+      ["/milagre", "/milagre-advisor", "/milagre-committee", "/milagre-help"],
+    );
+    await screenshot("milagre-skills-menu");
     await type("run /tldr");
     await waitFor(`document.querySelector('[data-prompt-skill]')?.textContent === '/tldr'`);
     await escape();

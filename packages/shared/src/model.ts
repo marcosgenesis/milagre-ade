@@ -211,6 +211,15 @@ export interface ChatMessage {
   /** The host's sidecar with the long details of these steps (each marked `hasDetail`); read with the chat:message command. */
   detailFile?: string;
   operationId?: string;
+  /** On the user's answers to an agent's questions: each question with what they answered, shown as a card. */
+  answered?: AnsweredQuestion[];
+}
+
+/** One question the user answered, as their message keeps it. A typed answer to a secret question is masked. */
+export interface AnsweredQuestion {
+  header: string;
+  question: string;
+  answers: string[];
 }
 
 /** A provider switch inside a chat, shown as a divider before the message that caused it. `brief` is what the new provider was sent. */
@@ -224,7 +233,16 @@ export type HandoffContext = {
 };
 
 /** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, a handoff, or a legacy handover note. */
-export type ChatContext = LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
+export type AdvisorResultContext = {
+  kind: "advisor-result";
+  advisorId: string;
+  completionId: string;
+  title: string;
+  provider: ModelProvider;
+  outcome: "completed" | "failed" | "cancelled";
+};
+
+export type ChatContext = AdvisorResultContext | LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
 
 /**
  * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
@@ -390,6 +408,10 @@ export interface SubagentCommunication {
 
 export interface Subagent {
   id: string;
+  source?: "milagre-advisor";
+  provider?: ModelProvider;
+  model?: string;
+  retryable?: boolean;
   archived?: boolean;
   parentId?: string;
   title: string;

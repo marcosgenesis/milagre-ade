@@ -99,6 +99,11 @@ export function TerminalChip({ chatId, places }: { chatId?: string; places?: Ter
 }
 
 // What the key bar sends: keys a phone keyboard lacks. Ctrl is held for the next key instead.
+// The most output one read brings to the phone: about a tenth of a second for xterm in the WebView to parse.
+const PHONE_READ_LIMIT = 64 * 1024;
+// How long a write waits for the page's word before the next read goes ahead anyway.
+const WRITE_ACK_MS = 3000;
+
 const KEYS: { label: string; send: string }[] = [
   { label: "esc", send: "\x1b" },
   { label: "tab", send: "\t" },
@@ -374,6 +379,9 @@ function TerminalView({
   const follower = useRef<TerminalFollower | null>(null);
   const ready = useRef(false);
   const queued = useRef<string[]>([]);
+  // Output the page has not parsed yet, by id: the follower's next read waits for it.
+  const unwritten = useRef(new Map<number, () => void>());
+  const writeId = useRef(0);
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const latestEnded = useRef(onEnded);
@@ -389,6 +397,26 @@ function TerminalView({
       return;
     }
     view.current?.injectJavaScript(`${script};true;`);
+  }, []);
+
+  // Settles once the page says xterm parsed it, or after a while without word (a reloaded page never answers).
+  const draw = useCallback(
+    (call: string, data: string) =>
+      new Promise<void>((resolve) => {
+        const id = ++writeId.current;
+        const done = () => {
+          clearTimeout(timer);
+          unwritten.current.delete(id);
+          resolve();
+        };
+        const timer = setTimeout(done, WRITE_ACK_MS);
+        unwritten.current.set(id, done);
+        run(`window.${call}(${scriptValue(data)},${id})`);
+      }),
+    [run],
+  );
+  const settleWrites = useCallback(() => {
+    for (const done of unwritten.current.values()) done();
   }, []);
 
   useImperativeHandle(ref, () => ({
@@ -418,8 +446,10 @@ function TerminalView({
         input: (request) => client.call("terminal:input", [request]),
         resize: (request) => client.call("terminal:resize", [request]),
       },
-      write: (data) => run(`window.terminalWrite(${scriptValue(data)})`),
-      reset: (data) => run(`window.terminalReset(${scriptValue(data)})`),
+      write: (data) => draw("terminalWrite", data),
+      reset: (data) => draw("terminalReset", data),
+      // A read the phone parses in a few frames; a flood comes as many of them, or as a reset to its newest part.
+      readLimit: PHONE_READ_LIMIT,
       ended: () => latestEnded.current(),
       // Each read carries what runs in front, so the tab's name follows a command as it starts and ends.
       info: (latest) => latestInfo.current(latest),
@@ -428,6 +458,7 @@ function TerminalView({
     return () => {
       cancelled = true;
       current.stop();
+      settleWrites();
       follower.current = null;
       ready.current = false;
       queued.current = [];
@@ -437,7 +468,14 @@ function TerminalView({
         /* The OS may purge cache files. */
       }
     };
-  }, [client, terminal.id, run]);
+  }, [client, terminal.id, draw, settleWrites]);
+
+  // The page is gone: what it was sent will never be answered, and what follows waits for the reloaded page.
+  function stopped() {
+    ready.current = false;
+    settleWrites();
+    setFailed(true);
+  }
 
   if (failed)
     return (
@@ -479,9 +517,10 @@ function TerminalView({
         } else if (message.event === "input") follower.current?.send(message.data);
         else if (message.event === "resize") follower.current?.resize(message.cols, message.rows);
         else if (message.event === "ctrl-used") onCtrlUsed();
+        else if (message.event === "wrote") unwritten.current.get(message.id)?.();
       }}
-      onContentProcessDidTerminate={() => setFailed(true)}
-      onRenderProcessGone={() => setFailed(true)}
+      onContentProcessDidTerminate={stopped}
+      onRenderProcessGone={stopped}
     />
   );
 }

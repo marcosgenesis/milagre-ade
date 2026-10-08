@@ -85,6 +85,16 @@ async function browserChecks() {
       "false,false,false",
       "A provider tab stays clickable while its CLI needs an update",
     );
+    // Each provider's models, with its logo in color and each model's context window beside its name.
+    for (const index of [0, 1, 2]) {
+      await click(`[data-picker-panel] [data-provider-tabs] > button:nth-child(${index + 1})`);
+      assert.match(
+        await evaluate(`document.querySelector('[data-picker-panel] [data-picker-row] [data-picker-meta]')?.textContent ?? ""`),
+        /^\d+(k|M)$/,
+        "A model row shows its context window beside the name",
+      );
+      await screenshot(`model-picker-tab-${index + 1}`);
+    }
     await click("[data-picker-panel] input");
     assert.equal(await panels(), 1, "Pressing inside the picker keeps it open");
     await click("textarea");

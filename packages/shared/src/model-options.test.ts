@@ -5,6 +5,7 @@ import {
   MODEL_CATALOG,
   antigravityFamilies,
   capabilityFor,
+  contextWindowFor,
   familySlug,
   resolveAntigravityModel,
   splitModelName,
@@ -87,4 +88,15 @@ test("the catalog lists Antigravity's four families, and capabilityFor offers ea
     ultracode: false,
     fastMode: false,
   });
+});
+
+test("each model's context window: 1M Claude from Opus 4.7 on, 200K before it, 272K GPT, about 1M Gemini", () => {
+  const window = (provider: "claude" | "codex" | "antigravity", id: string) => contextWindowFor({ provider, id });
+  for (const id of ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-5-5", "claude-opus-4-7", "claude-opus-4-8"])
+    assert.equal(window("claude", id), 1_000_000, id);
+  for (const id of ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-5", "claude-opus-4-1", "claude-opus-4", "claude-3-7-sonnet"])
+    assert.equal(window("claude", id), 200_000, id);
+  assert.equal(window("codex", "gpt-6.1-sol"), 272_000);
+  assert.equal(window("antigravity", "gemini-3.1-pro"), 1_048_576);
+  assert.equal(window("antigravity", "claude-sonnet-4-6"), undefined);
 });

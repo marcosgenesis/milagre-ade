@@ -6,8 +6,21 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const zlib = require("node:zlib");
-const { execFileSync } = require("node:child_process");
-const { AGENT_NAME, COMMAND, HARNESS, OVERRIDE_ENV, RELEASES, createAntigravity, hasToken, validateAgent } = require("./antigravity-install.cjs");
+const { execFile, execFileSync } = require("node:child_process");
+const {
+  AGENT_NAME,
+  COMMAND,
+  HARNESS,
+  OVERRIDE_ENV,
+  RELEASES,
+  archiveCommands,
+  argsFor,
+  createAntigravity,
+  hasToken,
+  memberNames,
+  validateAgent,
+} = require("./antigravity-install.cjs");
+const { antigravityEnv, antigravitySpawn } = require("./antigravity-acp.cjs");
 
 const skip = process.platform === "win32" ? "needs unzip and a POSIX shell" : false;
 
@@ -72,7 +85,163 @@ test("the pinned table lists darwin-arm64 with a full SHA-256 and sizes", () => 
   assert.match(release.sha256, /^[0-9a-f]{64}$/);
   assert.equal(release.bytes, 111_456_962);
   assert.deepEqual(Object.keys(release.files).toSorted(), [COMMAND, HARNESS].toSorted());
-  assert.equal(Object.keys(RELEASES).length, 1);
+});
+
+// Hashes, sizes and member sizes were taken from the downloaded archives and match the ones T3 Code pins.
+const PINNED = {
+  "darwin-arm64": { dir: "macos", file: "darwin-arm64", sha256: "7cd97045", bytes: 111_456_962, sizes: [278_535_456, 118_611_392] },
+  "darwin-x64": { dir: "macos", file: "darwin-x86_64", sha256: "bb23956b", bytes: 117_245_544, sizes: [282_840_688, 124_175_392] },
+  "linux-x64": { dir: "linux", file: "linux-x86_64", sha256: "9fb60956", bytes: 333_727_150, sizes: [926_533_965, 130_388_040] },
+  "linux-arm64": { dir: "linux", file: "linux-arm64", sha256: "500b0bc0", bytes: 321_690_363, sizes: [930_848_992, 123_224_968] },
+  "win32-x64": { dir: "windows", file: "windows-x86_64", sha256: "65215e06", bytes: 124_509_787, sizes: [81_437_336, 145_548_952] },
+  "win32-arm64": { dir: "windows", file: "windows-arm64", sha256: "4a0f4697", bytes: 124_654_803, sizes: [85_893_472, 135_640_216] },
+};
+
+test("every platform the registry lists for 1.3.0 is pinned, with its own member names", () => {
+  assert.deepEqual(Object.keys(RELEASES).toSorted(), Object.keys(PINNED).toSorted());
+  for (const [key, expected] of Object.entries(PINNED)) {
+    const release = RELEASES[key];
+    const platform = key.split("-")[0];
+    assert.equal(release.version, "1.3.0", key);
+    assert.equal(release.url, `https://dl.google.com/agy-extensions/releases/${expected.dir}/agy-acp-server-1.3.0-${expected.file}.zip`, key);
+    assert.match(release.sha256, /^[0-9a-f]{64}$/, key);
+    assert.ok(release.sha256.startsWith(expected.sha256), key);
+    assert.equal(release.bytes, expected.bytes, key);
+    const names = memberNames(platform);
+    assert.deepEqual(release.files, { [names.command]: expected.sizes[0], [names.harness]: expected.sizes[1] }, key);
+    assert.deepEqual([...release.args], platform === "linux" ? ["--uid="] : [], key);
+    assert.ok(Object.isFrozen(release), key);
+  }
+  assert.equal(new Set(Object.values(RELEASES).map((release) => release.sha256)).size, 6);
+  assert.deepEqual(memberNames("win32"), { command: "agy_acp_server.exe", harness: "localharness_external.exe" });
+  assert.deepEqual(memberNames("darwin"), { command: COMMAND, harness: HARNESS });
+  assert.deepEqual(memberNames("linux"), { command: COMMAND, harness: HARNESS });
+  assert.deepEqual([...argsFor("linux")], ["--uid="]);
+  assert.deepEqual([...argsFor("darwin")], []);
+});
+
+test("every pinned platform is supported and reports its pinned release", () => {
+  for (const [key, release] of Object.entries(RELEASES)) {
+    const [platform, arch] = key.split("-");
+    const antigravity = createAntigravity({ dataDir: os.tmpdir(), platform, arch, env: {} });
+    assert.equal(antigravity.supported(), true, key);
+    assert.deepEqual(antigravity.pinned(), { version: "1.3.0", sha256: release.sha256, bytes: release.bytes }, key);
+  }
+});
+
+test("resolve finds the platform's own file names and arguments", () => {
+  for (const [key, release] of Object.entries(RELEASES)) {
+    const [platform, arch] = key.split("-");
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "milagre-agy-r-"));
+    try {
+      const root = path.join(dataDir, "tools", "antigravity", key);
+      const folder = path.join(root, "versions", release.sha256);
+      fs.mkdirSync(folder, { recursive: true });
+      const names = memberNames(platform);
+      const antigravity = createAntigravity({ dataDir, platform, arch, env: {} });
+      assert.equal(antigravity.resolve(), null, key);
+      fs.writeFileSync(path.join(root, "active.json"), JSON.stringify({ version: "1.3.0", sha256: release.sha256 }));
+      // The other platform's names don't count.
+      fs.writeFileSync(path.join(folder, platform === "win32" ? COMMAND : names.command + ".other"), "x");
+      assert.equal(antigravity.resolve(), null, key);
+      fs.writeFileSync(path.join(folder, names.command), "x");
+      fs.writeFileSync(path.join(folder, names.harness), "x");
+      const found = antigravity.resolve();
+      assert.equal(found.command, path.join(folder, names.command), key);
+      assert.equal(found.harness, path.join(folder, names.harness), key);
+      assert.deepEqual(found.args, platform === "linux" ? ["--uid="] : [], key);
+      // The override names the agent file; a harness beside it is found by the platform's name.
+      const override = createAntigravity({ dataDir, platform, arch, env: { [OVERRIDE_ENV]: path.join(folder, names.command) } }).resolve();
+      assert.equal(override.harness, path.join(folder, names.harness), key);
+      assert.equal(createAntigravity({ dataDir, platform, arch, env: { [OVERRIDE_ENV]: path.join(folder, "agy_acp_server.bin") } }).resolve(), null, key);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("the spawn passes --uid= on Linux only, and finds the harness by the platform's name", () => {
+  assert.deepEqual(antigravitySpawn({ command: "/a/agy_acp_server.par", platform: "linux", env: {} }).args, ["--uid="]);
+  assert.deepEqual(antigravitySpawn({ command: "/a/agy_acp_server.par", platform: "darwin", env: {} }).args, []);
+  assert.deepEqual(antigravitySpawn({ command: "C:\\a\\agy_acp_server.exe", platform: "win32", env: {} }).args, []);
+  // An explicit list (the resolved install's) wins.
+  assert.deepEqual(antigravitySpawn({ command: "/a/agy_acp_server.par", args: [], platform: "linux", env: {} }).args, []);
+  const harnessOf = (platform, command) => antigravityEnv({ env: {}, command, platform }).ANTIGRAVITY_HARNESS_PATH;
+  assert.equal(harnessOf("linux", "/a/agy_acp_server.par"), path.join("/a", "localharness_external"));
+  assert.equal(harnessOf("win32", path.join("/a", "agy_acp_server.exe")), path.join("/a", "localharness_external.exe"));
+});
+
+test("archive commands: unzip on macOS and Linux, System32 tar on Windows", () => {
+  const unix = archiveCommands("darwin", "/t/a.zip", "/t/out", { exists: () => true });
+  assert.equal(unix.file, "/usr/bin/unzip");
+  assert.deepEqual(unix.list, ["-Z1", "/t/a.zip"]);
+  assert.deepEqual(unix.extract, ["-q", "-o", "/t/a.zip", "-d", "/t/out"]);
+  assert.equal(archiveCommands("linux", "/t/a.zip", "/t/out", { exists: (file) => file === "/bin/unzip" }).file, "/bin/unzip");
+  assert.equal(archiveCommands("linux", "/t/a.zip", "/t/out", { exists: () => false }).file, "/usr/bin/unzip");
+  const win = archiveCommands("win32", "C:\\d\\a.zip", "C:\\d\\out", { env: { SystemRoot: "D:\\Win" } });
+  assert.equal(win.file, "D:\\Win\\System32\\tar.exe");
+  assert.deepEqual(win.list, ["-tf", "C:\\d\\a.zip"]);
+  assert.deepEqual(win.extract, ["-xf", "C:\\d\\a.zip", "-C", "C:\\d\\out"]);
+  assert.equal(archiveCommands("win32", "a", "b", { env: {} }).file, "C:\\Windows\\System32\\tar.exe");
+});
+
+// macOS's /usr/bin/tar is the same bsdtar that Windows ships as tar.exe, so it proves the Windows arguments.
+const bsdtar = process.platform === "darwin" ? false : "needs bsdtar (macOS tar), the same tool as Windows' tar.exe";
+
+test("a Windows install lists and unpacks the .exe archive with tar and validates it", { skip: skip || bsdtar }, async (t) => {
+  const names = memberNames("win32");
+  const { make, release, dataDir } = await fixture(t, { files: { [names.command]: agentScript(), [names.harness]: "harness\n" } });
+  const calls = [];
+  const execFileImpl = (file, args, options, callback) => {
+    calls.push(file);
+    return execFile(file.endsWith("tar.exe") ? "/usr/bin/tar" : file, args, options, callback);
+  };
+  const validated = [];
+  const antigravity = make({
+    platform: "win32",
+    arch: "x64",
+    releases: { "win32-x64": release },
+    env: { SystemRoot: "C:\\Windows" },
+    execFileImpl,
+    validate: async (options) => validated.push(options),
+  });
+  assert.deepEqual(await antigravity.install(), { version: "9.9.9", changed: true });
+  assert.ok(calls.length === 2 && calls.every((file) => file === "C:\\Windows\\System32\\tar.exe"), calls.join());
+  assert.equal(validated.length, 1);
+  assert.equal(path.basename(validated[0].command), names.command);
+  assert.equal(path.basename(validated[0].harness), names.harness);
+  const found = antigravity.resolve();
+  assert.equal(found.command, path.join(dataDir, "tools", "antigravity", "win32-x64", "versions", release.sha256, names.command));
+  assert.equal(fs.readFileSync(found.harness, "utf8"), "harness\n");
+  // An archive with the macOS names instead is refused on Windows.
+  const wrong = await fixture(t);
+  await assert.rejects(
+    wrong
+      .make({
+        platform: "win32",
+        arch: "x64",
+        releases: { "win32-x64": { ...wrong.release, files: release.files } },
+        env: { SystemRoot: "C:\\Windows" },
+        execFileImpl,
+        validate: async () => {},
+      })
+      .install(),
+    /unexpected contents/,
+  );
+});
+
+test("a Linux install validates with --uid=", { skip }, async (t) => {
+  const { make, release } = await fixture(t);
+  const validated = [];
+  const antigravity = make({
+    platform: "linux",
+    arch: "x64",
+    releases: { "linux-x64": { ...release, args: RELEASES["linux-x64"].args } },
+    validate: async (options) => validated.push(options),
+  });
+  await antigravity.install();
+  assert.deepEqual(validated[0].args, ["--uid="]);
+  assert.deepEqual(antigravity.resolve().args, ["--uid="]);
 });
 
 test("nothing is installed until an install ran; MILAGRE_ANTIGRAVITY_PATH overrides", { skip }, async (t) => {
@@ -226,4 +395,15 @@ test("a profile with acp_token.json is signed in", (t) => {
   fs.mkdirSync(path.join(home, AGENT_NAME));
   fs.writeFileSync(path.join(home, AGENT_NAME, "acp_token.json"), "{}");
   assert.equal(hasToken(home), true);
+});
+
+test("on Windows the agent's temporary directory is also TEMP and TMP", () => {
+  const { antigravitySpawn } = require("./antigravity-acp.cjs");
+  const windows = antigravitySpawn({ command: "C:\\agy\\agy_acp_server.exe", env: { GEMINI_HOME: "C:\\p" }, tmpdir: "C:\\t", platform: "win32" }).env;
+  assert.equal(windows.TMPDIR, "C:\\t");
+  assert.equal(windows.TEMP, "C:\\t");
+  assert.equal(windows.TMP, "C:\\t");
+  const mac = antigravitySpawn({ command: "/agy/agy_acp_server.par", env: { GEMINI_HOME: "/p" }, tmpdir: "/t", platform: "darwin" }).env;
+  assert.equal(mac.TMPDIR, "/t");
+  assert.equal(mac.TEMP, undefined);
 });

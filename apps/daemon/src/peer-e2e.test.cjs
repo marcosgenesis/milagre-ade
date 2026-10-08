@@ -1,14 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs/promises");
-const os = require("node:os");
-const path = require("node:path");
-const { execFileSync } = require("node:child_process");
 const { b64url } = require("@milagre/shared/relay-crypto");
-const { startDaemon } = require("./server.cjs");
-const { connect } = require("./client.cjs");
-const { readIdentity } = require("./relay-identity.cjs");
-const { startLocalRelay, connectDesktop, connectPhone, until } = require("./relay-test-kit.cjs");
+const { startTestMac, connectDesktop, connectPhone, until } = require("./relay-test-kit.cjs");
 
 const PIECE = 512 * 1024;
 
@@ -29,57 +22,8 @@ function cutsEveryBoundary(json) {
   return boundaries.length >= 2 && boundaries.every((at) => (bytes[at] & 0xc0) === 0x80);
 }
 
-/**
- * A throwaway Mac: its own data folder, a local relay in place of relay.milagre.cloud, the LAN on a port the OS picks
- * on 127.0.0.1, and a clock the test moves (pairing windows). Never Victor's data folder, 8797 or 8798.
- */
-async function macWithRelay(t) {
-  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "peer-e2e-")));
-  const dataDir = path.join(directory, "profile");
-  const project = path.join(directory, "project");
-  await fs.mkdir(project);
-  const clock = { now: 1_000_000 };
-  const sockets = [];
-  let daemon;
-  let client;
-  // Registered before the relay's own hook, so the daemon closes while the relay still answers; the folder goes last.
-  t.after(async () => {
-    for (const socket of sockets) socket.close();
-    client?.close();
-    try {
-      await daemon?.close();
-    } finally {
-      await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    }
-  });
-  execFileSync("git", ["init", "-b", "main", project], { stdio: "ignore" });
-  const relay = await startLocalRelay(t);
-  daemon = await startDaemon({
-    dataDir,
-    version: "9.8.7",
-    runtimeOptions: { cwd: project, environmentReady: Promise.resolve(), titleModels: {}, readPullRequests: async (_worktree, refs) => refs },
-    phoneOptions: { relayUrl: relay.url, localPort: 0, lanPort: 0, lanHostname: "127.0.0.1", addresses: () => ["127.0.0.1"], now: () => clock.now },
-  });
-  client = await connect({ dataDir });
-  // Turning phone access on opens the pairing window, as showing the QR in Settings › Devices does.
-  await client.call("phone:set-enabled", [true]);
-  await until(async () => {
-    const status = await client.call("phone:status");
-    return status.state === "on" && status.relay === "online";
-  }, "phone access on and the relay online");
-  const identity = await readIdentity(dataDir);
-  const token = JSON.parse(await fs.readFile(path.join(dataDir, "mobile.json"), "utf8")).token;
-  /** Dials this Mac with `connectTo` (connectDesktop or connectPhone), through the relay unless `relayUrl` says otherwise. */
-  const dial = (connectTo, options = {}) => {
-    const socket = connectTo({ relayUrl: relay.url, identity, token, ...options });
-    sockets.push(socket);
-    return socket;
-  };
-  return { clock, client, project, identity, token, dial };
-}
-
 test("a desktop pairs through the relay in the pairing window and drives this Mac's daemon, except pairing and devices", async (t) => {
-  const mac = await macWithRelay(t);
+  const mac = await startTestMac(t);
   const desktop = mac.dial(connectDesktop, { name: "studio" });
   assert.ok((await desktop.hello()).channel);
   const key = b64url(desktop.key.publicKey);
@@ -148,7 +92,7 @@ test("a desktop pairs through the relay in the pairing window and drives this Ma
 });
 
 test("a paired desktop finds the LAN route over the relay and makes a round trip on it", async (t) => {
-  const mac = await macWithRelay(t);
+  const mac = await startTestMac(t);
   const desktop = mac.dial(connectDesktop);
   assert.ok((await desktop.hello()).channel);
   const reply = await desktop.call("peer:routes");
@@ -177,7 +121,7 @@ test("a paired desktop finds the LAN route over the relay and makes a round trip
 });
 
 test("removing a desktop closes it on the relay and the LAN, and it pairs again only in a window opened later", async (t) => {
-  const mac = await macWithRelay(t);
+  const mac = await startTestMac(t);
   const desktop = mac.dial(connectDesktop, { name: "studio" });
   assert.ok((await desktop.hello()).channel);
   const lanUrl = (await desktop.call("peer:routes")).result.lan[0];
@@ -204,7 +148,7 @@ test("removing a desktop closes it on the relay and the LAN, and it pairs again 
 });
 
 test("a phone removed while the pairing window is open stays out until a later window, with the real relay host", async (t) => {
-  const mac = await macWithRelay(t);
+  const mac = await startTestMac(t);
   const phone = mac.dial(connectPhone, { name: "Victor's iPhone" });
   assert.ok((await phone.hello()).channel);
   const key = b64url(phone.key.publicKey);
@@ -219,5 +163,56 @@ test("a phone removed while the pairing window is open stays out until a later w
   mac.clock.now += 1000;
   await mac.client.call("phone:open-pairing");
   assert.ok((await mac.dial(connectPhone, { key: phone.key, name: "Victor's iPhone" }).hello()).channel);
+  assert.equal((await mac.client.call("devices:list")).length, 1);
+});
+
+test("a new computer waits for Allow, which only this Mac's window hears; Deny saves nothing, and a late Allow finds nothing", async (t) => {
+  const mac = await startTestMac(t, { autoAllow: false });
+  const heard = [];
+  mac.client.on("event", ({ channel, payload }) => {
+    if (channel === "devices:pending") heard.push(payload.requests);
+  });
+  const waitingFor = (key) => until(() => heard.at(-1)?.some((request) => request.key === key), "the window to hear the request");
+
+  // A computer the owner allows.
+  const known = mac.dial(connectDesktop, { name: "known" });
+  const knownHello = known.hello({ ms: 10_000 });
+  const knownKey = b64url(known.key.publicKey);
+  await waitingFor(knownKey);
+  await until(() => known.notices.length > 0, "the waiting notice");
+  assert.deepEqual(await mac.client.call("devices:list"), [], "nothing saved before Allow");
+  await mac.client.call("devices:allow", [knownKey]);
+  assert.ok((await knownHello).channel);
+
+  // Another asks: the window hears it, the computer already connected doesn't, and it can't answer for this Mac.
+  const studio = mac.dial(connectDesktop, { name: "studio" });
+  const studioHello = studio.hello({ ms: 10_000 });
+  const studioKey = b64url(studio.key.publicKey);
+  await waitingFor(studioKey);
+  assert.deepEqual(
+    (await mac.client.call("devices:pending")).map((request) => [request.key, request.name]),
+    [[studioKey, "studio"]],
+  );
+  assert.deepEqual((await known.call("devices:allow", [studioKey])).error, { code: "NOT_AVAILABLE_REMOTELY", message: "Not available on a remote computer" });
+  await known.call("daemon:status");
+  assert.deepEqual(
+    known.frames.filter((frame) => frame.event?.channel?.startsWith("devices:")),
+    [],
+  );
+  await mac.client.call("devices:deny", [studioKey]);
+  assert.deepEqual(await studioHello, { error: { t: "error", code: "unknown-phone", reason: "denied" } });
+  assert.deepEqual(
+    (await mac.client.call("devices:list")).map((device) => device.key),
+    [knownKey],
+  );
+
+  // One that leaves before the owner answers: its request goes, and Allow afterwards changes nothing.
+  const late = mac.dial(connectDesktop, { name: "late" });
+  void late.hello({ ms: 2000 }).catch(() => {});
+  const lateKey = b64url(late.key.publicKey);
+  await waitingFor(lateKey);
+  late.close();
+  await until(() => heard.at(-1)?.length === 0, "the request to go");
+  await assert.rejects(mac.client.call("devices:allow", [lateKey]), /no longer waiting/);
   assert.equal((await mac.client.call("devices:list")).length, 1);
 });

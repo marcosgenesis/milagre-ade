@@ -20,8 +20,9 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 // Handled here, never by core, and not in the mobile bridge's allow-list: a paired phone must not manage its own access.
 const PUSH_METHODS = Object.freeze(["push:register", "push:unregister", "push:focus"]);
 const PHONE_METHODS = Object.freeze(["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing", "phone:set-lan"]);
-// Paired phones and computers, listed and removed from this Mac's own window only (Settings > Devices).
-const DEVICE_METHODS = Object.freeze(["devices:list", "devices:remove"]);
+// Paired phones and computers, listed and removed from this Mac's own window only (Settings > Devices), and the
+// computers waiting for its Allow.
+const DEVICE_METHODS = Object.freeze(["devices:list", "devices:remove", "devices:pending", "devices:allow", "devices:deny"]);
 // A paired desktop's own channel (peer-channel.cjs): rpc / evt / part messages over the relay or the LAN.
 const DESKTOP_PEER = "desktop-peer-v1";
 // Asked by a paired desktop, which has no phone:* methods: where it can reach this Mac (relay identity, LAN routes).
@@ -385,6 +386,8 @@ async function startDaemon({
     dataDir,
     onChange: (status) => broadcast("phone:status", status),
     onPaired: (info) => broadcast("phone:paired", info),
+    // Only this Mac's window hears it: paired desktops are never sent devices:* events (see broadcast).
+    onPending: (requests) => broadcast("devices:pending", { requests }),
     // Each paired desktop is one more client of this daemon, with the paired-desktop deny set.
     openPeer: (carrier) => acceptConnection({ ...carrier, policy: peerPolicy }),
     ...phoneOptions,
@@ -547,6 +550,9 @@ async function startDaemon({
         else if (request.method === "phone:set-lan") result = await phone.setLan(request.args[0]);
         else if (request.method === "devices:list") result = await phone.devices();
         else if (request.method === "devices:remove") result = await phone.removeDevice(request.args[0]);
+        else if (request.method === "devices:pending") result = phone.pendingDevices();
+        else if (request.method === "devices:allow") result = phone.allowDevice(request.args[0]);
+        else if (request.method === "devices:deny") result = phone.denyDevice(request.args[0]);
         else if (request.method === "peer:routes") result = phone.peerRoutes();
         else if (request.method === "push:register") result = await push.register(request.args[0]);
         else if (request.method === "push:unregister") result = await push.unregister(request.args[0]);

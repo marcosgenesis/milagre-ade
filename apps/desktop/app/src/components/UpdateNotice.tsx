@@ -56,7 +56,7 @@ function Gift() {
   );
 }
 
-export function UpdateNotice({ state }: { state: UpdateState | null }) {
+function UpdateNotice({ state }: { state: UpdateState | null }) {
   const [presentation, setPresentation] = useState({ version: "", open: false });
   const [requestError, setRequestError] = useState("");
   const [pending, setPending] = useState(false);

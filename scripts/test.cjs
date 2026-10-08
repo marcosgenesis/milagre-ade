@@ -11,7 +11,7 @@ try {
   filters = parseArgs(process.argv.slice(2));
 } catch (error) {
   console.error(error.message);
-  console.error("Usage: npm test [-- --unit | --electron] [--workspace <name>] [--only <substring>] [--list]");
+  console.error("Usage: npm test [-- --unit | --electron] [--workspace <name>] [--only <substring>] [--shard <index>/<count>] [--list]");
   process.exit(2);
 }
 

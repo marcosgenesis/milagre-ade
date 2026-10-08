@@ -79,3 +79,26 @@ test("an Electron check is retried once, only on Linux CI", () => {
   assert.equal(shouldRetry({ platform: "linux", ci: undefined, attempt: 1 }), false);
   assert.equal(shouldRetry({ platform: "darwin", ci: "true", attempt: 1 }), false);
 });
+
+test("--shard splits the runnable Electron checks round-robin and leaves unit tests alone", () => {
+  const electron = ["scripts/test-a.cjs", "scripts/test-b.cjs", "scripts/test-c.cjs", "scripts/test-d.cjs", "scripts/test-windows-cli.cjs"];
+  const run = (shard) =>
+    selectTests({ unit: ["x.test.ts"], electron, filters: { ...parseArgs(["--shard", shard]), platform: "linux", commandExists: () => true } });
+  // Skipped checks are removed before splitting so every shard gets an even share of real work.
+  assert.deepEqual(run("1/2").electron, ["scripts/test-a.cjs", "scripts/test-c.cjs"]);
+  assert.deepEqual(run("2/2").electron, ["scripts/test-b.cjs", "scripts/test-d.cjs"]);
+  assert.deepEqual(run("3/3").electron, ["scripts/test-c.cjs"]);
+  assert.deepEqual(run("1/1").electron, electron.slice(0, 4));
+  assert.deepEqual(run("2/2").unit, ["x.test.ts"]);
+  assert.deepEqual(
+    run("2/2").skipped.map((item) => item.file),
+    ["scripts/test-windows-cli.cjs"],
+  );
+  assert.deepEqual(parseArgs(["--shard", "2/3"]).shard, { index: 2, count: 3 });
+  assert.equal(parseArgs([]).shard, null);
+});
+
+test("a malformed --shard is rejected", () => {
+  for (const value of ["0/2", "3/2", "2", "a/b", "1/0", "1.5/2"]) assert.throws(() => parseArgs(["--shard", value]), /--shard needs <index>\/<count>/, value);
+  assert.throws(() => parseArgs(["--shard"]), /--shard needs a value/);
+});

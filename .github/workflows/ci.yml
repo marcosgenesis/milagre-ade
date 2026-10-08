@@ -130,10 +130,16 @@ jobs:
           echo "native-tests: $RESULT"
           case "$RESULT" in success|skipped) exit 0 ;; *) exit 1 ;; esac
   desktop-checks:
+    # The Electron checks run one at a time (each boots Vite and Electron), so they are split across runners.
+    name: desktop-checks (${{ matrix.shard }}/3)
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
     timeout-minutes: 45
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -150,12 +156,12 @@ jobs:
           MILAGRE_SCREENSHOT_DIR: ${{ runner.temp }}/electron-screenshots
           LIBGL_ALWAYS_SOFTWARE: "1"
           ELECTRON_ENABLE_LOGGING: "1"
-        run: xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron
+        run: xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron --shard ${{ matrix.shard }}/3
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: electron-screenshots
+          name: electron-screenshots-${{ matrix.shard }}
           path: ${{ runner.temp }}/electron-screenshots
           if-no-files-found: ignore
           retention-days: 7

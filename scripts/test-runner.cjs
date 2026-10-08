@@ -54,7 +54,7 @@ const WORKSPACES = {
 };
 
 function parseArgs(argv) {
-  const filters = { unit: false, electron: false, workspace: null, only: null, list: false };
+  const filters = { unit: false, electron: false, workspace: null, only: null, list: false, shard: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--changed") throw new Error("--changed is not implemented yet; use --only or --workspace");
@@ -62,6 +62,13 @@ function parseArgs(argv) {
     else if (arg === "--workspace" || arg === "--only") {
       filters[arg.slice(2)] = argv[++i];
       if (!filters[arg.slice(2)]) throw new Error(`${arg} needs a value`);
+    } else if (arg === "--shard") {
+      const value = argv[++i];
+      if (!value) throw new Error("--shard needs a value");
+      const match = /^(\d+)\/(\d+)$/.exec(value);
+      const [index, count] = match ? [Number(match[1]), Number(match[2])] : [0, 0];
+      if (!(index >= 1 && count >= 1 && index <= count)) throw new Error(`--shard needs <index>/<count> with 1 <= index <= count, got ${value}`);
+      filters.shard = { index, count };
     } else throw new Error(`Unknown option ${arg}`);
   }
   if (filters.workspace && !WORKSPACES[filters.workspace])
@@ -100,6 +107,8 @@ function selectTests({ unit, electron, filters }) {
     return true;
   });
   skipped.sort((a, b) => a.file.localeCompare(b.file));
+  // CI splits the Electron checks across runners; the split happens after skips so each shard gets an even share of real work.
+  if (filters.shard) pickedElectron = pickedElectron.filter((_, i) => i % filters.shard.count === filters.shard.index - 1);
   return { unit: pickedUnit, electron: pickedElectron, skipped };
 }
 

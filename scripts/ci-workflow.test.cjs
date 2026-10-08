@@ -98,13 +98,18 @@ test("installers build on main, on dispatch, and on PRs only with the preview:in
   );
 });
 
-test("Electron checks run on Ubuntu under xvfb with screenshots kept as an artifact", () => {
+test("Electron checks run on Ubuntu under xvfb, split across three runners, with screenshots kept per shard", () => {
   const job = ci.jobs["desktop-checks"];
   assert.equal(job["runs-on"], "ubuntu-latest");
+  // Each check boots its own Vite and Electron, so they run serially; sharding is what keeps the job short.
+  assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3]);
+  assert.equal(job.strategy["fail-fast"], false);
+  assert.equal(job.name, "desktop-checks (${{ matrix.shard }}/3)");
   const runs = job.steps.map((step) => step.run).filter(Boolean);
-  assert.ok(runs.includes('xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron'));
+  assert.ok(runs.includes('xvfb-run -a -s "-screen 0 1600x1200x24 +extension GLX +render -noreset" npm test -- --electron --shard ${{ matrix.shard }}/3'));
   const upload = job.steps.find((step) => step.uses?.startsWith("actions/upload-artifact"));
   assert.equal(upload.if, "always()");
+  assert.equal(upload.with.name, "electron-screenshots-${{ matrix.shard }}");
   assert.equal(upload.with.path, "${{ runner.temp }}/electron-screenshots");
 });
 

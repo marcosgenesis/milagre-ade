@@ -25,7 +25,7 @@ function Fixture() {
   window.setProject = setRoot;
   window.setExpanded = setExpanded;
   const model = MODEL_CATALOG[0];
-  return <div style={{ width: '100%', maxWidth: 720, margin: '120px auto' }}>
+  return <div style={{ width: '100%', maxWidth: 720, margin: '260px auto' }}>
     <PromptComposer projectPath={root} draft={draft} onDraftChange={setDraft}
       imageDraft={{ images: [], files: [], loading: false, error: '', onPaste: noop, remove: noop, removeFile: noop }}
       onSend={() => { window.sent.push(draft); setDraft(''); }} sendBlocked={false}
@@ -41,7 +41,7 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   app.setPath("userData", fs.mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-prompt-skills-")));
   await app.whenReady();
-  const window = new BrowserWindow({ width: 1000, height: 500, show: false, webPreferences: { backgroundThrottling: false } });
+  const window = new BrowserWindow({ width: 1000, height: 700, show: false, webPreferences: { backgroundThrottling: false } });
   const evaluate = (source) => window.webContents.executeJavaScript(source);
   const errors = [];
   window.webContents.on("console-message", (details) => {

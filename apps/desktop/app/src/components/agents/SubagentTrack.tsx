@@ -26,7 +26,7 @@ function elapsed(agent: Subagent, now: number) {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-export function AdvisorControls({ agent, onStop, onRetry }: { agent: Subagent; onStop?: (id: string) => void; onRetry?: (id: string) => void }) {
+function AdvisorControls({ agent, onStop, onRetry }: { agent: Subagent; onStop?: (id: string) => void; onRetry?: (id: string) => void }) {
   const action = advisorAction(agent);
   if (!action || !(action === "stop" ? onStop : onRetry)) return null;
   return (

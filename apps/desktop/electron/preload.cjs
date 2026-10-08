@@ -92,6 +92,16 @@ const bridge = {
     ipcRenderer.on("main-sync:status", listener);
     return () => ipcRenderer.removeListener("main-sync:status", listener);
   },
+  readLinearStatus: () => ipcRenderer.invoke("linear:status"),
+  connectLinear: () => ipcRenderer.invoke("linear:connect"),
+  disconnectLinear: () => ipcRenderer.invoke("linear:disconnect"),
+  readLinearEnabled: () => ipcRenderer.invoke("linear:enabled:read"),
+  saveLinearEnabled: (value) => ipcRenderer.invoke("linear:enabled:save", value),
+  onLinearStatusChanged: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("linear:status-changed", listener);
+    return () => ipcRenderer.removeListener("linear:status-changed", listener);
+  },
   onWorktreeRenamed: (callback) => {
     const listener = (_event, rename) => callback(rename);
     ipcRenderer.on("worktree:renamed", listener);

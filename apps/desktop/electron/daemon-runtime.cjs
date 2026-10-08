@@ -14,9 +14,19 @@ const START_ATTEMPTS = 3;
 const RESTARTED_HOST = "Milagre's background host stopped unexpectedly, so it was started again.";
 // A host that has them sends what changed in a state event, not the whole state; the window applies it (state-events.ts).
 const STATE_PATCHES = "state-patches-v1";
-/** Asks a host that can for state patches; an older one keeps sending whole states. */
+// A host that keeps messages by Chat sends states without them; the window reads each Chat's own (chat-messages.ts).
+const CHAT_PAGES = "chat-pages-v1";
+// A host that can sends each subagent with only the end of its transcript; the panel reads a whole one (subagent-transcripts.ts).
+const SUBAGENT_TAILS = "subagent-tails-v1";
+/**
+ * Asks a host that can for state patches, and for states without messages and with transcript tails when it can; an
+ * older one keeps sending whole states.
+ */
 async function takeStatePatches(connection, status) {
-  if (status.capabilities?.includes(STATE_PATCHES)) await connection.call("daemon:state-patches");
+  const capabilities = status.capabilities ?? [];
+  if (capabilities.includes(CHAT_PAGES))
+    await connection.call("daemon:state-patches", [{ messages: false, ...(capabilities.includes(SUBAGENT_TAILS) ? { transcripts: false } : {}) }]);
+  else if (status.capabilities?.includes(STATE_PATCHES)) await connection.call("daemon:state-patches");
 }
 
 // The Project an event belongs to, when it names one.

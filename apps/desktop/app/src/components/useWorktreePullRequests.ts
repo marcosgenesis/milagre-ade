@@ -65,14 +65,20 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
   const stateRef = useRef(state);
   stateRef.current = state;
   const [snapshot, setSnapshot] = useState<{ projectPath: string; prs: Record<string, PullRequest | null> }>({ projectPath: "", prs: {} });
+  // The Worktrees whose Chats have a message, from each Chat's summary (an older host's state, without one, from its messages).
   const pathsKey = JSON.stringify(
     [
       ...new Set(
-        state?.messages.flatMap((message) => {
-          const session = state.sessions[message.session_id];
-          const worktree = session && !session.archived ? state.worktrees[session.worktree_id] : undefined;
-          return worktree ? [worktree.path] : [];
-        }) ?? [],
+        Object.values(state?.sessions ?? {}).every((session) => session.summary)
+          ? Object.values(state?.sessions ?? {}).flatMap((session) => {
+              const worktree = !session.archived && session.summary!.count > 0 ? state!.worktrees[session.worktree_id] : undefined;
+              return worktree ? [worktree.path] : [];
+            })
+          : (state?.messages.flatMap((message) => {
+              const session = state.sessions[message.session_id];
+              const worktree = session && !session.archived ? state.worktrees[session.worktree_id] : undefined;
+              return worktree ? [worktree.path] : [];
+            }) ?? []),
       ),
     ].sort(),
   );
@@ -129,7 +135,9 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
     for (const session of Object.values(state?.sessions ?? {})) {
       const worktree = !session.archived ? state?.worktrees[session.worktree_id] : undefined;
       if (!worktree) continue;
-      const refs = pullRequestRefs(state!.messages.filter((message) => message.session_id === session.id));
+      const refs = session.summary
+        ? (session.summary.pullRequests ?? [])
+        : pullRequestRefs(state!.messages.filter((message) => message.session_id === session.id));
       if (refs.length) byPath[worktree.path] = [...new Set([...(byPath[worktree.path] ?? []), ...refs])];
     }
     return byPath;

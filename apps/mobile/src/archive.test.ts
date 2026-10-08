@@ -262,9 +262,10 @@ test("Cancel changes nothing", async () => {
     },
   });
   assert.equal(result, "cancelled");
+  // Only the checks ran: nothing was hidden, removed or ended.
   assert.deepEqual(
     calls.map((call) => call.method),
-    ["worktree:roots", "worktree:status"],
+    ["worktree:roots", "worktree:status", "terminal:list"],
   );
   assert.equal(refreshed, false);
 });
@@ -382,4 +383,22 @@ test("a dropped connection during the removal: a worktree that is gone counts as
     kept.calls.filter((call) => call.method === "chat:patch").map((call) => call.args[2]),
     [{ archived: true, unread: false }, { archived: false }],
   );
+});
+
+test("checkArchive names what the Chat's Terminals run, and leaves idle ones out", async () => {
+  const terminals = {
+    "terminal:list": () =>
+      Promise.resolve({
+        terminals: [
+          { id: "a", title: "npm", busy: true },
+          { id: "b", title: "zsh", busy: false },
+        ],
+      }),
+  };
+  const plan = await checkArchive(fakeClient(terminals).client, state(), 2, "/repo#2");
+  assert.deepEqual(plan, { milagreOwned: true, shared: false, status: clean, terminals: ["npm"] });
+  assert.equal(archiveDialog(plan, false).message, "Archiving ends the Terminal running npm.");
+  // A Mac without Terminals answers with an error: the plan stays as it was.
+  const old = { "terminal:list": () => Promise.reject(new Error("terminal:list is not available from mobile")) };
+  assert.deepEqual(await checkArchive(fakeClient(old).client, state(), 2, "/repo#2"), { milagreOwned: true, shared: false, status: clean });
 });

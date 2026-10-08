@@ -17,6 +17,10 @@ _Avoid_: folder, workspace, repo
 A git working directory of a **Project**, the main checkout included. A **Worktree** is active while git lists it and its folder exists; only active **Worktrees** appear on the canvas.
 _Avoid_: branch (a **Worktree** has a branch, it isn't one)
 
+**Main branch**:
+The branch a **Project**'s remote names as its default (`origin/HEAD`), else `main`, else `master`. Main branch sync fast-forwards it from the remote before a new **Worktree** is made, together with the **Worktree** that has it checked out when that one is clean.
+_Avoid_: base (the base is whatever branch a **Worktree** started from, which may not be the main branch)
+
 **Chat**:
 One conversation with one agent. A Project Chat is bound to exactly one **Worktree**; a named Link's shared Chat owns one isolated **Worktree** in each member **Project**. An ordinary **Worktree** can have many **Chats**; a shared Chat's owned Worktree does not receive an independent editable Project Chat.
 An archived **Chat** stays readable from a linked side but is never chosen to receive a **Delegation**.
@@ -25,6 +29,10 @@ _Avoid_: session, thread (the providers' names for the agent process behind a **
 **Browser page**:
 A page in a Chromium browser on the host that a **Chat** may view and control. It belongs to the **Chat** whose agent process started its browser, or to a **Chat** the user attached that browser to. See ADR-0006.
 _Avoid_: tab (a browser's own UI term), session (the page's sign-in state is part of it, not a separate thing)
+
+**Terminal**:
+An interactive shell the user opens in a **Chat**. It starts in that **Chat**'s **Worktree** with the user's own login shell and environment. It belongs to the **Chat**: other **Chats**, even in the same **Worktree**, do not see it, and the **Chat**'s agent neither reads nor types in it. A **Chat** can have several. A **Terminal** keeps running when the desktop app closes, and ends when its shell exits or its **Chat** is archived. See ADR-0008.
+_Avoid_: console, shell (the program running inside a **Terminal**)
 
 ### Linking
 
@@ -49,6 +57,7 @@ _Avoid_: consensus mode, auto-chat
 ## Relationships
 
 - A **Project** has one or more **Worktrees**; an ordinary **Worktree** has one or more **Chats**. A named Link's shared **Chat** owns one **Worktree** per member **Project**.
+- A **Chat** has zero or more **Terminals**; each **Terminal** belongs to exactly one **Chat**.
 - A **Link** joins exactly two endpoints; each endpoint is a **Project** or a **Worktree**.
 - A **Delegation** travels along exactly one **Link**, from one **Chat** to one **Chat**.
 - A **Negotiation** involves exactly two **Chats** and is made of **Delegations** along one **Link**.

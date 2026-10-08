@@ -1,5 +1,6 @@
 import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
+import { UpdatePillSlot } from "./UpdateNotice";
 import { BrowserTrack } from "./agents/BrowserTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
@@ -245,8 +246,10 @@ const MessageTranscript = memo(function MessageTranscript({
   onOpenLinkedChat,
   findOpen,
   models,
+  earlier,
 }: Pick<
   ChatComposerProps,
+  | "earlier"
   | "messages"
   | "pendingMessageId"
   | "isSending"
@@ -295,12 +298,24 @@ const MessageTranscript = memo(function MessageTranscript({
     restore();
     return () => cancelAnimationFrame(frame);
   }, [page]);
-  function showEarlier() {
+  // Messages the host still holds before the ones here (chat-pages-v1); find in chat reads them all.
+  const remote = earlier?.count ?? 0;
+  useEffect(() => {
+    if (findOpen && remote > 0) void earlier?.loadAll();
+  }, [findOpen, remote, earlier]);
+  async function showEarlier() {
     const column = earlierButton.current?.parentElement;
     const element = column?.querySelector<HTMLElement>('[data-slot="message"]');
     const viewport = column?.closest<HTMLElement>('[aria-label="Conversation"]');
     if (element && viewport) anchor.current = { element, viewport, top: element.getBoundingClientRect().top };
-    setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
+    if (start > 0 || !earlier) {
+      setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
+      return;
+    }
+    // None left here: read the next turns from the host, then show everything held (no message has this id, and unlike
+    // NaN it equals itself, so the page comparison below settles).
+    await earlier.load();
+    setPage({ chat: chatId, firstId: Number.NEGATIVE_INFINITY });
   }
   const streamingMessage: AppChatMessage | undefined =
     isSending && (streamingText || streamingSteps?.length)
@@ -315,14 +330,14 @@ const MessageTranscript = memo(function MessageTranscript({
   const openingIds = openingMessages.current.ids;
   return (
     <>
-      {start > 0 && (
+      {start + remote > 0 && (
         <button
           ref={earlierButton}
           type="button"
-          onClick={showEarlier}
+          onClick={() => void showEarlier()}
           className="self-center rounded-control border border-line px-3 py-1.5 text-xs text-ink-2 hover:bg-hover"
         >
-          Show earlier messages ({start})
+          Show earlier messages ({start + remote})
         </button>
       )}
       {transcript.map((message) => (
@@ -358,6 +373,8 @@ interface ChatComposerProps {
   onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
+  /** Messages of the Chat the host holds before `messages` (chat-pages-v1): how many, and reading them. */
+  earlier?: { count: number; load: () => Promise<void>; loadAll: () => Promise<void> };
   /** The Project or Link (scope key) the messages belong to, for step output the host keeps out of the state. */
   messageScope?: string;
   messages: AppChatMessage[];
@@ -612,6 +629,7 @@ export function ChatComposer({
   imageDraft,
   projectPath,
   messageScope,
+  earlier,
   messages,
   pendingMessageId,
   draft,
@@ -724,6 +742,7 @@ export function ChatComposer({
       >
         <SubagentCanvas
           key={`canvas-${chatId}`}
+          chatKey={runtimeChat}
           opened={canvasOpened}
           agents={subagents}
           working={isSending}
@@ -767,6 +786,7 @@ export function ChatComposer({
                   <StepDetailsScope scope={messageScope}>
                     <MessageTranscript
                       findOpen={findOpen}
+                      earlier={earlier}
                       messages={messages}
                       pendingMessageId={pendingMessageId}
                       isSending={isSending}
@@ -841,6 +861,7 @@ export function ChatComposer({
             {!isNewChat && runtimeChat && <SimulatorTrack key={`simulator-${runtimeChat}`} chatId={runtimeChat} />}
             <SubagentTrack
               key={chatId}
+              chatKey={runtimeChat}
               agents={subagents}
               provider={sessionProvider ?? selectedModel.provider}
               onOpenCanvas={() => setCanvasChat(chatId)}
@@ -851,7 +872,9 @@ export function ChatComposer({
             />
           </div>
 
-          <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "relative z-20 -mt-1.5"}`}>
+          <div className={`relative mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "z-20 -mt-1.5"}`}>
+            {/* The update pill floats centred on the chip row's line, outside its flow. */}
+            {!canvasOpened && <UpdatePillSlot className="bottom-full mb-2" />}
             {isNewChat && scopeKind !== "link" && (
               <NewChatHeader
                 worktrees={worktrees}

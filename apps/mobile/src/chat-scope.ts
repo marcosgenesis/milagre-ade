@@ -11,6 +11,7 @@ export function phoneSnapshot(value: Snapshot | { link: OpenLink; runs: Runs }):
     projects: {},
     tasks: {},
     messages: link.state.messages,
+    ...(link.state.messagesInChats ? { messagesInChats: true } : {}),
     sessions: Object.fromEntries(Object.entries(link.state.sessions).map(([id, chat]) => [id, { ...chat, worktree_id: chat.id }])),
     worktrees: Object.fromEntries(
       Object.entries(link.state.sessions).map(([id, chat]) => [

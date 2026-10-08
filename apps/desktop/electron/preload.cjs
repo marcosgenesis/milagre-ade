@@ -25,6 +25,26 @@ const bridge = {
     input: (request) => ipcRenderer.invoke("browser:input", request),
     close: (request) => ipcRenderer.invoke("browser:close", request),
   },
+  terminals: {
+    list: (request) => ipcRenderer.invoke("terminal:list", request),
+    open: (request) => ipcRenderer.invoke("terminal:open", request),
+    read: (request) => ipcRenderer.invoke("terminal:read", request),
+    input: (request) => ipcRenderer.invoke("terminal:input", request),
+    resize: (request) => ipcRenderer.invoke("terminal:resize", request),
+    close: (request) => ipcRenderer.invoke("terminal:close", request),
+  },
+  onTerminalsChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("terminal:changed", listener);
+    return () => ipcRenderer.removeListener("terminal:changed", listener);
+  },
+  // ⌘W closes the focused Terminal instead of the window; the main process needs to know where focus is to decide.
+  setTerminalFocused: (focused) => ipcRenderer.send("app:terminal-focused", focused === true),
+  onCloseFocusedTerminal: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("app:close-focused-terminal", listener);
+    return () => ipcRenderer.removeListener("app:close-focused-terminal", listener);
+  },
   artifacts: {
     get: (request) => ipcRenderer.invoke("artifact:get", request),
     list: (request) => ipcRenderer.invoke("artifact:list", request),
@@ -63,6 +83,15 @@ const bridge = {
   saveFilesToCopy: (projectPath, patterns) => ipcRenderer.invoke("files-to-copy:save", projectPath, patterns),
   readWorktreeSetup: (projectPath) => ipcRenderer.invoke("worktree-setup:read", projectPath),
   saveWorktreeSetup: (projectPath, command) => ipcRenderer.invoke("worktree-setup:save", projectPath, command),
+  readMainSync: (projectPath) => ipcRenderer.invoke("main-sync:read", projectPath),
+  saveMainSync: (projectPath, override) => ipcRenderer.invoke("main-sync:save", projectPath, override),
+  readMainSyncDefault: () => ipcRenderer.invoke("main-sync:default:read"),
+  saveMainSyncDefault: (value) => ipcRenderer.invoke("main-sync:default:save", value),
+  onMainSyncStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("main-sync:status", listener);
+    return () => ipcRenderer.removeListener("main-sync:status", listener);
+  },
   onWorktreeRenamed: (callback) => {
     const listener = (_event, rename) => callback(rename);
     ipcRenderer.on("worktree:renamed", listener);
@@ -144,6 +173,9 @@ const bridge = {
   getRuns: () => ipcRenderer.invoke("chat:runs"),
   getMessage: (scope, id) => ipcRenderer.invoke("chat:message", scope, id),
   readState: (scope) => ipcRenderer.invoke("state:read", scope),
+  readChatMessages: (scope, chatId, options) => ipcRenderer.invoke("chat:messages", scope, chatId, options),
+  searchChats: (scope, query, options) => ipcRenderer.invoke("chat:search", scope, query, options),
+  readSubagent: (scope, chatId, agentId) => ipcRenderer.invoke("chat:subagent", scope, chatId, agentId),
   listAccountScopes: () => ipcRenderer.invoke("accounts:scopes"),
   getProjectAccounts: (scopeKey, refresh) => ipcRenderer.invoke("accounts:scope", scopeKey, refresh),
   assignProjectAccount: (scopeKey, provider, accountId) => ipcRenderer.invoke("accounts:assign", scopeKey, provider, accountId),

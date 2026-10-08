@@ -131,3 +131,16 @@ test("removeFailureNotice names git's message, says the chat stays, and has no p
     "It changed after you checked, so the chat and its worktree stay.",
   );
 });
+
+test("archiving names the commands its Terminals would end", () => {
+  assert.equal(archiveChoices({ plan: plan({ terminals: ["npm"] }), running: false }).reason, "Archiving ends the Terminal running npm.");
+  assert.equal(
+    archiveChoices({ plan: { milagreOwned: false, shared: false, status: null, terminals: ["npm", "vim", "npm"] }, running: false }).reason,
+    "Archiving ends 3 Terminals running npm, vim.",
+  );
+  assert.equal(
+    archiveChoices({ plan: plan({ status: { ...dirty, unpushed: 0, uncommitted: 2 }, terminals: ["node"] }), running: false }).reason,
+    "2 uncommitted files will be lost. Commit them first to keep them. Archiving ends the Terminal running node.",
+  );
+  assert.equal(archiveChoices({ plan: plan({ terminals: [] }), running: false }).reason, null);
+});

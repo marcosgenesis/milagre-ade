@@ -593,3 +593,85 @@ test("attachment preview command serves Worktree files and saved external attach
   await second.invoke("project:current");
   assert.equal((await second.invoke("attachment:preview", [external])).text, "outside the Worktree");
 });
+
+// A clone of a remote that has moved on: the clone's main is one commit behind.
+async function trailingClone(project) {
+  const root = path.dirname(project);
+  const id = ["-c", "user.name=Milagre", "-c", "user.email=milagre@example.com"];
+  const remote = path.join(root, "remote");
+  const clone = path.join(root, "clone");
+  await fs.mkdir(remote);
+  const remoteGit = (...args) => execFileSync("git", ["-C", remote, ...id, ...args], { encoding: "utf8" }).trim();
+  remoteGit("init", "-q", "-b", "main");
+  await fs.writeFile(path.join(remote, "README.md"), "shop\n");
+  remoteGit("add", ".");
+  remoteGit("commit", "-qm", "init");
+  execFileSync("git", ["clone", "--quiet", remote, clone]);
+  await fs.writeFile(path.join(remote, "NEWS.md"), "shipped\n");
+  remoteGit("add", ".");
+  remoteGit("commit", "-qm", "ship");
+  const git = (...args) => execFileSync("git", ["-C", clone, ...args], { encoding: "utf8" }).trim();
+  return { remote, clone, git, behind: git("rev-parse", "main"), ahead: remoteGit("rev-parse", "main") };
+}
+
+test("worktree:create syncs main first only when main sync is on, and survives a failed sync", async (t) => {
+  const { project, events, make } = await fixture(t);
+  const { remote, clone, git, behind, ahead } = await trailingClone(project);
+  const worktreeRoot = path.join(path.dirname(project), "worktrees");
+  const runtime = make({ cwd: clone, worktreeRoot });
+  await runtime.openProject(clone);
+  const create = () => runtime.invoke("worktree:create", [{ projectPath: clone, baseBranch: "main", prompt: "" }]);
+
+  assert.deepEqual(await runtime.invoke("main-sync:read", [clone]), { branch: "main", override: null, defaultValue: false, enabled: false, last: null });
+  await create();
+  assert.equal(git("rev-parse", "main"), behind, "Off by default: main stays where it was");
+  assert.equal(
+    events.some(({ channel }) => channel === "main-sync:status"),
+    false,
+  );
+
+  assert.deepEqual(await runtime.invoke("main-sync:default:save", [true]), { syncMain: true });
+  assert.deepEqual(await runtime.invoke("main-sync:default:read"), { syncMain: true });
+  await create();
+  assert.equal(git("rev-parse", "main"), ahead);
+  assert.equal(await fs.readFile(path.join(clone, "NEWS.md"), "utf8"), "shipped\n");
+  const status = events.find(({ channel }) => channel === "main-sync:status");
+  assert.deepEqual(
+    { ...status.payload, last: { ...status.payload.last, at: 0 } },
+    {
+      projectPath: clone,
+      last: { at: 0, outcome: "updated", branch: "main", commit: ahead.slice(0, 7) },
+    },
+  );
+  assert.equal((await runtime.invoke("main-sync:read", [clone])).last.outcome, "updated");
+
+  const off = await runtime.invoke("main-sync:save", [clone, false]);
+  assert.equal(off.enabled, false);
+  assert.equal(off.override, false);
+  await runtime.invoke("main-sync:save", [clone, null]);
+
+  await fs.rm(remote, { recursive: true, force: true });
+  const created = await create();
+  assert.ok(Number.isInteger(created.worktreeId), "A failed sync never blocks the Worktree");
+  const last = (await runtime.invoke("main-sync:read", [clone])).last;
+  assert.equal(last.outcome, "failed");
+  assert.equal(last.message, "Could not reach origin");
+});
+
+test("two worktree:create calls share one sync", async (t) => {
+  const { project, events, make } = await fixture(t);
+  const { clone } = await trailingClone(project);
+  const runtime = make({ cwd: clone, worktreeRoot: path.join(path.dirname(project), "worktrees") });
+  await runtime.openProject(clone);
+  await runtime.invoke("main-sync:save", [clone, true]);
+  const create = () => runtime.invoke("worktree:create", [{ projectPath: clone, baseBranch: "main", prompt: "" }]);
+  await Promise.all([create(), create()]);
+  assert.equal(events.filter(({ channel }) => channel === "main-sync:status").length, 1);
+});
+
+test("main-sync commands refuse a folder Milagre hasn't opened", async (t) => {
+  const { make } = await fixture(t);
+  const runtime = make();
+  await assert.rejects(runtime.invoke("main-sync:read", ["/not/opened"]), /Open this project in Milagre first/);
+  await assert.rejects(runtime.invoke("main-sync:save", ["/not/opened", true]), /Open this project in Milagre first/);
+});

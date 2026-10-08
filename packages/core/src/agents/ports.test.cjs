@@ -66,6 +66,41 @@ test("a chat owns what its command shells started, not the agent's MCP servers",
   });
 });
 
+test("a Chat's Terminal shells count as its roots, with or without an agent", () => {
+  // The Terminal's shell (300) runs a dev server (301) in its own job's group.
+  const ps = `${PS}  300    50   300 /opt/homebrew/bin/fish\n  301   300   301 node\n`;
+  const byChat = chatProcesses(
+    parsePs(ps),
+    new Map([
+      ["/a#1", { pid: 100, shells: [300] }],
+      ["/c#3", { shells: [300] }],
+    ]),
+    new Map(),
+  );
+  assert.deepEqual([...byChat.get("/a#1")].sort(), [110, 111, 112, 300, 301]);
+  assert.deepEqual([...byChat.get("/c#3")].sort(), [300, 301]);
+});
+
+test("stopping a Terminal's port in the shell's own group leaves the shell running", async () => {
+  const killed = [];
+  const ps = "    1     0     1 /sbin/launchd\n  300    50   300 /bin/zsh\n  301   300   300 node\n";
+  const watcher = new PortWatcher({
+    platform: "darwin",
+    roots: () => new Map([["/c#3", { shells: [300] }]]),
+    publish: () => {},
+    exec: async (command) => (command === "ps" ? ps : "p301\ncnode\nn*:3000\n"),
+    kill: (pid, signal) => {
+      if (signal === 0) throw new Error("gone");
+      killed.push(pid);
+    },
+    graceMs: 0,
+  });
+  await watcher.poll();
+  watcher.close();
+  assert.equal(await watcher.stopPort("/c#3", 301), true);
+  assert.deepEqual(killed, [301]);
+});
+
 test("a server that outlived its shell and its agent stays with the chat until it stops", () => {
   const groups = new Map();
   chatProcesses(parsePs(PS), new Map([["/a#1", { pid: 100 }]]), groups);

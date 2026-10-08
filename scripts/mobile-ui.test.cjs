@@ -100,6 +100,8 @@ function load(file, modules, extra = "") {
       return modules[id];
     },
     process: { env: {} },
+    // The host's Error, so `failure instanceof Error` holds for errors a test's fake client throws.
+    Error,
     URL,
     TextDecoder,
     setTimeout,
@@ -744,6 +746,10 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     },
   };
   const { default: ChatScreen } = load("app/chat.tsx", {
+    // A test can stand in for a host that keeps messages by Chat with globalThis.chatPage.
+    "../chat-pages": {
+      useChatPage: (...args) => globalThis.chatPage?.(...args) ?? { messages: [], hasMore: false, total: 0, loading: false, loadEarlier: async () => {} },
+    },
     "@sbaiahmed1/react-native-blur": { LiquidGlassView: "LiquidGlassView" },
     "expo-crypto": { randomUUID: require("node:crypto").randomUUID },
     "../archive-progress": archiveProgress,
@@ -764,6 +770,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../simulator": { SimulatorChip: "SimulatorChip" },
     "../browser": { BrowserChip: "BrowserChip" },
     "../ports": { PortsChip: "PortsChip" },
+    "../terminal": { TerminalChip: "TerminalChip", terminalPlaces: () => undefined },
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": native,
@@ -1111,8 +1118,8 @@ test("launch restoration shows the splash animation while the saved Chat opens",
   assert.ok(find(tree, (node) => node.props.accessibilityRole === "progressbar" && node.props.accessibilityLabel === "Reopening your Chat..."));
 });
 
-function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId } = {}) {
-  const react = hookHost();
+function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId, effects = false } = {}) {
+  const react = hookHost({ effects });
   const routes = [];
   const secondaryRoutes = [];
   const opened = [];
@@ -1463,6 +1470,37 @@ test("a chat search with no matching title lists matching messages, and a tap op
     false,
     "a Chat title match keeps messages out",
   );
+});
+
+test("a drawer search over Projects held without messages asks the host, which finds what was said", async () => {
+  const asked = [];
+  const preview = {
+    previewOnly: true,
+    project: { path: "/last", name: "last", state: { sessions: { 3: { id: 3, title: "Relay work" } }, messages: [], worktrees: {}, messagesInChats: true } },
+    runs: { runs: {} },
+  };
+  const nav = navigationHost(deferred().promise, {
+    effects: true,
+    session: {
+      cachedProject: () => preview,
+      client: {
+        url: "mac",
+        call: async () => {},
+        searchChats: async (path, query) => {
+          asked.push([path, query]);
+          return [{ message: { id: 7, session_id: 3 }, score: 9, snippet: "Deploy the relay with wrangler", highlight: [21, 29], term: "wrangler" }];
+        },
+      },
+    },
+  });
+  const search = () => find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats");
+  search().props.onChangeText("wranglr");
+  nav.render();
+  // The host is asked after a short pause while typing.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await settleAll();
+  assert.deepEqual(asked, [["/last", "wranglr"]]);
+  assert.match(nav.row("message").props.accessibilityLabel, /^Deploy the relay with wrangler, in /);
 });
 
 test("a sidebar Project can be removed from the list after confirming", async () => {
@@ -1832,7 +1870,7 @@ test("a sidebar Chat Archive asks with the worktree choice, then stops, hides an
   ]);
   assert.deepEqual(
     project.calls.map(([method]) => method),
-    ["worktree:roots", "worktree:status", "agent:interrupt", "chat:patch", "worktree:remove", "refresh"],
+    ["worktree:roots", "worktree:status", "terminal:list", "agent:interrupt", "chat:patch", "worktree:remove", "refresh"],
   );
   assert.deepEqual(project.calls.find(([method]) => method === "worktree:remove").slice(1), [
     "/wt/p/fix",
@@ -3845,6 +3883,36 @@ test("mobile opens a long Chat with its newest 40 messages and loads another pag
   assert.equal(transcriptMessages(screen).at(-1).id, 1000);
 });
 
+test("with a host that keeps messages by Chat, the screen shows its Chat's page and reads the next one on request", async (t) => {
+  const screen = ongoingChatHost();
+  const state = screen.session.snapshot.project.state;
+  state.messages = [];
+  state.messagesInChats = true;
+  const message = (id) => ({ id, session_id: 7, role: id % 2 ? "assistant" : "user", body: "Message " + id, context: null });
+  let held = Array.from({ length: 40 }, (_, index) => message(961 + index));
+  const asked = [];
+  globalThis.chatPage = (client, projectPath, chatId) =>
+    chatId === 7 && client
+      ? {
+          messages: held,
+          hasMore: true,
+          total: 1000,
+          loading: false,
+          loadEarlier: async () => {
+            asked.push(projectPath);
+            held = [...Array.from({ length: 40 }, (_, index) => message(921 + index)), ...held];
+          },
+        }
+      : undefined;
+  t.after(() => delete globalThis.chatPage);
+  assert.deepEqual([transcriptMessages(screen).length, transcriptMessages(screen)[0].id], [40, 961]);
+  const earlier = () => find(screen.render(), (node) => node.type === "PillButton" && node.props.title?.startsWith("Show earlier messages"));
+  assert.equal(earlier().props.title, "Show earlier messages (960)");
+  await earlier().props.onPress();
+  assert.deepEqual(asked, ["/p"]);
+  assert.deepEqual([transcriptMessages(screen).length, transcriptMessages(screen)[0].id], [80, 921]);
+});
+
 test("legacy mobile follow-up retires after acceptance and an untagged saved input", async () => {
   const screen = ongoingChatHost();
   screen.session.snapshot.project.state.next_id = 4;
@@ -4190,16 +4258,18 @@ test("mobile provider discovery uses the selected scope and ignores late respons
 test("mobile Project Accounts opens from Settings as a native stack screen", () => {
   const opened = [];
   const { SettingsView } = load("app/settings.tsx", {
+    react: { useState: (value) => [value, () => {}], useCallback: (fn) => fn },
     "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
     "react-native": { View: "View" },
-    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} } },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect() {} },
     "@hugeicons/core-free-icons": {},
     "../session": { useSession: () => ({ recent: [], client: null }) },
     "../project-icon": { ProjectIcon: "ProjectIcon" },
     "../push": { usePush: () => ({}) },
     "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
     "../icons": { Icon: "Icon" },
-    "../ui": { ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
     "../attention": { useAttentionButton: () => [true, () => {}] },
   });
   find(SettingsView({ onOpen: (page) => opened.push(page) }), (n) => n.props.title === "Project Accounts").props.onPress();
@@ -4227,6 +4297,12 @@ test("new mobile Chat has no simulator pill; an existing Chat carries its identi
     undefined,
   );
   assert.equal(find(existing.render(), (n) => n.type === "PortsChip").props.chatId, "/p#7");
+  // A Terminal opens in a sent Chat's Worktree, so a new Chat has no Terminal pill either.
+  assert.equal(
+    find(fresh.render(), (n) => n.type === "TerminalChip"),
+    undefined,
+  );
+  assert.equal(find(existing.render(), (n) => n.type === "TerminalChip").props.chatId, "/p#7");
 });
 
 test("mobile simulator pill stays hidden until this Chat has attachments, including stopped devices", async (t) => {
@@ -4728,6 +4804,52 @@ test("mobile subagent rows show current activity and preserve terminal states", 
   const failed = SubagentItem({ agent: { ...agent, status: "failed" } });
   assert.equal(failed.props.status, "Needs attention");
   assert.equal(failed.props.state, "failed");
+});
+
+test("mobile main sync switch re-reads the Mac's default on focus and shows a refused save", async () => {
+  const react = hookHost();
+  const focused = [];
+  let saved = false;
+  const client = {
+    async call(method) {
+      if (method === "main-sync:default:read") return { syncMain: saved };
+      throw new Error("This demo computer only opens its demo project.");
+    },
+  };
+  const { SettingsView } = load("app/settings.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect: (fn) => focused.push(fn) },
+    "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../push": { usePush: () => ({}) },
+    "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
+    "../icons": { Icon: "Icon" },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../attention": { useAttentionButton: () => [true, () => {}] },
+  });
+  const render = () => {
+    react.begin();
+    return SettingsView({ onOpen() {} });
+  };
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const toggle = () => find(render(), (n) => n.props?.title === "Sync main branch before new Worktrees");
+  render();
+  focused.at(-1)();
+  await settle();
+  assert.equal(toggle().props.selected, false);
+  // Turned on from the Mac while the phone was elsewhere: coming back to the screen shows it.
+  saved = true;
+  focused.at(-1)();
+  await settle();
+  assert.equal(toggle().props.selected, true);
+  toggle().props.onPress();
+  await settle();
+  assert.equal(toggle().props.selected, true, "a refused save puts the switch back");
+  assert.equal(find(render(), (n) => n.type === "ErrorNotice").props.message, "This demo computer only opens its demo project.");
 });
 
 test("mobile advisor Stop and Retry call the owning Chat and show failures without hiding records", async () => {

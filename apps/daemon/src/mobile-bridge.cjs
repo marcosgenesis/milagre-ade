@@ -31,6 +31,10 @@ const METHODS = new Set([
   "project:image",
   "project:set-icon",
   "project:set-hidden",
+  "main-sync:read",
+  "main-sync:save",
+  "main-sync:default:read",
+  "main-sync:default:save",
   "chat:runs",
   "chat:ports",
   "agent:stop-port",
@@ -51,6 +55,12 @@ const METHODS = new Set([
   "browser:control",
   "browser:input",
   "browser:close",
+  "terminal:list",
+  "terminal:open",
+  "terminal:read",
+  "terminal:input",
+  "terminal:resize",
+  "terminal:close",
   "artifact:get",
   "artifact:list",
   "artifact:add-comments",
@@ -101,7 +111,7 @@ const METHODS = new Set([
   "worktree:remove",
 ]);
 const MAX_BODY = 1024 * 1024;
-// Subagent entries the phone shows under each agent.
+// Subagent entries the phone shows under each agent, no more than the host sends the bridge (subagent-transcript.mjs).
 const TRANSCRIPT_TAIL = 4;
 
 // Characters of each subagent entry the phone shows (six lines at most).
@@ -180,6 +190,11 @@ function phoneAgent(agent) {
     phoneAgents.set(agent, slim);
   }
   return slim;
+}
+/** A phone snapshot's Project or Link without its messages, for an app that reads them as pages. */
+function withoutMessages(slim) {
+  const strip = (owner) => (owner?.state ? { ...owner, state: { ...owner.state, messages: [], messagesInChats: true } } : owner);
+  return slim.link ? { ...slim, link: strip(slim.link) } : { ...slim, project: strip(slim.project) };
 }
 /** A Project cut down to one new worktree and its Chats, without messages: what a phone needs from worktree:create. */
 function forNewWorktree(project, worktreeId) {
@@ -347,8 +362,9 @@ async function startMobileBridge({
   let uploadTurn = Promise.resolve();
   const expected = Buffer.from(`Bearer ${token}`);
   const client = await connect({ dataDir });
-  // The bridge only needs to know a state changed, so it takes patches: the host then encodes no whole state for it.
-  await client.call("daemon:state-patches").catch(() => {});
+  // The bridge only needs to know a state changed, so it takes patches: the host then encodes no whole state for it. A
+  // phone shows the last few entries of a subagent's transcript, so the bridge takes only their tails.
+  await client.call("daemon:state-patches", [{ transcripts: false }]).catch(() => {});
   const validScope = (owner) => typeof owner === "string" && (isLinkScopeKey(owner) || path.isAbsolute(owner));
   // The Projects phones opened lately, kept current from the host's state patches (and subagent updates, which carry
   // none), so a phone's snapshot doesn't read and parse the whole state from the host each time. A missed patch drops
@@ -621,11 +637,30 @@ async function startMobileBridge({
             reply(200, { result: forChatList(scope.project, projectRuns(runs, projectPath)) }, { etag: true });
             return;
           }
-          const result = { ...slim, runs: runsForPhone(projectRuns(runs, projectPath)) };
+          // An app that reads each Chat's messages as pages (/chat-messages) gets the snapshot without them.
+          const pages = req.headers["x-milagre-chat-pages"] === "1";
+          const result = { ...(pages ? withoutMessages(slim) : slim), runs: runsForPhone(projectRuns(runs, projectPath)) };
           // An app that says what it holds gets the snapshot numbered, and as a patch on that one when it can.
           const since = req.headers["x-milagre-snapshot-since"];
           if (typeof since !== "string") reply(200, { result }, { etag: true });
-          else reply(200, { result: numberSnapshot(projectPath, result, since) });
+          else reply(200, { result: numberSnapshot(pages ? `${projectPath}#pages` : projectPath, result, since) });
+          return;
+        }
+        // A page of one Chat's messages, slim like the snapshot's (tool output from /message), and search across Chats.
+        if (req.method === "GET" && target.pathname === "/chat-messages") {
+          const owner = target.searchParams.get("projectPath");
+          await confine?.check(owner);
+          if (!validScope(owner)) throw failure(400, "Choose a valid Project or Link");
+          const number = (name) => (target.searchParams.has(name) ? Number(target.searchParams.get(name)) : undefined);
+          const page = await client.call("chat:messages", [owner, number("chatId"), { before: number("before"), turns: number("turns") }]);
+          reply(200, { result: { ...page, messages: page.messages.map(phoneMessage) } });
+          return;
+        }
+        if (req.method === "GET" && target.pathname === "/search") {
+          const owner = target.searchParams.get("projectPath");
+          await confine?.check(owner);
+          if (!validScope(owner)) throw failure(400, "Choose a valid Project or Link");
+          reply(200, { result: await client.call("chat:search", [owner, target.searchParams.get("q") ?? "", { limit: 200 }]) });
           return;
         }
         // What a live "runs" signal fetches: a few kilobytes, where the snapshot can run to megabytes.

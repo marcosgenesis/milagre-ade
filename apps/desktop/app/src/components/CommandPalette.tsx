@@ -42,15 +42,20 @@ function Label({ command }: { command: Command }) {
   );
 }
 
-/** `searchMessages` runs only when no command, chat or project matches, so a chat's own words are the fallback. */
+/**
+ * `searchMessages` runs only when no command, chat or project matches, so a chat's own words are the fallback.
+ * `searchMessagesAsync` does the same through the host, for a window that holds no messages.
+ */
 export function CommandPalette({
   commands,
   searchMessages,
+  searchMessagesAsync,
   onClose,
   onError,
 }: {
   commands: Command[];
   searchMessages?: (query: string) => Command[];
+  searchMessagesAsync?: (query: string) => Promise<Command[]>;
   onClose: () => void;
   onError: (message: string) => void;
 }) {
@@ -63,7 +68,24 @@ export function CommandPalette({
   const animation = useRef<Animation | null>(null);
   const listId = useId();
   const matches = filterCommands(commands, query);
-  const results = matches.length || !searchMessages ? matches : searchMessages(query);
+  const [found, setFound] = useState<{ query: string; commands: Command[] }>({ query: "", commands: [] });
+  const searchHost = !matches.length && !searchMessages && searchMessagesAsync && query.trim().length >= 2;
+  useEffect(() => {
+    if (!searchHost) return;
+    let cancelled = false;
+    // A short pause while typing, so each keystroke doesn't ask the host.
+    const timer = setTimeout(() => {
+      searchMessagesAsync(query).then(
+        (commands) => !cancelled && setFound({ query, commands }),
+        () => !cancelled && setFound({ query, commands: [] }),
+      );
+    }, 120);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchHost, query, searchMessagesAsync]);
+  const results = matches.length ? matches : searchMessages ? searchMessages(query) : searchHost && found.query === query ? found.commands : [];
   const selected = results.find((command) => command.id === selectedId) ?? results[0];
   const selectedIndex = selected ? results.indexOf(selected) : -1;
 

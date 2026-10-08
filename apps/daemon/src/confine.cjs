@@ -55,6 +55,13 @@ const PATHS = Object.freeze({
   "browser:control": denied,
   "browser:input": denied,
   "browser:close": denied,
+  // A Terminal runs any command as the owner of this computer. A demo Project never opens one.
+  "terminal:list": denied,
+  "terminal:open": denied,
+  "terminal:read": denied,
+  "terminal:input": denied,
+  "terminal:resize": denied,
+  "terminal:close": denied,
   // A design is read through its Chat, which must be in the folder.
   "artifact:get": ([value]) => [chatProject(value?.chatId)],
   "artifact:list": ([value]) => [chatProject(value?.chatId)],
@@ -80,6 +87,11 @@ const PATHS = Object.freeze({
   "project:image": ([projectPath]) => [projectPath],
   "project:set-icon": ([projectPath]) => [projectPath],
   "project:set-hidden": ([projectPath]) => [projectPath],
+  "main-sync:read": ([projectPath]) => [projectPath],
+  "main-sync:save": ([projectPath]) => [projectPath],
+  // The global default names no folder. Changing it reaches every Project on the Mac, so a confined phone only reads it.
+  "main-sync:default:read": none,
+  "main-sync:default:save": denied,
   "chat:runs": none,
   "chat:ports": ([chatId]) => [chatProject(chatId)],
   "agent:stop-port": ([chatId]) => [chatProject(chatId)],

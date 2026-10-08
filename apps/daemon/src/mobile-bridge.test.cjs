@@ -204,6 +204,37 @@ test("mobile archives finished subagents through the shared owner and restores t
   assert.equal(restored.transcript[0].text, "Preserved output");
 });
 
+test("the phone shows the end of a long subagent transcript from a bridge that holds only its tail", async (t) => {
+  const { project, rpc, request } = await fixture(t);
+  const transcript = Array.from({ length: 30 }, (_, index) => ({ id: `e${index + 1}`, kind: "message", text: `Entry ${index + 1}` }));
+  await fs.mkdir(path.join(project, ".milagre"));
+  await fs.writeFile(
+    path.join(project, ".milagre/coordination.json"),
+    JSON.stringify({
+      next_id: 3,
+      projects: { 1: { id: 1, name: "project" } },
+      worktrees: { 1: { id: 1, project_id: 1, path: project, name: "main" } },
+      sessions: {
+        2: {
+          id: 2,
+          worktree_id: 1,
+          agent_name: "main",
+          status: "Created",
+          subagents: [{ id: "child", title: "Review", status: "completed", startedAt: 1, updatedAt: 2, transcript }],
+        },
+      },
+      messages: [],
+      tasks: {},
+    }),
+  );
+  await rpc("project:open", [project]);
+  const phone = (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result;
+  assert.deepEqual(
+    phone.project.state.sessions[2].subagents[0].transcript.map((item) => item.id),
+    ["e27", "e28", "e29", "e30"],
+  );
+});
+
 test("the phone can load the real skill catalog for its project", async (t) => {
   const { project, rpc } = await fixture(t);
   await rpc("project:open", [project]);
@@ -1209,4 +1240,46 @@ test("the phone's copy of a state keeps what didn't change, so snapshots share i
   assert.equal(second.state.messages[0], first.state.messages[0]);
   assert.equal(second.state.sessions[1], first.state.sessions[1]);
   assert.equal(first.state.messages[0].steps[0].hasDetail, true, "tool output is still left out");
+});
+
+test("an app that reads Chats as pages gets snapshots without messages, a Chat's messages as pages, and search", async (t) => {
+  const { project, request, rpc } = await fixture(t);
+  await fs.mkdir(path.join(project, ".milagre"));
+  await fs.writeFile(
+    path.join(project, ".milagre/coordination.json"),
+    JSON.stringify({
+      next_id: 20,
+      projects: { 1: { id: 1, name: "project" } },
+      worktrees: { 1: { id: 1, project_id: 1, path: project, name: "main" } },
+      sessions: { 2: { id: 2, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", title: "Notes" } },
+      messages: [
+        { id: 10, session_id: 2, role: "user", body: "First note", context: null },
+        { id: 11, session_id: 2, role: "assistant", body: "Second note with output", context: null },
+      ],
+      tasks: {},
+    }),
+  );
+  assert.equal((await rpc("project:open", [project])).status, 200);
+  const snapshot = async () =>
+    (
+      await (
+        await request("/snapshot?projectPath=" + encodeURIComponent(project), { headers: { "x-milagre-chat-pages": "1", "x-milagre-snapshot-since": "none" } })
+      ).json()
+    ).result;
+  const lean = await snapshot();
+  const session = lean.snapshot.project.state.sessions[2];
+  assert.deepEqual([lean.snapshot.project.state.messages, lean.snapshot.project.state.messagesInChats], [[], true]);
+  assert.equal(lean.snapshot.project.state.sessions[session.id].summary.count, 2);
+  const read = async (query) => (await (await request(`/chat-messages?projectPath=${encodeURIComponent(project)}&chatId=${session.id}${query}`)).json()).result;
+  const latest = await read("&turns=1");
+  assert.deepEqual(
+    latest.messages.map((message) => message.body),
+    ["First note", "Second note with output"],
+  );
+  assert.equal(latest.total, 2);
+  const found = (await (await request(`/search?projectPath=${encodeURIComponent(project)}&q=${encodeURIComponent("second note")}`)).json()).result;
+  assert.deepEqual(found[0].message, { id: latest.messages[1].id, session_id: session.id });
+  // Without the header, the snapshot is whole, as an older app expects.
+  const whole = (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result;
+  assert.equal(whole.project.state.messages.length, 2);
 });

@@ -127,7 +127,10 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     assert.equal(current.path, project);
     assert.equal(current.state.sessions[2].title, "Saved chat");
     assert.equal(current.state.sessions[2].native_session_id, "existing-provider-session");
-    assert.equal(current.state.messages[0].body, "Existing conversation survives the move.");
+    // The window takes states without messages (chat-pages-v1) and reads each Chat's as pages.
+    assert.equal(current.state.messagesInChats, true);
+    const saved = await evaluate(`window.milagre.readChatMessages(${JSON.stringify(project)}, 2)`);
+    assert.equal(saved.messages[0].body, "Existing conversation survives the move.");
     const settings = await evaluate(`window.milagre.readWorktreeSetup(${JSON.stringify(project)})`);
     assert.equal(settings.setupCommand, "npm ci");
     assert.equal(settings.source, "setting");

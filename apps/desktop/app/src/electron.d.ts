@@ -1,3 +1,4 @@
+import type { MainSyncSettings, MainSyncStatus } from "@milagre/shared/main-sync";
 import type {
   ProjectAccountScope,
   ProjectAccountsSnapshot,
@@ -12,9 +13,14 @@ import type { Result } from "@milagre/shared/result";
 import type { StatePatch } from "@milagre/shared/state-patch";
 
 /** On a state event from a host that sends patches: what changed since the state numbered `base`, or `resync`. */
-type StateNumbering = { patch?: StatePatch; base?: number; version?: number; epoch?: string; resync?: boolean };
+type StateNumbering = { patch?: StatePatch; base?: number; version?: number; epoch?: string; resync?: boolean; messages?: MessageChanges };
+/** To a client that reads messages by Chat: the messages a change added, changed (each after the one before it in its Chat) or removed. */
+export type MessageChanges = { changed: Array<{ message: ChatMessage; after: number | null }>; removed: number[] };
+/** Where a search match is and what matched. */
+export type ChatSearchMatch = { message: { id: number; session_id: number }; score: number; snippet: string; highlight: [number, number]; term: string };
 import type { SimulatorApi } from "@milagre/shared/simulator";
 import type { BrowserApi } from "@milagre/shared/browser";
+import type { TerminalApi } from "@milagre/shared/terminal";
 import type { ArtifactApi } from "@milagre/shared/artifact";
 
 import type { AgentRuns } from "./lib/agent-runs";
@@ -114,6 +120,12 @@ declare global {
     milagre: {
       simulators: SimulatorApi;
       browsers: BrowserApi;
+      terminals: TerminalApi;
+      /** A Chat's Terminals opened, closed or changed what they run. */
+      onTerminalsChanged: (callback: (payload: { chatId: string }) => void) => () => void;
+      setTerminalFocused: (focused: boolean) => void;
+      /** ⌘W pressed while a Terminal has focus. */
+      onCloseFocusedTerminal: (callback: () => void) => () => void;
       artifacts: ArtifactApi;
       getRuntimeConnection: () => Promise<RuntimeConnection>;
       /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
@@ -158,6 +170,14 @@ declare global {
       readWorktreeSetup: (projectPath: string) => Promise<WorktreeSetupSettings>;
       /** Saves the project's setup command; an empty one removes it. `.milagre/worktree.json` still wins. */
       saveWorktreeSetup: (projectPath: string, command: string) => Promise<WorktreeSetupSettings>;
+      /** Whether new Worktrees sync the main branch first, and the last sync's result. */
+      readMainSync: (projectPath: string) => Promise<MainSyncSettings>;
+      /** null brings the global default back. */
+      saveMainSync: (projectPath: string, override: boolean | null) => Promise<MainSyncSettings>;
+      readMainSyncDefault: () => Promise<{ syncMain: boolean }>;
+      saveMainSyncDefault: (value: boolean) => Promise<{ syncMain: boolean }>;
+      /** A main branch sync finished, before a new Worktree. */
+      onMainSyncStatus: (callback: (status: MainSyncStatus) => void) => () => void;
       /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */
       onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
       /** Re-reads the given worktrees' diff stats in the main process, e.g. after a commit from the "Commit and open PR" dialog. */
@@ -276,6 +296,16 @@ declare global {
       ) => () => void;
       /** A Project's or Link's (scope key) state and its number, for applying the host's state patches. */
       readState: (scope: string) => Promise<{ state: CoordinatorState | LinkState; version: number; epoch: string }>;
+      /** A page of one Chat's messages: its latest turns, or those before the message `before` (chat-pages-v1). */
+      readChatMessages: (
+        scope: string,
+        chatId: number,
+        options?: { before?: number; turns?: number; limit?: number },
+      ) => Promise<{ messages: ChatMessage[]; hasMore: boolean; total: number }>;
+      /** Matches across the Chats of a Project or Link, best first (chat-pages-v1). */
+      searchChats: (scope: string, query: string, options?: { limit?: number }) => Promise<ChatSearchMatch[]>;
+      /** One subagent of Chat `chatId` with its whole transcript (subagent-tails-v1). */
+      readSubagent: (scope: string, chatId: number, agentId: string) => Promise<Subagent>;
       /** Every chat's listening ports now, by chat key. */
       getAgentPorts: () => Promise<AgentPorts>;
       /** Stops the command listening on one of a chat's ports; false when the chat's list doesn't show that pid. */

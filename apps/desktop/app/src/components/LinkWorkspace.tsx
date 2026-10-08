@@ -8,7 +8,9 @@ import { AttentionButton, ChangesToggle, DiffBar } from "./changes/ChangesChrome
 import { DiffToolbar, useDiffPreferences } from "./changes/DiffPrefs";
 import { useDiffComments } from "./changes/useDiffComments";
 import { formatCommentsMessage } from "../lib/diff-comments";
-import { messageCommands } from "../lib/message-commands";
+import { messageCommands, messageCommandsFrom } from "../lib/message-commands";
+import { useChatMessages } from "../lib/chat-messages";
+import { isLean } from "../lib/state-events";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import type { AgentPorts, LinkState, OpenLink, WorktreeBinding } from "@milagre/shared/model";
 import { chatKeyForScope, scopeKey } from "@milagre/shared/chat-scopes";
@@ -38,6 +40,9 @@ import { gitChatContext } from "../lib/git-dialog";
 import { Select } from "./primitives/Select";
 import { lazyView } from "../lib/lazy-view";
 import type { LinkedWork } from "@milagre/shared/model";
+import { TerminalPanel } from "./terminal/TerminalPanel";
+import { CORNER_PITCH, PanelToggles } from "./agents/PanelToggles";
+import { busyTerminals, newTerminal, useTerminalSync, type TerminalPlace } from "../lib/terminal-actions";
 const CanvasView = lazyView(() => import("./CanvasView").then((module) => module.CanvasView));
 const CANVAS_STATES = {};
 
@@ -114,6 +119,11 @@ export function LinkWorkspace({
   );
   const session = sessionId == null ? undefined : state.sessions[sessionId];
   const chatId = session ? chatKeyForScope(scope, session.id) : null;
+  // A shared Chat's Terminals start in one of its Worktrees, chosen when it has several.
+  const terminalPlaces: TerminalPlace[] | undefined = session?.worktrees.map((member) => ({
+    path: member.worktreePath,
+    label: member.alias ?? member.projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? member.worktreePath,
+  }));
   const run = chatId ? agents.runs[chatId] : undefined;
   // Every project's chats that wait on the user; the Link's own are marked in its sidebar.
   const attentionKey = chatsNeedingAttention(agents.runs).join("\n");
@@ -121,7 +131,19 @@ export function LinkWorkspace({
   const attentionChats = useMemo(() => (attentionKey ? attentionKey.split("\n") : []), [attentionKey]);
   const { showAttentionButton } = useSettings();
   const attentionPaths = useMemo(() => [...new Set(attentionChats.map(projectOfKey))], [attentionChats]);
-  const messages = state.messages.filter((message) => message.session_id === sessionId);
+  // A host that keeps messages by Chat (chat-pages-v1) sends states without them: the open Chat reads its own.
+  const lean = isLean(state);
+  const chatWindow = useChatMessages(lean ? owner : null, sessionId);
+  const messages = useMemo(
+    () => (lean ? chatWindow.messages : state.messages.filter((message) => message.session_id === sessionId)),
+    [lean, chatWindow.messages, state.messages, sessionId],
+  );
+  const remoteCount = lean ? chatWindow.total - chatWindow.messages.length : 0;
+  const earlierMessages = useMemo(
+    () => (remoteCount > 0 ? { count: remoteCount, load: chatWindow.loadEarlier, loadAll: chatWindow.loadAll } : undefined),
+    [remoteCount, chatWindow.loadEarlier, chatWindow.loadAll],
+  );
+  const chatMessagesOf = (id: number) => (lean ? (id === sessionId ? messages : []) : state.messages.filter((message) => message.session_id === id));
   const imageDraft = usePastedImages(`${owner}:${sessionId ?? "new"}`);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +159,8 @@ export function LinkWorkspace({
   const memberDialog = useRef<HTMLDialogElement>(null);
   const [commandsOpen, setCommandsOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  const terminalChatId = canvasOpen || session?.archived ? null : chatId;
+  useTerminalSync(terminalChatId);
   const chosen = session?.worktrees.find((member) => member.projectId === memberId);
   const changes = useChanges({ cwd: chosen?.worktreePath, base: chosen?.base, chatId, available: Boolean(session) });
   const groupChanges = useLinkDiffLists({ members: session?.worktrees ?? [], chatId, mode: changes.mode, active: changes.open });
@@ -221,6 +245,10 @@ export function LinkWorkspace({
         event.preventDefault();
         setCommandsOpen(true);
       }
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "t" && terminalChatId) {
+        event.preventDefault();
+        newTerminal(terminalChatId, terminalPlaces, setError);
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         setFindSeed(undefined);
@@ -243,7 +271,7 @@ export function LinkWorkspace({
     }
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, [chatId, run, findOpen, session, changes.toggle, canvasOpen]);
+  }, [chatId, run, findOpen, session, changes.toggle, canvasOpen, terminalChatId]);
   function pick(id: number | null) {
     latest.current.selection++;
     drafts.newSelection(scope);
@@ -417,6 +445,13 @@ export function LinkWorkspace({
                 setGitChoice(Number(id));
                 setGitMemberId("");
               },
+              // A shared Chat keeps its Worktrees when archived; only its Terminals would end.
+              onArchiveCheck: async (id) => ({
+                milagreOwned: false,
+                shared: false,
+                status: null,
+                terminals: await busyTerminals(chatKeyForScope(scope, Number(id))),
+              }),
               onArchive: (id) => {
                 const key = chatKeyForScope(scope, Number(id));
                 return agents
@@ -462,7 +497,7 @@ export function LinkWorkspace({
                 trailing={<DiffToolbar changes={{ ...changes, refresh: refreshChanges }} prefs={diffPrefs} />}
               />
               {changes.diffOpen && <DiffView key={`${chatId}:${memberId}:${changes.mode}`} changes={changes} prefs={diffPrefs} comments={comments} />}
-              <div className={`min-h-0 flex-1 overflow-hidden ${changes.diffOpen ? "hidden" : ""}`}>
+              <div className={`min-h-0 flex-1 flex-col overflow-hidden ${changes.diffOpen ? "hidden" : "flex"}`}>
                 <EditorLinks root={root}>
                   <DraftChatComposer
                     {...preferences}
@@ -470,6 +505,7 @@ export function LinkWorkspace({
                     store={draftStore}
                     projectPath={root}
                     messageScope={owner}
+                    earlier={earlierMessages}
                     messages={messages}
                     imageDraft={imageDraft}
                     onSend={() => void send()}
@@ -542,6 +578,7 @@ export function LinkWorkspace({
                     }
                   />
                 </EditorLinks>
+                <TerminalPanel chatId={terminalChatId} places={terminalPlaces} notify={setError} />
               </div>
             </>
           )}
@@ -572,6 +609,7 @@ export function LinkWorkspace({
         </ChangesPanelSlot>
       </div>
       {!canvasOpen && session && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+      <PanelToggles right={!canvasOpen && session ? 12 + CORNER_PITCH : 12} />
       {showAttentionButton && attentionChats[0] && (
         <AttentionButton
           label={attentionLabel(attentionPaths.map((path) => path.split("/").pop() ?? path))}
@@ -642,7 +680,15 @@ export function LinkWorkspace({
               run: () => onSwitchProject(project.path),
             })),
           ]}
-          searchMessages={(query) => messageCommands(state.messages, query, new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)}
+          searchMessages={
+            lean ? undefined : (query) => messageCommands(state.messages, query, new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)
+          }
+          searchMessagesAsync={
+            lean
+              ? async (query) =>
+                  messageCommandsFrom(await window.milagre.searchChats(owner, query), new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)
+              : undefined
+          }
           onClose={() => setCommandsOpen(false)}
           onError={setError}
         />
@@ -653,13 +699,7 @@ export function LinkWorkspace({
           cwd={gitDialog.member.worktreePath}
           base={gitDialog.member.base}
           provider={state.sessions[gitDialog.sessionId]?.provider}
-          chat={gitChatContext(
-            chatTitle(
-              state.sessions[gitDialog.sessionId],
-              state.messages.filter((message) => message.session_id === gitDialog.sessionId),
-            ),
-            state.messages.filter((message) => message.session_id === gitDialog.sessionId),
-          )}
+          chat={gitChatContext(chatTitle(state.sessions[gitDialog.sessionId], chatMessagesOf(gitDialog.sessionId)), chatMessagesOf(gitDialog.sessionId))}
           turnRunning={Boolean(agents.runs[chatKeyForScope(scope, gitDialog.sessionId)])}
           onClose={() => setGitDialog(null)}
           onSendToAgent={(text) => {

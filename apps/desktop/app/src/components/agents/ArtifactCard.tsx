@@ -541,6 +541,10 @@ function ArtifactDock({
         setOpenPin(null);
         setChoice(null);
         setCommenting(false);
+        // The chat comes back into view to follow the reply: the canvas steps back beside it, or closes when the
+        // window is too narrow for both.
+        if (cramped) onClose();
+        else setExpanded(false);
       } else setError("The feedback didn't send. Try again.");
     } finally {
       setSending(false);
@@ -562,6 +566,7 @@ function ArtifactDock({
       setPins((current) => current.filter((pin) => pin.key !== key));
       setOpenPin((current) => (current === key ? null : current));
     },
+    onSend: () => void send(),
   };
   const icon = "rounded p-1 text-ink-2 hover:bg-hover disabled:opacity-40";
   return createPortal(

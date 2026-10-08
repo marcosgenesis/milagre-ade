@@ -88,6 +88,11 @@ export default function Layout() {
                       options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
                     />
                     <Stack.Screen name="browser-sheet" options={{ ...sheet, sheetAllowedDetents: [1] }} />
+                    {/* Full screen too: a downward drag scrolls the Terminal's output instead of dismissing it. */}
+                    <Stack.Screen
+                      name="terminal-sheet"
+                      options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
+                    />
                     {/* Full screen too: a design scrolls and takes taps of its own. */}
                     <Stack.Screen
                       name="artifact-sheet"

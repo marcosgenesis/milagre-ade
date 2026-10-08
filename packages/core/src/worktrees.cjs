@@ -12,8 +12,9 @@ const DEFAULT_WORKTREE_ROOT = path.join(os.homedir(), ".milagre", "worktrees");
 
 // The commit a new worktree starts from. A local branch that only trails its upstream (a `main` behind
 // `origin/main`) starts from the freshly fetched upstream; one with commits of its own, one without an
-// upstream, or one whose remote can't be reached starts from itself.
-async function resolveStartRef(projectPath, baseBranch) {
+// upstream, or one whose remote can't be reached starts from itself. `fetched` says the upstream was just fetched
+// (a main branch sync ran), so the Worktree doesn't wait on the network a second time.
+async function resolveStartRef(projectPath, baseBranch, { fetched = false } = {}) {
   let upstream = [];
   try {
     const { stdout } = await git(projectPath, [
@@ -26,11 +27,12 @@ async function resolveStartRef(projectPath, baseBranch) {
   const [remote, remoteRef, trackingRef] = upstream;
   // "." is an upstream that is itself a local branch: nothing to fetch.
   if (!remote || remote === "." || !remoteRef || !trackingRef) return baseBranch;
-  try {
-    await client.write.checked(projectPath, ["fetch", "--quiet", remote, `+${remoteRef}:refs/remotes/${trackingRef}`], { profile: "NETWORK" });
-  } catch {
-    // Offline: the last fetched upstream is still newer than nothing.
-  }
+  if (!fetched)
+    try {
+      await client.write.checked(projectPath, ["fetch", "--quiet", remote, `+${remoteRef}:refs/remotes/${trackingRef}`], { profile: "NETWORK" });
+    } catch {
+      // Offline: the last fetched upstream is still newer than nothing.
+    }
   try {
     await git(projectPath, ["merge-base", "--is-ancestor", "--end-of-options", baseBranch, trackingRef]);
     return trackingRef;
@@ -80,13 +82,14 @@ async function createWorktree({
   suffix = Math.random().toString(36).slice(2, 6),
   copyPatterns,
   copyLimits,
+  fetched = false,
 }) {
   await checkBase(projectPath, baseBranch);
   const name = `${slugify(prompt) || "chat"}-${suffix}`;
   const branch = `milagre/${name}`;
   const worktreePath = path.join(root, path.basename(projectPath), name);
   await fs.mkdir(path.dirname(worktreePath), { recursive: true });
-  const start = await resolveStartRef(projectPath, baseBranch);
+  const start = await resolveStartRef(projectPath, baseBranch, { fetched });
   // --no-track: the chat's branch must not push to, or pull from, the branch it started on.
   await client.write.checked(projectPath, ["worktree", "add", "--no-track", "-b", branch, "--end-of-options", worktreePath, start]);
   // Ignored files the project needs (env files) come along; a failed copy never fails the worktree.

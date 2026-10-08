@@ -8,6 +8,7 @@ const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat
 const { PROVIDERS } = require("@milagre/shared/providers");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { createGit } = require("./git/client.cjs");
+const { syncMainBranch } = require("./main-sync.cjs");
 const fs = require("node:fs/promises");
 const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
@@ -165,6 +166,34 @@ function createRuntime(options) {
     commands.handle(`browser:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Browser access requires an authenticated connection");
       return browsers[method === "close" ? "closeViewer" : method](request, context.clientId);
+    });
+  }
+  // A Chat's Terminals start in its Worktree, or in one of a shared Chat's Worktrees. The host resolves them from the
+  // saved Chat: a client never names a folder it could not otherwise reach.
+  async function chatWorktrees(chatId) {
+    const scope = projectOfKey(chatId),
+      id = sessionIdFromKey(chatId);
+    if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope)) throw new Error("Open this Chat before opening a Terminal.");
+    const state = await scopeStates.get(scope);
+    const session = state.sessions[id];
+    if (!session) throw new Error("Open an existing Chat before opening a Terminal.");
+    if (session.archived) throw new Error("This Chat is archived.");
+    if (isLinkScopeKey(scope)) return (session.worktrees ?? []).map((member) => ({ path: member.worktreePath, label: member.alias }));
+    const worktree = state.worktrees?.[session.worktree_id];
+    return worktree?.path ? [{ path: worktree.path, label: path.basename(worktree.path) }] : [];
+  }
+  const terminals =
+    options.terminals ??
+    require("./terminals.cjs").createTerminals({
+      resolveChat: chatWorktrees,
+      onChange: (chatId) => emit("terminal:changed", { chatId }),
+      onShellsChanged: () => ports.wake(),
+    });
+  commands.handle("terminal:list", (_context, request) => terminals.list(request));
+  for (const method of ["open", "read", "input", "resize", "close"]) {
+    commands.handle(`terminal:${method}`, (context, request) => {
+      if (!context?.clientId) throw new Error("Terminal access requires an authenticated connection");
+      return terminals[method](request);
     });
   }
   const searchFiles = createFileSearch();
@@ -489,6 +518,7 @@ function createRuntime(options) {
       force,
       closeSession: async () => {
         for (const gone of goneChats) {
+          terminals.closeChat(gone);
           await advisorDelivery.stop(gone);
           await advisors.stopChat(gone);
         }
@@ -539,6 +569,41 @@ function createRuntime(options) {
     await projectSettings().setSetupCommand(projectPath, typeof command === "string" ? command : "");
     return readSetupCommand(projectPath);
   });
+  // Main branch sync (see main-sync.cjs): the setting, and one sync at a time per Project.
+  async function readMainSync(projectPath) {
+    const [settings, base] = await Promise.all([projectSettings().getMainSync(projectPath), git.resolveBase(projectPath).catch(() => ({ name: "main" }))]);
+    return { branch: base.name, ...settings };
+  }
+  const mainSyncs = new Map();
+  function syncMain(projectPath) {
+    let running = mainSyncs.get(projectPath);
+    if (!running) {
+      running = syncMainBranch(projectPath)
+        .then(async (last) => {
+          await projectSettings()
+            .recordMainSync(projectPath, last)
+            .catch((error) => console.warn("Milagre main sync:", error.message));
+          emit("main-sync:status", { projectPath, last });
+          return last;
+        })
+        .finally(() => mainSyncs.delete(projectPath));
+      mainSyncs.set(projectPath, running);
+    }
+    return running;
+  }
+  commands.handle("main-sync:read", async (_event, projectPath) => {
+    await knownFolder(projectPath);
+    await environmentReady;
+    return readMainSync(projectPath);
+  });
+  commands.handle("main-sync:save", async (_event, projectPath, override) => {
+    await knownFolder(projectPath);
+    await projectSettings().setMainSyncOverride(projectPath, typeof override === "boolean" ? override : null);
+    await environmentReady;
+    return readMainSync(projectPath);
+  });
+  commands.handle("main-sync:default:read", () => projectSettings().getMainSyncDefault());
+  commands.handle("main-sync:default:save", (_event, value) => projectSettings().setMainSyncDefault(value === true));
 
   // A new worktree starts on its prompt's first words; a better name replaces its branch's once Haiku
   // picks one, so the chat never waits on it.
@@ -560,8 +625,17 @@ function createRuntime(options) {
     await ownProject(projectPath);
     await environmentReady;
     const settings = await projectSettings().get(projectPath);
+    // Brings main up to its remote first, when the user asked for it. Never throws: a skipped or failed sync
+    // leaves main as it was and the Worktree starts from it as before.
+    const synced = (await projectSettings().getMainSync(projectPath)).enabled ? await syncMain(projectPath) : null;
     // The files are copied into the folder git just made; the rename that follows only changes the branch, so the path holds.
-    const created = await createWorktree({ ...request, root: worktreeRoot(), copyPatterns: settings.filesToCopy });
+    const created = await createWorktree({
+      ...request,
+      root: worktreeRoot(),
+      copyPatterns: settings.filesToCopy,
+      // The sync already fetched main's upstream (or timed out trying): don't wait on it a second time.
+      fetched: synced?.branch === baseBranch,
+    });
     if (created.copy?.notes.length) console.warn("Milagre worktree file copy:", created.copy.notes.join(" "));
     // The setup command runs before the chat's first turn (see agent:start-turn).
     const resolved = await resolveSetupCommand(projectPath, settings.setupCommand);
@@ -631,8 +705,13 @@ function createRuntime(options) {
 
   // The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
   const ports = new PortWatcher({
-    isRunning: () => [...agents.sessions.values()].some((entry) => entry.session.turnActive),
-    roots: () => agents.processes(),
+    isRunning: () => terminals.size > 0 || [...agents.sessions.values()].some((entry) => entry.session.turnActive),
+    roots: () => {
+      // A Terminal's shell is a root too: what its commands listen on is the Chat's, like the agent's commands.
+      const roots = agents.processes();
+      for (const [chatId, shells] of terminals.shells()) roots.set(chatId, { ...roots.get(chatId), shells });
+      return roots;
+    },
     publish: (next) => {
       emit("agent:ports", next);
     },
@@ -816,6 +895,7 @@ function createRuntime(options) {
   commands.handle("chat:patch", async (_event, projectPath, sessionId, patch) => {
     if (!scopeStates.has(projectPath)) return;
     if (patch?.archived) {
+      terminals.closeChat(`${projectPath}#${sessionId}`);
       await advisorDelivery.stop(`${projectPath}#${sessionId}`);
       await advisors.stopChat(`${projectPath}#${sessionId}`);
     }
@@ -1251,6 +1331,13 @@ function createRuntime(options) {
   };
   commands.handle("chat:messages", async (_event, scope, chatId, options) => chatPage((await readScope(scope)).messages, chatId, options ?? {}));
   commands.handle("chat:search", async (_event, scope, query, options) => chatSearch(await readScope(scope), query, options ?? {}));
+  // One subagent with its whole transcript, for a client that takes only each transcript's last entries (the panel that
+  // shows it). `chatId` is the Chat's number in the scope.
+  commands.handle("chat:subagent", async (_event, scope, chatId, agentId) => {
+    const agent = (await readScope(scope)).sessions?.[chatId]?.subagents?.find((item) => item.id === agentId);
+    if (!agent) throw new Error("That subagent is no longer in this Chat.");
+    return agent;
+  });
   // What the phone's media check needs, without the whole state.
   commands.handle("project:chat-image", (_event, projectPath, requested) => chats.images.resolve(projectPath, requested));
   commands.handle("project:worktree-paths", async (_event, projectPath) => {
@@ -1270,7 +1357,8 @@ function createRuntime(options) {
       await advisors.close();
       await advisorMcp.close();
       await advisorStore.close();
-      await Promise.all([simulators.close(), browsers.close(), artifacts.close()]);
+      // Ending the Terminals first also answers their pending reads, which the wait for accepted commands includes.
+      await Promise.all([simulators.close(), browsers.close(), artifacts.close(), terminals.dispose()]);
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();

@@ -19,3 +19,7 @@ runs:
     - if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: npm ci
+    # Electron fetches its binary on first use; fetch it now so the saved tree has it and warm runs skip the download.
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: node node_modules/electron/install.js

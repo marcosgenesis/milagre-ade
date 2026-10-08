@@ -15,6 +15,7 @@ import { ArtifactCards, DesignFeedbackCard } from "./artifact";
 import { advisorResultLabel } from "@milagre/shared/advisor-result";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
 import { AnswerCard } from "./answer-card";
+import { useMuriloMode } from "./murilo-mode";
 import { PullRequestActionCard } from "./pr-action-card";
 import { isPullRequestAction } from "@milagre/shared/pr-action";
 import { hex } from "./theme";
@@ -206,6 +207,7 @@ export const ChatReply = memo(function ChatReply({
   /** How far the Chat has come (its message count), to read the agent's resolutions of comments again. */
   designsMoved?: number;
 }) {
+  const [muriloMode] = useMuriloMode();
   const savedMedia = useCallback((path: string) => media(message?.images?.find((image) => image.sourcePath === path)?.path || path), [media, message?.images]);
   const openActivity = () => onActivity(message ? String(message.id) : "run");
   const text = run?.text ?? message?.body ?? "";
@@ -257,7 +259,16 @@ export const ChatReply = memo(function ChatReply({
       {reply.setup.map((step) => (
         <ToolRow key={step.id} step={step} live={!!run} waiting={waiting} onPress={openActivity} />
       ))}
-      {reply.activity.length === 1 && reply.activity[0].type === "step" ? (
+      {/* Murilo mode (Settings > Experimental): every tool call is its own row, with the notes between them. */}
+      {muriloMode ? (
+        reply.activity.map((entry, index) =>
+          entry.type === "step" ? (
+            <ToolRow key={entry.step.id} step={entry.step} live={!!run} waiting={waiting} onPress={openActivity} />
+          ) : (
+            <Markdown key={`text-${index}`} text={entry.text} media={savedMedia} basePath={basePath} />
+          ),
+        )
+      ) : reply.activity.length === 1 && reply.activity[0].type === "step" ? (
         <ToolRow step={reply.activity[0].step} live={!!run} waiting={waiting} onPress={openActivity} />
       ) : (
         reply.activity.length > 0 && (

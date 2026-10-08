@@ -2,12 +2,14 @@ import { useCallback, useState } from "react";
 import { LINEAR_HINT, LINEAR_TITLE, linearStatusLine, type LinearStatus } from "@milagre/shared/linear";
 import { Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
+import { useMuriloMode } from "./murilo-mode";
 import { useSession } from "./session";
 import { ErrorNotice, Toggle, styles } from "./ui";
 
-/** Settings › Experimental: the connected Mac's experimental switches, like desktop's Experimental section. */
+/** Settings › Experimental: this phone's and the connected Mac's experimental switches, like desktop's Experimental section. */
 export function ExperimentalSection() {
   const session = useSession();
+  const [muriloMode, setMuriloMode] = useMuriloMode();
   // The Mac's Linear switch and connection; null until the Mac answers (an older Mac never does). Re-read on focus:
   // the phone gets no event when the Mac connects or disconnects.
   const [linear, setLinear] = useState<{ enabled: boolean; status: LinearStatus } | null>(null);
@@ -39,10 +41,17 @@ export function ExperimentalSection() {
       setLinearError(failure instanceof Error ? failure.message : "Could not change this setting.");
     }
   }
-  if (!session.client) return <Text style={styles.caption}>Connect to a Mac to change its experimental features.</Text>;
   return (
     <View style={{ gap: 8 }}>
-      {linear !== null && (
+      {/* This phone's own switch, kept on the phone. */}
+      <View style={[styles.card, { gap: 4 }]}>
+        <Toggle title="Murilo mode" selected={muriloMode} onPress={() => setMuriloMode(!muriloMode)} />
+        <Text style={styles.caption}>
+          Shows every tool call in the Chat, one row each, with the agent&apos;s notes between them. Replies no longer fold their activity into one line.
+        </Text>
+      </View>
+      {!session.client && <Text style={styles.caption}>Connect to a Mac to change its experimental features.</Text>}
+      {session.client && linear !== null && (
         <View style={[styles.card, { gap: 4 }]}>
           <Toggle title={LINEAR_TITLE} selected={linear.enabled} onPress={() => void changeLinear(!linear.enabled)} />
           <Text style={styles.caption}>{LINEAR_HINT}</Text>

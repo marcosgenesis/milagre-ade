@@ -430,10 +430,10 @@ function createBrowsers(options = {}) {
           else if (event.phase === "up") capture.mouse = null;
           else if (capture.mouse) capture.mouse = { ...capture.mouse, x: event.x, y: event.y };
         }
-        if (event.kind === "key")
-          event.phase === "down"
-            ? capture.keys.set(event.code || event.key, { key: event.key, code: event.code, keyCode: event.keyCode })
-            : capture.keys.delete(event.code || event.key);
+        if (event.kind === "key") {
+          if (event.phase === "down") capture.keys.set(event.code || event.key, { key: event.key, code: event.code, keyCode: event.keyCode });
+          else capture.keys.delete(event.code || event.key);
+        }
         v.heartbeat = now();
         return { accepted: true };
       });

@@ -32,6 +32,7 @@ export function createBrowserInputQueue(send, failed, limit = 32) {
     if (sending || disposed) return;
     sending = true;
     try {
+      // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- dispose() and the catch/push paths flip `disposed` from other closures while the loop awaits send()
       while (queue.length && !disposed) await send(queue.shift());
     } catch (error) {
       if (!disposed) {
@@ -275,6 +276,7 @@ function receiver(config, geometryFor, pointFor, inputQueue, touchGesture, keyFo
   const pending = new Map(),
     heldKeys = new Set();
   const post = (data) => {
+    // oxlint-disable-next-line unicorn/require-post-message-target-origin -- the srcdoc parent has an opaque origin, same as the simulator receiver
     if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(data));
     else window.parent.postMessage(data, "*");
   };
@@ -598,6 +600,7 @@ function receiver(config, geometryFor, pointFor, inputQueue, touchGesture, keyFo
   });
   const pull = async (currentEpoch) => {
     let after = 0;
+    // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- stop() bumps `epoch` from another closure while the loop awaits the next frame
     while (currentEpoch === epoch) {
       const frame = await rpc("frame", { viewerId, after });
       if (currentEpoch !== epoch) return;

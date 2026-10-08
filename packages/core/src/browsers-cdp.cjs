@@ -213,7 +213,8 @@ function createBrowserAdapter(options = {}) {
         if (!item) return;
         pending.delete(message.id);
         clearTimeout(item.timer);
-        message.error ? item.reject(new Error("The browser rejected the command.")) : item.resolve(message.result);
+        if (message.error) item.reject(new Error("The browser rejected the command."));
+        else item.resolve(message.result);
         return;
       }
       const params = message.params ?? {};

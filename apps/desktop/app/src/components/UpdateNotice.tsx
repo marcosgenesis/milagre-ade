@@ -1,6 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { motion, useReducedMotion } from "motion/react";
 import type { UpdateState } from "../electron";
+import { EASE_OUT } from "../lib/ease";
 import { useDismiss } from "../lib/use-dismiss";
 
 const Updates = createContext<UpdateState | null>(null);
@@ -73,12 +75,33 @@ function Gift({ size = 20 }: { size?: number }) {
   );
 }
 
+const HIDDEN_FACE = "invisible transition-[visibility] duration-100 motion-reduce:duration-0";
+
+/** Reports an element's border-box size as it changes. */
+function useSize() {
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const ref = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    const read = () => setSize({ width: node.offsetWidth, height: node.offsetHeight });
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return [size, ref] as const;
+}
+
 function UpdateNotice({ state, slot }: { state: UpdateState | null; slot: HTMLElement | null }) {
   const [presentation, setPresentation] = useState({ version: "", open: false });
   const [requestError, setRequestError] = useState("");
   const [pending, setPending] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
+  // Closing from the keyboard or the dismiss button hands focus back to the pill.
+  const refocus = useRef(false);
+  const reduce = useReducedMotion();
+  // Both faces stay mounted and report their sizes; the surface takes the size of the one on show.
+  const [pillSize, measurePill] = useSize();
+  const [cardSize, measureCard] = useSize();
   const ready = state?.status === "downloaded";
   const installing = state?.status === "installing";
   const downloading = state?.status === "downloading";
@@ -89,10 +112,16 @@ function UpdateNotice({ state, slot }: { state: UpdateState | null; slot: HTMLEl
     setRequestError("");
   }
   const open = presentation.open || installing;
-  const close = () => {
-    if (!installing && !pending) setPresentation((previous) => ({ ...previous, open: false }));
+  const close = (returnFocus = false) => {
+    if (installing || pending) return;
+    refocus.current = returnFocus;
+    setPresentation((previous) => ({ ...previous, open: false }));
   };
-  useDismiss(open, close, (target) => !!root.current?.contains(target));
+  useDismiss(
+    open,
+    () => close(),
+    (target) => !!root.current?.contains(target),
+  );
   useEffect(() => {
     const show = () => {
       setPresentation((previous) => ({ ...previous, open: true }));
@@ -101,6 +130,11 @@ function UpdateNotice({ state, slot }: { state: UpdateState | null; slot: HTMLEl
     window.addEventListener("milagre:show-update", show);
     return () => window.removeEventListener("milagre:show-update", show);
   }, []);
+  useLayoutEffect(() => {
+    if (open || !refocus.current) return;
+    refocus.current = false;
+    root.current?.querySelector<HTMLButtonElement>("[data-face=pill]")?.focus();
+  }, [open]);
   if (!state || (!open && !ready && !installing && !downloading && !failed)) return null;
   if (state.status === "idle" || state.status === "unavailable") return null;
   const title = installing
@@ -130,26 +164,47 @@ function UpdateNotice({ state, slot }: { state: UpdateState | null; slot: HTMLEl
       setPending(false);
     }
   }
+  // Both faces hang from the pill's spot: centred above the composer, or the window's bottom left.
+  const anchor = slot ? { left: "50%", x: "-50%" } : { left: 0 };
+  // A face shows in the same commit and goes invisible as its fade ends, so a closed card's text and
+  // controls leave the page. Only hiding transitions visibility, which stays visible through those 100ms.
+  const face = (shown: boolean) => ({
+    initial: false,
+    animate: shown
+      ? { opacity: 1, filter: "blur(0px)", transition: { duration: reduce ? 0 : 0.18, delay: reduce ? 0 : 0.06, ease: EASE_OUT } }
+      : { opacity: 0, filter: reduce ? "blur(0px)" : "blur(4px)", transition: { duration: reduce ? 0 : 0.1, ease: EASE_OUT } },
+    style: anchor,
+    inert: !shown,
+    "aria-hidden": !shown || undefined,
+  });
+  const size = open ? cardSize : pillSize;
   const notice = (
     <div
       ref={root}
-      className={`text-ink [-webkit-app-region:no-drag] ${
-        slot ? "pointer-events-auto flex flex-col items-center" : "fixed bottom-4 left-4 z-50 max-w-[calc(100vw-2rem)]"
-      }`}
+      data-update-notice=""
+      className={`text-ink [-webkit-app-region:no-drag] ${slot ? "pointer-events-auto" : "fixed bottom-4 left-4 z-50"}`}
       onKeyDown={(event) => {
         if (event.key === "Escape" && open && !installing && !pending) {
           event.stopPropagation();
-          close();
-          trigger.current?.focus();
+          close(true);
         }
       }}
     >
-      {open && (
-        <section
-          role="dialog"
-          aria-label={title}
-          aria-describedby="update-description"
-          className="mb-3 w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-5 shadow-overlay"
+      {/* One surface morphs between the pill and the card; both faces stay mounted and crossfade inside it. */}
+      <div
+        style={size ? { width: size.width, height: size.height, borderRadius: open ? 16 : size.height / 2 } : undefined}
+        className={`relative overflow-hidden bg-surface transition-[width,height,border-radius,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none ${
+          open ? "shadow-overlay" : slot ? "shadow-[0_0_0_1px_var(--line-strong)]" : "shadow-btn"
+        }`}
+      >
+        <motion.section
+          ref={measureCard}
+          data-face="card"
+          role={open ? "dialog" : undefined}
+          aria-label={open ? title : undefined}
+          aria-describedby={open ? "update-description" : undefined}
+          {...face(open)}
+          className={`absolute bottom-0 w-[360px] max-w-[calc(100vw-2rem)] p-5 ${open ? "visible" : HIDDEN_FACE}`}
         >
           <div className="flex items-center gap-3">
             <span className="text-ink-2">
@@ -160,10 +215,7 @@ function UpdateNotice({ state, slot }: { state: UpdateState | null; slot: HTMLEl
               <button
                 type="button"
                 aria-label="Dismiss update"
-                onClick={() => {
-                  close();
-                  trigger.current?.focus();
-                }}
+                onClick={() => close(true)}
                 className="-mr-1 rounded-md p-1 text-ink-3 transition-colors hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-ink"
               >
                 <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -231,26 +283,23 @@ function UpdateNotice({ state, slot }: { state: UpdateState | null; slot: HTMLEl
               </button>
             )}
           </div>
-        </section>
-      )}
-      <button
-        ref={trigger}
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => {
-          if (open) close();
-          else showUpdateNotice();
-        }}
-        disabled={installing || pending}
-        className={`flex items-center rounded-full border border-line-strong bg-surface font-medium transition-colors hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink ${
-          slot ? "h-6 gap-1.5 px-2.5 text-[12px] whitespace-nowrap" : "gap-2 px-3 py-2 text-[12px] shadow-sm"
-        }`}
-      >
-        <Gift size={slot ? 14 : 20} />
-        <span>{downloading ? `Downloading update · ${percent}%` : title}</span>
-        {ready && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-ink" />}
-      </button>
+        </motion.section>
+        <motion.button
+          ref={measurePill}
+          data-face="pill"
+          type="button"
+          aria-haspopup="dialog"
+          onClick={showUpdateNotice}
+          {...face(!open)}
+          className={`absolute bottom-0 flex items-center rounded-full font-medium whitespace-nowrap ${open ? HIDDEN_FACE : "visible transition-colors"} hover:bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink ${
+            slot ? "h-6 gap-1.5 px-2.5 text-[12px]" : "gap-2 px-3 py-2 text-[12px]"
+          }`}
+        >
+          <Gift size={slot ? 14 : 20} />
+          <span>{downloading ? `Downloading update · ${percent}%` : title}</span>
+          {ready && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-ink" />}
+        </motion.button>
+      </div>
     </div>
   );
   return slot ? createPortal(notice, slot) : notice;

@@ -56,7 +56,8 @@ export function visibleProviders(snapshot: UsageSnapshot) {
 }
 
 export function usageLabel(usage: ProviderUsage, display: UsageDisplay = "used") {
-  const name = PROVIDER_NAMES[usage.provider];
+  const account = usage.account?.email || usage.account?.label;
+  const name = `${PROVIDER_NAMES[usage.provider]}${account ? ` (${account})` : ""}`;
   if (usage.windows.length === 0) return `${name} usage unavailable`;
   const windows = usage.windows.slice(0, 2).map((item) => `${item.label} ${formatPercent(shownPercent(item.usedPercent, display))} ${shownSuffix(display)}`);
   return `${name} usage${usage.status === "error" ? ", last known" : ""}: ${windows.join(", ")}`;

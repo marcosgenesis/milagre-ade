@@ -53,8 +53,14 @@ function run(label, command, args, options = {}, { retryable = false } = {}) {
 if (selected.unit.length) run(`${selected.unit.length} unit test files`, process.execPath, ["--test", ...selected.unit]);
 
 if (selected.electron.length) {
+  // Checks write screenshots straight into this folder; with sharding, the one that used to create it may run elsewhere.
+  if (process.env.MILAGRE_SCREENSHOT_DIR) require("node:fs").mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
   if (selected.electron.some((file) => MANIFEST[path.basename(file)]?.needsBuild))
     run("build renderer", "npm", ["run", "build:renderer", "--workspace", "milagre"]);
+  // The first Electron launch on a fresh Linux runner is unreliable (see electron-warmup.cjs); spend it on a throwaway window.
+  // A failed warm-up is not a failed check.
+  if (process.platform === "linux" && process.env.CI)
+    spawnSync(process.execPath, [path.join(__dirname, "electron-warmup.cjs")], { cwd: root, stdio: "inherit" });
   for (const file of selected.electron) run(file, process.execPath, [file], {}, { retryable: true });
 }
 

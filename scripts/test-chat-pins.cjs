@@ -45,11 +45,8 @@ createRoot(document.getElementById("root")).render(<Fixture />);
 `;
 
 async function browserChecks() {
-  const { app, BrowserWindow, Menu } = require("electron");
+  const { app, BrowserWindow } = require("electron");
   await app.whenReady();
-  // On Linux the default menu bar attaches after the page renders and shrinks it by 27px; clicks sent during that
-  // resize are dropped, which failed this check on cold CI runners. Without a menu the window never resizes.
-  Menu.setApplicationMenu(null);
   const window = new BrowserWindow({ width: 1200, height: 560, show: false, webPreferences: { backgroundThrottling: false, partition: "chat-pins-check" } });
   window.webContents.on("did-finish-load", () => window.webContents.setZoomFactor(1));
   // A throw in the page comes back as its own message and the expression, not Electron's generic "Script failed to execute".

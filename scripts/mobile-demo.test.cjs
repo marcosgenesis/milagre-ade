@@ -54,7 +54,8 @@ test("demo sends, approves, answers, stops and reconnects through the real HTTP/
   assert.equal(stopped.project.state.messages.at(-1).outcome, "cancelled");
   await send("tools failure");
   await wait((state) => state.runs.runs[chatId]?.steps.some((step) => step.status === "running"));
-  const finished = await wait((state) => !state.runs.runs[chatId]);
+  // Run state and the bridge's cached Project arrive independently. Wait for the saved reply too.
+  const finished = await wait((state) => !state.runs.runs[chatId] && state.project.state.messages.at(-1)?.role === "assistant");
   const reply = finished.project.state.messages.at(-1);
   assert.equal(reply.steps.length, 2);
   assert.equal(reply.steps[1].status, "failed");

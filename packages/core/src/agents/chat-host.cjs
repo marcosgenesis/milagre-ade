@@ -91,9 +91,24 @@ class ChatHost {
     nameChat = async () => {},
     readSubagents = async () => [],
     handoverTools,
+    beforeSend = async () => {},
+    onUnblocked = () => {},
     now = Date.now,
   }) {
-    Object.assign(this, { states, startTurn, publish, broadcast, isFocused, isChatFocused, nameChat, readSubagents, handoverTools, now });
+    Object.assign(this, {
+      states,
+      startTurn,
+      publish,
+      broadcast,
+      isFocused,
+      isChatFocused,
+      nameChat,
+      readSubagents,
+      handoverTools,
+      beforeSend,
+      onUnblocked,
+      now,
+    });
     // Chats whose handoff is staged or its brief being written, by chat key: { controller, done, settle, ... }.
     // Stop and quit abort it (see cancelHandoff); a send meanwhile waits on `done` (see send).
     this.preparing = new Map();
@@ -151,7 +166,9 @@ class ChatHost {
       const session = saved.sessions[sessionId];
       const cwd = session?.workspacePath ?? saved.worktrees?.[session?.worktree_id]?.path;
       if (!cwd || !["codex", "antigravity"].includes(session?.provider) || !session.native_session_id || session.archived) return;
-      const unknown = (session.subagents ?? []).filter((agent) => agent.status === "unknown" && !agent.archived && agent.id !== session.native_session_id);
+      const unknown = (session.subagents ?? []).filter(
+        (agent) => agent.status === "unknown" && agent.source !== "milagre-advisor" && !agent.archived && agent.id !== session.native_session_id,
+      );
       if (!unknown.length) return;
       const events = await this.readSubagents({ cwd, agents: unknown, projectPath, provider: session.provider, nativeSessionId: session.native_session_id });
       if (!events.length) return;
@@ -204,7 +221,7 @@ class ChatHost {
           const unread = isTurnEnd(event) && !visible && !result.state.sessions[sessionId]?.archived;
           const next = unread ? patchSession(result.state, sessionId, { unread: true }) : result.state;
           // Subagents that ended during the turn are archived with it, so the track only lists what is still running.
-          const recorded = isTurnEnd(event) ? this.withNotes(archiveFinishedSubagents(next, sessionId), chatId) : next;
+          const recorded = isTurnEnd(event) ? this.withNotes(archiveFinishedSubagents(next, sessionId, { keepAdvisors: true }), chatId) : next;
           const previousIds = new Set(state.messages.map((message) => message.id));
           added = recorded.messages.filter((message) => !previousIds.has(message.id) && message.role === "assistant");
           return recorded;
@@ -334,6 +351,8 @@ class ChatHost {
    * ({ turnId, steered }), or null when it couldn't start (that fails in the chat).
    */
   async send(request) {
+    await this.beforeSend(request);
+    if (request.canStart && !request.canStart()) throw new Error("Advisor delivery is deferred.");
     const { projectPath, body, images = [], files = [], provider, model } = request;
     const execution = this.states.executionContext && request.sessionId != null ? await this.states.executionContext(projectPath, request.sessionId) : null;
     const storedImages = await storeImages(this.states.storageDirectory?.(projectPath) ?? projectPath, images);
@@ -353,6 +372,7 @@ class ChatHost {
     let originalSession;
     let stagedSession;
     await this.states.update(projectPath, (latest) => {
+      if (request.canStart && !request.canStart()) throw new Error("Advisor delivery is deferred.");
       let session = request.sessionId == null ? undefined : latest.sessions[request.sessionId];
       if (request.sessionId != null && !session) throw new Error("That chat is no longer in the project.");
       // A chat runs in its own worktree; a new one goes to the worktree asked for.
@@ -501,7 +521,7 @@ class ChatHost {
     const started = ready
       .then((handoffBrief) => {
         // null: the handoff was cancelled or failed (see abandonHandoff), so no agent starts.
-        if (handoffBrief === null) return null;
+        if (handoffBrief === null || (request.canStart && !request.canStart())) return null;
         const prompt = withLead(handoffBrief, turn.prompt);
         this.turns.set(target.chatId, { ...turn, prompt });
         return this.startTurn({ ...turn, prompt, ...execution, chatId: target.chatId, cwd: target.cwd, images, resumeId: target.resumeId });
@@ -569,7 +589,10 @@ class ChatHost {
 
   /** Forgets a chat's preparation once it ended, unless a newer one took its place. */
   release(chatId, preparation) {
-    if (this.preparing.get(chatId) === preparation) this.preparing.delete(chatId);
+    if (this.preparing.get(chatId) === preparation) {
+      this.preparing.delete(chatId);
+      this.onUnblocked(chatId);
+    }
   }
 
   /**

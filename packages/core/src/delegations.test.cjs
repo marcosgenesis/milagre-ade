@@ -244,14 +244,13 @@ test("a working Chat is steered by the Delegation; a Chat waiting on the user re
     session.finish("sent again");
   };
   await fixture.send("api", "Ask web again");
-  await settled();
-  assert.equal(web.prompts.length, 3, "nothing reaches a Chat waiting on the user");
-  assert.ok(
+  await waitFor(() =>
     fixture.events.some(
       ({ channel, payload }) =>
         channel === "linked:changed" && payload.delegations.some((item) => item.status === "queued" && item.message === "Second request"),
     ),
   );
+  assert.equal(web.prompts.length, 3, "nothing reaches a Chat waiting on the user");
   await fixture.runtime.invoke("agent:respond-permission", [{ chatId: fixture.chatOf("web"), requestId: "perm-1", decision: "allow" }]);
   await waitFor(() => web.prompts.length === 4);
   assert.match(web.prompts[3], /Second request/);

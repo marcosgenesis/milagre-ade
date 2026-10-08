@@ -228,7 +228,10 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
             parentId: event.agent.parentId ?? previous.parentId,
             startedAt: Math.min(previous.startedAt, event.agent.startedAt),
             communications: [...communications.values()].sort((a, b) => a.at - b.at).slice(-20),
-            transcript: [...new Map([...previous.transcript, ...event.agent.transcript].map((entry) => [entry.id, entry])).values()].slice(-100),
+            transcript:
+              event.agent.source === "milagre-advisor"
+                ? event.agent.transcript
+                : [...new Map([...previous.transcript, ...event.agent.transcript].map((entry) => [entry.id, entry])).values()].slice(-100),
           }
         : event.agent;
       const subagents = previous ? children.map((child) => (child.id === agent.id ? agent : child)) : [...children, agent];

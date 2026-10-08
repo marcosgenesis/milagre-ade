@@ -12,6 +12,7 @@ import { Icon } from "./icons";
 import { ActivityTitle } from "./activity-item";
 import { ToolRow } from "./tool-row";
 import { ArtifactCards, DesignFeedbackCard } from "./artifact";
+import { advisorResultLabel } from "@milagre/shared/advisor-result";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
 import { hex } from "./theme";
 import { showImages, type MediaValue, type ViewerImage } from "./viewer-store";
@@ -212,6 +213,14 @@ export const ChatReply = memo(function ChatReply({
   const feedback = message?.role === "user" ? parseDesignFeedback(text) : null;
   // What the agent concluded only in thinking, once the turn ends or stops on a question.
   const thought = !run || run.questions.length ? unspokenThought(text, steps) : "";
+  const advisor = typeof message?.context === "object" && message.context?.kind === "advisor-result" ? message.context : null;
+  if (advisor)
+    return (
+      <View style={{ gap: 6, paddingVertical: 8 }}>
+        <Text style={styles.caption}>{advisorResultLabel(advisor)}</Text>
+        <Markdown text={text} />
+      </View>
+    );
   if (message?.role === "user")
     return (
       <View style={{ alignSelf: "flex-end", alignItems: "flex-end", gap: 6, maxWidth: "88%" }}>

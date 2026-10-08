@@ -703,6 +703,16 @@ function App() {
     if (current) void reportChatAction(window.milagre.patchChat(current.path, sessionId, patch), "Could not update Chat", setNotice);
   }
 
+  function controlAdvisor(action: "stop" | "retry", id: string) {
+    const current = projectRef.current;
+    const parentId = selectedSessionRef.current;
+    if (current && parentId !== null)
+      void reportChatAction(
+        (action === "stop" ? window.milagre.stopAdvisor : window.milagre.retryAdvisor)(`${current.path}#${parentId}`, id),
+        `Could not ${action} advisor`,
+        setNotice,
+      );
+  }
   function archiveChild(id: string, archived: boolean) {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
@@ -1927,6 +1937,8 @@ function App() {
                   subagents={subagents}
                   onArchiveFinishedSubagents={archiveFinishedChildren}
                   onArchiveSubagent={archiveChild}
+                  onStopAdvisor={(id) => controlAdvisor("stop", id)}
+                  onRetryAdvisor={(id) => controlAdvisor("retry", id)}
                   waitingForSubagents={run?.waitingForSubagents}
                   tasks={run?.tasks}
                   contextUsage={run?.contextUsage ?? selectedSession?.contextUsage}

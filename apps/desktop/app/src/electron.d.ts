@@ -26,6 +26,7 @@ import type {
   AgentCliStatus,
   AgentModels,
   AgentPorts,
+  Subagent,
   EditorInfo,
   AgentEvent,
   ChatSendRequest,
@@ -262,6 +263,8 @@ declare global {
       getCliStatus: (scopeKey?: string) => Promise<AgentCliStatus>;
       /** Runs update for the specified CLI agent and refreshes status. */
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
+      stopAdvisor: (chatId: string, id: string) => Promise<Subagent>;
+      retryAdvisor: (chatId: string, id: string) => Promise<Subagent>;
       /** Where Antigravity's install stands while `updateCli("antigravity")` runs: download bytes, then extract, validate, done. */
       onCliProgress: (callback: (progress: CliProgress) => void) => () => void;
       interruptAgent: (chatId: string) => Promise<void>;

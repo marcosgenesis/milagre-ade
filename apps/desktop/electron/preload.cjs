@@ -149,6 +149,8 @@ const bridge = {
   getModels: (scopeKey) => ipcRenderer.invoke("agent:models", scopeKey),
   getCliStatus: (scopeKey) => ipcRenderer.invoke("agent:cli-status", scopeKey),
   updateCli: (provider) => ipcRenderer.invoke("agent:update-cli", provider),
+  stopAdvisor: (chatId, id) => ipcRenderer.invoke("advisor:stop", chatId, id),
+  retryAdvisor: (chatId, id) => ipcRenderer.invoke("advisor:retry", chatId, id),
   onCliProgress: (callback) => {
     const listener = (_event, progress) => callback(progress);
     ipcRenderer.on("agent:cli-progress", listener);

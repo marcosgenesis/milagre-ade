@@ -73,6 +73,8 @@ function createRuntime(options) {
   const background = new Set();
   let closing = false;
   let closed;
+  let advisors;
+  let advisorDelivery;
   function track(work, set = active) {
     const task = Promise.resolve().then(work);
     set.add(task);
@@ -485,6 +487,10 @@ function createRuntime(options) {
       seen,
       force,
       closeSession: async () => {
+        for (const gone of goneChats) {
+          await advisorDelivery.stop(gone);
+          await advisors.stopChat(gone);
+        }
         if (typeof chatId === "string") {
           await worktreeSetups.cancel(chatId);
           worktreeSetups.forget(worktreePath);
@@ -602,6 +608,8 @@ function createRuntime(options) {
     if (event.type === "turn-failed" && event.login) {
       for (const name of PROVIDERS) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
     }
+    if (["turn-completed", "turn-failed", "turn-cancelled", "permission-resolved", "question-resolved"].includes(event.type))
+      void advisorDelivery?.drain(chatId).catch((error) => console.warn("Advisor delivery failed:", error.message));
     emit("agent:event", { chatId, event, ...(state ? { state } : {}), ...(seq ? { seq } : {}) });
   }
 
@@ -682,6 +690,12 @@ function createRuntime(options) {
   }
 
   const chats = new ChatHost({
+    beforeSend: async (request) => {
+      if (request.context?.kind !== "advisor-result" && request.sessionId != null) await advisorDelivery?.resume(`${request.projectPath}#${request.sessionId}`);
+    },
+    onUnblocked: (chatId) => {
+      void advisorDelivery?.drain(chatId).catch((error) => console.warn("Advisor delivery failed:", error.message));
+    },
     states: scopeStates,
     startTurn: (request) => track(() => startAgentTurn(request), starting),
     readSubagents: async ({ cwd, agents, projectPath, provider = "codex", nativeSessionId }) => {
@@ -798,9 +812,14 @@ function createRuntime(options) {
     if (!scopeStates.has(projectPath)) throw new Error("Open the project before continuing its chats.");
     return chats.resumeChat(projectPath, Number(sessionId));
   });
-  commands.handle("chat:patch", (_event, projectPath, sessionId, patch) =>
-    scopeStates.has(projectPath) ? editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined,
-  );
+  commands.handle("chat:patch", async (_event, projectPath, sessionId, patch) => {
+    if (!scopeStates.has(projectPath)) return;
+    if (patch?.archived) {
+      await advisorDelivery.stop(`${projectPath}#${sessionId}`);
+      await advisors.stopChat(`${projectPath}#${sessionId}`);
+    }
+    await editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {}));
+  });
   // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
   commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) =>
     scopeStates.has(projectPath)
@@ -819,7 +838,10 @@ function createRuntime(options) {
   async function readOpenChat(chatId = chats.openChat) {
     if (chatId && scopeStates.has(projectOfKey(chatId))) {
       await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
-      void track(() => chats.recoverSubagents(chatId), background).catch((error) => console.warn("Milagre couldn't refresh subagent outcomes:", error.message));
+      void track(async () => {
+        await advisors.reconcile(chatId);
+        await chats.recoverSubagents(chatId);
+      }, background).catch((error) => console.warn("Milagre couldn't refresh subagent outcomes:", error.message));
     }
   }
   commands.handle("chat:set-open", (_event, chatId) => {
@@ -852,6 +874,9 @@ function createRuntime(options) {
   });
 
   commands.handle("agent:interrupt", async (_event, chatId) => {
+    await existingChat("stopping advisors")(chatId);
+    await advisorDelivery.stop(chatId);
+    await advisors.stopChat(chatId);
     // A handoff still writing its brief has no agent to stop: cancelling it is the whole interrupt.
     if (await chats.cancelHandoff(chatId)) return;
     await worktreeSetups.cancel(chatId);
@@ -934,8 +959,137 @@ function createRuntime(options) {
     chats,
     agents,
     emit,
-    extraTools: (chatId) => [...simulatorToolDefinitions(chatId, simulators), ...artifactToolDefinitions(chatId, artifacts)],
+    extraTools: (chatId) => [
+      ...simulatorToolDefinitions(chatId, simulators),
+      ...artifactToolDefinitions(chatId, artifacts),
+      ...require("./advisor-tools.cjs").advisorToolDefinitions(chatId, advisors),
+    ],
   });
+  const advisorStore = require("./advisor-store.cjs").createAdvisorStore({ dataDir });
+  const advisorTransports = new Map();
+  const advisorMcp = require("./linked-mcp-server.cjs").createLinkedMcpServer({ toolsFor: (id) => advisorTransports.get(id) ?? [] });
+  async function advisorContext(chatId) {
+    await existingChat("using advisors")(chatId);
+    const scope = projectOfKey(chatId);
+    const id = sessionIdFromKey(chatId);
+    const state = await scopeStates.get(scope);
+    const session = state.sessions[id];
+    if (session.archived) throw new Error("This Chat is archived.");
+    const execution = await scopeStates.executionContext(scope, id);
+    if (!execution.cwd) throw new Error("This Chat's Worktree is unavailable.");
+    const roots = [...new Set([execution.cwd, ...(execution.workspaceRoots ?? [])])];
+    const identities = await Promise.all(
+      roots.map(async (root) => {
+        const real = await fs.realpath(root);
+        if (real !== root) throw new Error("The advisor Worktree identity changed.");
+        const stat = await fs.stat(real);
+        return [real, stat.dev, stat.ino];
+      }),
+    );
+    const settings = chats.turnSettings(chatId) ?? {};
+    const provider = session.provider ?? settings.provider ?? "claude";
+    return {
+      ...execution,
+      roots,
+      scopeIdentity: JSON.stringify([scope, id, session.worktree_id, identities]),
+      parentProvider: provider,
+      provider,
+      model: chats.runs[chatId]?.model || require("@milagre/shared/agent-runs").lastUserModel(state, id) || settings.model,
+      settings: { ...settings, provider },
+      scope,
+      sessionId: id,
+    };
+  }
+  async function advisorProviders(chatId, pinned) {
+    const scope = projectOfKey(chatId);
+    const ids = routing.selection(scope);
+    if (pinned) ids[pinned.provider] = pinned.accountId;
+    const services = routing.services(scope, ids);
+    const [status, models, claude, codex] = await Promise.all([
+      options.agentCliStatus ? options.agentCliStatus() : services.status(),
+      options.agentModels ? options.agentModels() : services.models(),
+      routing.forAccount("claude", ids.claude),
+      routing.forAccount("codex", ids.codex),
+    ]);
+    return Object.fromEntries(
+      PROVIDERS.map((provider) => {
+        const cli = provider === "claude" ? claude : codex;
+        return [
+          provider,
+          {
+            ...cli,
+            available: !cli.problem && Boolean(cli.command) && status[provider]?.state === "ready" && Boolean(models[provider]?.length),
+            models: models[provider] ?? [],
+            problem: cli.problem ?? status[provider]?.message,
+          },
+        ];
+      }),
+    );
+  }
+  advisorDelivery = require("./advisor-delivery.cjs").createAdvisorDelivery({
+    store: advisorStore,
+    contextFor: advisorContext,
+    isBlocked: (chatId) => closing || chats.preparing.has(chatId) || Boolean(chats.runs[chatId]?.approvals.length || chats.runs[chatId]?.questions.length),
+    send: async (chatId, message, ctx) => {
+      const sent = await chats.send({
+        ...ctx.settings,
+        projectPath: ctx.scope,
+        sessionId: ctx.sessionId,
+        provider: ctx.provider,
+        model: ctx.model,
+        permissionMode: ctx.settings.permissionMode ?? "auto",
+        ...message,
+      });
+      return sent.started;
+    },
+  });
+  advisors = require("./advisors.cjs").createAdvisors({
+    store: advisorStore,
+    contextFor: advisorContext,
+    providersFor: advisorProviders,
+    publish: async (chatId, agent) => {
+      if (["initializing", "running", "waiting"].includes(agent.status)) keepAwake.turnStarted(agent.id);
+      else keepAwake.turnEnded(agent.id);
+      await chats.receive(chatId, { type: "subagent-update", agent });
+    },
+    completed: (chatId, result) => advisorDelivery.enqueue(chatId, result),
+    launch: async ({ record, context, provider, emit: send }) => {
+      const { skills } = await discoverSkills(context.cwd);
+      const referenceRoots = [...new Set(skills.map((skill) => path.dirname(skill.path)))];
+      const canvasReads = linked
+        .forChat(record.chatId)
+        .tools.filter((tool) => ["linked_overview", "read_linked_chat", "linked_git", "read_linked_file", "search_linked_files"].includes(tool.name));
+      const tools = [...require("./advisor-reads.cjs").createAdvisorReads({ roots: context.roots, referenceRoots }), ...canvasReads];
+      advisorTransports.set(record.id, tools);
+      const sessionOptions = {
+        cwd: context.cwd,
+        workspaceRoots: context.workspaceRoots,
+        workspaceInstructions: context.workspaceInstructions,
+        analysisOnly: true,
+        resumeId: record.nativeId,
+        command: provider.command,
+        env: provider.env,
+        linked: { tools, url: () => advisorMcp.url(record.id) },
+        emit: send,
+      };
+      const session = options.createSession
+        ? options.createSession(record.provider, sessionOptions)
+        : record.provider === "codex"
+          ? new CodexSession({ ...sessionOptions, clientVersion: version })
+          : new ClaudeSession(sessionOptions);
+      const close = session.close.bind(session);
+      session.close = async () => {
+        advisorTransports.delete(record.id);
+        await close();
+      };
+      return session;
+    },
+  });
+  for (const method of ["stop", "retry"])
+    commands.handle(`advisor:${method}`, async (_event, chatId, advisorId) => {
+      await existingChat("controlling advisors")(chatId);
+      return advisors[method](chatId, String(advisorId));
+    });
   const linkWorkspaces = createLinkWorkspaces({
     store: linkStore,
     registry: projectRegistry(),
@@ -1104,6 +1258,10 @@ function createRuntime(options) {
   function close() {
     closing = true;
     closed ??= (async () => {
+      await advisorDelivery.close();
+      await advisors.close();
+      await advisorMcp.close();
+      await advisorStore.close();
       await Promise.all([simulators.close(), browsers.close(), artifacts.close()]);
       await Promise.allSettled([...active]);
       accounts.close();

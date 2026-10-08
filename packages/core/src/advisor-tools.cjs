@@ -1,0 +1,45 @@
+const { z } = require("zod");
+const title = z.string().trim().min(1).max(120);
+const prompt = z.string().trim().min(1).max(40_000);
+const createInput = z.strictObject({
+  title,
+  prompt,
+  provider: z.enum(["claude", "codex"]).optional(),
+  model: z.string().min(1).max(200).optional(),
+  effort: z.string().min(1).max(40).optional(),
+});
+function advisorToolDefinitions(chatId, manager) {
+  const tool = (name, description, input, readOnly, run) => ({
+    name,
+    description,
+    input,
+    readOnly,
+    strict: true,
+    run: async (args) => JSON.stringify(await run(args)),
+  });
+  const id = { advisorId: z.string().startsWith("advisor:").max(100) };
+  return [
+    tool("advisor_providers", "Discover available advisor providers and their reported models/efforts for this Chat.", {}, true, () =>
+      manager.providers(chatId),
+    ),
+    tool(
+      "create_advisor",
+      "Start an asynchronous analysis-only advisor. Default is the other provider. At most two active advisors per Chat. Completion returns as labeled context.",
+      createInput.shape,
+      false,
+      (args) => manager.create(chatId, args),
+    ),
+    tool(
+      "advisor_followup",
+      "Queue a follow-up after the current advisor turn. Preserves history. At most four queued prompts.",
+      { ...id, prompt },
+      false,
+      (args) => manager.followup(chatId, args.advisorId, args.prompt),
+    ),
+    tool("advisor_read", "Inspect a settled advisor after its completion notice. Returns status, transcript and output; do not poll.", id, true, (args) =>
+      manager.read(chatId, args.advisorId),
+    ),
+    tool("advisor_stop", "Stop an advisor owned by this Chat and discard its queued prompts.", id, false, (args) => manager.stop(chatId, args.advisorId)),
+  ];
+}
+module.exports = { advisorToolDefinitions, createInput, promptInput: prompt };

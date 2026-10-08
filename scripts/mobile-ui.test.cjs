@@ -752,6 +752,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
       "./confirm-store": { confirmSheet: (...args) => alert(...args), confirm: async () => true },
     }),
     "@milagre/shared/message-navigation": require("@milagre/shared/message-navigation"),
+    "@milagre/shared/advisor-result": require("@milagre/shared/advisor-result"),
     "../message-navigation": { MessageNavigation: "MessageNavigation" },
     "../prompt-field": { PromptField: "PromptField" },
     "../context-ring": { ContextRing: "ContextRing" },
@@ -858,6 +859,7 @@ function subagentsHost({ call = async () => {} } = {}) {
     "expo-router": { router: { back() {} }, useLocalSearchParams: () => ({ id: "7" }) },
     "@hugeicons/core-free-icons": new Proxy({}, { get: (_, name) => String(name) }),
     "@milagre/shared/project-edits": require("@milagre/shared/project-edits"),
+    "@milagre/shared/agent-activity": require("@milagre/shared/agent-activity"),
     "../session": { useSession: () => session },
     "../subagent-item": { SubagentItem: "SubagentItem" },
     "../icons": { Icon: "Icon" },
@@ -4575,6 +4577,7 @@ test("feedback from the designs shows as a card of the choice and each comment",
 test("a reply shows the thinking it wrote nothing after, once it waits on a question or ends, not while working", () => {
   const react = { memo: (fn) => fn, useCallback: (fn) => fn, useEffect() {}, useRef: () => ({}), useState: (value) => [value, () => {}] };
   const { ChatReply } = load("chat-reply.tsx", {
+    "@milagre/shared/advisor-result": require("@milagre/shared/advisor-result"),
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
     "react-native": { Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", useColorScheme: () => "dark" },
@@ -4673,4 +4676,22 @@ test("mobile subagent rows show current activity and preserve terminal states", 
   const failed = SubagentItem({ agent: { ...agent, status: "failed" } });
   assert.equal(failed.props.status, "Needs attention");
   assert.equal(failed.props.state, "failed");
+});
+
+test("mobile advisor Stop and Retry call the owning Chat and show failures without hiding records", async () => {
+  const host = subagentsHost({
+    call: async () => {
+      throw Error("Advisor Account unavailable");
+    },
+  });
+  host.state.sessions[7].subagents = [
+    { id: "advisor:running", title: "Security", source: "milagre-advisor", provider: "codex", status: "running", transcript: [] },
+    { id: "advisor:failed", title: "Plan", source: "milagre-advisor", provider: "claude", status: "failed", retryable: true, transcript: [] },
+  ];
+  await host.button("Stop Security").props.onPress();
+  assert.deepEqual(host.calls[0], { method: "advisor:stop", args: ["/project#7", "advisor:running"] });
+  assert.ok(find(host.render(), (node) => node.type === "ErrorNotice" && node.props.message === "Advisor Account unavailable"));
+  assert.equal(host.state.sessions[7].subagents.length, 2);
+  await host.button("Retry Plan").props.onPress();
+  assert.deepEqual(host.calls[1], { method: "advisor:retry", args: ["/project#7", "advisor:failed"] });
 });

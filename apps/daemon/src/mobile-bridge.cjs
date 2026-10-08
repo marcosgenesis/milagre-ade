@@ -63,6 +63,8 @@ const METHODS = new Set([
   "chat:send",
   "chat:resume",
   "agent:interrupt",
+  "advisor:stop",
+  "advisor:retry",
   "agent:respond-permission",
   "accounts:scopes",
   "accounts:scope",
@@ -170,7 +172,9 @@ function phoneAgent(agent) {
     slim = {
       ...agent,
       latestActivity: clip(agent.latestActivity),
-      transcript: (agent.transcript || []).slice(-TRANSCRIPT_TAIL).map((item) => ({ ...item, text: clip(item.text) })),
+      transcript: (agent.transcript || [])
+        .slice(-TRANSCRIPT_TAIL)
+        .map((item) => ({ ...item, text: agent.source === "milagre-advisor" ? item.text.slice(0, 40_000) : clip(item.text) })),
     };
     phoneAgents.set(agent, slim);
   }

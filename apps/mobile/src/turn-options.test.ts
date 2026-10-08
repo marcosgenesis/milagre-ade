@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AgentModels } from "@milagre/shared/model";
-import { modelsFor, selectedModel, sendOptions } from "./turn-options.ts";
+import { afterSend, afterSheet, defaultPreferences, modelsFor, selectedModel, sendOptions, turnTarget } from "./turn-options.ts";
 
 const reported: AgentModels = {
   claude: null,
@@ -47,8 +47,6 @@ test("models without effort omit it, and supported fast mode is explicit", () =>
   });
 });
 
-import { afterSend, afterSheet, turnTarget, defaultPreferences } from "./turn-options.ts";
-
 const claudeChat = { ...defaultPreferences, provider: "codex" as const, model: "gpt-6", pickedOn: "claude" as const };
 
 test("a pick holds while the chat is still on the provider it was picked against", () => {
@@ -62,7 +60,7 @@ test("a pick is ignored after the chat's provider changes elsewhere", () => {
 
 test("a pick is spent by a send, whether or not the handoff succeeds", () => {
   const target = turnTarget(claudeChat, "claude", defaultPreferences);
-  const spent = afterSend(claudeChat, target, "claude", "gpt-6");
+  const spent = afterSend(claudeChat, target, "claude", "gpt-6", false);
   assert.equal(spent.pickedOn, undefined);
   // The handoff failed and the chat is back on claude: the chat decides.
   assert.deepEqual(turnTarget(spent, "claude", defaultPreferences), { provider: "claude", model: "", picked: false });
@@ -70,10 +68,17 @@ test("a pick is spent by a send, whether or not the handoff succeeds", () => {
   assert.deepEqual(turnTarget(spent, "codex", defaultPreferences), { provider: "codex", model: "", picked: false });
 });
 
+test("a send that steers a running turn keeps the pick for the next turn", () => {
+  const target = turnTarget(claudeChat, "claude", defaultPreferences);
+  const kept = afterSend(claudeChat, target, "claude", "gpt-6", true);
+  assert.deepEqual(kept, claudeChat);
+  assert.deepEqual(turnTarget(kept, "claude", defaultPreferences), { provider: "codex", model: "gpt-6", picked: true });
+});
+
 test("a send without a pick keeps the chat's model", () => {
   const saved = { ...defaultPreferences, provider: "claude" as const };
   const target = turnTarget(saved, "claude", defaultPreferences);
-  assert.equal(afterSend(saved, target, "claude", "opus").model, "opus");
+  assert.equal(afterSend(saved, target, "claude", "opus", false).model, "opus");
 });
 
 test("a chat with no provider yet follows the saved preferences", () => {

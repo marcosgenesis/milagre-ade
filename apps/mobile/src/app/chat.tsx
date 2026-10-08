@@ -331,6 +331,8 @@ export default function ChatScreen() {
     }
   }
   async function send(body = draft, withAttachments = true) {
+    // A turn running now takes this message as a steer, on the provider it already runs.
+    const steered = Boolean(run);
     if (busy || sendingRef.current || pending || picking || (!body && !(withAttachments && attachments.length))) return;
     sendingRef.current = true;
     setBusy(true);
@@ -451,7 +453,7 @@ export default function ChatScreen() {
         return next;
       });
       composer.setPreferences((current) => {
-        const next = { ...current, [destination]: afterSend(current[chatId] || preferences, turn, chat?.provider, model.id) };
+        const next = { ...current, [destination]: afterSend(current[chatId] || preferences, turn, chat?.provider, model.id, steered) };
         if (destination !== chatId) delete next[chatId];
         return next;
       });

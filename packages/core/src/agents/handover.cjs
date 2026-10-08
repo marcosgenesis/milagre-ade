@@ -32,12 +32,14 @@ function renderTranscript(state, sessionId, { after } = {}) {
   const session = state.sessions[sessionId];
   const all = state.messages.filter((message) => message.session_id === sessionId);
   const messages = after == null ? all : all.filter((message) => message.id > after);
-  const worktree = state.worktrees[session.worktree_id];
-  const parts = [`# Chat transcript: ${chatTitle(session, all)}`, `Provider: ${providerName(session.provider)} · Worktree: ${worktree?.path ?? "unknown"}`];
+  // A Link chat's state has no worktrees: it runs in its own workspace.
+  const workspace = state.worktrees?.[session.worktree_id]?.path ?? session.workspacePath ?? "unknown";
+  const parts = [`# Chat transcript: ${chatTitle(session, all)}`, `Provider: ${providerName(session.provider)} · Worktree: ${workspace}`];
   if (after != null) parts.push("Earlier messages are left out: you already know them.");
   for (const message of messages) {
     if (message.context?.kind === "handoff") {
-      parts.push(`## Handoff: ${providerName(message.context.from.provider)} → ${providerName(message.context.to.provider)}`);
+      const failed = message.context.status === "failed" ? " (failed)" : "";
+      parts.push(`## Handoff${failed}: ${providerName(message.context.from.provider)} → ${providerName(message.context.to.provider)}`);
     } else if (message.role === "assistant") {
       const steps = (message.steps ?? []).filter((step) => step.kind !== "thinking").map(stepLine);
       parts.push(`## Assistant${message.model ? ` (${message.model})` : ""}`, [steps.join("\n"), message.body].filter(Boolean).join("\n\n"));
@@ -76,13 +78,21 @@ function parseBrief(reply) {
   }
 }
 
-async function ask(call, input, timeoutMs) {
+async function ask(call, input, timeoutMs, outer) {
   const controller = new AbortController();
+  const abort = () => {
+    controller.abort();
+    resolveOuter?.(null);
+  };
+  let resolveOuter;
   let timer;
   try {
+    if (outer?.aborted) return null;
+    outer?.addEventListener("abort", abort, { once: true });
     return await Promise.race([
       call({ ...input, signal: controller.signal }),
       new Promise((resolve) => {
+        resolveOuter = resolve;
         timer = setTimeout(() => {
           controller.abort();
           resolve(null);
@@ -90,13 +100,14 @@ async function ask(call, input, timeoutMs) {
       }),
     ]);
   } finally {
+    outer?.removeEventListener("abort", abort);
     clearTimeout(timer);
   }
 }
 
-/** The new chat's first message. Never throws: when the model can't answer, a minimal brief takes its place. */
+/** The brief that opens the next agent's turn. Never throws: when the model can't answer, a minimal brief takes its place. */
 async function generateBrief(
-  { transcript, transcriptPath: file, provider, lastUserMessage, changedFiles, catchUp = false },
+  { transcript, transcriptPath: file, provider, lastUserMessage, changedFiles, catchUp = false, signal },
   { models = {}, timeoutMs = TIMEOUT_MS } = {},
 ) {
   const opening = catchUp
@@ -107,7 +118,7 @@ async function generateBrief(
       ? `[Earlier messages are cut off; read the transcript file for them.]\n${transcript.slice(-TRANSCRIPT_LIMIT)}`
       : transcript;
   const brief = models[provider]
-    ? await ask(models[provider], { system: catchUp ? SYSTEM + CATCH_UP : SYSTEM, prompt: `<transcript>\n${shown}\n</transcript>` }, timeoutMs).then(
+    ? await ask(models[provider], { system: catchUp ? SYSTEM + CATCH_UP : SYSTEM, prompt: `<transcript>\n${shown}\n</transcript>` }, timeoutMs, signal).then(
         parseBrief,
         () => null,
       )

@@ -488,7 +488,12 @@ class ChatHost {
     const ready = handoff
       ? this.prepareHandoff(projectPath, target, state, preparation)
       : waitFor
-        ? waitFor.done.then((result) => (result === null ? null : ""))
+        ? waitFor.done.then(async (result) => {
+            if (result !== null) return "";
+            // The handoff this message waited for never started its turn, and this message opened a run that nothing will end.
+            if (this.runs[target.chatId] && !this.preparing.has(target.chatId)) await this.receive(target.chatId, { type: "turn-cancelled" });
+            return null;
+          })
         : Promise.resolve("");
     const started = ready
       .then((handoffBrief) => {
@@ -537,6 +542,7 @@ class ChatHost {
           transcriptPath,
           provider: from,
           catchUp: catchUp != null,
+          signal: controller.signal,
           lastUserMessage,
           worktrees: session.worktrees,
           cwd: target.cwd,
@@ -575,6 +581,13 @@ class ChatHost {
       return failHandoff(latest, divider, sessionId, from, to);
     });
     if (changed) this.broadcast(projectPath, state);
+    // The turn stored for the chat still names the target provider: put it back, so a Delegation delivered next doesn't redo the switch.
+    const chatId = chatKey(projectPath, sessionId);
+    const turn = this.turns.get(chatId);
+    if (turn?.provider === to) {
+      const fromModel = state.messages.find((item) => item.id === dividerId)?.context?.from?.model;
+      this.turns.set(chatId, { ...turn, provider: from, ...(fromModel ? { model: fromModel } : {}) });
+    }
   }
 
   /** Merges `patch` into a handoff divider's context and tells the windows. */
@@ -593,8 +606,14 @@ class ChatHost {
     const preparation = this.preparing.get(chatId);
     if (!preparation) return false;
     preparation.controller.abort();
-    await this.abandonHandoff(projectOfKey(chatId), preparation);
-    await this.receive(chatId, { type: "turn-cancelled" });
+    try {
+      await this.abandonHandoff(projectOfKey(chatId), preparation);
+      await this.receive(chatId, { type: "turn-cancelled" });
+    } finally {
+      // Nothing may wait on a preparation that was cancelled, whatever threw above.
+      this.release(chatId, preparation);
+      preparation.settle(null);
+    }
     return true;
   }
 

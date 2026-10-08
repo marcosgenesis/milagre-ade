@@ -191,10 +191,6 @@ export interface ChatMessage {
   operationId?: string;
 }
 
-/**
- * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
- * report coming back, a Negotiation's agreement, or a notice about one. `from` is the other Chat's key.
- */
 /** A provider switch inside a chat, shown as a divider before the message that caused it. `brief` is what the new provider was sent. */
 export type HandoffContext = {
   kind: "handoff";
@@ -208,6 +204,10 @@ export type HandoffContext = {
 /** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, a handoff, or a legacy handover note. */
 export type ChatContext = LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
 
+/**
+ * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
+ * report coming back, a Negotiation's agreement, or a notice about one. `from` is the other Chat's key.
+ */
 export type LinkedContext =
   | { kind: "delegation"; delegationId: string; from: string; fromLabel: string; negotiation?: { id: string; round: number } }
   | {

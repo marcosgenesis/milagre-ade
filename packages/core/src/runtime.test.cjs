@@ -316,6 +316,66 @@ test("quit stops agents after a disk failure and can retry before releasing owne
   assert.ok(restored.state.messages.some((m) => m.body === "Keep me"));
 });
 
+test("agent:interrupt during a preparing handoff cancels it, fails the divider and starts no agent", async (t) => {
+  const { project, make } = await fixture(t);
+  const blocked = Promise.withResolvers();
+  let blockClaude = false;
+  const sessions = [];
+  const runtime = make({
+    titleModels: {},
+    agentCli: async (provider) => {
+      if (provider === "claude" && blockClaude) {
+        blocked.resolve();
+        return new Promise(() => {});
+      }
+      return { command: "/fake" };
+    },
+    createSession(provider, options) {
+      const session = {
+        provider,
+        turnActive: false,
+        closed: false,
+        startTurn: async () => {
+          options.emit({ type: "turn-started", turnId: "t" });
+          if (provider === "claude") {
+            options.emit({ type: "session-started", nativeId: "claude-1" });
+            options.emit({ type: "text-delta", messageId: "m1", text: "Done." });
+            options.emit({ type: "turn-completed" });
+          }
+          return { turnId: "t" };
+        },
+        interrupt: async () => {},
+        close: async () => {},
+      };
+      sessions.push(session);
+      return session;
+    },
+  });
+  const opened = await runtime.openProject(project);
+  const chat = Object.values(opened.state.sessions)[0];
+  const chatId = `${project}#${chat.id}`;
+  await runtime.invoke("chat:send", [{ projectPath: project, sessionId: chat.id, body: "first", provider: "claude", model: "claude-opus-5-5" }]);
+  const stateOf = async () => (await runtime.invoke("project:snapshot", [project])).state;
+  for (let i = 0; i < 200 && !(await stateOf()).messages.some((item) => item.outcome === "completed"); i++) await new Promise((r) => setTimeout(r, 10));
+  blockClaude = true;
+  await runtime.invoke("chat:send", [{ projectPath: project, sessionId: chat.id, body: "switch", provider: "codex", model: "gpt-6" }]);
+  await blocked.promise;
+  await runtime.invoke("agent:interrupt", [chatId]);
+  await new Promise((r) => setTimeout(r, 50));
+  const state = await stateOf();
+  const dividers = state.messages.filter((item) => item.context?.kind === "handoff");
+  assert.deepEqual(
+    dividers.map((item) => item.context.status),
+    ["failed"],
+  );
+  assert.equal(state.sessions[chat.id].provider, "claude");
+  assert.equal(
+    sessions.some((item) => item.provider === "codex"),
+    false,
+  );
+  assert.ok(state.messages.some((item) => item.outcome === "cancelled"));
+});
+
 test("linked Worktrees resolve to one registered Project without losing saved Chats", async (t) => {
   const { project, make } = await fixture(t);
   execFileSync("git", ["-C", project, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "Initial"], {

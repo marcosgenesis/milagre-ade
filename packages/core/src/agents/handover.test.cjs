@@ -169,3 +169,43 @@ test("a catch-up brief opens by saying the reader is back, and asks only for wha
   assert.match(brief, /^You're back on this chat\. Here is what happened on Codex since you last worked on it\.\n\nB\n\n/);
   assert.match(calls[0].system, /already knows the work before this transcript/);
 });
+
+test("a Link chat's state has no worktrees: the header uses the session's workspace path", () => {
+  const link = {
+    sessions: { 3: { id: 3, provider: "claude", workspacePath: "/link/ws", worktrees: [{ alias: "api", worktreePath: "/a" }] } },
+    messages: [{ id: 4, session_id: 3, role: "user", body: "hi", context: null }],
+  };
+  assert.match(renderTranscript(link, 3), /Worktree: \/link\/ws/);
+  assert.match(renderTranscript({ ...link, sessions: { 3: { id: 3, provider: "claude" } } }, 3), /Worktree: unknown/);
+});
+
+test("a failed divider renders as a failed handoff", () => {
+  const failed = {
+    ...divided,
+    messages: divided.messages.map((message) => (message.id === 7 ? { ...message, context: { ...message.context, status: "failed" } } : message)),
+  };
+  assert.match(renderTranscript(failed, 3), /## Handoff \(failed\): Claude → Codex\n/);
+});
+
+test("an outer abort signal aborts the model call", async () => {
+  const outer = new AbortController();
+  let seen;
+  const pending = generateBrief(
+    { transcript: "T", transcriptPath: "/x/3.md", provider: "claude", lastUserMessage: "", changedFiles: async () => [], signal: outer.signal },
+    {
+      models: {
+        claude: ({ signal }) =>
+          new Promise((resolve) => {
+            seen = signal;
+            signal.addEventListener("abort", () => resolve(null));
+          }),
+      },
+      timeoutMs: 5000,
+    },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  outer.abort();
+  const settled = await Promise.race([pending.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 500))]);
+  assert.equal(settled, true);
+  assert.equal(seen.aborted, true);
+});

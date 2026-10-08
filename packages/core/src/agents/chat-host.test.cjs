@@ -56,6 +56,7 @@ function projectState(projectPath) {
 function harness({
   failStart = null,
   focused = true,
+  read = async (projectPath) => projectState(projectPath),
   now = () => NOW,
   handoverTools = {
     writeTranscript: async ({ sessionId }) => `/tmp/handovers/${sessionId}.md`,
@@ -67,7 +68,7 @@ function harness({
   const broadcasts = [];
   const created = [];
   const states = new ProjectStates({
-    read: async (projectPath) => projectState(projectPath),
+    read,
     save: async (projectPath, state) => void saved.set(projectPath, state),
   });
   const manager = new SessionManager({
@@ -545,6 +546,99 @@ test("a send during preparing waits, then steers after the briefed message; the 
   );
 });
 
+test("Stop while a message sent during preparing is still flushing leaves no run open, and a later send works", async (t) => {
+  let release;
+  const { host, manager, saved, session, created } = harness({
+    handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: () => new Promise((resolve) => (release = resolve)) },
+  });
+  t.after(() => manager.closeAll());
+  const sessionId = await chatWithReply(host, session, saved);
+  const chatId = `${ALPHA}#${sessionId}`;
+  await host.send(message(ALPHA, "switch", { sessionId, provider: "codex", model: "gpt-6" }));
+  await waitUntil(() => release);
+  // The second message's save is held back until Stop has cancelled the handoff.
+  let open;
+  const gate = new Promise((resolve) => (open = resolve));
+  const flush = host.states.flush.bind(host.states);
+  host.states.flush = async (...args) => {
+    await gate;
+    return flush(...args);
+  };
+  const second = host.send(message(ALPHA, "also this", { sessionId, provider: "codex", model: "gpt-6" }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(await host.cancelHandoff(chatId), true);
+  open();
+  assert.equal(await (await second).started, null);
+  host.states.flush = flush;
+  assert.equal(host.runs[chatId], undefined);
+  await host.states.flush();
+  assert.ok(saved.get(ALPHA).messages.some((item) => item.outcome === "cancelled"));
+  release("LATE");
+  await host.send(message(ALPHA, "again", { sessionId, provider: "claude", model: "claude-opus-5-5" }));
+  await waitUntil(() => session(ALPHA).turns.length === 2);
+  assert.equal(
+    created.some((item) => item.provider === "codex"),
+    false,
+  );
+});
+
+test("a handoff that fails leaves no run open for a message sent while it prepared", async (t) => {
+  let fail;
+  const { host, manager, saved, session } = harness({
+    handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: () => new Promise((_, reject) => (fail = reject)) },
+  });
+  t.after(() => manager.closeAll());
+  const sessionId = await chatWithReply(host, session, saved);
+  const chatId = `${ALPHA}#${sessionId}`;
+  await host.send(message(ALPHA, "switch", { sessionId, provider: "codex", model: "gpt-6" }));
+  await waitUntil(() => fail);
+  const second = await host.send(message(ALPHA, "also this", { sessionId, provider: "codex", model: "gpt-6" }));
+  fail(new Error("brief broke"));
+  assert.equal(await second.started, null);
+  await waitUntil(() => host.runs[chatId] === undefined);
+});
+
+test("a Link chat (no worktrees in its state) switches providers and its brief gets the workspace and members", async (t) => {
+  const members = [{ alias: "api", worktreePath: "/work/api" }];
+  const briefs = [];
+  const link = {
+    ...projectState(ALPHA),
+    worktrees: undefined,
+    sessions: {
+      3: { id: 3, agent_name: "Link", status: "Created", provider: "claude", workspacePath: "/link/ws", worktrees: members, native_session_id: "claude-1" },
+    },
+    next_id: 7,
+    messages: [
+      { id: 4, session_id: 3, role: "user", body: "go", model: "claude-opus-5-5", context: null },
+      { id: 5, session_id: 3, role: "assistant", body: "Done.", outcome: "completed", model: "claude-opus-5-5", context: null },
+    ],
+  };
+  delete link.worktrees;
+  const { host, manager, created } = harness({
+    read: async () => link,
+    handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: async (input) => (briefs.push(input), "BRIEF") },
+  });
+  t.after(() => manager.closeAll());
+  const { started } = await host.send(message(ALPHA, "continue", { sessionId: 3, provider: "codex", model: "gpt-6" }));
+  assert.notEqual(await started, null);
+  assert.equal(created.find((item) => item.provider === "codex").options.cwd, "/link/ws");
+  assert.deepEqual({ cwd: briefs[0].cwd, worktrees: briefs[0].worktrees }, { cwd: "/link/ws", worktrees: members });
+  assert.match(briefs[0].transcript, /Worktree: \/link\/ws/);
+});
+
+test("Stop aborts the brief model call", async (t) => {
+  let signal;
+  const { host, manager, saved, session } = harness({
+    handoverTools: { writeTranscript: async () => "/tmp/t.md", brief: (input) => ((signal = input.signal), new Promise(() => {})) },
+  });
+  t.after(() => manager.closeAll());
+  const sessionId = await chatWithReply(host, session, saved);
+  await host.send(message(ALPHA, "switch", { sessionId, provider: "codex", model: "gpt-6" }));
+  await waitUntil(() => signal);
+  await host.cancelHandoff(`${ALPHA}#${sessionId}`);
+  assert.equal(signal.aborted, true);
+});
+
 test("two quick sends on the other provider produce one divider", async (t) => {
   const { host, manager, saved, session } = harness();
   t.after(() => manager.closeAll());
@@ -574,6 +668,9 @@ test("a cancelled handoff did not happen: the chat is back on its provider and a
   await host.cancelHandoff(`${ALPHA}#${sessionId}`);
   release("LATE");
   await host.states.flush();
+  // A Delegation delivered next reads the chat's last turn: it must not redo the switch.
+  assert.equal(host.turns.get(`${ALPHA}#${sessionId}`).provider, "claude");
+  assert.equal(host.turns.get(`${ALPHA}#${sessionId}`).model, "claude-opus-5-5");
   const reverted = saved.get(ALPHA).sessions[sessionId];
   assert.deepEqual(
     { provider: reverted.provider, current: reverted.native_session_id, parked: reverted.native_sessions },

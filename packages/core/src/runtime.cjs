@@ -890,7 +890,7 @@ function createRuntime(options) {
   commands.handle("agent:answer-question", async (_event, { chatId, requestId, answers, summary } = {}) => {
     const messageId =
       answers && typeof summary === "string" && summary && typeof chatId === "string" && scopeStates.has(projectOfKey(chatId))
-        ? await chats.recordAnswers(chatId, summary)
+        ? await chats.recordAnswers(chatId, summary, { requestId, answers })
         : null;
     try {
       const accepted = await agents.answerQuestion(chatId, requestId, answers);

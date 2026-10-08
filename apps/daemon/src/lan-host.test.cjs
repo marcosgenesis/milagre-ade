@@ -8,19 +8,19 @@ const { b64url, boxKeyPair } = require("@milagre/shared/relay-crypto");
 const { readIdentity } = require("./relay-identity.cjs");
 const { createDevices } = require("./devices.cjs");
 const { startLanHost } = require("./lan-host.cjs");
-const { random, startFakeBridge, connectPhone, until } = require("./relay-test-kit.cjs");
+const { random, startFakeBridge, connectPhone, connectDesktop, fakePeerDaemon, until } = require("./relay-test-kit.cjs");
 
 /** What devices.json holds now, or "" before it exists. */
 const onDisk = (dir) => fs.readFile(path.join(dir, "devices.json"), "utf8").catch(() => "");
 
-async function lanMac(t, { knownPhone = true, ...hostOptions } = {}) {
+async function lanMac(t, { knownPhone = true, knownKind = "phone", ...hostOptions } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lan-host-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const identity = await readIdentity(dir);
   const phones = createDevices(dir);
   await phones.load();
   const key = boxKeyPair(random);
-  if (knownPhone) await phones.add(b64url(key.publicKey));
+  if (knownPhone) await phones.add(b64url(key.publicKey), { kind: knownKind });
   const bridge = await startFakeBridge(t);
   const host = await startLanHost({ port: 0, hostname: "127.0.0.1", identity, phones, token: "a".repeat(64), bridgeUrl: bridge.url, ...hostOptions });
   t.after(() => host.close());
@@ -285,4 +285,27 @@ test("a known phone on the LAN shows as connected, is seen with its name, and dr
   host.drop(id);
   await phone.closed;
   await until(() => host.connectedKeys().length === 0, "dropped");
+});
+
+test("a known computer speaks rpc over the LAN, in parts past 768 KiB, and closing the host closes its daemon connection", async (t) => {
+  const daemon = fakePeerDaemon();
+  const { identity, key, host, url } = await lanMac(t, { knownKind: "computer", openPeer: daemon.openPeer });
+  const desktop = connectDesktop({ relayUrl: url, identity, key });
+  t.after(() => desktop.close());
+  assert.ok((await desktop.hello()).channel);
+  assert.deepEqual(host.connectedKeys(), [b64url(key.publicKey)]);
+  const big = "ação🙂".repeat(150_000);
+  assert.deepEqual((await desktop.call("echo", [big])).result, { echo: [big] });
+  await host.close();
+  await desktop.closed;
+  assert.equal(daemon.connections[0].closed, true);
+});
+
+test("an unknown desktop is refused on the LAN, which never pairs", async (t) => {
+  const daemon = fakePeerDaemon();
+  const { identity, url } = await lanMac(t, { knownPhone: false, openPeer: daemon.openPeer });
+  const desktop = connectDesktop({ relayUrl: url, identity });
+  t.after(() => desktop.close());
+  assert.deepEqual((await desktop.hello()).error, { t: "error", code: "unknown-phone" });
+  assert.equal(daemon.connections.length, 0);
 });

@@ -184,7 +184,7 @@ async function startDesktop() {
       emit(channel, payload) {
         if (channel === "agent:event") notifier.observe(payload.chatId, payload.event);
         if (channel === "notification:waiting" && notifyWhenWaiting && Notification.isSupported()) notifier.notify(payload);
-        if (channel === "phone:paired" && Notification.isSupported()) notifier.notifyPhonePaired();
+        if (channel === "phone:paired" && Notification.isSupported()) notifier.notifyDevicePaired(payload?.kind);
         if (channel === "runtime:connection") {
           connectionState = payload;
           // A host started again after it went away can be newer, with more commands. (Not yet set during the first connect.)

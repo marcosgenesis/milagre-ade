@@ -101,6 +101,8 @@ function createDevices(dataDir, { now = Date.now } = {}) {
     count: () => devices.length,
     list: () => devices.map((device) => ({ ...device })),
     removedAt: (key) => removed.get(key) ?? null,
+    /** The kind a device paired as ("phone" or "computer"), or null when it isn't paired. */
+    kindOf: (key) => find(key)?.kind ?? null,
     async add(key, { kind = "phone", name = null } = {}) {
       if (!KINDS.has(kind)) throw new Error(`Unknown device kind: ${kind}`);
       await ready();

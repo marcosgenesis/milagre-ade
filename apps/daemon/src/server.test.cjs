@@ -624,7 +624,7 @@ test("a first pairing reaches the desktop as phone:paired, with the count in the
   assert.equal((await phoneStatus(desktop, "on")).pairedPhones, 0);
   await relays[0].phones.add("phoneA");
   await waitFor(() => paired.length === 1);
-  assert.deepEqual(paired, [{ pairedPhones: 1 }]);
+  assert.deepEqual(paired, [{ pairedPhones: 1, kind: "phone" }]);
   assert.equal((await desktop.call("phone:status")).pairedPhones, 1);
 });
 

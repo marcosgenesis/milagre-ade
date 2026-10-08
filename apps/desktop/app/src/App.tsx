@@ -1,3 +1,4 @@
+import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { LinkWorkspace } from "./components/LinkWorkspace";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
@@ -79,7 +80,7 @@ import { EditorLinks, Notice } from "./components/editor-links";
 // Notice above is editor-links' toast; this is the dismissable notice card.
 import { Notice as NoticeCard } from "./components/Notice";
 import { openInEditor } from "./lib/editors";
-import type { RuntimeConnection, UpdateState } from "./electron";
+import type { RuntimeConnection } from "./electron";
 import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
@@ -330,7 +331,7 @@ function App() {
   const [hostConnection, setHostConnection] = useState<RuntimeConnection>({ connected: true });
   const [restartingHost, setRestartingHost] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
-  const [update, setUpdate] = useState<UpdateState | null>(null);
+  const update = useAppUpdates();
   const [gitDialog, setGitDialog] = useState<{
     sessionId: number;
     worktreeId: number;
@@ -390,13 +391,6 @@ function App() {
       off?.();
       snapshotOff?.();
     };
-  }, []);
-
-  useEffect(() => {
-    let unsubscribe = () => {};
-    window.milagre.getUpdateState().then(setUpdate);
-    unsubscribe = window.milagre.onUpdateState(setUpdate);
-    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -1755,14 +1749,6 @@ function App() {
             onOpen={openChatByKey}
           />
         )}
-        {update?.status === "downloaded" && (
-          <div className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-2xl items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-ink shadow-lg [-webkit-app-region:no-drag]">
-            <span>Milagre {update.version} is ready to update.</span>
-            <button className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700" onClick={() => void window.milagre.installUpdate()}>
-              Update and restart
-            </button>
-          </div>
-        )}
         <div
           className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
           onAnimationEnd={(event) => {
@@ -2074,4 +2060,10 @@ function App() {
   );
 }
 
-export default App;
+export default function AppWithUpdates() {
+  return (
+    <UpdateShell>
+      <App />
+    </UpdateShell>
+  );
+}

@@ -8,13 +8,13 @@ import { usePreventRemove } from "expo-router/react-navigation";
 import { Cancel01Icon, FlashIcon, Tick02Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
 import type { ModelProvider } from "@milagre/shared/model";
 import { useComposer, useSession } from "../session";
-import { modelsFor, selectedModel, type TurnPreferences } from "../turn-options";
+import { modelsFor, selectedModel, afterSheet, type TurnPreferences } from "../turn-options";
 import { EffortMeter, Icon, ProviderLogo } from "../icons";
 import { CircleButton, colors, styles } from "../ui";
 
 /** Model, thinking effort, Ultracode and fast mode for one Chat. Cancel (✕) discards, Done (✓) applies, per Apple's sheet guidance. */
 export default function ModelSheet() {
-  const params = useLocalSearchParams<{ chatId: string; model?: string; provider?: string; busy?: string }>();
+  const params = useLocalSearchParams<{ chatId: string; model?: string; provider?: string; on?: string; busy?: string }>();
   const session = useSession();
   const composer = useComposer();
   const navigation = useNavigation();
@@ -35,7 +35,11 @@ export default function ModelSheet() {
     ]),
   );
   const close = (apply: boolean) => {
-    if (apply) composer.setPreferences((current) => ({ ...current, [params.chatId]: { ...draft, model: model.id } }));
+    if (apply)
+      composer.setPreferences((current) => ({
+        ...current,
+        [params.chatId]: afterSheet({ ...draft, model: model.id }, (params.on as ModelProvider | undefined) || undefined),
+      }));
     setClosing(true);
     setTimeout(() => router.back(), 0);
   };

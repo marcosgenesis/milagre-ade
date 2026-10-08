@@ -30,6 +30,7 @@ import { SimulatorChip } from "../simulator";
 import { PortsChip } from "../ports";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { ChatReply } from "../chat-reply";
+import { handoffSides } from "../handoff-sides";
 import { HandoffDivider } from "../handoff-divider";
 import { showBrief } from "../handoff-brief-store";
 import { isHandoff } from "@milagre/shared/handoff";
@@ -38,7 +39,7 @@ import { BottomFade, EdgeFade } from "../bottom-fade";
 import { useDotBackground } from "../dot-background";
 import { Approval, Questions } from "../questions";
 import { AgentControls, PermissionChip } from "../agent-controls";
-import { modelsFor, selectedModel, sendOptions } from "../turn-options";
+import { afterSend, modelsFor, selectedModel, sendOptions, turnTarget } from "../turn-options";
 import { Icon } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
@@ -181,13 +182,16 @@ export default function ChatScreen() {
   // Long Chats mount their newest messages first; earlier ones load on request.
   const [shown, setShown] = useState({ id: params.id, count: PAGE });
   const visible = shown.id === params.id ? shown.count : PAGE;
+  const handoffModels = useMemo(() => [...modelsFor("claude", session.models), ...modelsFor("codex", session.models)], [session.models]);
   const navigationItems = useMemo(
     () =>
       messageNavigationIndices(messages.length).map((index) => ({
         index,
-        label: `Go to ${messages[index].role} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
+        label: isHandoff(messages[index])
+          ? `Go to ${handoffSides(messages[index].context, handoffModels).restored ? "context restored" : "context handoff"} ${index + 1} of ${messages.length}.`
+          : `Go to ${messages[index].role} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
       })),
-    [messages],
+    [messages, handoffModels],
   );
   const messagePositions = useRef(new Map<number, number>());
   const navigationTarget = useRef<number | null>(null);
@@ -216,7 +220,6 @@ export default function ChatScreen() {
       }
     }
   };
-  const handoffModels = useMemo(() => [...modelsFor("claude", session.models), ...modelsFor("codex", session.models)], [session.models]);
   const openBrief = useCallback((brief: string) => {
     showBrief(brief);
     router.push("/handoff-brief");
@@ -279,8 +282,9 @@ export default function ChatScreen() {
   const run = chat ? runs.runs[chatId] : undefined;
   const contextUsage = run?.contextUsage ?? chat?.contextUsage;
   const preferences = composer.preferences[chatId] || composer.defaults;
-  const actualProvider = composer.preferences[chatId]?.provider ?? chat?.provider ?? composer.defaults.provider;
-  const model = selectedModel(actualProvider, preferences.model || (chat ? lastUserModel(project.state, chat.id) : ""), session.models);
+  const turn = turnTarget(composer.preferences[chatId], chat?.provider, composer.defaults);
+  const actualProvider = turn.provider;
+  const model = selectedModel(actualProvider, turn.model || (chat && !turn.picked ? lastUserModel(project.state, chat.id) : ""), session.models);
   const worktreeId = chat?.worktree_id ?? Number(params.worktreeId);
   const worktree = project.state.worktrees[worktreeId];
   const branches = branchList?.client === client && branchList.path === project.path ? branchList : null;
@@ -447,7 +451,7 @@ export default function ChatScreen() {
         return next;
       });
       composer.setPreferences((current) => {
-        const next = { ...current, [destination]: { ...(current[chatId] || preferences), provider: actualProvider, model: model.id } };
+        const next = { ...current, [destination]: afterSend(current[chatId] || preferences, turn, chat?.provider, model.id) };
         if (destination !== chatId) delete next[chatId];
         return next;
       });
@@ -980,7 +984,13 @@ export default function ChatScreen() {
                     onToggle={() => {
                       router.push({
                         pathname: "/model-sheet",
-                        params: { chatId, model: model.id, provider: actualProvider, ...(run ? { busy: "1" } : {}) },
+                        params: {
+                          chatId,
+                          model: model.id,
+                          provider: actualProvider,
+                          ...(chat?.provider ? { on: chat.provider } : {}),
+                          ...(run ? { busy: "1" } : {}),
+                        },
                       });
                     }}
                   />

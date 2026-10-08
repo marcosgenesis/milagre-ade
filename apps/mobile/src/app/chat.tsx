@@ -17,13 +17,14 @@ import {
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
-import type { ChatMessage } from "@milagre/shared/model";
+import type { ChatMessage, PullRequestActionContext } from "@milagre/shared/model";
 import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
 import { messageSender } from "@milagre/shared/advisor-result";
 import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 import type { Client, OpenProject } from "../client";
 import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
-import { blockerPrompt, pullRequestBlockers } from "@milagre/shared/pr-blockers";
+import { pullRequestBlockers } from "@milagre/shared/pr-blockers";
+import { pullRequestActionBody, pullRequestActionContext } from "@milagre/shared/pr-action";
 import { useComposer, usePendingChats, useSession } from "../session";
 import { pickAttachments } from "../attachment-picker";
 import { appendAttachments, attachmentPrompt, prepareAttachments } from "../attachments";
@@ -376,7 +377,7 @@ export default function ChatScreen() {
     });
   };
   /** Whether the message went: "busy" when it wasn't tried, the Chat being busy. */
-  async function send(body = draft, withAttachments = true): Promise<boolean | "busy"> {
+  async function send(body = draft, withAttachments = true, prAction?: PullRequestActionContext): Promise<boolean | "busy"> {
     // A turn running now takes this message as a steer, on the provider it already runs.
     const steered = Boolean(run);
     if (!body && !(withAttachments && attachments.length)) return false;
@@ -401,6 +402,7 @@ export default function ChatScreen() {
       files: sending.filter((item) => !item.image).map((item) => item.path || item.name),
       model: model.id,
       provider: actualProvider,
+      context: prAction ?? null,
     });
     pendingStore.setPendingChats((current) => ({
       ...current,
@@ -464,6 +466,7 @@ export default function ChatScreen() {
               ...media,
               prompt: attachmentPrompt(sent, media.files),
               ...options,
+              ...(prAction ? { prAction: { action: prAction.action, pr: prAction.pr, url: prAction.url } } : {}),
             },
           ]);
       accepted = true;
@@ -608,6 +611,8 @@ export default function ChatScreen() {
     }
   }
   const blockers = pullRequestBlockers(pr);
+  // The pill's action, checked here too: a PR without a number yet shows no pill instead of sending a broken one.
+  const prActionRequest = pr && blockers[0] ? pullRequestActionContext({ action: blockers[0], pr: pr.number, url: pr.url }) : null;
   const agents = (chat?.subagents || []).filter((agent) => !agent.archived);
   const diff = worktree?.diff;
   const header = (
@@ -828,8 +833,8 @@ export default function ChatScreen() {
           >
             {(!question || answering) && (
               <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 4, gap: 8 }}>
-                {pr && blockers.length > 0 && chat && (
-                  <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />
+                {pr && prActionRequest && chat && (
+                  <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(pullRequestActionBody(prActionRequest), false, prActionRequest)} />
                 )}
                 <View style={{ flex: 1 }} />
                 <BrowserChip chatId={params.id ? chatId : undefined} />

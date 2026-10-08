@@ -4,7 +4,7 @@ const { EventEmitter } = require("node:events");
 const fsSync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { createUsageReader, readClaudeUsage, readCodexUsage } = require("./usage.cjs");
+const { createUsageReader, readClaudeUsage, readCodexUsage, readAntigravityUsage } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
 const TOKEN = "sk-ant-oat01-SECRET-TOKEN";
@@ -361,7 +361,7 @@ test("shares one in-flight read between concurrent callers", async () => {
   const snapshot = await first;
   assert.deepEqual(
     snapshot.providers.map((item) => item.provider),
-    ["claude", "codex"],
+    ["claude", "codex", "antigravity"],
   );
   assert.deepEqual([claudeReads, codexReads], [1, 1]);
 
@@ -625,4 +625,23 @@ test("the store keeps a banked reset count and drops zero or junk", () => {
   assert.equal(cachedSnapshot(store, NOW).providers[0].bankedResets, 2);
   store.setLast("codex", { windows, updatedAt: "2026-10-01T19:10:00.000Z", bankedResets: "lots" });
   assert.equal("bankedResets" in cachedSnapshot(store, NOW).providers[0], false);
+});
+
+test("Antigravity usage is always unavailable and is never cached as numbers", async () => {
+  const updatedAt = new Date(NOW).toISOString();
+  assert.deepEqual(await readAntigravityUsage({ now: () => NOW }), {
+    provider: "antigravity",
+    status: "unavailable",
+    windows: [],
+    updatedAt,
+    message: "Google doesn't report Antigravity quota.",
+  });
+  const readUsage = createUsageReader({
+    now: () => NOW,
+    readClaude: async () => ({ provider: "claude", status: "ok", windows: [], updatedAt }),
+    readCodex: async () => ({ provider: "codex", status: "ok", windows: [], updatedAt }),
+  });
+  const antigravity = (await readUsage()).providers.find((item) => item.provider === "antigravity");
+  assert.equal(antigravity.status, "unavailable");
+  assert.equal(antigravity.message, "Google doesn't report Antigravity quota.");
 });

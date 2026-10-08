@@ -1,5 +1,5 @@
 export type SessionStatus = "Created" | "Running" | "Stopped";
-export type ModelProvider = "codex" | "claude";
+export type ModelProvider = "codex" | "claude" | "antigravity";
 export type PermissionMode = "ask" | "auto" | "full";
 /** Where a new chat runs: the selected checkout, or a fresh git worktree. */
 export type Isolation = "local" | "worktree";

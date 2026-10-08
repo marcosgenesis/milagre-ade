@@ -110,4 +110,4 @@ function createComputersStore({ file, now = Date.now }) {
   };
 }
 
-module.exports = { createComputersStore, lanRoutesFrom, LAN_ROUTE };
+module.exports = { createComputersStore, lanRoutesFrom };

@@ -556,4 +556,4 @@ function createComputers({
   };
 }
 
-module.exports = { createComputers, OFFLINE_AFTER_MS };
+module.exports = { createComputers };

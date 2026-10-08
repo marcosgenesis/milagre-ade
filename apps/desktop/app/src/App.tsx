@@ -10,7 +10,7 @@ import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shar
 import { reportChatAction } from "./lib/chat-action";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { cliName } from "@milagre/shared/providers";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import {
   ChatMessage,
@@ -91,7 +91,7 @@ import { messageCommands } from "./lib/message-commands";
 import type { RecentProject } from "./lib/project-list";
 import { useProjectImages } from "./lib/project-images";
 import { isModalOpen } from "./lib/modal";
-import { createDraftStore } from "./lib/draft-store";
+import { createDraftStore, draftKey } from "./lib/draft-store";
 import { restoredChatsNotice } from "./lib/restored-chats";
 import { lazyView } from "./lib/lazy-view";
 import { MediaLightbox } from "./components/motion/LazyMediaLightbox";
@@ -151,13 +151,23 @@ function App() {
   /** The open project's latest state. */
   const openState = () => (projectRef.current ? statesRef.current[projectRef.current.path] : undefined);
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<number | null>(null);
-  const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
+  const [selectedSessionId, setSelectedSessionState] = useState<number | null>(null);
   const selectedSessionRef = useRef<number | null>(null);
   selectedSessionRef.current = selectedSessionId;
   // The draft lives outside React state: a keystroke re-renders the composer (DraftChatComposer), not the whole app.
   // oxlint-disable-next-line react/use-memo -- useMemo is given a factory function reference so the instance is created once
   const draftStore = useMemo(createDraftStore, []);
   const setDraft = draftStore.set;
+  // Each Chat, and each project's new-chat screen, keeps its own draft. The store switches with the selection, before
+  // the render, so a draft written right after picking a Chat lands in that Chat.
+  function setSelectedSessionId(next: SetStateAction<number | null>) {
+    const value = typeof next === "function" ? next(selectedSessionRef.current) : next;
+    selectedSessionRef.current = value;
+    draftStore.select(draftKey(projectRef.current?.path ?? "", value));
+    setSelectedSessionState(value);
+  }
+  // Catches a project change that did not go through the setter above.
+  useLayoutEffect(() => draftStore.select(draftKey(project?.path ?? "", selectedSessionId)), [project?.path, selectedSessionId]);
   const [selectedModel, setSelectedModel] = useState<ModelOption>(() =>
     resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)),
   );
@@ -942,7 +952,6 @@ function App() {
     const latest = openState();
     if (latest && projectRef.current) restoreProjectChoices(latest, projectRef.current.path);
     setSelectedSessionId(null);
-    setDraft("");
     setNewChatError(null);
     setView("chat");
     // The composer may only mount on this render (coming from settings), so focus after it lands.
@@ -977,7 +986,6 @@ function App() {
       selectInitialChat(nextProject.state, nextProject.path);
       const remembered = scopeDrafts.read({ kind: "project", projectPath: nextProject.path });
       if (remembered.sessionId !== null && nextProject.state.sessions[remembered.sessionId]) setSelectedSessionId(remembered.sessionId);
-      setDraft(remembered.text);
       setGitDialog(null);
       setView("chat");
     });
@@ -1161,7 +1169,11 @@ function App() {
           : pending,
       );
       if (stillHere()) {
+        // Text typed while a new chat was being created belongs to that chat, not to the next new one.
+        const carried = draftStore.get();
+        setDraft("");
         setSelectedSessionId(sessionId);
+        setDraft([draftStore.get(), carried].filter(Boolean).join("\n\n"));
         setSelectedWorktreeId(openState()?.sessions[sessionId]?.worktree_id ?? target.worktreeId);
       }
       return true;

@@ -9,7 +9,7 @@ import { DiffToolbar, useDiffPreferences } from "./changes/DiffPrefs";
 import { useDiffComments } from "./changes/useDiffComments";
 import { formatCommentsMessage } from "../lib/diff-comments";
 import { messageCommands } from "../lib/message-commands";
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import type { AgentPorts, LinkState, ModelProvider, OpenLink, WorktreeBinding } from "@milagre/shared/model";
 import { chatKeyForScope, scopeKey } from "@milagre/shared/chat-scopes";
 import { chatTitle } from "@milagre/shared/chats";
@@ -21,7 +21,7 @@ import { DotBackground } from "./DotBackground";
 import SidebarNav from "./SidebarNav";
 import { runKeys } from "../lib/sidebar-scopes";
 import { DraftChatComposer } from "./DraftChatComposer";
-import { createDraftStore } from "../lib/draft-store";
+import { createDraftStore, draftKey } from "../lib/draft-store";
 import { createScopeDrafts, linkChatRows, memberWorktreeForAction } from "../lib/link-scope";
 import { usePastedImages } from "./usePastedImages";
 import type { useAgentRuns } from "./useAgentRuns";
@@ -147,7 +147,10 @@ export function LinkWorkspace({
   latest.current.sessionId = sessionId;
   useEffect(() => {
     latest.current.active = true;
+    // The text saved when this Link was last left belongs to the Chat that was open then.
+    draftStore.select(draftKey(owner, saved.sessionId));
     draftStore.set(saved.text);
+    draftStore.select(draftKey(owner, latest.current.sessionId));
     const unsubscribe = draftStore.subscribe(() => {
       latest.current.text = draftStore.get();
     });
@@ -157,6 +160,8 @@ export function LinkWorkspace({
       unsubscribe();
     };
   }, [owner]);
+  // Each Chat keeps its own draft; a send clears the one it came from before the selection moves on.
+  useLayoutEffect(() => draftStore.select(draftKey(owner, sessionId)), [draftStore, sessionId]);
   const imageDraftRef = useRef(imageDraft);
   imageDraftRef.current = imageDraft;
   useEffect(
@@ -241,7 +246,6 @@ export function LinkWorkspace({
     drafts.newSelection(scope);
     setCanvasOpen(false);
     setSessionId(id);
-    draftStore.set("");
     imageDraft.clear();
     setError(null);
     setMemberId("");

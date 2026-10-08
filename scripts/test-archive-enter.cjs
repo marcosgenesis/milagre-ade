@@ -102,6 +102,14 @@ async function browserChecks() {
     await waitFor('!document.querySelector("[data-chat-menu]")');
 
     assert.ok(await evaluate('document.querySelector("[role=status]")?.textContent.includes("Archiving")'), "Pending archive is visible after the menu closes");
+    assert.ok(
+      await evaluate(`(() => {
+        const row = document.querySelector("[data-row]").getBoundingClientRect();
+        const box = document.querySelector("[role=status]").getBoundingClientRect();
+        return document.querySelector("[data-row]").disabled && box.top <= row.top && box.bottom >= row.bottom && box.width >= row.width;
+      })()`),
+      "The progress covers the whole row, which takes no clicks",
+    );
     await shot("archiving.png");
     await click('[aria-label="Chat actions"]');
     assert.equal(await evaluate('!!document.querySelector("[data-chat-menu]")'), false, "Pending archive cannot be repeated");

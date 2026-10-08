@@ -11,8 +11,6 @@ import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
 import { useDismiss } from "../lib/use-dismiss";
 import { ProviderLogo } from "./ProviderLogo";
-import { HandoverBriefChip, HandoverRow } from "./Handover";
-import { handoverBlocker, otherProvider, providerLabel } from "../lib/handover";
 import { Attachments } from "./Attachments";
 import { useProjectFiles } from "./useProjectFiles";
 import { promptToken, fileMentionPath, removePromptToken, insertPromptToken } from "../lib/file-mentions";
@@ -50,13 +48,6 @@ interface PromptComposerProps {
   sendBlocked: boolean;
   /** A turn is running in this chat; a message sent now steers it. */
   running?: boolean;
-  lockedProvider?: ModelProvider;
-  /** Opens a new chat on the other provider with this chat's context. */
-  onHandover?: (provider: ModelProvider) => void;
-  /** The chat has messages, so the model picker offers a handover instead of the provider tabs. A locked draft chat does not. */
-  canHandover?: boolean;
-  /** A handed-over chat's brief, attached to its first message: it can be sent with no text, and edited before. */
-  handoverBrief?: { brief: string; onSave: (text: string) => Promise<void> };
   /** The models each agent offers, or the maintained list until it reports them. */
   models: ModelOption[];
   /** How each agent's CLI stands; a problem is flagged on its tab and in a notice above the models. */
@@ -147,10 +138,6 @@ export function PromptComposer({
   onStop,
   sendBlocked,
   running = false,
-  lockedProvider,
-  onHandover,
-  canHandover = false,
-  handoverBrief,
   models,
   cliStatus,
   onModelPickerOpen,
@@ -182,14 +169,14 @@ export function PromptComposer({
   const orchestrating = ultracode || effort === "ultra";
   const effortLabel = ultracode ? "Ultracode" : effortName;
   const canUseFastMode = capability.fastMode;
-  const [provider, setProvider] = useState<ModelProvider>(lockedProvider ?? selectedModel.provider);
-  // The provider tab follows the open chat, and a locked chat always opens on its own provider.
+  const [provider, setProvider] = useState<ModelProvider>(selectedModel.provider);
+  // The provider tab follows the selected model, which follows the open chat.
   useEffect(() => {
-    setProvider(lockedProvider ?? selectedModel.provider);
-  }, [lockedProvider, selectedModel.provider]);
+    setProvider(selectedModel.provider);
+  }, [selectedModel.provider]);
   useEffect(() => {
     if (modelOpen) {
-      setProvider(lockedProvider ?? selectedModel.provider);
+      setProvider(selectedModel.provider);
       onModelPickerOpen();
     }
   }, [modelOpen]);
@@ -253,7 +240,7 @@ export function PromptComposer({
   const providerNotice = cliNotice(cliStatus?.[provider]);
   const modelRows = models.filter((model) => model.provider === provider && `${model.name} ${model.id}`.toLowerCase().includes(query.toLowerCase()));
   const canStop = running && Boolean(onStop);
-  const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0 || handoverBrief !== undefined;
+  const canSend = draft.trim().length > 0 || imageDraft.images.length > 0 || imageDraft.files.length > 0;
 
   useEffect(() => {
     setActive(0);
@@ -500,41 +487,26 @@ export function PromptComposer({
             className="absolute w-[360px]"
             style={anchorStyle}
             header={
-              lockedProvider !== undefined && onHandover && canHandover ? (
-                <HandoverRow
-                  provider={otherProvider(lockedProvider)}
-                  blocked={handoverBlocker({ running, cli: cliMessage(cliStatus?.[otherProvider(lockedProvider)]) ?? null })}
-                  onClick={() => {
-                    setModelOpen(false);
-                    onHandover(otherProvider(lockedProvider));
-                  }}
-                />
-              ) : (
-                <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
-                  {PROVIDERS.map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      disabled={lockedProvider !== undefined && item !== lockedProvider}
-                      title={
-                        lockedProvider !== undefined && item !== lockedProvider
-                          ? `This chat runs on ${providerName(lockedProvider)}. Start a new chat to use ${providerName(item)}.`
-                          : (cliMessage(cliStatus?.[item]) ?? undefined)
-                      }
-                      className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`}
-                      onClick={() => setProvider(item)}
-                    >
-                      <ProviderLogo provider={item} size={14} />
-                      {providerName(item)}
-                      {cliTabLabel(cliStatus?.[item]) ? (
-                        <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span>
-                      ) : (
-                        <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )
+              <div className="grid grid-cols-2 gap-1 rounded-control bg-inset p-1">
+                {PROVIDERS.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    disabled={Boolean(cliMessage(cliStatus?.[item]))}
+                    title={cliMessage(cliStatus?.[item]) ?? undefined}
+                    className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`}
+                    onClick={() => setProvider(item)}
+                  >
+                    <ProviderLogo provider={item} size={14} />
+                    {providerName(item)}
+                    {cliTabLabel(cliStatus?.[item]) ? (
+                      <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span>
+                    ) : (
+                      <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
             }
           >
             {providerNotice && (
@@ -672,7 +644,6 @@ export function PromptComposer({
             files={imageDraft.files}
             removeImage={imageDraft.remove}
             removeFile={imageDraft.removeFile}
-            leading={handoverBrief && <HandoverBriefChip brief={handoverBrief.brief} onSave={handoverBrief.onSave} />}
           />
           {imageDraft.loading && (
             <div role="status" className="px-2 text-xs text-ink-3">
@@ -723,13 +694,7 @@ export function PromptComposer({
                   setPlusOpen(false);
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder={
-                  running
-                    ? "Steer the agent…"
-                    : handoverBrief && lockedProvider
-                      ? `Add instructions for ${providerLabel(lockedProvider)}, or send the brief as is`
-                      : "Prompt or mention a file with @"
-                }
+                placeholder={running ? "Steer the agent…" : "Prompt or mention a file with @"}
                 aria-label="Prompt"
                 className={`${inputTextClass} ${expanded ? "" : "placeholder-shown:whitespace-nowrap placeholder:truncate"} ${hasSkill ? "prompt-input-highlighted" : "text-ink"} relative block min-w-0 w-full resize-none overflow-hidden bg-transparent caret-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`}
               />

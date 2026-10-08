@@ -3890,6 +3890,7 @@ function artifactHost(client, pushes = [], router = { back() {} }) {
       "react-native": { Text: "Text", View: "View", Pressable: "Pressable", TextInput: "TextInput" },
       "expo-router": { router: { back: () => router.back(), push: (route) => pushes.push(route) } },
       "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
+      "react-native-keyboard-controller": { KeyboardAvoidingView: "KeyboardAvoidingView" },
       "@expo/dom-webview": { DomWebView: "DomWebView" },
       "expo-file-system": { File, Paths: { cache: "/cache" } },
       "@hugeicons/core-free-icons": {},

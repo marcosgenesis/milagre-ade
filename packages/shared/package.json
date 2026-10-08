@@ -17,6 +17,7 @@
     "src/diff-layout.ts",
     "src/usage.ts",
     "src/simulator.ts",
+    "src/browser.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
     "src/message-search.ts",
@@ -101,6 +102,11 @@
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
       "default": "./src/simulator-receiver.mjs"
+    },
+    "./browser": "./src/browser.ts",
+    "./browser-receiver": {
+      "types": "./src/browser-receiver.d.mts",
+      "default": "./src/browser-receiver.mjs"
     },
     "./message-navigation": "./src/message-navigation.ts",
     "./message-search": "./src/message-search.ts",

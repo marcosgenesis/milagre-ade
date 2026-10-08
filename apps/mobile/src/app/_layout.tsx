@@ -80,6 +80,7 @@ export default function Layout() {
                       name="simulator-sheet"
                       options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
                     />
+                    <Stack.Screen name="browser-sheet" options={{ ...sheet, sheetAllowedDetents: [1] }} />
                     {/* Full screen too: a design scrolls and takes taps of its own. */}
                     <Stack.Screen
                       name="artifact-sheet"

@@ -28,7 +28,7 @@
     "packages/core": {
       "entry": ["src/*.cjs", "src/agents/*.cjs"],
       "project": ["src/**"],
-      "ignore": ["src/simulators.d.cts"]
+      "ignore": ["src/simulators.d.cts", "src/browsers.d.cts"]
     },
     "packages/shared": {
       "entry": ["src/*.ts", "src/*.mjs"],

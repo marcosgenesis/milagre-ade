@@ -47,7 +47,8 @@ function createChatScopes({ projects, links, validateLink }) {
       for (const member of session.worktrees) {
         try {
           if ((await fs.realpath(member.worktreePath)) !== member.worktreePath) throw new Error("Worktree target changed");
-          const registered = (await git.worktreeList(member.projectPath)).find((entry) => entry.path === member.worktreePath && entry.name === member.branch);
+          // The branch is not part of the identity: the agent may switch or rename it (fix/..., renameWorktreeBranch).
+          const registered = (await git.worktreeList(member.projectPath)).find((entry) => entry.path === member.worktreePath);
           if (!registered || (await git.commonDir(member.worktreePath)) !== (await git.commonDir(member.projectPath)))
             throw new Error("Worktree identity changed");
           if ((await fs.realpath(path.join(session.workspacePath, member.alias))) !== member.worktreePath) throw new Error("Workspace alias changed");

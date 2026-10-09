@@ -22,14 +22,22 @@ export function useAttention(): string[] {
   useEffect(() => {
     if (!client) return;
     let live = true;
+    // One call at a time: on a busy Mac a slow answer would otherwise stack a new call every 5 s.
+    let busy = false;
     const load = () => {
-      if (AppState.currentState !== "active") return;
-      client.attention().then(
-        (keys) => {
-          if (live) setFound((previous) => (previous.client === client && previous.keys.join("\n") === keys.join("\n") ? previous : { client, keys }));
-        },
-        () => {},
-      );
+      if (busy || AppState.currentState !== "active") return;
+      busy = true;
+      client
+        .attention()
+        .then(
+          (keys) => {
+            if (live) setFound((previous) => (previous.client === client && previous.keys.join("\n") === keys.join("\n") ? previous : { client, keys }));
+          },
+          () => {},
+        )
+        .finally(() => {
+          busy = false;
+        });
     };
     load();
     const timer = setInterval(load, 5000);

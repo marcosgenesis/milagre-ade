@@ -6,6 +6,8 @@ import { mediaKind, mediaUrl } from "../lib/media";
 import type { LightboxItem } from "./motion/MediaLightbox";
 import { lazyView } from "../lib/lazy-view";
 import { MediaLightbox } from "./motion/LazyMediaLightbox";
+import { isRemoteKey, useScope } from "../lib/computer-bridge";
+import { useRemoteMedia } from "../lib/remote-media";
 
 const AttachmentPreview = lazyView(() => import("./AttachmentPreview").then((module) => module.AttachmentPreview));
 
@@ -28,13 +30,21 @@ export function Attachments({
   // The open item's index among the media; its thumbnail hides while the viewer shows it.
   const [open, setOpen] = useState<number | null>(null);
   const thumbs = useRef(new Map<string, HTMLButtonElement>());
+  // A remote chat's images come from its computer; its other files have no preview here.
+  const scope = useScope();
+  const remote = isRemoteKey(scope);
+  const remoteSources = useRemoteMedia(remote ? scope : null, [
+    ...images.flatMap((image) => (image.dataUrl || !image.path ? [] : [image.path])),
+    ...files.filter((path) => mediaKind(path) === "image"),
+  ]);
+  const sourceOf = (path: string) => (remote ? (remoteSources[path] ?? "") : mediaUrl(path));
   const items = [
     ...images.map((image) => ({
       id: image.id,
       name: image.name,
-      src: image.dataUrl ?? mediaUrl(image.path ?? ""),
+      src: image.dataUrl ?? sourceOf(image.path ?? ""),
       kind: "image" as const,
-      file: image.path ?? image.dataUrl,
+      file: remote && image.path ? (remoteSources[image.path] ?? image.dataUrl) : (image.path ?? image.dataUrl),
       remove: image.path && removeFile ? () => removeFile(image.path!) : removeImage ? () => removeImage(image.id) : undefined,
     })),
     ...files
@@ -42,9 +52,9 @@ export function Attachments({
       .map((path) => ({
         id: path,
         name: path.split("/").at(-1) || path,
-        src: mediaUrl(path),
-        kind: mediaKind(path),
-        file: mediaKind(path) === "image" ? path : undefined,
+        src: sourceOf(path),
+        kind: remote && mediaKind(path) !== "image" ? null : mediaKind(path),
+        file: mediaKind(path) !== "image" ? undefined : remote ? remoteSources[path] : path,
         remove: removeFile ? () => removeFile(path) : undefined,
       })),
   ];

@@ -144,6 +144,10 @@ function makeBridge(invoke, listen, send) {
     openInEditor: (request) => invoke("editor:open", request),
     getCurrentProject: () => invoke("project:current"),
     openProject: () => invoke("project:open"),
+    /** A folder on this computer, opened as a Project without the folder dialog (the remote folder picker). */
+    openProjectAt: (folder) => invoke("project:open-at", folder, { takeNotice: true }),
+    listDirs: (request) => invoke("fs:list-dirs", request),
+    readMedia: (request) => invoke("media:read", request),
     listRecentProjects: () => invoke("project:recent"),
     setProjectHidden: (projectPath, hidden) => invoke("project:set-hidden", projectPath, hidden),
     readProject: (projectPath) => invoke("project:read", projectPath),

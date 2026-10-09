@@ -6,7 +6,7 @@ import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
 import type { LinkState, NamedProjectLink, OpenLink } from "@milagre/shared/model";
 import { scopeKey, isLinkScopeKey, scopeFromKey, LOCAL_COMPUTER, computerOfKey } from "@milagre/shared/chat-scopes";
-import { BridgeContext, bridgeFor, bridgeForKey, forgetBridge, isRemoteKey, onAnyAgentEvent } from "./lib/computer-bridge";
+import { BridgeContext, ScopeContext, bridgeFor, bridgeForKey, forgetBridge, isRemoteKey, onAnyAgentEvent } from "./lib/computer-bridge";
 import type { WorktreeRename } from "@milagre/shared/project-edits";
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
@@ -1981,394 +1981,396 @@ function App() {
 
   return (
     <BridgeContext.Provider value={bridgeForKey(project.path)}>
-      <DotBackground key="app">
-        {hostConnection.connected && hostConnection.hostOutdated && (
-          <div
-            role="status"
-            data-host-outdated
-            className="fixed inset-x-4 top-12 z-50 mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]"
-          >
-            <span>{hostConnection.message ?? "Restart Milagre's background host to load large projects."}</span>
-            <button
-              type="button"
-              disabled={restartingHost}
-              onClick={() => {
-                setRestartingHost(true);
-                void window.milagre
-                  .restartHost()
-                  .catch((error) => setNotice(`Couldn't restart the host: ${ipcErrorMessage(error)}`))
-                  .finally(() => setRestartingHost(false));
-              }}
-              className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40"
+      <ScopeContext.Provider value={project.path}>
+        <DotBackground key="app">
+          {hostConnection.connected && hostConnection.hostOutdated && (
+            <div
+              role="status"
+              data-host-outdated
+              className="fixed inset-x-4 top-12 z-50 mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]"
             >
-              {restartingHost ? "Restarting…" : "Restart host"}
-            </button>
-          </div>
-        )}
-        {!hostConnection.connected && (
-          <div
-            role="status"
-            data-host-disconnected
-            className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]"
-          >
-            {hostConnection.failed ? (
-              <>
-                <p className="font-medium">Couldn't restart Milagre's background host</p>
-                <p className="mt-1 text-ink-2">{hostConnection.message} Your draft is kept here. Quit and reopen Milagre to try again.</p>
-              </>
-            ) : (
-              <>
-                <p className="font-medium">Reconnecting to your computer</p>
-                <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
-              </>
-            )}
-          </div>
-        )}
-        <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
-        {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
-        <PanelToggles right={changesAvailable ? 12 + CORNER_PITCH : 12} />
-        {showAttentionButton && attentionChats[0] && (
-          <AttentionButton
-            label={attentionLabel(attentionPaths.map(projectName))}
-            items={attentionTitles.map((item) => ({
-              ...item,
-              asking: !agentRuns.runs[item.key]?.approvals.length,
-              waitingFor: waitingFor(agentRuns.runs[item.key]),
-            }))}
-            offset={(changesAvailable ? 1 : 0) + sidePanelCount(sidePanels)}
-            onOpen={openChatByKey}
-          />
-        )}
-        <div
-          className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
-          onAnimationEnd={(event) => {
-            if (event.animationName === "app-enter-main") setAppEntered(true);
-          }}
-        >
-          <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" || view === "canvas" ? "flex" : "hidden"}`}>
-            <SidebarNav
-              fill
-              workspaceName={project.name}
-              workspaceImage={projectImage(project.path)}
-              onSwitchLink={(id) => void selectLink(id)}
-              onLinkProject={() => setLinkDialogOpen(true)}
-              onAddComputer={() => setAddComputerOpen(true)}
-              onOpenComputerSettings={openComputerSettings}
-              onEditLink={(id) => void editLink(id)}
-              onOpenProject={openProjectFromSidebar}
-              recents={chats}
-              activeId={
-                view === "chat"
-                  ? pendingHere && pendingSend
-                    ? String(pendingCanonicalId ?? pendingSend.session.id)
-                    : selectedSession
-                      ? String(selectedSession.id)
-                      : null
-                  : null
-              }
-              onPick={pickChat}
-              chatActions={chatActions}
-              onNewChat={startNewChatFromSidebar}
-              onOpenSettings={openSettings}
-              onOpenCanvas={openCanvas}
-              canvasActive={view === "canvas"}
-              onOpenCommands={openCommandPalette}
-              hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
-              projectPath={project.path}
-              onSwitchProject={switchProjectFromSidebar}
-              attentionPaths={attentionPaths}
-              onOpenProjectSettings={openProjectSettings}
-              onNewChatInScope={newChatInScope}
-              usage={sidebarUsage}
-              runningKeys={sidebarRunKeys.running}
-              waitingKeys={sidebarRunKeys.waiting}
-              askingKeys={sidebarRunKeys.asking}
-              onOpenScopeChat={openScopeChat}
-            />
-          </div>
-          {view === "settings" && (
-            <div className="flex shrink-0 py-3 pl-3">
-              <SettingsNav
-                section={settingsSection}
-                project={settingsProject ?? project}
-                current={project}
-                onSelect={setSettingsSection}
-                computerId={settingsComputer ?? undefined}
-                onSelectComputer={selectSettingsComputer}
-                onSelectProject={(picked) => {
-                  setSettingsProject(picked);
-                  setSettingsSection("project");
+              <span>{hostConnection.message ?? "Restart Milagre's background host to load large projects."}</span>
+              <button
+                type="button"
+                disabled={restartingHost}
+                onClick={() => {
+                  setRestartingHost(true);
+                  void window.milagre
+                    .restartHost()
+                    .catch((error) => setNotice(`Couldn't restart the host: ${ipcErrorMessage(error)}`))
+                    .finally(() => setRestartingHost(false));
                 }}
-                onBack={() => setView("chat")}
-              />
+                className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40"
+              >
+                {restartingHost ? "Restarting…" : "Restart host"}
+              </button>
             </div>
           )}
-
-          <main data-workspace-main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-            <DiffBar
-              open={diffShowing}
-              onBack={changes.closeDiff}
-              send={{ count: diffComments.sendable.length, onSend: () => void sendDiffComments() }}
-              trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />}
+          {!hostConnection.connected && (
+            <div
+              role="status"
+              data-host-disconnected
+              className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]"
+            >
+              {hostConnection.failed ? (
+                <>
+                  <p className="font-medium">Couldn't restart Milagre's background host</p>
+                  <p className="mt-1 text-ink-2">{hostConnection.message} Your draft is kept here. Quit and reopen Milagre to try again.</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium">Reconnecting to your computer</p>
+                  <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
+                </>
+              )}
+            </div>
+          )}
+          <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
+          {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+          <PanelToggles right={changesAvailable ? 12 + CORNER_PITCH : 12} />
+          {showAttentionButton && attentionChats[0] && (
+            <AttentionButton
+              label={attentionLabel(attentionPaths.map(projectName))}
+              items={attentionTitles.map((item) => ({
+                ...item,
+                asking: !agentRuns.runs[item.key]?.approvals.length,
+                waitingFor: waitingFor(agentRuns.runs[item.key]),
+              }))}
+              offset={(changesAvailable ? 1 : 0) + sidePanelCount(sidePanels)}
+              onOpen={openChatByKey}
             />
-            <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
-              {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} comments={diffComments} />}
-            </AnimatePresence>
+          )}
+          <div
+            className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
+            onAnimationEnd={(event) => {
+              if (event.animationName === "app-enter-main") setAppEntered(true);
+            }}
+          >
+            <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" || view === "canvas" ? "flex" : "hidden"}`}>
+              <SidebarNav
+                fill
+                workspaceName={project.name}
+                workspaceImage={projectImage(project.path)}
+                onSwitchLink={(id) => void selectLink(id)}
+                onLinkProject={() => setLinkDialogOpen(true)}
+                onAddComputer={() => setAddComputerOpen(true)}
+                onOpenComputerSettings={openComputerSettings}
+                onEditLink={(id) => void editLink(id)}
+                onOpenProject={openProjectFromSidebar}
+                recents={chats}
+                activeId={
+                  view === "chat"
+                    ? pendingHere && pendingSend
+                      ? String(pendingCanonicalId ?? pendingSend.session.id)
+                      : selectedSession
+                        ? String(selectedSession.id)
+                        : null
+                    : null
+                }
+                onPick={pickChat}
+                chatActions={chatActions}
+                onNewChat={startNewChatFromSidebar}
+                onOpenSettings={openSettings}
+                onOpenCanvas={openCanvas}
+                canvasActive={view === "canvas"}
+                onOpenCommands={openCommandPalette}
+                hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
+                projectPath={project.path}
+                onSwitchProject={switchProjectFromSidebar}
+                attentionPaths={attentionPaths}
+                onOpenProjectSettings={openProjectSettings}
+                onNewChatInScope={newChatInScope}
+                usage={sidebarUsage}
+                runningKeys={sidebarRunKeys.running}
+                waitingKeys={sidebarRunKeys.waiting}
+                askingKeys={sidebarRunKeys.asking}
+                onOpenScopeChat={openScopeChat}
+              />
+            </div>
             {view === "settings" && (
-              <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-                {notice && (
-                  <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>
-                    {notice}
-                  </NoticeCard>
-                )}
-                <SettingsPanel
+              <div className="flex shrink-0 py-3 pl-3">
+                <SettingsNav
                   section={settingsSection}
                   project={settingsProject ?? project}
+                  current={project}
+                  onSelect={setSettingsSection}
                   computerId={settingsComputer ?? undefined}
-                  models={models}
-                  update={update}
-                  onSectionChange={setSettingsSection}
+                  onSelectComputer={selectSettingsComputer}
+                  onSelectProject={(picked) => {
+                    setSettingsProject(picked);
+                    setSettingsSection("project");
+                  }}
+                  onBack={() => setView("chat")}
                 />
               </div>
             )}
-            {view === "canvas" && (
-              <CanvasView
-                states={states}
-                runs={agentRuns.runs}
-                linkedWork={linkedWork}
-                onOpenChat={(path, id) => void openCanvasChat(path, id)}
-                onBack={() => setView("chat")}
+
+            <main data-workspace-main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+              <DiffBar
+                open={diffShowing}
+                onBack={changes.closeDiff}
+                send={{ count: diffComments.sendable.length, onSend: () => void sendDiffComments() }}
+                trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />}
               />
-            )}
-            {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
-            <div
-              data-chat-pane
-              className={`min-h-0 flex-1 flex-col overflow-hidden ${view === "chat" && !diffPresence.occupied ? "flex" : "hidden"}`}
-              style={{ animation: "fade-in 160ms ease-out" }}
-            >
-              {awayBanner && (
-                <OfflineBanner text={awayBanner} empty={Boolean(lean && selectedSession && !chatWindow.loading && chatWindow.messages.length === 0)} />
+              <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
+                {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} comments={diffComments} />}
+              </AnimatePresence>
+              {view === "settings" && (
+                <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+                  {notice && (
+                    <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>
+                      {notice}
+                    </NoticeCard>
+                  )}
+                  <SettingsPanel
+                    section={settingsSection}
+                    project={settingsProject ?? project}
+                    computerId={settingsComputer ?? undefined}
+                    models={models}
+                    update={update}
+                    onSectionChange={setSettingsSection}
+                  />
+                </div>
               )}
-              <EditorLinks root={isRemoteKey(project.path) ? "" : (selectedWorktree?.path ?? project.path)}>
-                <DraftChatComposer
-                  key={project.path}
-                  store={draftStore}
-                  messages={displayedMessages}
-                  pendingMessageId={pendingHere && pendingCanonicalId === null ? pendingSend?.message.id : undefined}
-                  imageDraft={imageDraft}
-                  projectPath={selectedWorktree?.path ?? project.path}
-                  messageScope={project.path}
-                  earlier={earlierMessages}
-                  onSend={() => void sendMessage()}
-                  onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
-                  onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
-                  pullRequestAction={
-                    selectedSession && selectedPullRequest && pullRequestBlocker && pullRequestActionRequest
-                      ? {
-                          label: BLOCKERS[pullRequestBlocker].action,
-                          tone: BLOCKERS[pullRequestBlocker].tone,
-                          onRun: () => {
-                            dismissBlockerAction(selectedPullRequest, pullRequestBlocker);
-                            void executeSend(pullRequestActionBody(pullRequestActionRequest), permissionMode, [], [], true, pullRequestActionRequest);
-                          },
-                        }
-                      : undefined
-                  }
-                  isSending={isSending}
-                  sendBlocked={preparing || readOnly}
-                  offlineName={readOnly ? (openComputer?.name ?? "That computer") : null}
-                  runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
-                  streamingText={run?.text}
-                  streamingSteps={run?.steps}
-                  subagents={subagents}
-                  onArchiveFinishedSubagents={archiveFinishedChildren}
-                  onArchiveSubagent={archiveChild}
-                  onStopAdvisor={(id) => controlAdvisor("stop", id)}
-                  onRetryAdvisor={(id) => controlAdvisor("retry", id)}
-                  waitingForSubagents={run?.waitingForSubagents}
-                  tasks={run?.tasks}
-                  contextUsage={run?.contextUsage ?? selectedSession?.contextUsage}
-                  ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
-                  agentChatId={project && selectedSession ? chatKey(project.path, selectedSession.id) : undefined}
-                  onStopPort={
-                    project && selectedSession ? (pid) => bridgeForKey(project.path).stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined
-                  }
-                  waitingStepIds={waitingStepIds}
-                  asking={Boolean(run?.questions.length)}
-                  sessionProvider={selectedSession?.provider}
-                  runModelName={run ? (models.find((model) => model.id === run.model)?.name ?? run.model) : undefined}
-                  resume={
-                    project && selectedSession?.resumeTurn
-                      ? {
-                          onContinue: () =>
-                            void bridgeForKey(project.path)
-                              .resumeChat(project.path, selectedSession.id)
-                              .catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)),
-                        }
-                      : undefined
-                  }
-                  onOpenLinkedChat={openLinkedChat}
-                  models={models}
-                  cliStatus={cliStatus}
-                  onModelPickerOpen={refreshCliStatus}
-                  onUpdateCli={handleUpdateCli}
-                  updatingCli={updatingCli}
-                  selectedModel={selectedModel}
-                  onModelChange={chooseModel}
-                  capability={selectedCapability}
-                  effort={effortFor(selectedCapability, effort)}
-                  onEffortChange={setEffort}
-                  ultracode={selectedCapability.ultracode && ultracode}
-                  onUltracodeChange={setUltracode}
-                  fastMode={fastMode}
-                  onFastModeChange={setFastMode}
-                  permissionMode={permissionMode}
-                  onPermissionModeChange={changePermissionMode}
-                  onRecommendationSelect={sendRecommendation}
-                  worktrees={composerWorktrees}
-                  selectedWorktreeId={selectedWorktree?.id}
-                  onWorktreeChange={(id) => {
-                    advanceChatView();
-                    setSelectedWorktreeId(id);
-                    saveChatPreferences(localStorage, project.path, { worktreePath: state.worktrees[id]?.path });
-                  }}
-                  isolation={isolation}
-                  onIsolationChange={(next) => {
-                    preparedTarget.current = null;
-                    setIsolation(next);
-                    saveChatPreferences(localStorage, project.path, { isolation: next });
-                    setNewChatError(null);
-                  }}
-                  branches={branches}
-                  baseBranch={effectiveBaseBranch}
-                  onBaseBranchChange={(branch) => {
-                    preparedTarget.current = null;
-                    setBaseBranch(branch);
-                    saveChatPreferences(localStorage, project.path, { baseBranch: branch });
-                  }}
-                  newChatError={newChatError}
-                  findOpen={findOpen}
-                  findSignal={findSignal}
-                  findSeed={findSeed}
-                  onFindClose={() => setFindOpen(false)}
-                  notice={notice}
-                  onDismissNotice={() => setNotice(null)}
-                  approval={
-                    pendingApproval ? (
-                      <PermissionCard
-                        key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}
-                        request={pendingApproval}
-                        waiting={(run?.approvals.length ?? 1) - 1}
-                        answering={sentDecision(run, pendingApproval.requestId)}
-                        onAnswer={answerApproval}
-                      />
-                    ) : pendingQuestion ? (
-                      <QuestionCard
-                        key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingQuestion.requestId}`}
-                        request={pendingQuestion}
-                        waiting={(run?.questions.length ?? 1) - 1}
-                        answering={sentReply(run, pendingQuestion.requestId)}
-                        onAnswer={answerQuestion}
-                      />
-                    ) : undefined
-                  }
+              {view === "canvas" && (
+                <CanvasView
+                  states={states}
+                  runs={agentRuns.runs}
+                  linkedWork={linkedWork}
+                  onOpenChat={(path, id) => void openCanvasChat(path, id)}
+                  onBack={() => setView("chat")}
                 />
-              </EditorLinks>
-              <TerminalPanel chatId={terminalChatId} notify={setNotice} />
-            </div>
-          </main>
-          <ChangesPanelSlot open={changes.open}>
-            <ChangesPanel
-              list={changes.list}
-              mode={changes.mode}
-              onModeChange={changes.setMode}
-              onRefresh={() => void changes.refresh()}
-              onSelectFile={changes.selectFile}
-              activePath={changes.activePath}
-              commentCounts={diffComments.counts}
-            />
-          </ChangesPanelSlot>
-        </div>
-        {linkDialog}
-        {addComputerDialog}
-        {commandPaletteOpen && (
-          <CommandPalette
-            commands={buildCommands(project)}
-            searchMessages={
-              lean
-                ? undefined
-                : (query) =>
-                    messageCommands(sidebarState?.messages ?? NO_MESSAGES, query, new Map(chats.map((chat) => [Number(chat.id), chat.label])), openMessage)
-            }
-            searchMessagesAsync={
-              lean && project
-                ? async (query) =>
-                    messageCommandsFrom(
-                      await bridgeForKey(project.path).searchChats(project.path, query),
-                      new Map(chats.map((chat) => [Number(chat.id), chat.label])),
-                      openMessage,
-                    )
-                : undefined
-            }
-            onClose={() => setCommandPaletteOpen(false)}
-            onError={setNotice}
-          />
-        )}
-        {gitDialog && (
-          <GitActionsDialog
-            key={gitDialog.sessionId}
-            cwd={gitDialog.cwd}
-            base={gitDialog.base}
-            provider={gitDialog.provider}
-            chat={gitDialog.chat}
-            turnRunning={Boolean(agentRuns.runs[chatKey(project.path, gitDialog.sessionId)])}
-            onClose={() => setGitDialog(null)}
-            // The dialog's chat is the open one; a message sent while its turn runs steers it.
-            onSendToAgent={(text) => {
-              if (selectedSession?.id === gitDialog.sessionId) void executeSend(text, permissionMode, []);
-              else {
-                openChat(gitDialog.sessionId);
-                setDraft(text);
-              }
-            }}
-            onRan={(note) => {
-              recordGitNote(gitDialog.sessionId, note);
-              void bridgeForKey(project.path)
-                .refreshDiffs(project.path, [gitDialog.worktreeId])
-                .catch(() => {});
-            }}
-          />
-        )}
-        <Notice />
-      </DotBackground>
-      {splashOverlay(true)}
-      {quitError && (
-        <dialog
-          ref={(element) => {
-            if (element && !element.open) element.showModal();
-          }}
-          onCancel={(event) => event.preventDefault()}
-          className="fixed inset-0 m-0 h-screen w-screen max-w-none max-h-none items-center justify-center bg-black/40 backdrop-blur-overlay p-6 open:flex"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="save-failure-title"
-        >
-          <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 text-ink shadow-xl">
-            <h2 id="save-failure-title" className="text-lg font-semibold">
-              Chats could not be saved
-            </h2>
-            <p className="mt-3 text-sm">Keep Milagre open while you fix the storage problem, then retry saving.</p>
-            <p className="mt-3 break-words text-sm text-ink-2">{quitError}</p>
-            <button
-              autoFocus
-              className="mt-5 rounded-lg bg-ink px-4 py-2 text-sm text-surface"
-              onClick={() => void window.milagre.retryQuit().catch((error) => setQuitError(ipcErrorMessage(error)))}
-            >
-              Retry saving and quit
-            </button>
+              )}
+              {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
+              <div
+                data-chat-pane
+                className={`min-h-0 flex-1 flex-col overflow-hidden ${view === "chat" && !diffPresence.occupied ? "flex" : "hidden"}`}
+                style={{ animation: "fade-in 160ms ease-out" }}
+              >
+                {awayBanner && (
+                  <OfflineBanner text={awayBanner} empty={Boolean(lean && selectedSession && !chatWindow.loading && chatWindow.messages.length === 0)} />
+                )}
+                <EditorLinks root={isRemoteKey(project.path) ? "" : (selectedWorktree?.path ?? project.path)}>
+                  <DraftChatComposer
+                    key={project.path}
+                    store={draftStore}
+                    messages={displayedMessages}
+                    pendingMessageId={pendingHere && pendingCanonicalId === null ? pendingSend?.message.id : undefined}
+                    imageDraft={imageDraft}
+                    projectPath={selectedWorktree?.path ?? project.path}
+                    messageScope={project.path}
+                    earlier={earlierMessages}
+                    onSend={() => void sendMessage()}
+                    onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
+                    onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
+                    pullRequestAction={
+                      selectedSession && selectedPullRequest && pullRequestBlocker && pullRequestActionRequest
+                        ? {
+                            label: BLOCKERS[pullRequestBlocker].action,
+                            tone: BLOCKERS[pullRequestBlocker].tone,
+                            onRun: () => {
+                              dismissBlockerAction(selectedPullRequest, pullRequestBlocker);
+                              void executeSend(pullRequestActionBody(pullRequestActionRequest), permissionMode, [], [], true, pullRequestActionRequest);
+                            },
+                          }
+                        : undefined
+                    }
+                    isSending={isSending}
+                    sendBlocked={preparing || readOnly}
+                    offlineName={readOnly ? (openComputer?.name ?? "That computer") : null}
+                    runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
+                    streamingText={run?.text}
+                    streamingSteps={run?.steps}
+                    subagents={subagents}
+                    onArchiveFinishedSubagents={archiveFinishedChildren}
+                    onArchiveSubagent={archiveChild}
+                    onStopAdvisor={(id) => controlAdvisor("stop", id)}
+                    onRetryAdvisor={(id) => controlAdvisor("retry", id)}
+                    waitingForSubagents={run?.waitingForSubagents}
+                    tasks={run?.tasks}
+                    contextUsage={run?.contextUsage ?? selectedSession?.contextUsage}
+                    ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
+                    agentChatId={project && selectedSession ? chatKey(project.path, selectedSession.id) : undefined}
+                    onStopPort={
+                      project && selectedSession ? (pid) => bridgeForKey(project.path).stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined
+                    }
+                    waitingStepIds={waitingStepIds}
+                    asking={Boolean(run?.questions.length)}
+                    sessionProvider={selectedSession?.provider}
+                    runModelName={run ? (models.find((model) => model.id === run.model)?.name ?? run.model) : undefined}
+                    resume={
+                      project && selectedSession?.resumeTurn
+                        ? {
+                            onContinue: () =>
+                              void bridgeForKey(project.path)
+                                .resumeChat(project.path, selectedSession.id)
+                                .catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)),
+                          }
+                        : undefined
+                    }
+                    onOpenLinkedChat={openLinkedChat}
+                    models={models}
+                    cliStatus={cliStatus}
+                    onModelPickerOpen={refreshCliStatus}
+                    onUpdateCli={handleUpdateCli}
+                    updatingCli={updatingCli}
+                    selectedModel={selectedModel}
+                    onModelChange={chooseModel}
+                    capability={selectedCapability}
+                    effort={effortFor(selectedCapability, effort)}
+                    onEffortChange={setEffort}
+                    ultracode={selectedCapability.ultracode && ultracode}
+                    onUltracodeChange={setUltracode}
+                    fastMode={fastMode}
+                    onFastModeChange={setFastMode}
+                    permissionMode={permissionMode}
+                    onPermissionModeChange={changePermissionMode}
+                    onRecommendationSelect={sendRecommendation}
+                    worktrees={composerWorktrees}
+                    selectedWorktreeId={selectedWorktree?.id}
+                    onWorktreeChange={(id) => {
+                      advanceChatView();
+                      setSelectedWorktreeId(id);
+                      saveChatPreferences(localStorage, project.path, { worktreePath: state.worktrees[id]?.path });
+                    }}
+                    isolation={isolation}
+                    onIsolationChange={(next) => {
+                      preparedTarget.current = null;
+                      setIsolation(next);
+                      saveChatPreferences(localStorage, project.path, { isolation: next });
+                      setNewChatError(null);
+                    }}
+                    branches={branches}
+                    baseBranch={effectiveBaseBranch}
+                    onBaseBranchChange={(branch) => {
+                      preparedTarget.current = null;
+                      setBaseBranch(branch);
+                      saveChatPreferences(localStorage, project.path, { baseBranch: branch });
+                    }}
+                    newChatError={newChatError}
+                    findOpen={findOpen}
+                    findSignal={findSignal}
+                    findSeed={findSeed}
+                    onFindClose={() => setFindOpen(false)}
+                    notice={notice}
+                    onDismissNotice={() => setNotice(null)}
+                    approval={
+                      pendingApproval ? (
+                        <PermissionCard
+                          key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}
+                          request={pendingApproval}
+                          waiting={(run?.approvals.length ?? 1) - 1}
+                          answering={sentDecision(run, pendingApproval.requestId)}
+                          onAnswer={answerApproval}
+                        />
+                      ) : pendingQuestion ? (
+                        <QuestionCard
+                          key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingQuestion.requestId}`}
+                          request={pendingQuestion}
+                          waiting={(run?.questions.length ?? 1) - 1}
+                          answering={sentReply(run, pendingQuestion.requestId)}
+                          onAnswer={answerQuestion}
+                        />
+                      ) : undefined
+                    }
+                  />
+                </EditorLinks>
+                <TerminalPanel chatId={terminalChatId} notify={setNotice} />
+              </div>
+            </main>
+            <ChangesPanelSlot open={changes.open}>
+              <ChangesPanel
+                list={changes.list}
+                mode={changes.mode}
+                onModeChange={changes.setMode}
+                onRefresh={() => void changes.refresh()}
+                onSelectFile={changes.selectFile}
+                activePath={changes.activePath}
+                commentCounts={diffComments.counts}
+              />
+            </ChangesPanelSlot>
           </div>
-        </dialog>
-      )}
+          {linkDialog}
+          {addComputerDialog}
+          {commandPaletteOpen && (
+            <CommandPalette
+              commands={buildCommands(project)}
+              searchMessages={
+                lean
+                  ? undefined
+                  : (query) =>
+                      messageCommands(sidebarState?.messages ?? NO_MESSAGES, query, new Map(chats.map((chat) => [Number(chat.id), chat.label])), openMessage)
+              }
+              searchMessagesAsync={
+                lean && project
+                  ? async (query) =>
+                      messageCommandsFrom(
+                        await bridgeForKey(project.path).searchChats(project.path, query),
+                        new Map(chats.map((chat) => [Number(chat.id), chat.label])),
+                        openMessage,
+                      )
+                  : undefined
+              }
+              onClose={() => setCommandPaletteOpen(false)}
+              onError={setNotice}
+            />
+          )}
+          {gitDialog && (
+            <GitActionsDialog
+              key={gitDialog.sessionId}
+              cwd={gitDialog.cwd}
+              base={gitDialog.base}
+              provider={gitDialog.provider}
+              chat={gitDialog.chat}
+              turnRunning={Boolean(agentRuns.runs[chatKey(project.path, gitDialog.sessionId)])}
+              onClose={() => setGitDialog(null)}
+              // The dialog's chat is the open one; a message sent while its turn runs steers it.
+              onSendToAgent={(text) => {
+                if (selectedSession?.id === gitDialog.sessionId) void executeSend(text, permissionMode, []);
+                else {
+                  openChat(gitDialog.sessionId);
+                  setDraft(text);
+                }
+              }}
+              onRan={(note) => {
+                recordGitNote(gitDialog.sessionId, note);
+                void bridgeForKey(project.path)
+                  .refreshDiffs(project.path, [gitDialog.worktreeId])
+                  .catch(() => {});
+              }}
+            />
+          )}
+          <Notice />
+        </DotBackground>
+        {splashOverlay(true)}
+        {quitError && (
+          <dialog
+            ref={(element) => {
+              if (element && !element.open) element.showModal();
+            }}
+            onCancel={(event) => event.preventDefault()}
+            className="fixed inset-0 m-0 h-screen w-screen max-w-none max-h-none items-center justify-center bg-black/40 backdrop-blur-overlay p-6 open:flex"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="save-failure-title"
+          >
+            <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 text-ink shadow-xl">
+              <h2 id="save-failure-title" className="text-lg font-semibold">
+                Chats could not be saved
+              </h2>
+              <p className="mt-3 text-sm">Keep Milagre open while you fix the storage problem, then retry saving.</p>
+              <p className="mt-3 break-words text-sm text-ink-2">{quitError}</p>
+              <button
+                autoFocus
+                className="mt-5 rounded-lg bg-ink px-4 py-2 text-sm text-surface"
+                onClick={() => void window.milagre.retryQuit().catch((error) => setQuitError(ipcErrorMessage(error)))}
+              >
+                Retry saving and quit
+              </button>
+            </div>
+          </dialog>
+        )}
+      </ScopeContext.Provider>
     </BridgeContext.Provider>
   );
 }

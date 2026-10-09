@@ -34,6 +34,10 @@ export function useBridge(): MilagreBridge {
   return useContext(BridgeContext) ?? window.milagre;
 }
 
+/** The scope key of the Project or Link on screen, which App and LinkWorkspace provide. */
+export const ScopeContext = createContext<string | null>(null);
+export const useScope = () => useContext(ScopeContext);
+
 /** Agent events from this Mac and from every paired computer, raw (keys already name their computer). */
 export function onAnyAgentEvent(callback: (payload: AgentEventPayload) => void) {
   const offLocal = window.milagre.onAgentEvent(callback);

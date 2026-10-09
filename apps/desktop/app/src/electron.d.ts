@@ -280,6 +280,10 @@ export type MilagreBridge = {
   openInEditor: (request: { root: string; path?: string; line?: number; editor?: string }) => Promise<Result<null>>;
   getCurrentProject: () => Promise<OpenProject>;
   openProject: () => Promise<OpenProject | null>;
+  /** Opens a folder of this computer as a Project, without the dialog. */
+  openProjectAt: (folder: string) => Promise<OpenProject>;
+  listDirs: (request: { path?: string }) => Promise<DirListing>;
+  readMedia: (request: { scope: string; path: string }) => Promise<MediaBytes>;
   /** Projects opened lately, most recent first; folders that are gone are left out. */
   listRecentProjects: () => Promise<RecentProject[]>;
   /** Keeps a recent project out of the all-Projects sidebar and the phone's list, or shows it again; resolves to the list. */
@@ -450,3 +454,13 @@ declare global {
     };
   }
 }
+
+/** One folder of a computer's home folder, for the remote folder picker (fs:list-dirs). */
+export type DirListing = {
+  path: string;
+  home: string;
+  parent: string | null;
+  entries: Array<{ name: string; path: string; git: boolean; branch: string | null; project: boolean }>;
+};
+/** An image a chat shows, read from its computer (media:read). */
+export type MediaBytes = { type: string; size: number; base64: string };

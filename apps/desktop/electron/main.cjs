@@ -265,6 +265,8 @@ async function startDesktop() {
     const result = await dialog.showOpenDialog({ title: "Open project", properties: ["openDirectory", "createDirectory"] });
     return result.canceled || !result.filePaths[0] ? null : runtime.openProject(result.filePaths[0]);
   });
+  // This Mac's side of openProjectAt; a paired computer's goes through computers:invoke as project:open.
+  ipcMain.handle("project:open-at", (_event, folder) => runtime.openProject(String(folder)));
   const { getWindowState, manageWindowState } = require("./window-state.cjs");
   function createWindow() {
     const { state, statePath } = getWindowState();

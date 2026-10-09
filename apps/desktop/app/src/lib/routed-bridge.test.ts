@@ -34,6 +34,7 @@ const ALLOWED: Record<string, string[]> = {
     "restartHost",
     "retryQuit",
   ],
+  "components/AddProjectDialog.tsx": ["openProject"],
   "components/Settings.tsx": [
     "listRecentProjects",
     "onPhoneStatus",

@@ -2,6 +2,7 @@ import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { ComputerAllowPrompt } from "./components/ComputerAllowPrompt";
 import { LinkWorkspace } from "./components/LinkWorkspace";
 import { AddComputerDialog } from "./components/AddComputerDialog";
+import { AddProjectDialog } from "./components/AddProjectDialog";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
 import type { LinkState, NamedProjectLink, OpenLink } from "@milagre/shared/model";
@@ -355,6 +356,7 @@ function App() {
   const [settingsProject, setSettingsProject] = useState<{ path: string; name: string } | null>(null);
   const [settingsComputer, setSettingsComputer] = useState<string | null>(null);
   const [addComputerOpen, setAddComputerOpen] = useState(false);
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
   // A send may finish after the user opens another Chat. Its feedback and completion belong to the view that sent it.
   const chatView = useRef(0);
   const nextChatView = useRef(0);
@@ -1196,7 +1198,8 @@ function App() {
     }
   }
 
-  const openProject = () => replaceProject(() => window.milagre.openProject());
+  // With other computers, Add project asks which computer first; with this Mac alone, the folder dialog.
+  const openProject = () => (pairedComputers.length > 0 ? Promise.resolve(setAddProjectOpen(true)) : replaceProject(() => window.milagre.openProject()));
   const switchProject = (projectPath: string) => replaceProject(() => bridgeForKey(projectPath).switchProject(projectPath), projectPath);
   async function selectLink(id: string, sessionId?: number) {
     const navigation = ++projectNavigation.current;
@@ -1726,6 +1729,15 @@ function App() {
     />
   ) : null;
   const addComputerDialog = addComputerOpen ? <AddComputerDialog onClose={() => setAddComputerOpen(false)} onAdded={() => setAddComputerOpen(false)} /> : null;
+  const addProjectDialog = addProjectOpen ? (
+    <AddProjectDialog
+      onClose={() => setAddProjectOpen(false)}
+      onOpened={(opened) => {
+        setAddProjectOpen(false);
+        void replaceProject(async () => opened);
+      }}
+    />
+  ) : null;
   if (selectedLink && view === "settings")
     return (
       <DotBackground>
@@ -1800,6 +1812,7 @@ function App() {
         />
         {linkDialog}
         {addComputerDialog}
+        {addProjectDialog}
       </>
     );
 
@@ -2292,6 +2305,7 @@ function App() {
           </div>
           {linkDialog}
           {addComputerDialog}
+          {addProjectDialog}
           {commandPaletteOpen && (
             <CommandPalette
               commands={buildCommands(project)}

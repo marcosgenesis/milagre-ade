@@ -1,0 +1,17 @@
+# Milagre
+
+> Milagre is a free, open-source (MIT) app for macOS and Linux that runs Claude Code, Codex and Antigravity coding agents on your computer, each Chat in its own Git worktree. When an agent needs an approval or an answer, it shows up on the desktop and in the Milagre app for iPhone and Android.
+
+## Download
+
+- [macOS (Apple Silicon)](https://milagre.cloud/download/mac-arm64): DMG of the latest release
+- [macOS (Intel)](https://milagre.cloud/download/mac-x64): DMG of the latest release
+- [Linux AppImage](https://milagre.cloud/download/linux-appimage), [.deb](https://milagre.cloud/download/linux-deb), [.rpm](https://milagre.cloud/download/linux-rpm)
+- [iPhone beta (TestFlight)](https://testflight.apple.com/join/K9ExV7bV)
+- [Android beta (APK)](https://milagre.cloud/download/android)
+
+## Project
+
+- [Source code on GitHub](https://github.com/the-ptf/milagre-ade): MIT license, issues and discussions
+- [Releases and changelog](https://github.com/the-ptf/milagre-ade/releases)
+- [Documentation](https://github.com/the-ptf/milagre-ade/tree/main/docs)

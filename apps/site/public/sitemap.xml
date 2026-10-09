@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
+  <url>
+    <loc>https://milagre.cloud/</loc>
+    <lastmod>2026-10-09</lastmod>
+    <video:video>
+      <video:thumbnail_loc>https://milagre.cloud/demo/desktop.jpg</video:thumbnail_loc>
+      <video:title>Milagre on a Mac: an agent stops for approval</video:title>
+      <video:description>An agent in Milagre reads and edits a file, asks to run the mobile checks, is approved from the phone, and finishes on the Mac.</video:description>
+      <video:content_loc>https://milagre.cloud/demo/desktop.mp4</video:content_loc>
+      <video:duration>13</video:duration>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://milagre.cloud/demo/phone.jpg</video:thumbnail_loc>
+      <video:title>Milagre on iPhone: answering an agent's approval</video:title>
+      <video:description>The same Milagre Chat on an iPhone: the agent's request to run the mobile checks arrives and is approved with one tap.</video:description>
+      <video:content_loc>https://milagre.cloud/demo/phone.mp4</video:content_loc>
+      <video:duration>13</video:duration>
+    </video:video>
+  </url>
+</urlset>

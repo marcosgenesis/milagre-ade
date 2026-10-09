@@ -1,9 +1,19 @@
 ---
 import "../styles/global.css";
-interface Props { title: string; description: string }
-const { title, description } = Astro.props;
+interface Props {
+  title: string;
+  description: string;
+  /** The link preview's headline and text, when they should read differently from the search result's. */
+  socialTitle?: string;
+  socialDescription?: string;
+  /** JSON-LD objects for this page. */
+  schema?: object[];
+  noindex?: boolean;
+}
+const { title, description, socialTitle = title, socialDescription = description, schema = [], noindex = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const ogImage = new URL("/og.png", Astro.site);
+const ogImageAlt = "Milagre on a Mac and an iPhone showing the same Chat, with an agent waiting for approval to run the mobile checks.";
 ---
 <!doctype html>
 <html lang="en">
@@ -16,21 +26,38 @@ const ogImage = new URL("/og.png", Astro.site);
     <link rel="icon" href="/app-icon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/app-icon-512.png" />
     <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121b27" />
+    {noindex && <meta name="robots" content="noindex" />}
     <meta property="og:type" content="website" />
-    <meta property="og:title" content={title} />
-    <meta property="og:description" content={description} />
+    <meta property="og:site_name" content="Milagre" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:title" content={socialTitle} />
+    <meta property="og:description" content={socialDescription} />
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content={ogImage} />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={ogImageAlt} />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={socialTitle} />
+    <meta name="twitter:description" content={socialDescription} />
+    <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content={ogImageAlt} />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+    {schema.map((item) => <script type="application/ld+json" is:inline set:html={JSON.stringify(item)} />)}
     <script is:inline>
       // Each device sees its own download (and Android its own recording), chosen before first paint; anything else gets the Mac one. iPadOS reports itself as a Mac with touch.
       const ua = navigator.userAgent;
       if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) document.documentElement.dataset.platform = "ios";
       else if (/Android/.test(ua)) document.documentElement.dataset.platform = "android";
       else if (/Windows/.test(ua)) document.documentElement.dataset.platform = "windows";
-      else if (/Linux|X11/.test(ua) && !/Android/.test(ua)) document.documentElement.dataset.platform = "linux";
+      else if (/Linux|X11/.test(ua) && !/Android/.test(ua)) {
+        document.documentElement.dataset.platform = "linux";
+        // Only some browsers name the distribution (Firefox on Ubuntu, Debian, Mint and Fedora does; Chrome doesn't).
+        if (/Ubuntu|Debian|Mint|Pop!_OS|elementary|Zorin|Kali|Raspbian/i.test(ua)) document.documentElement.dataset.linux = "deb";
+        else if (/Fedora|Red Hat|CentOS|Rocky|AlmaLinux|openSUSE|SUSE|Mageia/i.test(ua)) document.documentElement.dataset.linux = "rpm";
+      }
     </script>
   </head>
   <body>

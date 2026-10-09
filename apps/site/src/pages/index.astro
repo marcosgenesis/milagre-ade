@@ -4,14 +4,73 @@ import Nav from "../components/Nav.astro";
 import HeroDemo from "../components/HeroDemo.astro";
 import DownloadButtons from "../components/DownloadButtons.astro";
 
-const title = "Milagre: run Claude Code and Codex on your Mac, answer from anywhere";
-const description = "Milagre runs Claude Code and Codex on your Mac, one Git Worktree per Chat. When an agent needs an approval or an answer, it shows up on your desk and on your iPhone.";
+import { DOWNLOAD_ARM64, IPHONE_BETA_URL, REPO_URL } from "../links";
+
+// Search result: 50-60 characters of title, 150-160 of description, with the facts up front.
+const title = "Milagre: Claude Code and Codex agents on your Mac and phone";
+const description =
+  "Free, open-source app that runs Claude Code, Codex and Antigravity on your Mac, one Git worktree per chat. Answer approvals from your iPhone or Android.";
+// Link previews (Discord, Slack, X, iMessage) lead with the headline instead.
+const socialTitle = "Milagre: your agents keep working. Answer them from anywhere.";
+const site = "https://milagre.cloud/";
+const schema = [
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": `${site}#website`,
+    name: "Milagre",
+    url: site,
+    publisher: { "@id": `${site}#organization` },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "@id": `${site}#organization`,
+    name: "Milagre",
+    url: site,
+    logo: { "@type": "ImageObject", url: `${site}app-icon-512.png`, width: 512, height: 512 },
+    sameAs: [REPO_URL],
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "@id": `${site}#app`,
+    name: "Milagre",
+    description,
+    url: site,
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "macOS, Linux, iOS, Android",
+    downloadUrl: new URL(DOWNLOAD_ARM64, site).href,
+    installUrl: IPHONE_BETA_URL,
+    screenshot: `${site}og.png`,
+    image: `${site}app-icon-512.png`,
+    license: "https://opensource.org/license/mit",
+    isAccessibleForFree: true,
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    publisher: { "@id": `${site}#organization` },
+    sameAs: [REPO_URL],
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    name: "milagre-ade",
+    codeRepository: REPO_URL,
+    license: "https://opensource.org/license/mit",
+    programmingLanguage: "TypeScript",
+    targetProduct: { "@id": `${site}#app` },
+  },
+];
 ---
-<Base title={title} description={description}>
+<Base title={title} description={description} socialTitle={socialTitle} schema={schema}>
   <div class="page">
     <Nav />
     <main class="hero container">
       <h1>Your agents keep working. <em>Answer them from anywhere.</em></h1>
+      <p class="summary">
+        Milagre is a free, open-source (MIT) app for macOS and Linux that runs Claude Code, Codex and Antigravity coding agents on your
+        computer, each Chat in its own Git worktree. When an agent needs an approval or an answer, it shows up on your desktop and on the
+        Milagre app for iPhone and Android, so you can reply from anywhere. <a href={REPO_URL}>Source on GitHub</a>.
+      </p>
       <div class="stage"><HeroDemo /></div>
     </main>
     <div class="fade" aria-hidden="true"></div>
@@ -25,6 +84,9 @@ const description = "Milagre runs Claude Code and Codex on your Mac, one Git Wor
   .hero { display: flex; flex: 1; flex-direction: column; align-items: center; gap: clamp(22px, 3.6vh, 36px); min-height: 0; padding-top: calc(clamp(20px, 4.5vh, 52px) + var(--lift, 0px)); text-align: center; }
   h1 { max-width: 22ch; font-size: clamp(32px, min(4.6vw, 5.8vh), 60px); font-weight: 600; letter-spacing: -0.035em; line-height: 1.05; }
   /* The payoff line in an italic serif, a touch larger so it reads at the same size as the grotesk. */
+  /* The one-screen design shows the headline and the apps; this paragraph says what Milagre is for search engines,
+     AI search and screen readers. */
+  .summary { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   h1 em { display: block; font-family: var(--font-serif); font-size: 1.12em; font-weight: 400; letter-spacing: -0.01em; color: oklch(0.86 0.06 255); }
   /* Wider than the text column, so the Mac window can grow on big screens. */
   .stage { position: relative; flex: 1; width: min(100vw - 48px, 1680px); min-height: 0; margin-top: clamp(8px, 2.5vh, 28px); }

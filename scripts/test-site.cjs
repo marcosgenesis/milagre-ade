@@ -158,7 +158,7 @@ const checks = [
     },
   },
   {
-    name: "Linux gets the AppImage with .deb and .rpm links, Windows gets its own button, and every desktop lists the others",
+    name: "Linux gets the AppImage (or the .deb or .rpm when the browser names the distribution), Windows gets its own button, and every desktop lists the others",
     async run(open, evaluate, shot) {
       const linux = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
       const visible = (selector) => `[...document.querySelectorAll('${selector}')].filter((a) => a.offsetParent).map((a) => a.getAttribute("href"))`;
@@ -176,6 +176,24 @@ const checks = [
       await assertOneScreen(evaluate, window);
       await shot(window, "linux.png");
       window.destroy();
+      const ubuntu = await open({ width: 1440, height: 900, userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:141.0) Gecko/20100101 Firefox/141.0" });
+      assert.deepEqual(await evaluate(ubuntu, visible(".cta a")), [
+        "/download/linux-deb",
+        "/download/linux-appimage",
+        "/download/linux-rpm",
+        "/download/mac-arm64",
+        "/download/windows",
+      ]);
+      ubuntu.destroy();
+      const fedora = await open({ width: 1440, height: 900, userAgent: "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:141.0) Gecko/20100101 Firefox/141.0" });
+      assert.deepEqual(await evaluate(fedora, visible(".cta a")), [
+        "/download/linux-rpm",
+        "/download/linux-appimage",
+        "/download/linux-deb",
+        "/download/mac-arm64",
+        "/download/windows",
+      ]);
+      fedora.destroy();
       const windows = await open({
         width: 1440,
         height: 900,
@@ -272,7 +290,25 @@ const checks = [
       })`,
       );
       assert.equal(meta.canonical, "https://milagre.cloud/");
-      assert.ok(meta.description.startsWith("Milagre runs Claude Code and Codex on your Mac"));
+      assert.ok(meta.description.length >= 120 && meta.description.length <= 160, `description is ${meta.description.length} characters`);
+      assert.ok(meta.description.includes("Claude Code"));
+      const extra = await evaluate(
+        window,
+        `({
+        title: document.title,
+        siteName: document.querySelector('meta[property="og:site_name"]')?.content,
+        imageAlt: document.querySelector('meta[property="og:image:alt"]')?.content,
+        schema: [...document.querySelectorAll('script[type="application/ld+json"]')].map((s) => JSON.parse(s.textContent)["@type"]),
+        summary: document.querySelector("main p")?.textContent ?? "",
+      })`,
+      );
+      assert.ok(extra.title.length >= 30 && extra.title.length <= 60, `title is ${extra.title.length} characters`);
+      assert.equal(extra.siteName, "Milagre");
+      assert.ok(extra.imageAlt.length > 20, "og:image:alt");
+      assert.deepEqual(extra.schema, ["WebSite", "Organization", "SoftwareApplication", "SoftwareSourceCode"]);
+      assert.ok(extra.summary.includes("open-source"), "a crawlable summary of what Milagre is");
+      for (const file of ["sitemap.xml", "llms.txt"]) assert.ok(fs.existsSync(path.join(dist, file)), `${file} is built`);
+      assert.match(fs.readFileSync(path.join(dist, "robots.txt"), "utf8"), /Sitemap: https:\/\/milagre\.cloud\/sitemap\.xml/);
       assert.equal(meta.image, "https://milagre.cloud/og.png");
       assert.equal(meta.card, "summary_large_image");
       assert.ok(fs.existsSync(path.join(dist, "og.png")), "og.png is built");

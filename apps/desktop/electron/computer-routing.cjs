@@ -81,14 +81,15 @@ const EVENTS = {
   "notification:waiting": withChat,
   "worktree:renamed": (id, payload) => field(id, payload, "projectPath", key),
   "agent:ports": keyed,
+  "main-sync:status": (id, payload) => field(id, payload, "projectPath", key),
   "runtime:snapshot": (id, snapshot) =>
     isObject(snapshot)
       ? {
           ...snapshot,
-          projects: each(id, snapshot.projects, withPath),
+          ...(snapshot.projects ? { projects: each(id, snapshot.projects, withPath) } : {}),
           ...(snapshot.links ? { links: each(id, snapshot.links, (id, item) => field(id, item, "linkId", linkId)) } : {}),
-          runs: field(id, snapshot.runs, "runs", keyed),
-          ports: keyed(id, snapshot.ports),
+          ...(snapshot.runs ? { runs: field(id, snapshot.runs, "runs", keyed) } : {}),
+          ...(snapshot.ports ? { ports: keyed(id, snapshot.ports) } : {}),
         }
       : snapshot,
 };
@@ -111,6 +112,8 @@ const RESULTS = {
   "link:update": withLink,
   "link:snapshot": (id, result) => field(id, result, "link", withLink),
   "link:open": (id, result) => (isObject(result) ? { ...field(id, result, "link", withLink), projects: each(id, result.projects, withPath) } : result),
+  "project:snapshot": withPath,
+  "chat:ports": withChat,
   "chat:runs": (id, result) => field(id, result, "runs", keyed),
   "agent:ports": keyed,
   "worktree:create": (id, result) => field(id, result, "project", withPath),

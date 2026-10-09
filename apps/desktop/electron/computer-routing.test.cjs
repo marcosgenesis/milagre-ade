@@ -53,6 +53,10 @@ test("a computer's events and results come back naming it", () => {
       eventSeq: 9,
     },
   );
+  assert.deepEqual(qualifyEvent(ID, "main-sync:status", { projectPath: "/p", last: null }), { projectPath: `${ID}|/p`, last: null });
+  assert.deepEqual(qualifyEvent(ID, "runtime:snapshot", { eventSeq: 1 }), { eventSeq: 1 });
+  assert.deepEqual(qualifyResult(ID, "project:snapshot", { path: "/p" }), { path: `${ID}|/p` });
+  assert.deepEqual(qualifyResult(ID, "chat:ports", { chatId: "/p#2" }), { chatId: `${ID}|/p#2` });
   assert.deepEqual(qualifyEvent(ID, "agent:cli-progress", { provider: "codex" }), { provider: "codex" });
 
   assert.deepEqual(qualifyResult(ID, "project:switch", { path: "/p", name: "p", state: {} }), { path: `${ID}|/p`, name: "p", state: {} });

@@ -188,15 +188,27 @@ const checks = [
     },
   },
   {
+    name: "the phone is a 3D model where WebGL works",
+    async run(open, evaluate) {
+      const window = await open({ width: 1440, height: 900 });
+      await waitFor(evaluate, window, `document.querySelector(".demo").classList.contains("three")`, "3D phone");
+      const canvas = await evaluate(
+        window,
+        `(() => { const r = document.querySelector(".phone-canvas").getBoundingClientRect(); return { w: r.width, h: r.height }; })()`,
+      );
+      assert.ok(canvas.w > 100 && canvas.h > 200, `canvas ${JSON.stringify(canvas)}`);
+      window.destroy();
+    },
+  },
+  {
     name: "the loop fades the screens but keeps the device frames solid",
     async run(open, evaluate) {
       const window = await open({ width: 1440, height: 900, reducedMotion: true });
       await evaluate(window, `document.querySelector(".demo").classList.add("fading")`);
       assert.deepEqual(await evaluate(window, `[".mac", ".phone"].map((s) => getComputedStyle(document.querySelector(s)).opacity)`), ["1", "1"]);
-      assert.deepEqual(await evaluate(window, `[".mac-video", ".phone-video"].map((s) => getComputedStyle(document.querySelector(s)).opacity)`), [
-        "0.2",
-        "0.2",
-      ]);
+      assert.equal(await evaluate(window, `getComputedStyle(document.querySelector(".mac-video")).opacity`), "0.2");
+      // The phone's screen is the flat video, or the 3D model drawing it (where the video itself stays invisible).
+      assert.ok(["0.2", "0"].includes(await evaluate(window, `getComputedStyle(document.querySelector(".phone-video")).opacity`)));
       window.destroy();
     },
   },

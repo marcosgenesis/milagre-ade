@@ -29,14 +29,38 @@
       phone.poster = "/demo/android.jpg";
       phone.src = "/demo/android.mp4";
     }
+    // The phone is a 3D model when WebGL is there; otherwise the flat frame below stays.
+    void import("../scripts/phone3d").then(({ mountPhone3D, webglAvailable }) => {
+      const host = demo.querySelector<HTMLElement>(".phone");
+      if (!host || !webglAvailable()) return;
+      mountPhone3D({
+        host,
+        video: phone,
+        kind: demo.classList.contains("android") ? "android" : "iphone",
+        // Turned toward the Mac beside it; nearly straight on when it stands alone.
+        tilt: () => (narrow.matches ? -0.14 : -0.34),
+      });
+      demo.classList.add("three");
+    });
     const narrow = matchMedia("(max-width: 700px)");
     // The demo is a fixed-size canvas, scaled so its top part, down to both approval cards (y 565 of the canvas), ends
     // just above the download button at the bottom of the page; the rest runs under the button and the blurred fade.
     const cta = document.querySelector<HTMLElement>("[data-cta]");
+    // When the width caps the size (tall windows), the leftover height is split above the title and below the button,
+    // so the title, the devices and the button stay together in the middle and the devices still meet the button.
+    const page = stage.closest<HTMLElement>(".page");
+    let spare = 0;
     const fit = () => {
-      const room = innerHeight - stage.getBoundingClientRect().top - (cta?.offsetHeight ?? 0) - 12;
-      const scale = Math.min(1.25, stage.clientWidth / demo.offsetWidth, room / 565);
-      demo.style.setProperty("--scale", String(Math.max(scale, 0.1)));
+      const drop = spare / 2;
+      const room = innerHeight - stage.getBoundingClientRect().top - (cta?.offsetHeight ?? 0) - drop - 12;
+      const scale = Math.max(Math.min(1.7, stage.clientWidth / demo.offsetWidth, room / 565), 0.1);
+      demo.style.setProperty("--scale", String(scale));
+      const next = Math.max(0, Math.round(spare + room - 565 * scale));
+      if (Math.abs(next - spare) > 1) {
+        spare = next;
+        page?.style.setProperty("--lift", `${Math.floor(spare / 2)}px`);
+        page?.style.setProperty("--drop", `${Math.ceil(spare / 2)}px`);
+      }
     };
     new ResizeObserver(fit).observe(stage);
     narrow.addEventListener("change", fit);
@@ -103,6 +127,10 @@
   .lights i:nth-child(3) { background: #28c840; }
   .phone { position: absolute; right: 0; bottom: 0; width: 290px; aspect-ratio: 1206 / 2622; box-sizing: content-box; padding: 11px; border-radius: 52px; background: #0b0b0c; box-shadow: inset 0 0 0 1.5px oklch(1 0 0 / 0.16), 0 0 0 1px oklch(0 0 0 / 0.6), 0 30px 70px oklch(0 0 0 / 0.6); }
   .phone-video { border-radius: 41px; }
+  /* The 3D phone draws the frame and the screen; the video stays in place, invisible, as its texture. */
+  .phone :global(.phone-canvas) { position: absolute; top: -18%; left: -40%; width: 180%; height: 136%; pointer-events: none; }
+  .demo.three .phone { background: transparent; box-shadow: none; }
+  .demo.three .phone-video, .demo.three.fading .phone-video { opacity: 0; }
   /* Android draws its status bar close to the corners, so the screen is less rounded than the iPhone's. */
   .demo.android .phone { aspect-ratio: 1080 / 2400; border-radius: 28px; }
   .demo.android .phone-video { border-radius: 17px; }

@@ -35,7 +35,7 @@ feat!: change the coordination API    # major release
 docs: clarify setup                   # no release
 ```
 
-To ship a candidate, run the **Publish installers** workflow with its `vX.Y.Z` tag. It builds macOS DMG and ZIP installers for Intel and Apple Silicon, attaches the installers and update feed, then publishes the draft release. Draft candidates stay invisible to installed apps. Installed builds check published GitHub Releases at startup, download updates in the background, and ask to restart when ready. Use `npm run release:dry` to inspect what would be released without creating a tag.
+To ship a candidate, run the **Publish** workflow with `channel=stable` (and optionally its `vX.Y.Z` tag; empty means the newest draft). It builds the macOS DMG and ZIP installers for Intel and Apple Silicon and the Linux AppImage, DEB and RPM, attaches the installers and update feeds, publishes the draft release and redeploys the Linux package repository. `channel=beta` ships the same candidate as a `vX.Y.Z-beta.N` prerelease instead. Draft candidates stay invisible to installed apps. Installed builds check published GitHub Releases at startup, download updates in the background, and ask to restart when ready. Use `npm run release:dry` to inspect what would be released without creating a tag.
 
 Release installers require a Developer ID Application certificate and Apple notarization. The workflow checks Apple credentials before creating a release, signs and notarizes the app, and signs, notarizes and staples the DMG. It verifies signatures, notarization tickets, Gatekeeper acceptance and DMG integrity before uploading installers. See [macOS signing setup](agents/macos-signing.md) for the required GitHub Actions secrets.
 

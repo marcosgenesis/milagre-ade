@@ -1,5 +1,4 @@
-# Signed macOS build shared by Publish installers (stable) and Publish beta. It always stages the
-# signed-macos artifact; with publish=true it also uploads to the release and, for macos-only, un-drafts it.
+# Signed macOS build for the Publish workflow. It stages the installers-macos artifact; Publish uploads it.
 name: Build macOS
 on:
   workflow_call:
@@ -20,14 +19,6 @@ on:
         description: Require the tag to be a stable draft release
         type: boolean
         default: true
-      publish:
-        description: Upload to the release and publish it (otherwise only stage the artifact)
-        type: boolean
-        default: false
-      platforms:
-        description: Platforms the caller publishes (macos un-drafts the release)
-        type: string
-        default: macos
     secrets:
       CSC_LINK:
         required: true
@@ -161,38 +152,10 @@ jobs:
         env:
           FEED_TAG: v${{ inputs.version }}
         run: node scripts/finalize-update-feeds.cjs --tag "$FEED_TAG" --platform macos
-      - name: Generate Homebrew cask from signed installers
-        if: inputs.channel == 'latest'
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: npm run package:managers -- --tag "$RELEASE_TAG" --platform macos
-      - name: Upload installers and publish the release
-        if: inputs.publish
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          PUBLISH_PLATFORMS: ${{ inputs.platforms }}
-        run: |
-          for feed in latest-mac.yml beta-mac.yml; do
-            if [ ! -f "release/$feed" ]; then
-              echo "::error::release/$feed was not generated; without it installed apps cannot discover this update."
-              exit 1
-            fi
-          done
-          if [ ! -s release/package-managers/homebrew/milagre.rb ] || [ ! -s release/package-managers/SHA256SUMS ]; then
-            echo "::error::Homebrew metadata was not generated from the signed installers."
-            exit 1
-          fi
-          shopt -s nullglob
-          gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml release/beta-mac.yml release/package-managers/homebrew/milagre.rb release/package-managers/SHA256SUMS --clobber
-          if [ "${PUBLISH_PLATFORMS:-macos}" = macos ]; then
-            gh release edit "$RELEASE_TAG" --draft=false --latest
-          fi
       - name: Stage signed macOS artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: signed-macos
+          name: installers-macos
           path: |-
             release/*.dmg
             release/*.zip

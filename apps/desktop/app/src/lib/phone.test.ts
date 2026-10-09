@@ -30,6 +30,8 @@ test("the pairing window counts whole minutes up and closes at the deadline", ()
   const status = (pairingUntil?: number) => ({ enabled: true, state: "on" as const, remote: "relay" as const, relay: "online" as const, pairingUntil });
   assert.equal(pairingWindow(null, 0), null);
   assert.equal(pairingWindow({ enabled: true, state: "on", remote: "cloudflare" }, 0), null);
+  // Behind a tunnel the relay runs too, so computers get a window.
+  assert.deepEqual(pairingWindow({ enabled: true, state: "on", remote: "cloudflare", pairingUntil: 600_000 }, 0), { open: true, minutes: 10 });
   assert.equal(pairingWindow(status(), 0), null);
   assert.deepEqual(pairingWindow(status(600_000), 0), { open: true, minutes: 10 });
   assert.deepEqual(pairingWindow(status(600_000), 1), { open: true, minutes: 10 });

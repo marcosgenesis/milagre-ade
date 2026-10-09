@@ -76,15 +76,18 @@ export type PhoneStatus = {
   error?: string;
   /** "cloudflare": reachable from any network at `publicUrl`. "relay": reachable from any network through relay.milagre.cloud. "none": only this Mac, at `localUrl`. */
   remote: "cloudflare" | "relay" | "none";
-  /** Only with `remote: "relay"`: whether this Mac is connected to the relay. */
+  /** With `remote: "relay"` or `"cloudflare"` (the relay runs behind a tunnel too): whether this Mac is connected to the relay. */
   relay?: "connecting" | "online" | "offline";
-  /** Only with `remote: "relay"`: when (ms since the epoch) the window in which new phones may pair ends. */
+  /** Same as `relay`: when (ms since the epoch) the window in which new devices may pair through the relay ends. */
   pairingUntil?: number;
-  /** Only with `remote: "relay"`: how many phones have paired since the last reset. */
+  /** Same as `relay`: how many phones have paired since the last reset. */
   pairedPhones?: number;
   localUrl?: string;
   publicUrl?: string;
+  /** What the QR encodes: the tunnel's link behind a Cloudflare tunnel, otherwise the relay's. */
   pairingLink?: string;
+  /** The relay's link, the only kind another Mac can pair with. Copy link copies it. */
+  computerLink?: string;
   qrSvg?: string;
   /** Phone access on this Mac's local network: on or off, and the addresses a phone on the same network dials. */
   lan?: { enabled: boolean; addresses: string[]; error?: string };

@@ -1,0 +1,315 @@
+# The one desktop release pipeline. It ships a draft candidate (cut by CI's release job) on either channel:
+#   beta    the candidate as a vX.Y.Z-beta.N prerelease, never marked latest. Weekdays at 09:00 UTC and on dispatch.
+#   stable  the untouched draft itself, marked latest, then packages.milagre.cloud is redeployed from it.
+# macOS and Linux always build. Windows builds only once the RELEASE_WINDOWS repository variable is "true", which
+# needs the WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD secrets first. A stable release needs every platform it builds;
+# a beta needs only macOS and ships without a platform whose build failed.
+name: Publish
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: beta ships a vX.Y.Z-beta.N prerelease; stable publishes the draft as the latest release
+        type: choice
+        options:
+          - beta
+          - stable
+        default: beta
+        required: true
+      tag:
+        description: Draft candidate to ship (vX.Y.Z); empty means the newest draft
+        type: string
+        required: false
+  schedule:
+    - cron: "0 9 * * 1-5"
+permissions:
+  contents: write
+concurrency:
+  group: publish
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      channel: ${{ steps.channel.outputs.channel }}
+      feed_channel: ${{ steps.channel.outputs.feed_channel }}
+      windows: ${{ steps.channel.outputs.windows }}
+      tag: ${{ steps.pick.outputs.tag }}
+      version: ${{ steps.pick.outputs.version }}
+      release_tag: ${{ steps.pick.outputs.release_tag }}
+      changed: ${{ steps.pick.outputs.changed }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      # A scheduled run has no inputs, so it is a beta. electron-builder calls the stable channel "latest".
+      - id: channel
+        env:
+          CHANNEL: ${{ inputs.channel || 'beta' }}
+          WINDOWS: ${{ vars.RELEASE_WINDOWS == 'true' }}
+        run: |
+          {
+            echo "channel=$CHANNEL"
+            if [ "$CHANNEL" = stable ]; then echo "feed_channel=latest"; else echo "feed_channel=beta"; fi
+            echo "windows=$WINDOWS"
+          } >> "$GITHUB_OUTPUT"
+      - id: pick
+        env:
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          REQUESTED: ${{ inputs.tag }}
+        run: node scripts/pick-release-candidate.cjs >> "$GITHUB_OUTPUT"
+  macos:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+      version: ${{ needs.prepare.outputs.version }}
+      channel: ${{ needs.prepare.outputs.feed_channel }}
+      require_draft: ${{ needs.prepare.outputs.channel == 'stable' }}
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+  linux:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CHANNEL: ${{ needs.prepare.outputs.channel }}
+      FEED_CHANNEL: ${{ needs.prepare.outputs.feed_channel }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      MILAGRE_LINUX_SIGNING_KEY: ${{ secrets.LINUX_REPOSITORY_KEY_FINGERPRINT }}
+    steps:
+      - &checkout-candidate
+        name: Check out the candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - &setup-node
+        name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Require Linux signing credentials
+        if: env.CHANNEL == 'stable'
+        env:
+          PRIVATE_KEY: ${{ secrets.LINUX_REPOSITORY_PRIVATE_KEY }}
+        run: test -n "$PRIVATE_KEY" && test -n "$MILAGRE_LINUX_SIGNING_KEY"
+      - name: Install Linux tools
+        run: sudo apt-get update && sudo apt-get install -y rpm createrepo-c gnupg xvfb desktop-file-utils libgbm1 libgtk-3-0 libnss3 libasound2t64
+      - name: Install dependencies
+        run: npm ci
+      - name: Build Linux installers
+        run: npm run package:linux -- --config.extraMetadata.version="${VERSION}" --config.publish.channel="${FEED_CHANNEL}"
+      # As on macOS: electron-builder writes only the current channel's feed, so beta installs read a copy and move to this release.
+      - name: Mirror the stable feed to the beta channel
+        if: env.CHANNEL == 'stable'
+        run: |-
+          test -f release/latest-linux.yml || { echo "::error::release/latest-linux.yml was not generated; there is no stable feed to mirror to beta."; exit 1; }
+          cp release/latest-linux.yml release/beta-linux.yml
+      - name: Exercise installed Linux desktop
+        run: |-
+          sudo apt-get install -y ./release/*.deb
+          desktop-file-validate /usr/share/applications/milagre.desktop
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          xvfb-run -a node scripts/test-desktop.cjs --packaged /opt/Milagre/milagre
+      - name: Exercise Linux AppImage payload
+        run: |-
+          "release/Milagre-${VERSION}-x86_64.AppImage" --appimage-extract > /dev/null
+          xvfb-run -a node scripts/test-desktop.cjs --packaged squashfs-root/AppRun
+      # The package repository (packages.milagre.cloud) only ever carries stable releases.
+      - name: Import repository signing key
+        if: env.CHANNEL == 'stable'
+        env:
+          PRIVATE_KEY: ${{ secrets.LINUX_REPOSITORY_PRIVATE_KEY }}
+        run: |-
+          export GNUPGHOME="$RUNNER_TEMP/milagre-gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          printf "%s" "$PRIVATE_KEY" | gpg --batch --import
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+      - name: Retain previous package downloads
+        if: env.CHANNEL == 'stable'
+        run: node scripts/fetch-package-map.cjs "$RUNNER_TEMP/milagre-repository-maps"
+      - name: Sign RPM and generate signed repositories
+        if: env.CHANNEL == 'stable'
+        run: |-
+          previous=()
+          if [ -f "$RUNNER_TEMP/milagre-repository-maps/package-map.json" ]; then previous=(--previous "$RUNNER_TEMP/milagre-repository-maps/package-map.json" --previous-metadata "$RUNNER_TEMP/milagre-repository-maps/immutable-metadata.json"); fi
+          node scripts/generate-linux-repository.cjs --tag "$RELEASE_TAG" --artifacts release --output release/linux-repository --sign-rpm "${previous[@]}"
+          node scripts/finalize-update-feeds.cjs --tag "$RELEASE_TAG" --platform linux
+          tar -C release/linux-repository -czf release/milagre-linux-repository.tar.gz .
+      - name: Verify signed Linux repository bundle
+        if: env.CHANNEL == 'stable'
+        run: node scripts/verify-linux-repository.cjs --directory release/linux-repository --tag "$RELEASE_TAG" --fingerprint "$MILAGRE_LINUX_SIGNING_KEY" --artifacts release
+      - name: Install and exercise signed Fedora RPM
+        if: env.CHANNEL == 'stable'
+        run: |-
+          docker build --platform linux/amd64 -f scripts/linux-runtime.Dockerfile -t milagre-fedora-check scripts
+          mkdir -p "$RUNNER_TEMP/milagre-source"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/milagre-source"
+          docker run --rm --platform linux/amd64 --cap-add=SYS_ADMIN --security-opt seccomp=unconfined -v "$RUNNER_TEMP/milagre-source:/source:ro" -v "$PWD/release:/installers:ro" -v "$PWD/release/linux-repository/archive-keyring.asc:/public-key.asc:ro" milagre-fedora-check bash /source/scripts/test-linux-rpm.sh /source /installers /public-key.asc
+      # The checkout is the candidate's commit, whose finalizer can predate Linux betas; the check uses this workflow's.
+      - name: Check the beta feed
+        if: env.CHANNEL == 'beta'
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |-
+          git fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          git show "$WORKFLOW_SHA:scripts/finalize-update-feeds.cjs" > scripts/finalize-update-feeds.workflow.cjs
+          node scripts/finalize-update-feeds.workflow.cjs --tag "v${VERSION}" --platform linux --check
+      - name: Stage Linux installers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: installers-linux
+          path: |-
+            release/*.deb
+            release/*.rpm
+            release/*.AppImage
+            release/latest-linux.yml
+            release/beta-linux.yml
+            release/milagre-linux-repository.tar.gz
+          if-no-files-found: error
+      - name: Remove temporary signing key
+        if: always()
+        run: if [ -n "$GNUPGHOME" ]; then gpgconf --kill gpg-agent || true; rm -rf "$GNUPGHOME"; fi
+  windows:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true' && needs.prepare.outputs.windows == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CHANNEL: ${{ needs.prepare.outputs.channel }}
+      FEED_CHANNEL: ${{ needs.prepare.outputs.feed_channel }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - *checkout-candidate
+      - *setup-node
+      - name: Require Windows signing credentials
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: if (!$env:CSC_LINK -or !$env:CSC_KEY_PASSWORD) { throw 'Configure WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD before publishing Windows installers' }
+      - name: Install dependencies
+        run: npm ci
+      - name: Test Windows agent protocol
+        timeout-minutes: 5
+        run: node --test --test-reporter=tap --test-timeout=60000 packages/core/src/agents/codex-provider.test.cjs
+      - name: Test Windows runtime
+        timeout-minutes: 15
+        run: node --test --test-reporter=tap --test-timeout=180000 packages/core/src/windows-runtime.test.cjs apps/daemon/src/windows-transport.test.cjs packages/core/src/agents/process-tree.test.cjs packages/core/src/ownership.test.cjs
+      - name: Build signed Windows installer
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npm run package:win -- --config.extraMetadata.version="${VERSION}" --config.publish.channel="${FEED_CHANNEL}" --config.forceCodeSigning=true
+      - name: Mirror the stable feed to the beta channel
+        if: env.CHANNEL == 'stable'
+        shell: bash
+        run: |-
+          test -f release/latest.yml || { echo "::error::release/latest.yml was not generated; there is no stable feed to mirror to beta."; exit 1; }
+          cp release/latest.yml release/beta.yml
+      - name: Verify installer Authenticode
+        shell: pwsh
+        run: |-
+          Get-ChildItem release/Milagre-Setup-*-x64.exe | ForEach-Object {
+            $signature = Get-AuthenticodeSignature $_.FullName
+            if ($signature.Status -ne 'Valid') { throw "Invalid installer signature: $($signature.Status)" }
+          }
+      - name: Install and exercise Windows NSIS
+        shell: pwsh
+        run: |-
+          $installer = (Get-ChildItem release/Milagre-Setup-*-x64.exe | Select-Object -First 1).FullName
+          $destination = Join-Path $env:RUNNER_TEMP 'Milagre Installed'
+          $install = Start-Process -FilePath $installer -ArgumentList @('/S', '/currentuser', "/D=$destination") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited $($install.ExitCode)" }
+          $executable = Join-Path $destination 'Milagre.exe'
+          if (!(Test-Path $executable)) { throw 'Installed executable is missing' }
+          node scripts/test-desktop.cjs --packaged $executable
+          if ($LASTEXITCODE -ne 0) { throw 'Installed desktop check failed' }
+      - name: Stage Windows installers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: installers-windows
+          path: |-
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+            release/beta.yml
+          if-no-files-found: error
+  publish:
+    needs: [prepare, macos, linux, windows]
+    # macOS gates every release. Stable also needs Linux and, once enabled, Windows; a beta ships without a failed one.
+    if: >-
+      always() && needs.prepare.outputs.changed == 'true' && needs.macos.result == 'success' &&
+      (needs.prepare.outputs.channel == 'beta' || (needs.linux.result == 'success' && (needs.windows.result == 'success' || needs.windows.result == 'skipped')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CHANNEL: ${{ needs.prepare.outputs.channel }}
+      SOURCE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+      WINDOWS: ${{ needs.prepare.outputs.windows }}
+    steps:
+      # This workflow's own scripts check the feeds, since the candidate's copy can predate a platform or channel.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install metadata dependencies
+        run: npm ci --ignore-scripts
+      - name: Collect installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: release
+      - name: Publish the release
+        run: |
+          shopt -s nullglob
+          platforms=macos
+          linux=(release/*.AppImage)
+          windows=(release/*.exe)
+          if [ ${#linux[@]} -gt 0 ]; then platforms="$platforms,linux"
+          elif [ "$CHANNEL" = stable ]; then echo "::error::Linux installers are missing; a stable release ships every platform."; exit 1
+          else echo "::warning::The Linux build failed; this beta ships without Linux."; fi
+          if [ ${#windows[@]} -gt 0 ]; then platforms="$platforms,windows"
+          elif [ "$WINDOWS" = true ] && [ "$CHANNEL" = stable ]; then echo "::error::Windows installers are missing; a stable release ships every platform."; exit 1
+          elif [ "$WINDOWS" = true ]; then echo "::warning::The Windows build failed; this beta ships without Windows."; fi
+          echo "Publishing $RELEASE_TAG ($CHANNEL) for $platforms"
+          node scripts/finalize-update-feeds.cjs --tag "$RELEASE_TAG" --platform "$platforms" --check
+          assets=(release/*.dmg release/*.zip release/*.AppImage release/*.deb release/*.rpm release/*.exe release/*.blockmap release/*.yml release/milagre-linux-repository.tar.gz)
+          if [ "$CHANNEL" = stable ]; then
+            npm run package:managers -- --tag "$RELEASE_TAG" --platform "$platforms"
+            assets+=(release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb release/package-managers/winget/Milagre.Milagre.yaml)
+            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          else
+            target=$(gh api "repos/{owner}/{repo}/commits/$SOURCE_TAG" --jq .sha)
+            notes=$(gh release view "$SOURCE_TAG" --json body --jq .body)
+            gh release create "$RELEASE_TAG" --target "$target" --prerelease --title "$RELEASE_TAG" --notes "Beta build of $SOURCE_TAG."$'\n\n'"$notes" "${assets[@]}"
+          fi
+  deploy-linux-repository:
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.channel == 'stable'
+    uses: ./.github/workflows/deploy-linux-repository.yml
+    with:
+      tag: ${{ needs.prepare.outputs.release_tag }}
+    secrets:
+      LINUX_REPOSITORY_KEY_FINGERPRINT: ${{ secrets.LINUX_REPOSITORY_KEY_FINGERPRINT }}
+      CLOUDFLARE_PACKAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PACKAGES_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

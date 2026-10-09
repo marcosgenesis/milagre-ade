@@ -7,7 +7,7 @@ type IssueList = { issues: LinearIssue[]; error?: string };
 
 /**
  * The "Start from a Linear issue" list: a search over the workspace's issues. Shared by the new-chat header and the
- * sidebar row's "Link Linear issue…" menu item. A typed query waits 250 ms, and a stale answer is dropped.
+ * sidebar row's "Link issue…" menu item. A typed query waits 250 ms, and a stale answer is dropped.
  */
 export function LinearIssuePicker({
   onPick,

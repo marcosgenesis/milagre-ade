@@ -17,8 +17,6 @@ import {
   Folder01Icon,
   FolderOpenIcon,
   GitBranchIcon,
-  Link01Icon,
-  Unlink01Icon,
   GitMergeIcon,
   GitPullRequestIcon,
   Link04Icon,
@@ -66,7 +64,7 @@ type ChatDetails = {
   linearIssue?: LinearIssue;
   /** The key the chat's Worktree is stored as linked to (Worktree.linearIssue). Only while Linear is on. */
   linearKey?: string;
-  /** The chat has its own Worktree that another chat doesn't share, so "Link Linear issue…" is offered. Only while Linear is on. */
+  /** The chat has its own Worktree that another chat doesn't share, so "Link issue…" is offered. Only while Linear is on. */
   linkable?: boolean;
   /** The chat's last turn failed. */
   failed?: boolean;
@@ -128,7 +126,16 @@ const ROW_PR_LIMIT = 2;
 const HOVER_CARD_WIDTH = 256;
 const MENU_WIDTH = 240;
 
-type MenuEntry = { key: string; label: string; icon: HugeIconData; onSelect: () => void; disabled?: boolean; danger?: boolean; archiveChoice?: boolean };
+type MenuEntry = {
+  key: string;
+  label: string;
+  icon?: HugeIconData;
+  /** Drawn instead of `icon`, e.g. a brand mark. */ leading?: ReactNode;
+  onSelect: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  archiveChoice?: boolean;
+};
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
 
@@ -212,7 +219,7 @@ export const ChatRow = memo(function ChatRow({
   const hoverTimer = useRef<number | null>(null);
   const [card, setCard] = useState<{ top: number; left: number; flip: boolean } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  // The issue picker opened from the menu's "Link Linear issue…", at the menu's place.
+  // The issue picker opened from the menu's "Link issue…", at the menu's place.
   const [linking, setLinking] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
 
@@ -707,7 +714,7 @@ function CardLine({ icon, children }: { icon: ReactNode; children: ReactNode }) 
  * From the row's ⋮ button or a right-click. Archive hides the
  * chat for good (there is no archived list), so it asks twice.
  * ───────────────────────────────────────────────────────── */
-/** The issue list over the menu's place, for "Link Linear issue…". Picking an issue hands its key up and closes. */
+/** The issue list over the menu's place, for "Link issue…". Picking an issue hands its key up and closes. */
 function LinkIssuePopover({ position, onPick, onClose }: { position: { x: number; y: number }; onPick: (issue: LinearIssue) => void; onClose: () => void }) {
   useDismiss(true, onClose, (target) => !!target.closest("[data-picker-panel]"));
   const ref = useRef<HTMLDivElement>(null);
@@ -840,13 +847,13 @@ function ChatMenu({
         ? [
             {
               key: "unlink-issue",
-              label: "Unlink Linear issue",
-              icon: Unlink01Icon,
+              label: "Unlink issue",
+              leading: <LinearLogo size={14} />,
               onSelect: run(() => actions.onUnlinkIssue?.(item.id)),
               disabled: !actions.onUnlinkIssue,
             },
           ]
-        : [{ key: "link-issue", label: "Link Linear issue…", icon: Link01Icon, onSelect: run(onLink), disabled: !actions.onLinkIssue }]
+        : [{ key: "link-issue", label: "Link issue…", leading: <LinearLogo size={14} />, onSelect: run(onLink), disabled: !actions.onLinkIssue }]
       : []),
     item.unread
       ? { key: "read", label: "Mark as read", icon: Tick02Icon, onSelect: run(() => actions.onMarkUnread?.(item.id, false)), disabled: !actions.onMarkUnread }
@@ -928,7 +935,7 @@ function ChatMenu({
               className={`relative z-10 flex w-full items-center gap-2 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40 ${entry.archiveChoice ? "min-h-8 py-1.5" : "h-8"} ${entry.danger ? "text-red" : "text-ink"}`}
             >
               <span className={`flex size-5 shrink-0 items-center justify-center ${entry.danger ? "text-red" : "text-ink-2"}`}>
-                <HugeIcon icon={entry.icon} size={16} />
+                {entry.leading ?? (entry.icon && <HugeIcon icon={entry.icon} size={16} />)}
               </span>
               <span className={`min-w-0 flex-1 text-[13px] ${entry.archiveChoice ? "leading-snug" : "truncate"}`}>{entry.label}</span>
             </button>

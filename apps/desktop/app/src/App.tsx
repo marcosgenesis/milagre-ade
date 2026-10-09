@@ -88,6 +88,7 @@ import { createPendingChat, isListedChat, pendingChatSessionId, withPendingChat,
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 // Notice above is editor-links' toast; this is the dismissable notice card.
+import { showNotice } from "./lib/notice";
 import { Notice as NoticeCard } from "./components/Notice";
 import { openInEditor } from "./lib/editors";
 import type { RuntimeConnection } from "./electron";
@@ -704,7 +705,7 @@ function App() {
           path: worktree?.path,
           diff: worktree?.diff,
           linearIssue: worktree ? linearIssues[worktree.path] : undefined,
-          // The stored link (Worktree.linearIssue) and whether "Link Linear issue…" applies: the chat's own Worktree,
+          // The stored link (Worktree.linearIssue) and whether "Link issue…" applies: the chat's own Worktree,
           // not the main checkout, and not one another chat shares.
           linearKey: linear.active ? worktree?.linearIssue : undefined,
           linkable: linear.active && !!worktree && worktree.path !== project?.path && !worktreeShared(state, session.id),
@@ -1356,7 +1357,8 @@ function App() {
       const result = await window.milagre.linkWorktreeIssue({ projectPath: path, worktreeId, key });
       receiveState(path, result.project.state);
       refreshLinearIssues();
-      setNotice(result.mode === "renamed" ? `Branch renamed to ${result.branch}` : LINK_PR_HINT(key));
+      // A toast, as on the phone: the result needs no answer.
+      showNotice(result.mode === "renamed" ? `Branch renamed to ${result.branch}.` : `Issue linked. ${LINK_PR_HINT(key)}`);
     };
     await reportChatAction(linked(), "Could not link issue", setNotice);
   }

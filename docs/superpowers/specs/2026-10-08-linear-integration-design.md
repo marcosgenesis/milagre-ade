@@ -141,8 +141,8 @@ no token, and a short message string on network or API errors; none of them thro
 
 ## Link an existing Worktree
 
-- "Link Linear issue…" in the Worktree's menu (desktop context menu, phone action menu) opens the same
-  picker; "Unlink Linear issue" appears when a stored link exists.
+- "Link issue…" in the Worktree's menu (desktop context menu, phone action menu) opens the same
+  picker; "Unlink issue" appears when a stored link exists.
 - `worktree:link-issue { projectPath, worktreeId, key }`:
   - When the branch starts with `milagre/` and `readPullRequest` finds no open PR, the branch is renamed to
     the issue's `branchName` (folder untouched, as `renameWorktreeBranch` already does) and nothing is

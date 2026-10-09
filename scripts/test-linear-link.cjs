@@ -1,5 +1,5 @@
 // Real Electron checks for linking an existing Worktree to a Linear issue from the sidebar row: the row menu's
-// "Link Linear issue…" (only when Linear is on and the chat has its own Worktree), "Unlink Linear issue" for a stored
+// "Link issue…" (only when Linear is on and the chat has its own Worktree), "Unlink issue" for a stored
 // link, and the hover card's hint when the branch doesn't name the key. MILAGRE_SCREENSHOT_DIR saves images outside the repo.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -109,7 +109,7 @@ async function checks(url) {
     await window.loadURL(url + "?linear=off");
     await waitFor(`!!document.querySelector('[data-row="chat-link"]')`);
     const offLabels = await openMenu("chat-link");
-    assert.equal(offLabels.includes("Link Linear issue…"), false, "no link item while Linear is off");
+    assert.equal(offLabels.includes("Link issue…"), false, "no link item while Linear is off");
     await closeMenu();
 
     await window.loadURL(url + "?linear=on");
@@ -126,12 +126,12 @@ async function checks(url) {
 
     // An own Worktree with no link offers Link, not Unlink.
     const linkLabels = await openMenu("chat-link");
-    assert.equal(linkLabels.includes("Link Linear issue…"), true, "Link is offered for an own Worktree");
-    assert.equal(linkLabels.includes("Unlink Linear issue"), false);
+    assert.equal(linkLabels.includes("Link issue…"), true, "Link is offered for an own Worktree");
+    assert.equal(linkLabels.includes("Unlink issue"), false);
     await screenshot("link-menu");
 
     // Picking an issue in the picker hands its key to the link action for this chat.
-    await evaluate(`[...document.querySelectorAll('[data-chat-menu] [data-menu-row]')].find((el) => el.textContent.trim() === 'Link Linear issue…').click()`);
+    await evaluate(`[...document.querySelectorAll('[data-chat-menu] [data-menu-row]')].find((el) => el.textContent.trim() === 'Link issue…').click()`);
     await waitFor(`document.querySelectorAll('[data-linear-link-picker] [data-linear-issue-row]').length === 2`);
     assert.equal(await evaluate(`!!document.querySelector('[data-linear-link-picker] [data-linear-logo]')`), true, "picker rows show Linear's mark");
     await screenshot("link-picker");
@@ -141,9 +141,9 @@ async function checks(url) {
 
     // A stored link offers Unlink instead of Link, and Unlink calls the unlink action.
     const storedLabels = await openMenu("chat-stored");
-    assert.equal(storedLabels.includes("Unlink Linear issue"), true, "Unlink is offered for a stored link");
-    assert.equal(storedLabels.includes("Link Linear issue…"), false, "Link is replaced by Unlink");
-    await evaluate(`[...document.querySelectorAll('[data-chat-menu] [data-menu-row]')].find((el) => el.textContent.trim() === 'Unlink Linear issue').click()`);
+    assert.equal(storedLabels.includes("Unlink issue"), true, "Unlink is offered for a stored link");
+    assert.equal(storedLabels.includes("Link issue…"), false, "Link is replaced by Unlink");
+    await evaluate(`[...document.querySelectorAll('[data-chat-menu] [data-menu-row]')].find((el) => el.textContent.trim() === 'Unlink issue').click()`);
     await waitFor(`window.__unlink.length === 1`);
     assert.deepEqual(await evaluate(`window.__unlink`), [{ id: "chat-stored" }]);
 
@@ -159,7 +159,7 @@ async function checks(url) {
     // The picker opened from a row near the bottom of the window stays inside it.
     await evaluate(`${rowEl("chat-low")}.scrollIntoView({ block: 'end' })`);
     await openMenu("chat-low");
-    await evaluate(`[...document.querySelectorAll('[data-chat-menu] [data-menu-row]')].find((el) => el.textContent.trim() === 'Link Linear issue…').click()`);
+    await evaluate(`[...document.querySelectorAll('[data-chat-menu] [data-menu-row]')].find((el) => el.textContent.trim() === 'Link issue…').click()`);
     await waitFor(`document.querySelectorAll('[data-linear-link-picker] [data-linear-issue-row]').length === 2`);
     // The picker moves once its height is known, a frame after the rows appear, so wait for it to settle.
     await waitFor(

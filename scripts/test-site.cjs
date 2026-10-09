@@ -158,12 +158,18 @@ const checks = [
     },
   },
   {
-    name: "Linux gets the AppImage with .deb and .rpm links, Windows gets its own button, and Macs only the Mac builds",
+    name: "Linux gets the AppImage with .deb and .rpm links, Windows gets its own button, and every desktop lists the others",
     async run(open, evaluate, shot) {
       const linux = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
       const visible = (selector) => `[...document.querySelectorAll('${selector}')].filter((a) => a.offsetParent).map((a) => a.getAttribute("href"))`;
       const window = await open({ width: 1440, height: 900, userAgent: linux });
-      assert.deepEqual(await evaluate(window, visible(".cta a")), ["/download/linux-appimage", "/download/linux-deb", "/download/linux-rpm"]);
+      assert.deepEqual(await evaluate(window, visible(".cta a")), [
+        "/download/linux-appimage",
+        "/download/linux-deb",
+        "/download/linux-rpm",
+        "/download/mac-arm64",
+        "/download/windows",
+      ]);
       assert.ok(
         (await evaluate(window, `[...document.querySelectorAll(".cta .button")].find((a) => a.offsetParent).textContent.trim()`)) === "Download for Linux",
       );
@@ -175,7 +181,7 @@ const checks = [
         height: 900,
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
       });
-      assert.deepEqual(await evaluate(windows, visible(".cta a")), ["/download/windows"]);
+      assert.deepEqual(await evaluate(windows, visible(".cta a")), ["/download/windows", "/download/mac-arm64", "/download/linux-appimage"]);
       assert.equal(
         await evaluate(windows, `[...document.querySelectorAll(".cta .button")].find((a) => a.offsetParent).textContent.trim()`),
         "Download for Windows",
@@ -183,7 +189,7 @@ const checks = [
       await shot(windows, "windows.png");
       windows.destroy();
       const mac = await open({ width: 1440, height: 900 });
-      assert.deepEqual(await evaluate(mac, visible(".cta a")), ["/download/mac-arm64", "/download/mac-x64"]);
+      assert.deepEqual(await evaluate(mac, visible(".cta a")), ["/download/mac-arm64", "/download/mac-x64", "/download/linux-appimage", "/download/windows"]);
       mac.destroy();
     },
   },

@@ -14,7 +14,14 @@ struct ActivityPanel: View {
     VStack(alignment: .leading, spacing: 9) {
       HStack(spacing: 7) {
         MilagreMark().fill(.white).frame(width: 18, height: 18)
-        Text(state.question?.title ?? state.rows.first?.title ?? "Chat").font(.system(size: 13, weight: .semibold)).lineLimit(1)
+        if let question = state.question {
+          Text(question.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+        } else {
+          HStack(spacing: 4) {
+            Text("Milagre").layoutPriority(1)
+            Text("· \(context.attributes.hostName)").foregroundStyle(.secondary).lineLimit(1)
+          }.font(.system(size: 13, weight: .semibold))
+        }
         Spacer(minLength: 4)
         Text(context.isStale ? "Updated earlier" : state.delivery ?? (state.waitingCount > 0 ? "Needs you" : "Working"))
           .font(.system(size: 11, weight: .medium)).foregroundStyle(accent)

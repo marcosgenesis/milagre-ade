@@ -1,6 +1,7 @@
 export const RELEASES_API = "https://api.github.com/repos/the-ptf/milagre-ade/releases/latest";
 export const RELEASES_PAGE = "https://github.com/the-ptf/milagre-ade/releases/latest";
 export const REPO_API = "https://api.github.com/repos/the-ptf/milagre-ade";
+export const RECENT_RELEASES_API = "https://api.github.com/repos/the-ptf/milagre-ade/releases?per_page=10";
 
 // Release assets carry the version in their names, so match by pattern.
 const TARGETS = {
@@ -11,7 +12,10 @@ const TARGETS = {
   "linux-rpm": /^Milagre-.+-x86_64\.rpm$/,
   // No Windows build is published yet; until one is, this falls back to the latest release page.
   windows: /^Milagre-.+\.exe$/,
+  android: /^Milagre-.*android.*\.apk$/,
 };
+// The Android APK is attached by hand, not by every release, so it's looked up in the recent releases too.
+const SEARCH_RECENT = new Set(["android"]);
 
 function githubInit(token, timeoutMs) {
   const headers = { accept: "application/vnd.github+json", "user-agent": "milagre-site" };
@@ -23,11 +27,16 @@ export async function latestDownload(target, fetchImpl, { token, timeoutMs = 300
   const pattern = TARGETS[target];
   if (!pattern) return null;
   try {
-    const response = await fetchImpl(RELEASES_API, githubInit(token, timeoutMs));
+    const recent = SEARCH_RECENT.has(target);
+    const response = await fetchImpl(recent ? RECENT_RELEASES_API : RELEASES_API, githubInit(token, timeoutMs));
     if (!response.ok) return RELEASES_PAGE;
-    const release = await response.json();
-    const asset = (release.assets || []).find((item) => pattern.test(item.name));
-    return asset ? asset.browser_download_url : RELEASES_PAGE;
+    const body = await response.json();
+    const releases = recent ? (Array.isArray(body) ? body.filter((release) => !release.draft) : []) : [body];
+    for (const release of releases) {
+      const asset = (release.assets || []).find((item) => pattern.test(item.name));
+      if (asset) return asset.browser_download_url;
+    }
+    return RELEASES_PAGE;
   } catch {
     return RELEASES_PAGE;
   }

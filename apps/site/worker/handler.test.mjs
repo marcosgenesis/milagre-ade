@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { RELEASES_API, RELEASES_PAGE, REPO_API, handleRequest, latestDownload, repoStars, withRange } from "./handler.mjs";
+import { RECENT_RELEASES_API, RELEASES_API, RELEASES_PAGE, REPO_API, handleRequest, latestDownload, repoStars, withRange } from "./handler.mjs";
 
 const release = {
   tag_name: "v0.92.0",
@@ -171,4 +171,18 @@ test("sends Windows to the latest release page until a Windows installer is publ
   assert.equal(await latestDownload("windows", fetchImpl), RELEASES_PAGE);
   const withExe = { ...release, assets: [...release.assets, { name: "Milagre-0.92.0-x64.exe", browser_download_url: "https://example.test/x64.exe" }] };
   assert.equal(await latestDownload("windows", github(withExe).fetchImpl), "https://example.test/x64.exe");
+});
+
+test("finds the Android APK in the newest recent release that has one, skipping drafts", async () => {
+  const apk = (version) => ({ name: `Milagre-${version}-android-beta.apk`, browser_download_url: `https://example.test/${version}.apk` });
+  const releases = [
+    { draft: true, assets: [apk("draft")] },
+    { draft: false, assets: release.assets },
+    { draft: false, assets: [...release.assets, apk("0.91.0")] },
+    { draft: false, assets: [apk("0.90.0")] },
+  ];
+  const { fetchImpl, calls } = github(releases);
+  assert.equal(await latestDownload("android", fetchImpl), "https://example.test/0.91.0.apk");
+  assert.equal(calls[0].url, RECENT_RELEASES_API);
+  assert.equal(await latestDownload("android", github([{ draft: false, assets: release.assets }]).fetchImpl), RELEASES_PAGE);
 });

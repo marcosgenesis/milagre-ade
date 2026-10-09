@@ -56,7 +56,7 @@ import { useLinear } from "./use-linear";
 import { useWorktreeLinearIssues } from "./use-worktree-linear-issues";
 import { createStylesHook, useTheme, type Palette } from "./theme";
 import { activityAgo, CHAT_ROW_FIELDS } from "@milagre/shared/chat-row";
-import { saveChatRowShow, useChatRowShow } from "./chat-row-store";
+import { saveChatRowShow, useActivityClock, useChatRowShow } from "./chat-row-store";
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
@@ -129,14 +129,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const [query, setQuery] = useState("");
   const [show, setShow] = useState<Show>("all");
   const rowShow = useChatRowShow();
-  // Last activity reads "5m"; the list re-reads the clock each minute while it shows it.
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (!rowShow.lastActivity) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, [rowShow.lastActivity]);
+  // Last activity reads "5m"; the clock ticks only while the rows show it.
+  const now = useActivityClock(rowShow.lastActivity);
   const [page, setPage] = useState<"add" | null>(null);
   const [busy, setBusy] = useState(false);
   const archives = useArchiveActivity();

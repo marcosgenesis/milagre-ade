@@ -1269,7 +1269,11 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "./use-linear": { useLinear: () => ({ active: false }) },
     "./use-worktree-linear-issues": { useWorktreeLinearIssues: () => ({}) },
     "@milagre/shared/chat-row": require("../packages/shared/src/chat-row.ts"),
-    "./chat-row-store": { useChatRowShow: () => require("../packages/shared/src/chat-row.ts").PHONE_CHAT_ROW_SHOW, saveChatRowShow: () => {} },
+    "./chat-row-store": {
+      useChatRowShow: () => require("../packages/shared/src/chat-row.ts").PHONE_CHAT_ROW_SHOW,
+      saveChatRowShow: () => {},
+      useActivityClock: () => Date.now(),
+    },
     "./chat-pull-request-chips": { ChatPullRequestChips },
     "./icons": { Icon: "Icon", SpinnerRing: "SpinnerRing" },
     "./loading-logo": { LoadingLogo: "LoadingLogo" },

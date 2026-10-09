@@ -33,3 +33,33 @@ export function useChatRowShow(): ChatRowShow {
   }, []);
   return useSyncExternalStore(subscribe, () => current);
 }
+
+// One clock for the rows' last activity, so "5m" moves on without a timer per list. A read refreshes a stale value,
+// so a list shown long after the last tick starts right.
+const TICK = 30_000;
+let clockNow = Date.now();
+const clockListeners = new Set<() => void>();
+let clockTimer: ReturnType<typeof setInterval> | null = null;
+function readClock() {
+  if (Date.now() - clockNow >= TICK) clockNow = Date.now();
+  return clockNow;
+}
+function subscribeClock(listener: () => void) {
+  clockListeners.add(listener);
+  clockTimer ??= setInterval(() => {
+    clockNow = Date.now();
+    clockListeners.forEach((notify) => notify());
+  }, TICK);
+  return () => {
+    clockListeners.delete(listener);
+    if (clockListeners.size === 0 && clockTimer !== null) {
+      clearInterval(clockTimer);
+      clockTimer = null;
+    }
+  };
+}
+const NO_CLOCK = () => () => {};
+/** Now, to the half minute, while `on`; 0 otherwise, so a list that doesn't show the time never re-renders for it. */
+export function useActivityClock(on: boolean): number {
+  return useSyncExternalStore(on ? subscribeClock : NO_CLOCK, () => (on ? readClock() : 0));
+}

@@ -18,7 +18,6 @@ type ChoiceRequest = {
   onSelect: (id: string) => void;
 };
 type ChoiceRequestEntry = Omit<ChoiceRequest, "onSelect"> & { choose: (id: string | null) => void };
-export type { ChoiceItem };
 
 let current: ChoiceRequestEntry | null = null;
 let present: (() => void) | null = null;

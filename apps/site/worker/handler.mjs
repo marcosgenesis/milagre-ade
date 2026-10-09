@@ -56,5 +56,23 @@ export async function handleRequest(request, { assets, fetchImpl, token }) {
     const stars = await repoStars(fetchImpl, { token });
     return Response.json({ stars }, { headers: { "cache-control": stars === null ? "no-store" : "public, max-age=600" } });
   }
-  return assets.fetch(request);
+  return withRange(request, await assets.fetch(request));
+}
+
+// Safari plays a video only when the server answers byte ranges, so a whole-file answer is cut to the range asked for.
+export async function withRange(request, response) {
+  const range = request.headers.get("range")?.match(/^bytes=(\d*)-(\d*)$/);
+  if (!range || response.status !== 200 || (!range[1] && !range[2])) return response;
+  const body = new Uint8Array(await response.arrayBuffer());
+  const size = body.length;
+  let start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+  let end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+  if (start >= size || start > end) {
+    return new Response(null, { status: 416, headers: { "content-range": `bytes */${size}` } });
+  }
+  const headers = new Headers(response.headers);
+  headers.set("content-range", `bytes ${start}-${end}/${size}`);
+  headers.set("content-length", String(end - start + 1));
+  headers.set("accept-ranges", "bytes");
+  return new Response(body.slice(start, end + 1), { status: 206, headers });
 }

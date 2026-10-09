@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { RELEASES_API, RELEASES_PAGE, REPO_API, handleRequest, latestDownload, repoStars } from "./handler.mjs";
+import { RELEASES_API, RELEASES_PAGE, REPO_API, handleRequest, latestDownload, repoStars, withRange } from "./handler.mjs";
 
 const release = {
   tag_name: "v0.92.0",
@@ -138,4 +138,19 @@ test("serves null stars without caching when GitHub fails", async () => {
   const response = await handleRequest(new Request("https://milagre.cloud/api/stars"), { assets, fetchImpl });
   assert.deepEqual(await response.json(), { stars: null });
   assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
+test("answers a byte range with 206 and only those bytes, as Safari needs for video", async () => {
+  const file = () => new Response(new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]), { headers: { "content-type": "video/mp4" } });
+  const ranged = (range) => withRange(new Request("https://milagre.cloud/demo/phone.mp4", { headers: { range } }), file());
+  const first = await ranged("bytes=0-1");
+  assert.equal(first.status, 206);
+  assert.equal(first.headers.get("content-range"), "bytes 0-1/10");
+  assert.equal(first.headers.get("content-type"), "video/mp4");
+  assert.deepEqual([...new Uint8Array(await first.arrayBuffer())], [0, 1]);
+  assert.deepEqual([...new Uint8Array(await (await ranged("bytes=8-")).arrayBuffer())], [8, 9]);
+  assert.deepEqual([...new Uint8Array(await (await ranged("bytes=-3")).arrayBuffer())], [7, 8, 9]);
+  assert.equal((await ranged("bytes=20-")).status, 416);
+  const whole = await withRange(new Request("https://milagre.cloud/demo/phone.mp4"), file());
+  assert.equal(whole.status, 200);
 });

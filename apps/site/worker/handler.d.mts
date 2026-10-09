@@ -8,3 +8,4 @@ export declare function handleRequest(
   request: Request,
   options: { assets: { fetch(request: Request): Promise<Response> }; fetchImpl: FetchLike; token?: string },
 ): Promise<Response>;
+export declare function withRange(request: Request, response: Response): Promise<Response>;

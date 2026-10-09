@@ -25,9 +25,10 @@ const ogImage = new URL("/og.png", Astro.site);
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <script is:inline>
-      // Each device sees its own download, chosen before first paint. iPadOS reports itself as a Mac with touch.
+      // Each device sees its own download, chosen before first paint; anything else gets the Mac one. iPadOS reports itself as a Mac with touch.
       const ua = navigator.userAgent;
       if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) document.documentElement.dataset.platform = "ios";
+      else if (/Windows/.test(ua)) document.documentElement.dataset.platform = "windows";
       else if (/Linux|X11/.test(ua) && !/Android/.test(ua)) document.documentElement.dataset.platform = "linux";
     </script>
   </head>

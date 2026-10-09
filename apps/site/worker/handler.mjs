@@ -9,6 +9,8 @@ const TARGETS = {
   "linux-appimage": /^Milagre-.+-x86_64\.AppImage$/,
   "linux-deb": /^Milagre-.+-amd64\.deb$/,
   "linux-rpm": /^Milagre-.+-x86_64\.rpm$/,
+  // No Windows build is published yet; until one is, this falls back to the latest release page.
+  windows: /^Milagre-.+\.exe$/,
 };
 
 function githubInit(token, timeoutMs) {

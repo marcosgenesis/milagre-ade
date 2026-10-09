@@ -73,7 +73,7 @@ test("handleRequest forwards the token to the GitHub lookup", async () => {
 
 test("returns null for an unknown target without calling GitHub", async () => {
   const { fetchImpl, calls } = github(release);
-  assert.equal(await latestDownload("windows", fetchImpl), null);
+  assert.equal(await latestDownload("amiga", fetchImpl), null);
   assert.equal(calls.length, 0);
 });
 
@@ -164,4 +164,11 @@ test("resolves the Linux AppImage, .deb and .rpm, never the repository archive",
   assert.equal(await latestDownload("linux-appimage", fetchImpl), "https://example.test/x86_64.AppImage");
   assert.equal(await latestDownload("linux-deb", fetchImpl), "https://example.test/amd64.deb");
   assert.equal(await latestDownload("linux-rpm", fetchImpl), "https://example.test/x86_64.rpm");
+});
+
+test("sends Windows to the latest release page until a Windows installer is published", async () => {
+  const { fetchImpl } = github(release);
+  assert.equal(await latestDownload("windows", fetchImpl), RELEASES_PAGE);
+  const withExe = { ...release, assets: [...release.assets, { name: "Milagre-0.92.0-x64.exe", browser_download_url: "https://example.test/x64.exe" }] };
+  assert.equal(await latestDownload("windows", github(withExe).fetchImpl), "https://example.test/x64.exe");
 });

@@ -135,7 +135,7 @@ const checks = [
     },
   },
   {
-    name: "Linux gets the AppImage with .deb and .rpm links, and Macs get a Linux link too",
+    name: "Linux gets the AppImage with .deb and .rpm links, Windows gets its own button, and Macs only the Mac builds",
     async run(open, evaluate, shot) {
       const linux = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
       const visible = (selector) => `[...document.querySelectorAll('${selector}')].filter((a) => a.offsetParent).map((a) => a.getAttribute("href"))`;
@@ -147,8 +147,20 @@ const checks = [
       await assertOneScreen(evaluate, window);
       await shot(window, "linux.png");
       window.destroy();
+      const windows = await open({
+        width: 1440,
+        height: 900,
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+      });
+      assert.deepEqual(await evaluate(windows, visible(".cta a")), ["/download/windows"]);
+      assert.equal(
+        await evaluate(windows, `[...document.querySelectorAll(".cta .button")].find((a) => a.offsetParent).textContent.trim()`),
+        "Download for Windows",
+      );
+      await shot(windows, "windows.png");
+      windows.destroy();
       const mac = await open({ width: 1440, height: 900 });
-      assert.deepEqual(await evaluate(mac, visible(".cta a")), ["/download/mac-arm64", "/download/mac-x64", "/download/linux-appimage"]);
+      assert.deepEqual(await evaluate(mac, visible(".cta a")), ["/download/mac-arm64", "/download/mac-x64"]);
       mac.destroy();
     },
   },

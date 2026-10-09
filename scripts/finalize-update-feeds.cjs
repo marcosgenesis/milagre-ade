@@ -28,7 +28,10 @@ async function main() {
       [`Milagre-${v}-arm64.zip`, `Milagre-${v}-x64.zip`, `Milagre-${v}-arm64.dmg`, `Milagre-${v}-x64.dmg`],
     ],
     windows: [["latest.yml"], [`Milagre-Setup-${v}-x64.exe`]],
-    linux: [["latest-linux.yml"], [`Milagre-${v}-x86_64.AppImage`, `Milagre-${v}-amd64.deb`, `Milagre-${v}-x86_64.rpm`]],
+    linux: [
+      beta ? ["beta-linux.yml"] : ["latest-linux.yml", "beta-linux.yml"],
+      [`Milagre-${v}-x86_64.AppImage`, `Milagre-${v}-amd64.deb`, `Milagre-${v}-x86_64.rpm`],
+    ],
   };
   const changes = [];
   for (const platform of selected) {

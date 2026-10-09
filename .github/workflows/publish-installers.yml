@@ -138,6 +138,11 @@ jobs:
         run: npm ci
       - name: Build Linux installers
         run: npm run package:linux -- --config.extraMetadata.version="${RELEASE_TAG#v}"
+      # As on macOS: electron-builder writes only the stable feed, so beta installs read a copy and move to this release.
+      - name: Mirror the stable feed to the beta channel
+        run: |-
+          test -f release/latest-linux.yml || { echo "::error::release/latest-linux.yml was not generated; there is no stable feed to mirror to beta."; exit 1; }
+          cp release/latest-linux.yml release/beta-linux.yml
       - name: Exercise installed Linux desktop
         run: |-
           sudo apt-get install -y ./release/*.deb
@@ -183,6 +188,7 @@ jobs:
             release/*.rpm
             release/*.AppImage
             release/latest-linux.yml
+            release/beta-linux.yml
             release/milagre-linux-repository.tar.gz
           if-no-files-found: error
       - name: Remove temporary signing key
@@ -216,7 +222,7 @@ jobs:
       - name: Upload all platforms and publish draft
         run: |-
           test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
-          gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.exe release/*.AppImage release/*.deb release/*.rpm release/*.blockmap release/latest*.yml release/beta-mac.yml release/milagre-linux-repository.tar.gz release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb release/package-managers/winget/Milagre.Milagre.yaml --clobber
+          gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.exe release/*.AppImage release/*.deb release/*.rpm release/*.blockmap release/latest*.yml release/beta-mac.yml release/beta-linux.yml release/milagre-linux-repository.tar.gz release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb release/package-managers/winget/Milagre.Milagre.yaml --clobber
           gh release edit "$RELEASE_TAG" --draft=false --latest
   publish-macos-linux:
     if: inputs.platforms == 'macos+linux'
@@ -242,12 +248,12 @@ jobs:
         run: npm run package:managers -- --tag "$RELEASE_TAG" --platform macos,linux
       - name: Require complete updater feeds
         run: |-
-          for feed in latest-mac.yml beta-mac.yml latest-linux.yml; do
+          for feed in latest-mac.yml beta-mac.yml latest-linux.yml beta-linux.yml; do
             test -f "release/$feed" || { echo "::error::release/$feed is missing"; exit 1; }
           done
           node scripts/finalize-update-feeds.cjs --tag "$RELEASE_TAG" --platform macos,linux --check
       - name: Upload macOS and Linux and publish draft
         run: |-
           test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
-          gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.AppImage release/*.deb release/*.rpm release/*.blockmap release/latest-mac.yml release/beta-mac.yml release/latest-linux.yml release/milagre-linux-repository.tar.gz release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb --clobber
+          gh release upload "$RELEASE_TAG" release/*.dmg release/*.zip release/*.AppImage release/*.deb release/*.rpm release/*.blockmap release/latest-mac.yml release/beta-mac.yml release/latest-linux.yml release/beta-linux.yml release/milagre-linux-repository.tar.gz release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb --clobber
           gh release edit "$RELEASE_TAG" --draft=false --latest

@@ -129,9 +129,12 @@ function createPhoneChannels({
       abort.abort();
       return "dropped";
     } finally {
-      clearInterval(record.pendingTimer);
-      record.pendingTimer = null;
-      record.abort = null;
+      // Only this request's own notices and abort: a wait that replaced it on this record keeps its own.
+      if (record.abort === abort) {
+        clearInterval(record.pendingTimer);
+        record.pendingTimer = null;
+        record.abort = null;
+      }
     }
   }
 

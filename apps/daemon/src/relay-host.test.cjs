@@ -810,3 +810,29 @@ test("waiting() runs once however often it is called, and not at all after the r
   await sleep(120);
   assert.equal(desktop.error, null, "no notice repeats once the owner has answered");
 });
+
+test("a computer's second hello replaces its first while it waits, and the new channel keeps hearing that it waits", async (t) => {
+  const daemon = fakePeerDaemon();
+  // As phone.cjs does: a second request from the same key settles the first one as dropped.
+  const waiting = new Map();
+  const allowComputer = (request) =>
+    new Promise((resolve) => {
+      waiting.get(request.key)?.("dropped");
+      waiting.set(request.key, resolve);
+      request.waiting();
+    });
+  const { relay, mac } = await paired(t, { mac: { openPeer: daemon.openPeer, allowComputer, timing: { pendingRepeatMs: 30 } } });
+  const key = boxKeyPair(random);
+  const first = connectDesktop({ relayUrl: relay.url, identity: mac.identity, key, name: "studio" });
+  t.after(() => first.close());
+  const refused = first.hello({ ms: 10_000 });
+  await until(() => first.notices.length > 0, "the first channel's notice");
+  const second = connectDesktop({ relayUrl: relay.url, identity: mac.identity, key, name: "studio" });
+  t.after(() => second.close());
+  const accepted = second.hello({ ms: 10_000 });
+  assert.deepEqual((await refused).error, { t: "error", code: "unknown-phone" });
+  const heard = second.notices.length;
+  await until(() => second.notices.length >= heard + 2, "the second channel's repeated notices");
+  waiting.get(b64url(key.publicKey))("allowed");
+  assert.ok((await accepted).channel);
+});

@@ -50,3 +50,21 @@ test("an id that isn't a computer's is refused, so no path leaves the cache fold
   assert.throws(() => caches.put("../x", "recent", "", []), /computer/);
   await assert.rejects(caches.remove(".."), /computer/);
 });
+
+test("after close() a late put or get is a no-op and opens nothing", async (t) => {
+  const { dir, caches } = await setup(t);
+  caches.put(ID, "recent", "", [1]);
+  caches.close();
+  caches.put(ID, "recent", "", [2]);
+  assert.equal(caches.get(ID, "recent", ""), null);
+  caches.close();
+});
+
+test("a garbage file is closed and rebuilt, not left open", async (t) => {
+  const { dir, caches } = await setup(t);
+  await fs.mkdir(path.join(dir, ID), { recursive: true });
+  await fs.writeFile(path.join(dir, ID, "cache.sqlite"), "this is not a database, just text ".repeat(50));
+  assert.throws(() => caches.put(ID, "recent", "", [1]));
+  caches.put(ID, "recent", "", [3]);
+  assert.deepEqual(caches.get(ID, "recent", ""), [3]);
+});

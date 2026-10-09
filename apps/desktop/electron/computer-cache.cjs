@@ -30,21 +30,32 @@ const checked = (computerId) => {
 function createComputerCaches({ dir, now = Date.now }) {
   /** @type {Map<string, any>} */
   const open = new Map();
+  let closed = false;
   function db(computerId) {
     const id = checked(computerId);
     let handle = open.get(id);
     if (!handle) {
       fs.mkdirSync(path.join(dir, id), { recursive: true, mode: 0o700 });
       const raw = new (database().DatabaseSync)(path.join(dir, id, "cache.sqlite"));
-      raw.exec(SCHEMA);
-      handle = {
-        handle: raw,
-        upsert: raw.prepare(
-          "INSERT INTO entries (kind, key, payload, at) VALUES (?, ?, ?, ?) ON CONFLICT (kind, key) DO UPDATE SET payload = excluded.payload, at = excluded.at",
-        ),
-        trim: raw.prepare("DELETE FROM entries WHERE kind = 'chat' AND key NOT IN (SELECT key FROM entries WHERE kind = 'chat' ORDER BY at DESC LIMIT ?)"),
-        read: raw.prepare("SELECT payload FROM entries WHERE kind = ? AND key = ?"),
-      };
+      try {
+        raw.exec(SCHEMA);
+        handle = {
+          handle: raw,
+          upsert: raw.prepare(
+            "INSERT INTO entries (kind, key, payload, at) VALUES (?, ?, ?, ?) ON CONFLICT (kind, key) DO UPDATE SET payload = excluded.payload, at = excluded.at",
+          ),
+          trim: raw.prepare("DELETE FROM entries WHERE kind = 'chat' AND key NOT IN (SELECT key FROM entries WHERE kind = 'chat' ORDER BY at DESC LIMIT ?)"),
+          read: raw.prepare("SELECT payload FROM entries WHERE kind = ? AND key = ?"),
+        };
+      } catch (error) {
+        // A garbage file fails here, before the handle is kept: close it so the caller's reset can delete the folder.
+        try {
+          raw.close();
+        } catch {
+          /* already unusable */
+        }
+        throw error;
+      }
       open.set(id, handle);
     }
     return handle;
@@ -75,6 +86,7 @@ function createComputerCaches({ dir, now = Date.now }) {
     /** @param {string} computerId @param {string} kind @param {string} key @param {unknown} value @param {string} [text] `value` already serialized */
     put(computerId, kind, key, value, text) {
       const id = checked(computerId);
+      if (closed) return;
       guarded(id, () => {
         const { upsert, trim } = db(id);
         upsert.run(kind, key, text ?? JSON.stringify(value), now());
@@ -84,6 +96,7 @@ function createComputerCaches({ dir, now = Date.now }) {
     /** @param {string} computerId @param {string} kind @param {string} key */
     get(computerId, kind, key) {
       const id = checked(computerId);
+      if (closed) return null;
       if (!fs.existsSync(path.join(dir, id, "cache.sqlite"))) return null;
       return guarded(id, () => {
         const row = db(id).read.get(kind, key);
@@ -98,7 +111,14 @@ function createComputerCaches({ dir, now = Date.now }) {
       await fs.promises.rm(path.join(dir, id), { recursive: true, force: true, maxRetries: 5 });
     },
     close() {
-      for (const { handle } of open.values()) handle.close();
+      closed = true;
+      for (const { handle } of open.values()) {
+        try {
+          handle.close();
+        } catch {
+          /* already closed */
+        }
+      }
       open.clear();
     },
   };

@@ -423,6 +423,12 @@ function ExperimentalSettings() {
         >
           <Switch label="Other computers" checked={settings.otherComputers} onChange={(otherComputers) => updateSettings({ otherComputers })} />
         </Row>
+        <Row
+          label="Ultracode Fatality"
+          description="Turning Ultracode on darkens the window, slams ULTRACODE across it Mortal Kombat style, and an announcer says it out loud."
+        >
+          <Switch label="Ultracode Fatality" checked={settings.ultracodeFatality} onChange={(ultracodeFatality) => updateSettings({ ultracodeFatality })} />
+        </Row>
         <LinearSettings />
       </Group>
       {navigator.platform.startsWith("Mac") && (

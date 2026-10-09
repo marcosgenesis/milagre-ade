@@ -383,6 +383,8 @@ test("the LAN is used when the computer gave an address that answers, the relay 
   await until(() => state() === "online", "online");
   await until(() => computers.list()[0].route === "lan" && state() === "online", "on the LAN");
   assert.equal(computers.list()[0].lan, true);
+  assert.deepEqual(computers.list()[0].lanRoutes, [LAN]);
+  assert.equal(typeof computers.list()[0].addedAt, "number");
   assert.deepEqual(probed.slice(0, 1), [`${LAN.replace("ws:", "http:")}/v1/hello`]);
   assert.ok(mac.urls.some((url) => url.startsWith(`${LAN}/v1/phone`)));
   // Moving from the relay to the LAN is a switch, not an outage.

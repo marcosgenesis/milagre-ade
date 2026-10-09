@@ -41,8 +41,7 @@ const defaultNetworkSignature = () =>
   JSON.stringify(
     Object.values(os.networkInterfaces())
       .flat()
-      .filter((address) => address && !address.internal)
-      .map((address) => address.address)
+      .flatMap((address) => (address && !address.internal ? [address.address] : []))
       .toSorted(),
   );
 
@@ -81,6 +80,14 @@ async function stop(entry) {
  * are paired-desktop channels (peer-client.cjs) on the route the shared supervisor picks: a LAN address the computer
  * gave (peer:routes) when it answers, the relay otherwise; checked on every connect, every 60 s and when this Mac's
  * network changes. A refusal retrying can't fix (removed, reset, denied) stops it until it is paired again.
+ * @param {{
+ *   dataDir: string; safeStorage: any; name?: () => string; onChange?: (computers: any[]) => void;
+ *   emit?: (id: string, channel: string, payload: unknown) => void; ownHostId?: () => Promise<string | null>;
+ *   allowLocalRelay?: boolean; createSocket?: (url: string) => any; fetch?: typeof globalThis.fetch;
+ *   now?: () => number; random?: (n: number) => Uint8Array; reconnectMs?: number; switchWaitMs?: number;
+ *   offlineAfterMs?: number; checkEveryMs?: number; networkMs?: number; backoffMs?: number[];
+ *   networkSignature?: () => string;
+ * }} options
  */
 function createComputers({
   dataDir,
@@ -127,6 +134,8 @@ function createComputers({
       lastSeen: computer.lastSeen,
       message: enabled ? (entry?.message ?? null) : null,
       lan: computer.lanRoutes.length > 0,
+      lanRoutes: [...computer.lanRoutes],
+      addedAt: computer.addedAt,
     };
   }
   const list = () => store.list().map(view);
@@ -188,13 +197,17 @@ function createComputers({
     if (found) return found;
     const entry = {
       id,
+      /** @type {any} */
       runtime: null,
+      /** @type {any} */
       client: null,
       route: null,
       state: "connecting",
       message: null,
       lastError: null,
+      /** @type {{ hostKey: string; token: string } | null} */
       secrets: null,
+      /** @type {Promise<any> | null | undefined} */
       starting: null,
       retryTimer: null,
       offlineTimer: null,
@@ -203,11 +216,11 @@ function createComputers({
       refused: false,
       stopped: false,
       switching: false,
+      /** @type {{ promise: Promise<void>; done: () => void } | null} */
       recovery: null,
       abort: new AbortController(),
-      supervisor: null,
     };
-    entry.supervisor = createRouteSupervisor({
+    const supervisor = createRouteSupervisor({
       lan: () => {
         const computer = store.get(id);
         if (!computer?.lanRoutes.length || !entry.secrets) return undefined;
@@ -221,7 +234,8 @@ function createComputers({
     // already there finish there), and the runtime's reconnect then takes the LAN channel. Its brief disconnect is a
     // switch, not an outage: `down` lets the first disconnect after it go by, and a call made meanwhile (invoke) waits
     // for `recovery`. A LAN route lost before the relay was free leaves the runtime where it is.
-    entry.supervisor.subscribe((route) => {
+    entry.supervisor = supervisor;
+    supervisor.subscribe((route) => {
       const client = entry.client;
       if (!client || entry.route !== "relay") return;
       if (route.kind !== "lan") {
@@ -232,9 +246,10 @@ function createComputers({
       client.closeWhenIdle(() => {
         entry.switching = true;
         if (!entry.recovery) {
-          let done;
-          const promise = new Promise((resolve) => (done = resolve));
-          entry.recovery = { promise, done };
+          /** @type {(() => void) | undefined} */
+          let resolve;
+          const promise = /** @type {Promise<void>} */ (new Promise((settle) => (resolve = settle)));
+          entry.recovery = { promise, done: () => resolve?.() };
         }
       });
     });
@@ -246,7 +261,7 @@ function createComputers({
   function backoff(entry) {
     const wait = backoffMs[Math.min(entry.failures - 1, backoffMs.length - 1)];
     const { signal } = entry.abort;
-    return new Promise((resolve, reject) => {
+    return new Promise((/** @type {(value?: any) => void} */ resolve, reject) => {
       const onAbort = () => {
         clearTimeout(timer);
         reject(new Error("This computer is no longer connected."));
@@ -375,7 +390,7 @@ function createComputers({
   }
 
   /** Starts a computer's runtime. `first`: the channel that just paired, used as its first connection. */
-  function start(entry, first = null) {
+  function start(entry, first = /** @type {any} */ (null)) {
     if (!enabled || closed || entry.stopped || entry.refused || entry.runtime || entry.starting) {
       first?.close();
       return entry.starting;
@@ -486,6 +501,9 @@ function createComputers({
     /**
      * Pairs with the computer the link names and saves it as `name` ("Show it as"). Waits through its owner's Allow
      * (`onPending` runs when the Mac says it is asking). Rejects with the words to show; `cancelAdd()` stops it.
+     * @param {string} link
+     * @param {{ name?: string }} [options]
+     * @param {{ onPending?: () => void }} [hooks]
      */
     async add(link, { name: label } = {}, { onPending } = {}) {
       await ready;
@@ -511,10 +529,11 @@ function createComputers({
             ...socketOption,
           });
         } catch (error) {
-          const code = error instanceof PeerError ? error.code : (error?.code ?? "lost");
+          const failure = /** @type {any} */ (error);
+          const code = error instanceof PeerError ? error.code : (failure?.code ?? "lost");
           // A keychain failure is worded by the keys module; a refusal by what the computer said.
           const words =
-            code === "cancelled" ? "Cancelled." : error instanceof PeerError ? computerProblem(code, { name: pairing.name, pairing: true }) : error.message;
+            code === "cancelled" ? "Cancelled." : error instanceof PeerError ? computerProblem(code, { name: pairing.name, pairing: true }) : failure.message;
           throw Object.assign(new Error(words), { code });
         }
         if (replaces) await removeComputer(replaces);

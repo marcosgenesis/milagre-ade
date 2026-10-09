@@ -24,7 +24,7 @@ function createComputerKeys({ file, safeStorage, random }) {
     try {
       text = await fs.readFile(file, "utf8");
     } catch (error) {
-      if (error?.code === "ENOENT") return { identity: null, computers: {} };
+      if (/** @type {any} */ (error)?.code === "ENOENT") return { identity: null, computers: {} };
       throw keysError(UNREADABLE);
     }
     try {

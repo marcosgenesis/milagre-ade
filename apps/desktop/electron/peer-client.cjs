@@ -65,6 +65,11 @@ const defaultSocket = (url) => new WebSocket(url);
  * shaped like @milagre/daemon/client's `connect` (call, close, status, "event", "close"), so daemon-runtime.cjs drives
  * it as it drives the socket. Rejects with a PeerError. `onPending()` runs once if the Mac holds this first pairing for
  * its owner's Allow; `signal` cancels the attempt ("cancelled").
+ * @param {{
+ *   url: string; hostId: string; hostKey: string; token: string; identity: any; name?: string;
+ *   onPending?: () => void; signal?: AbortSignal; random?: (n: number) => Uint8Array; createSocket?: (url: string) => any;
+ *   timeoutMs?: number; maxPagedChars?: number;
+ * }} options
  */
 async function connectPeer({
   url,
@@ -244,7 +249,7 @@ async function connectPeer({
       let read;
       try {
         const message = channel.open(bytes);
-        if (message?.t === "pong") return;
+        if (/** @type {any} */ (message)?.t === "pong") return;
         read = reader.read(message);
       } catch {
         return end(new PeerError("lost"));

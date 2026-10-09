@@ -103,6 +103,46 @@ export type PairedDevice = {
 /** A computer pairing with this Mac for the first time, waiting for Allow in its window (devices:pending). */
 export type PendingComputer = { key: string; name: string | null; at: number };
 
+/** How a paired computer stands: "off" while Settings › Experimental › Other computers is off. */
+export type ComputerState = "off" | "connecting" | "online" | "reconnecting" | "offline" | "refused";
+/** A computer this Mac drives, as computers.cjs reports it. `route`: how it is reached while online. */
+export type ComputerView = {
+  id: string;
+  /** This Mac's label for it ("Show it as"); never sent to it. */
+  name: string;
+  hostId: string;
+  relayHost: string;
+  state: ComputerState;
+  route: "lan" | "relay" | null;
+  lastSeen: number | null;
+  addedAt: number | null;
+  /** Why it isn't connected, in words, while that can be said. */
+  message: string | null;
+  lan: boolean;
+  /** The LAN addresses it gave (ws://host:port), at most four. */
+  lanRoutes: string[];
+};
+/** This Mac's name and every computer it drives. */
+export type ComputersSnapshot = { thisMac: string; computers: ComputerView[] };
+/** What a pasted link names, read before any socket opens. */
+export type ComputerPreview = { name: string; hostId: string; relayHost: string };
+export type AddComputerResult = { ok: true; computer: ComputerView } | { ok: false; code: string; message: string };
+/** An event from a computer's runtime: its channel and payload, tagged with the computer. */
+export type ComputerEvent = { computerId: string; channel: string; payload: any };
+export type ComputersApi = {
+  list: () => Promise<ComputersSnapshot>;
+  preview: (link: string) => Promise<ComputerPreview>;
+  /** Pairs with the link's computer, waiting through its owner's Allow (onComputerAddPending says when). */
+  add: (link: string, options: { name?: string }) => Promise<AddComputerResult>;
+  cancelAdd: () => Promise<void>;
+  /** A label on this Mac only. */
+  rename: (id: string, name: string) => Promise<ComputersSnapshot>;
+  remove: (id: string) => Promise<ComputersSnapshot>;
+  setEnabled: (on: boolean) => Promise<void>;
+  /** One daemon call on the computer. */
+  invoke: (id: string, method: string, args?: unknown[]) => Promise<any>;
+};
+
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
 
@@ -361,6 +401,12 @@ declare global {
       denyDevice: (key: string) => Promise<PendingComputer[]>;
       onDevicesPending: (callback: (payload: { requests: PendingComputer[] }) => void) => () => void;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
+      computers: ComputersApi;
+      onComputersChanged: (callback: (snapshot: ComputersSnapshot) => void) => () => void;
+      /** The computer being added is waiting for its owner's Allow. */
+      onComputerAddPending: (callback: () => void) => () => void;
+      /** Every computer's runtime events. */
+      onComputerEvent: (callback: (event: ComputerEvent) => void) => () => void;
       listAccounts: (refresh?: boolean) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
       accountAction: (
         action: "add" | "select" | "login" | "cancel" | "remove",

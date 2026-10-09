@@ -240,6 +240,31 @@ const bridge = {
     ipcRenderer.on("devices:pending", listener);
     return () => ipcRenderer.removeListener("devices:pending", listener);
   },
+  computers: {
+    list: () => ipcRenderer.invoke("computers:list"),
+    preview: (link) => ipcRenderer.invoke("computers:preview", link),
+    add: (link, options) => ipcRenderer.invoke("computers:add", link, options),
+    cancelAdd: () => ipcRenderer.invoke("computers:cancel-add"),
+    rename: (id, name) => ipcRenderer.invoke("computers:rename", id, name),
+    remove: (id) => ipcRenderer.invoke("computers:remove", id),
+    setEnabled: (on) => ipcRenderer.invoke("computers:set-enabled", on),
+    invoke: (id, method, args) => ipcRenderer.invoke("computers:invoke", id, method, args),
+  },
+  onComputersChanged: (callback) => {
+    const listener = (_event, snapshot) => callback(snapshot);
+    ipcRenderer.on("computers:changed", listener);
+    return () => ipcRenderer.removeListener("computers:changed", listener);
+  },
+  onComputerAddPending: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("computers:pending", listener);
+    return () => ipcRenderer.removeListener("computers:pending", listener);
+  },
+  onComputerEvent: (callback) => {
+    const listener = (_event, event) => callback(event);
+    ipcRenderer.on("computers:event", listener);
+    return () => ipcRenderer.removeListener("computers:event", listener);
+  },
   onPhoneStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("phone:status", listener);

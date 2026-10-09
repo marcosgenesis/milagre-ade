@@ -16,7 +16,7 @@ function prepareToken(dataDir) {
       try {
         fs.linkSync(temporary, file);
       } catch (error) {
-        if (error.code !== "EEXIST") throw error;
+        if (/** @type {any} */ (error).code !== "EEXIST") throw error;
       }
     } finally {
       fs.rmSync(temporary, { force: true });

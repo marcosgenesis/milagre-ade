@@ -14,6 +14,7 @@ const {
   Notification,
   shell,
   protocol,
+  safeStorage,
   powerMonitor,
   net,
 } = require("electron");
@@ -217,6 +218,33 @@ async function startDesktop() {
   }
   registerHostMethods();
   ipcMain.handle("app:version", () => app.getVersion());
+
+  // Other Macs this window drives (Settings › Experimental › Other computers): nothing connects until the window turns
+  // the switch on (computers:set-enabled), which it does at launch when it is on.
+  const { createComputers } = require("./computers.cjs");
+  const { registerComputers } = require("./computers-ipc.cjs");
+  const { readOwnHostId } = require("./own-host.cjs");
+  const { computerName } = require("@milagre/daemon/mobile-pairing");
+  /** @type {string | null} */
+  let thisMacName = null;
+  /** @type {ReturnType<typeof registerComputers> | null} */
+  let computersIpc = null;
+  const computers = createComputers({
+    dataDir: app.getPath("userData"),
+    safeStorage,
+    ownHostId: () => readOwnHostId(app.getPath("userData")),
+    onChange: () => computersIpc?.changed(),
+    emit: (id, channel, payload) => computersIpc?.event(id, channel, payload),
+  });
+  computersIpc = registerComputers({
+    ipcMain,
+    computers,
+    thisMac: () => (thisMacName ??= computerName()),
+    send: (channel, payload) => {
+      for (const window of BrowserWindow.getAllWindows())
+        if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, payload);
+    },
+  });
   // An older host can't load very large Projects; the window offers to replace it with this desktop's own.
   ipcMain.handle("runtime:restart-host", async () => {
     await runtime.restartHost();
@@ -316,7 +344,8 @@ async function startDesktop() {
     quitting = true;
     quitPrepared ??= (async () => {
       notifier.closeAll();
-      await runtime.close();
+      // Each computer's channels close too; nothing on the other Macs stops.
+      await Promise.all([runtime.close(), computers.close()]);
     })().catch((error) => {
       quitPrepared = null;
       quitting = false;

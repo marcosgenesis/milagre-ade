@@ -4,6 +4,7 @@ import { ArrowLeft01Icon, ArrowRight01Icon, CheckmarkCircle02Icon } from "@hugei
 import { ARTIFACT_CSP, ARTIFACT_ESCAPE, artifactDocument, type Artifact } from "@milagre/shared/artifact";
 import type { ArtifactRef } from "../../model";
 import Tooltip from "../primitives/Tooltip";
+import { bridgeForKey } from "../../lib/computer-bridge";
 
 /** A comment the user pinned on a design and hasn't sent yet. */
 export type DesignPin = { key: string; design: ArtifactRef; x: number; y: number; text: string; resolved?: string };
@@ -43,11 +44,11 @@ const versionsRead = new Map<string, Promise<Artifact>>();
 const versionsKept = new Map<string, Artifact>();
 const KEEP = 48;
 function readArtifact(chatId: string, id: string, version: number | null): Promise<Artifact> {
-  if (version === null) return window.milagre.artifacts.get({ chatId, id });
+  if (version === null) return bridgeForKey(chatId).artifacts.get({ chatId, id });
   const key = `${chatId}\n${id}\n${version}`;
   let read = versionsRead.get(key);
   if (!read) {
-    read = window.milagre.artifacts.get({ chatId, id, version });
+    read = bridgeForKey(chatId).artifacts.get({ chatId, id, version });
     versionsRead.set(key, read);
     read.then(
       (artifact) => {

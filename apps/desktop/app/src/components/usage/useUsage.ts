@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UsageSnapshot } from "../../model";
 import { mergeSnapshot, seedSnapshot } from "./format";
+import { isRemoteKey } from "../../lib/computer-bridge";
 
 const POLL_MS = 5 * 60_000;
 // Each scope's last numbers, so switching Projects shows them at once instead of an empty usage row.
 const lastSnapshots = new Map<string, UsageSnapshot>();
 
 export function useUsage(scopeKey?: string) {
+  // Accounts and their usage stay on their own computer (ADR-0005).
+  const localScope = isRemoteKey(scopeKey) ? undefined : scopeKey;
   const currentScope = useRef(scopeKey);
   currentScope.current = scopeKey;
   const [snapshotScope, setSnapshotScope] = useState(scopeKey);
@@ -21,7 +24,7 @@ export function useUsage(scopeKey?: string) {
     setLoading(true);
     const version = generation.current;
     inFlight.current = window.milagre
-      .readUsage(scopeKey)
+      .readUsage(localScope)
       .then((next) => {
         if (version !== generation.current || currentScope.current !== scopeKey) return;
         setSnapshotScope(scopeKey);
@@ -60,7 +63,7 @@ export function useUsage(scopeKey?: string) {
     // Saved numbers first, so the sidebar isn't empty while the first read runs.
     const version = generation.current;
     window.milagre
-      .getCachedUsage(scopeKey)
+      .getCachedUsage(localScope)
       .then((cached) => {
         if (version === generation.current && currentScope.current === scopeKey) {
           setSnapshotScope(scopeKey);

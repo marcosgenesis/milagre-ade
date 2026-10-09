@@ -4,6 +4,7 @@ import type { CoordinatorState, PullRequest } from "../model";
 import { chatInProject, sessionIdFromKey } from "../lib/agent-runs";
 import { pullRequestRefs, type PullRequestRef } from "../lib/chat-pull-requests";
 import { type PullRequestBlocker, updateBlockerDismissals } from "../lib/pr-blockers";
+import { bridgeForKey, onAnyAgentEvent } from "../lib/computer-bridge";
 
 // Conflict entries are bare PR URLs, so this key keeps its name from when conflicts were the only blocker.
 const DISMISSED_BLOCKERS = "milagre.dismissed-conflict-actions";
@@ -96,7 +97,9 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
           if (pending.has(path)) return;
           pending.add(path);
           try {
-            const pr = await window.milagre.readPullRequest(path).catch(() => null);
+            const pr = await bridgeForKey(projectPath)
+              .readPullRequest(path)
+              .catch(() => null);
             if (!disposed) {
               setDismissedBlockers((current) => updateBlockerDismissals(current, pr));
               setSnapshot((current) => ({
@@ -115,7 +118,7 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
       () => void refresh(),
       () => lastRefresh,
     );
-    const unsubscribe = window.milagre.onAgentEvent(({ chatId, event }) => {
+    const unsubscribe = onAnyAgentEvent(({ chatId, event }) => {
       if (!chatInProject(projectPath, chatId) || !isTurnEnd(event)) return;
       const current = stateRef.current;
       const session = current?.sessions[sessionIdFromKey(chatId)];
@@ -165,7 +168,9 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
         entries.map(async ([path, refs]) => {
           const selected = refs.filter((ref) => known[path]?.[ref]?.state !== "MERGED");
           if (!selected.length) return;
-          const prs = await window.milagre.readPullRequests(path, selected).catch(() => selected.map(() => null));
+          const prs = await bridgeForKey(projectPath)
+            .readPullRequests(path, selected)
+            .catch(() => selected.map(() => null));
           if (disposed) return;
           setChatSnapshot((current) => {
             const previous = current.projectPath === projectPath ? current.prs : {};

@@ -18,6 +18,7 @@ import { getSettings } from "../lib/settings";
 import { showNotice } from "../lib/notice";
 import { Select } from "./primitives/Select";
 import { Markdown } from "./markdown/Markdown";
+import { bridgeForKey } from "../lib/computer-bridge";
 
 const button = "rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover disabled:opacity-40";
 const badge = "shrink-0 rounded-full bg-field px-2 py-px text-[11px] font-medium text-ink-2";
@@ -160,14 +161,16 @@ function SkillDetail({
   useEffect(() => {
     let cancelled = false;
     setContent(null);
-    window.milagre.readSkill(projectPath, skill.path).then(
-      (text) => {
-        if (!cancelled) setContent({ text });
-      },
-      (error: unknown) => {
-        if (!cancelled) setContent({ error: ipcErrorMessage(error) });
-      },
-    );
+    bridgeForKey(projectPath)
+      .readSkill(projectPath, skill.path)
+      .then(
+        (text) => {
+          if (!cancelled) setContent({ text });
+        },
+        (error: unknown) => {
+          if (!cancelled) setContent({ error: ipcErrorMessage(error) });
+        },
+      );
     return () => {
       cancelled = true;
     };

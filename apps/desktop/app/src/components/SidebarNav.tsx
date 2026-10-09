@@ -53,6 +53,7 @@ import { ipcErrorMessage } from "@milagre/shared/result";
 import { useSettings } from "../lib/settings";
 import { RECENT_PROJECTS_CHANGED } from "../lib/project-list";
 import { cachedProjectCopy, scopeChats, useScopeStates } from "../lib/sidebar-scopes";
+import { bridgeForKey } from "../lib/computer-bridge";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -948,7 +949,7 @@ export default memo(function SidebarNav({
     if (!actions) {
       actions = {
         onPin: (id, order) =>
-          void window.milagre
+          void bridgeForKey(key)
             .patchChat(key, Number(id), order == null ? { pinned: false, pin_order: undefined } : { pinned: true, pin_order: order })
             .catch(() => {}),
       };
@@ -996,24 +997,28 @@ export default memo(function SidebarNav({
 
   const forgetProject = (path: string) => {
     setRecentProjects((list) => list.filter((project) => project.path !== path));
-    window.milagre?.forgetProject?.(path).then(
-      (list) => {
-        if (Array.isArray(list)) setRecentProjects(list);
-      },
-      () => {},
-    );
+    bridgeForKey(path)
+      .forgetProject(path)
+      .then(
+        (list) => {
+          if (Array.isArray(list)) setRecentProjects(list);
+        },
+        () => {},
+      );
   };
 
   // Checked in the project chooser; the flag lives with the Project, so the phone's list follows.
   const showProject = (path: string, show: boolean) => {
     setRecentProjects((list) => list.map((project) => (project.path === path ? { ...project, hidden: !show } : project)));
-    window.milagre?.setProjectHidden?.(path, !show).then(
-      (list) => {
-        if (Array.isArray(list)) setRecentProjects(list);
-        window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
-      },
-      () => setListsChanged((count) => count + 1),
-    );
+    bridgeForKey(path)
+      .setProjectHidden(path, !show)
+      .then(
+        (list) => {
+          if (Array.isArray(list)) setRecentProjects(list);
+          window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
+        },
+        () => setListsChanged((count) => count + 1),
+      );
   };
   // By name, like the phone's: the recent list reorders as Projects open, and a row must not move under the pointer.
   const pickerProjects = projects

@@ -5,7 +5,9 @@ import { AddComputerDialog } from "./components/AddComputerDialog";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
 import type { LinkState, NamedProjectLink, OpenLink } from "@milagre/shared/model";
-import { scopeKey, isLinkScopeKey, scopeFromKey } from "@milagre/shared/chat-scopes";
+import { scopeKey, isLinkScopeKey, scopeFromKey, LOCAL_COMPUTER, computerOfKey } from "@milagre/shared/chat-scopes";
+import { BridgeContext, bridgeFor, bridgeForKey, forgetBridge, isRemoteKey, onAnyAgentEvent } from "./lib/computer-bridge";
+import type { WorktreeRename } from "@milagre/shared/project-edits";
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shared/attention";
@@ -93,7 +95,7 @@ import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
-import { useApplyOtherComputers } from "./lib/computers";
+import { useApplyOtherComputers, useComputers } from "./lib/computers";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import { messageCommands, messageCommandsFrom } from "./lib/message-commands";
@@ -228,7 +230,7 @@ function App() {
     const live = () => generation === accountGeneration.current && accountScopeRef.current === accountScope;
     // A refetch that changed nothing keeps the old objects, so opening the picker doesn't re-render the app or
     // re-apply anything that depends on the lists.
-    void window.milagre
+    void bridgeForKey(accountScope)
       .getCliStatus(accountScope)
       .then((next) => {
         if (live()) {
@@ -238,7 +240,7 @@ function App() {
         }
       })
       .catch(() => undefined);
-    void window.milagre
+    void bridgeForKey(accountScope)
       .getModels(accountScope)
       .then((next) => {
         if (live()) {
@@ -408,6 +410,17 @@ function App() {
   useEffect(() => {
     void loadInitialProject();
   }, []);
+  // The computer whose Project or Link is open was removed, or Other computers turned off: this Mac's Project comes back.
+  const { computers: pairedComputers } = useComputers();
+  const knownComputers = pairedComputers.map((computer) => computer.id).join("\n");
+  useEffect(() => {
+    const open = selectedLinkRef.current ? `milagre-link:${selectedLinkRef.current.link.id}` : projectRef.current?.path;
+    if (!open || !isRemoteKey(open)) return;
+    const computerId = computerOfKey(open);
+    if (knownComputers.split("\n").includes(computerId)) return;
+    forgetBridge(computerId);
+    void loadInitialProject();
+  }, [knownComputers]);
   useEffect(() => stateEvents.onLinkState((update) => setLinkStates((previous) => ({ ...previous, [update.linkId]: update.state }))), []);
 
   useEffect(() => {
@@ -428,15 +441,25 @@ function App() {
       for (const next of snapshot.projects) receiveState(next.path, next.state);
       for (const next of snapshot.links ?? []) setLinkStates((previous) => ({ ...previous, [next.linkId]: next.state }));
     });
+    // A computer's runtime sends a snapshot after each reconnect, with its open Projects' and Links' states (keys name it).
+    const remoteSnapshotOff = window.milagre.onComputerEvent?.((event) => {
+      if (event.channel !== "runtime:snapshot" || !event.payload) return;
+      for (const next of event.payload.projects ?? []) receiveState(next.path, next.state);
+      for (const next of event.payload.links ?? []) setLinkStates((previous) => ({ ...previous, [next.linkId]: next.state }));
+    });
     return () => {
       updated = true;
       off?.();
       snapshotOff?.();
+      remoteSnapshotOff?.();
     };
   }, []);
 
   useEffect(() => {
-    if (project) void window.milagre.listBranches(project.path).then(setBranches);
+    if (project)
+      void bridgeForKey(project.path)
+        .listBranches(project.path)
+        .then(setBranches, () => {});
   }, [project?.path]);
 
   const worktrees = useMemo(() => (state ? sortedWorktrees(state) : []), [state]);
@@ -580,7 +603,10 @@ function App() {
   function changePermissionMode(mode: PermissionMode) {
     setPermissionMode(mode);
     updateSettings({ defaultPermissionMode: mode });
-    if (project && selectedSession) void window.milagre.setAgentPermissionMode(chatKey(project.path, selectedSession.id), mode).catch(() => {});
+    if (project && selectedSession)
+      void bridgeForKey(project.path)
+        .setAgentPermissionMode(chatKey(project.path, selectedSession.id), mode)
+        .catch(() => {});
   }
 
   function answerApproval(decision: PermissionDecision) {
@@ -739,7 +765,7 @@ function App() {
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
-    if (current) void reportChatAction(window.milagre.patchChat(current.path, sessionId, patch), "Could not update Chat", setNotice);
+    if (current) void reportChatAction(bridgeForKey(current.path).patchChat(current.path, sessionId, patch), "Could not update Chat", setNotice);
   }
 
   function controlAdvisor(action: "stop" | "retry", id: string) {
@@ -747,7 +773,7 @@ function App() {
     const parentId = selectedSessionRef.current;
     if (current && parentId !== null)
       void reportChatAction(
-        (action === "stop" ? window.milagre.stopAdvisor : window.milagre.retryAdvisor)(`${current.path}#${parentId}`, id),
+        (action === "stop" ? bridgeForKey(current.path).stopAdvisor : bridgeForKey(current.path).retryAdvisor)(`${current.path}#${parentId}`, id),
         `Could not ${action} advisor`,
         setNotice,
       );
@@ -756,14 +782,14 @@ function App() {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
     if (current && parentId !== null)
-      void reportChatAction(window.milagre.archiveSubagent(current.path, parentId, id, archived), "Could not update subagent", setNotice);
+      void reportChatAction(bridgeForKey(current.path).archiveSubagent(current.path, parentId, id, archived), "Could not update subagent", setNotice);
   }
 
   function archiveFinishedChildren() {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
     if (current && parentId !== null)
-      void reportChatAction(window.milagre.archiveFinishedSubagents(current.path, parentId), "Could not archive finished subagents", setNotice);
+      void reportChatAction(bridgeForKey(current.path).archiveFinishedSubagents(current.path, parentId), "Could not archive finished subagents", setNotice);
   }
 
   function openChat(sessionId: number) {
@@ -796,10 +822,21 @@ function App() {
   }
 
   // The main process reads the chat on screen (on opening it, and when the window regains focus over it),
-  // and leaves a chat unread when its turn ends anywhere else, or while no window has focus.
+  // and leaves a chat unread when its turn ends anywhere else, or while no window has focus. The Mac that had the
+  // chat on screen before hears there is none when the next one is on another Mac.
+  const openChatComputer = useRef<string>(LOCAL_COMPUTER);
   useEffect(() => {
     if (selectedLink) return;
-    void window.milagre.setOpenChat(view === "chat" && project && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null).catch(() => {});
+    const key = view === "chat" && project && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null;
+    const computerId = project ? computerOfKey(project.path) : LOCAL_COMPUTER;
+    if (openChatComputer.current !== computerId)
+      void bridgeFor(openChatComputer.current)
+        .setOpenChat(null)
+        .catch(() => {});
+    openChatComputer.current = computerId;
+    void bridgeFor(computerId)
+      .setOpenChat(key)
+      .catch(() => {});
   }, [selectedSessionId, view, project?.path, selectedLink?.link.id]);
 
   // Archiving hides the chat for good; a turn still running in it is stopped first. The steps and their order
@@ -818,7 +855,7 @@ function App() {
         currentProjectPath: () => projectRef.current?.path,
         stop: () => (agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined),
         hide: async () => {
-          await window.milagre.patchChat(projectPath, sessionId, { archived: true, unread: false });
+          await bridgeForKey(projectPath).patchChat(projectPath, sessionId, { archived: true, unread: false });
           if (projectRef.current?.path === projectPath && selectedSessionRef.current === sessionId) startNewChat();
         },
         // The worktree stays, so the chat comes back with it; it is reopened only if it was open and nothing else has been since.
@@ -826,7 +863,7 @@ function App() {
           patchChat(sessionId, { archived: false });
           if (wasOpen && selectedSessionRef.current === null) openChat(sessionId);
         },
-        remove: (worktree, options) => window.milagre.removeWorktree(worktree.path, options),
+        remove: (worktree, options) => bridgeForKey(options.projectPath).removeWorktree(worktree.path, options),
         // The main process has dropped the worktree and its chats; a removal that drops the open chat or the picked
         // worktree moves the selection on.
         applyRemoval: (removed) => {
@@ -835,7 +872,7 @@ function App() {
           setSelectedWorktreeId((current) => (current === removed.worktreeId ? null : current));
         },
         refreshBranches: () =>
-          void window.milagre
+          void bridgeForKey(projectPath)
             .listBranches(projectPath)
             .then(setBranches)
             .catch(() => {}),
@@ -861,10 +898,10 @@ function App() {
     const latest = openState();
     const worktree = latest ? latest.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1] : undefined;
     const terminals = project ? await busyTerminals(chatKey(project.path, sessionId)) : [];
-    if (!latest || !isMilagreWorktree(worktree, await window.milagre.getWorktreeRoots()))
+    if (!latest || !isMilagreWorktree(worktree, await bridgeForKey(project?.path).getWorktreeRoots()))
       return { milagreOwned: false, shared: false, status: null, terminals };
     if (worktreeShared(latest, sessionId)) return { milagreOwned: true, shared: true, status: null, terminals };
-    return { milagreOwned: true, shared: false, status: await window.milagre.getWorktreeStatus(worktree.path, worktree.base!), terminals };
+    return { milagreOwned: true, shared: false, status: await bridgeForKey(project?.path).getWorktreeStatus(worktree.path, worktree.base!), terminals };
   }
 
   // "Commit and open PR…" opens the chat, with the dialog over it.
@@ -876,7 +913,11 @@ function App() {
     // The dialog reads the Chat's recent turns (its test commands, what was asked); a lean state has them on the host.
     const sessionMessages =
       isLean(latest) && project
-        ? (await window.milagre.readChatMessages(project.path, sessionId, { turns: 30 }).catch(() => ({ messages: [] as ChatMessage[] }))).messages
+        ? (
+            await bridgeForKey(project.path)
+              .readChatMessages(project.path, sessionId, { turns: 30 })
+              .catch(() => ({ messages: [] as ChatMessage[] }))
+          ).messages
         : latest.messages.filter((message) => message.session_id === sessionId);
     openChat(sessionId);
     setGitDialog({
@@ -893,11 +934,14 @@ function App() {
   // chat's turn runs, so it lands after the reply instead of inside it.
   function recordGitNote(sessionId: number, body: string) {
     const current = projectRef.current;
-    if (current) void window.milagre.addGitNote(chatKey(current.path, sessionId), body).catch(() => {});
+    if (current)
+      void bridgeForKey(current.path)
+        .addGitNote(chatKey(current.path, sessionId), body)
+        .catch(() => {});
   }
 
   function revealChat(sessionId: number) {
-    if (!project) return;
+    if (!project || isRemoteKey(project.path)) return;
     void window.milagre.revealInFolder(chatRevealPath(openState() ?? null, sessionId, project.path)).catch(() => {});
   }
 
@@ -942,7 +986,7 @@ function App() {
   // A turn that ends in the open project while Milagre is in the background gets a completion alert.
   useEffect(
     () =>
-      window.milagre.onAgentEvent(({ chatId, event }) => {
+      onAnyAgentEvent(({ chatId, event }) => {
         if (event.type === "subagent-update") {
           const path = projectOfKey(chatId);
           const linkId = isLinkScopeKey(path) ? path.slice("milagre-link:".length) : null;
@@ -992,14 +1036,23 @@ function App() {
     [],
   );
 
-  // A new worktree's branch is renamed a few seconds in, once its chat's name is picked; the main process saves the new name.
-  useEffect(
-    () =>
-      window.milagre.onWorktreeRenamed((rename) => {
-        if (projectRef.current?.path === rename.projectPath) void window.milagre.listBranches(rename.projectPath).then(setBranches);
-      }),
-    [],
-  );
+  // A new worktree's branch is renamed a few seconds in, once its chat's name is picked; its Mac saves the new name.
+  useEffect(() => {
+    const renamed = (rename: WorktreeRename) => {
+      if (projectRef.current?.path === rename.projectPath)
+        void bridgeForKey(rename.projectPath)
+          .listBranches(rename.projectPath)
+          .then(setBranches, () => {});
+    };
+    const offLocal = window.milagre.onWorktreeRenamed(renamed);
+    const offRemote = window.milagre.onComputerEvent?.((event) => {
+      if (event.channel === "worktree:renamed") renamed(event.payload);
+    });
+    return () => {
+      offLocal();
+      offRemote?.();
+    };
+  }, []);
 
   const pendingNotificationChat = useRef<string | null>(null);
   // Opens a chat by its key, in another project too: a notification's, or the one the attention button points at.
@@ -1111,11 +1164,11 @@ function App() {
   }
 
   const openProject = () => replaceProject(() => window.milagre.openProject());
-  const switchProject = (projectPath: string) => replaceProject(() => window.milagre.switchProject(projectPath), projectPath);
+  const switchProject = (projectPath: string) => replaceProject(() => bridgeForKey(projectPath).switchProject(projectPath), projectPath);
   async function selectLink(id: string, sessionId?: number) {
     const navigation = ++projectNavigation.current;
     try {
-      const next = await window.milagre.openNamedLink(id);
+      const next = await bridgeForKey(`milagre-link:${id}`).openNamedLink(id);
       if (navigation !== projectNavigation.current) return;
       if (!selectedLinkRef.current && projectRef.current)
         scopeDrafts.save({ kind: "project", projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
@@ -1149,7 +1202,7 @@ function App() {
     }
     const adopted = statesRef.current[projectPath];
     try {
-      const next = await window.milagre.openCanvasProject(projectPath);
+      const next = await (isRemoteKey(projectPath) ? bridgeForKey(projectPath).switchProject(projectPath) : window.milagre.openCanvasProject(projectPath));
       if (navigation !== projectNavigation.current) return;
       if (!instant || next.path !== projectRef.current?.path || selectedLinkRef.current) {
         adoptProject(next);
@@ -1175,12 +1228,12 @@ function App() {
     if (isolation === "local") return { sessionId: null, worktreeId: selectedWorktree.id };
     setBaseBranch(effectiveBaseBranch);
     saveChatPreferences(localStorage, project.path, { baseBranch: effectiveBaseBranch });
-    const created = await window.milagre.createWorktree({ projectPath: project.path, baseBranch: effectiveBaseBranch, prompt: body });
+    const created = await bridgeForKey(project.path).createWorktree({ projectPath: project.path, baseBranch: effectiveBaseBranch, prompt: body });
     receiveState(project.path, created.project.state);
     const session = sessionForWorktree(created.project.state, created.worktreeId);
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
     if (created.setupNote) setNotice(created.setupNote);
-    void window.milagre
+    void bridgeForKey(project.path)
       .listBranches(project.path)
       .then((next) => {
         // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
@@ -1596,7 +1649,7 @@ function App() {
 
   async function editLink(id: string) {
     try {
-      const link = (await window.milagre.listNamedLinks()).find((item) => item.id === id);
+      const link = (await bridgeForKey(`milagre-link:${id}`).listNamedLinks()).find((item) => item.id === id);
       if (!link) throw new Error("Link no longer exists");
       setLinkDialogOpen(link);
     } catch (error) {
@@ -1608,7 +1661,7 @@ function App() {
     window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
     if (selectedLinkRef.current?.link.id !== link.id) return;
     try {
-      const next = await window.milagre.openNamedLink(link.id);
+      const next = await bridgeForKey(`milagre-link:${link.id}`).openNamedLink(link.id);
       if (selectedLinkRef.current?.link.id === link.id) setSelectedLink(next);
     } catch (error) {
       setNotice(ipcErrorMessage(error));
@@ -1869,7 +1922,7 @@ function App() {
   }
 
   return (
-    <>
+    <BridgeContext.Provider value={bridgeForKey(project.path)}>
       <DotBackground key="app">
         {hostConnection.connected && hostConnection.hostOutdated && (
           <div
@@ -2075,7 +2128,9 @@ function App() {
                   contextUsage={run?.contextUsage ?? selectedSession?.contextUsage}
                   ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
                   agentChatId={project && selectedSession ? chatKey(project.path, selectedSession.id) : undefined}
-                  onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
+                  onStopPort={
+                    project && selectedSession ? (pid) => bridgeForKey(project.path).stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined
+                  }
                   waitingStepIds={waitingStepIds}
                   asking={Boolean(run?.questions.length)}
                   sessionProvider={selectedSession?.provider}
@@ -2084,7 +2139,7 @@ function App() {
                     project && selectedSession?.resumeTurn
                       ? {
                           onContinue: () =>
-                            void window.milagre
+                            void bridgeForKey(project.path)
                               .resumeChat(project.path, selectedSession.id)
                               .catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)),
                         }
@@ -2187,7 +2242,7 @@ function App() {
               lean && project
                 ? async (query) =>
                     messageCommandsFrom(
-                      await window.milagre.searchChats(project.path, query),
+                      await bridgeForKey(project.path).searchChats(project.path, query),
                       new Map(chats.map((chat) => [Number(chat.id), chat.label])),
                       openMessage,
                     )
@@ -2216,7 +2271,9 @@ function App() {
             }}
             onRan={(note) => {
               recordGitNote(gitDialog.sessionId, note);
-              void window.milagre.refreshDiffs(project.path, [gitDialog.worktreeId]).catch(() => {});
+              void bridgeForKey(project.path)
+                .refreshDiffs(project.path, [gitDialog.worktreeId])
+                .catch(() => {});
             }}
           />
         )}
@@ -2250,7 +2307,7 @@ function App() {
           </div>
         </dialog>
       )}
-    </>
+    </BridgeContext.Provider>
   );
 }
 

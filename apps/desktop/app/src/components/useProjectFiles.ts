@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { useBridge } from "../lib/computer-bridge";
 
 export function useProjectFiles(root: string, query: string, enabled: boolean) {
+  const bridge = useBridge();
   const [result, setResult] = useState({ root: "", query: "", files: [] as string[], error: "" });
   const [loading, setLoading] = useState(false);
   useEffect(() => {
@@ -11,7 +13,7 @@ export function useProjectFiles(root: string, query: string, enabled: boolean) {
     let current = true;
     setLoading(true);
     const timer = setTimeout(() => {
-      window.milagre
+      bridge
         .searchProjectFiles(root, query)
         .then(
           (files) => {

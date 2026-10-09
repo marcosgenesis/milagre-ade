@@ -4,6 +4,7 @@ import type { WorktreeBinding } from "@milagre/shared/model";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import type { DiffMode } from "../../electron";
 import type { DiffList } from "./useDiffFiles";
+import { bridgeForKey, onAnyAgentEvent } from "../../lib/computer-bridge";
 
 /** Read every owned Worktree, retaining independent errors and never showing an earlier Chat's lists. */
 export function useLinkDiffLists({ members, chatId, mode, active }: { members: WorktreeBinding[]; chatId: string | null; mode: DiffMode; active: boolean }) {
@@ -24,7 +25,7 @@ export function useLinkDiffLists({ members, chatId, mode, active }: { members: W
       members.map(async (member) => {
         let list: DiffList;
         try {
-          list = { state: "ready", ...(await window.milagre.git.diffFiles({ cwd: member.worktreePath, base: member.base, mode })) };
+          list = { state: "ready", ...(await bridgeForKey(chatId).git.diffFiles({ cwd: member.worktreePath, base: member.base, mode })) };
         } catch (error) {
           list = { state: "error", message: ipcErrorMessage(error) };
         }
@@ -41,7 +42,7 @@ export function useLinkDiffLists({ members, chatId, mode, active }: { members: W
   }, [active, identity, refresh]);
   useEffect(() => {
     if (!active || !chatId) return;
-    return window.milagre.onAgentEvent((message) => {
+    return onAnyAgentEvent((message) => {
       if (message.chatId === chatId && isTurnEnd(message.event)) void refresh();
     });
   }, [active, chatId, refresh]);

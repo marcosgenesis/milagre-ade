@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DiffFileEntry, DiffFileResult, DiffMode } from "../../electron";
+import type { DiffFileEntry, DiffFileResult, DiffMode, MilagreBridge } from "../../electron";
 import { parsePatch, type DiffHunk } from "../../lib/diff-parse";
 
 // Patches load as files scroll into view; a few at a time keeps git from competing with the agent.
@@ -38,7 +38,7 @@ function patchKey(cwd: string, mode: DiffMode, file: DiffFileEntry) {
  * patch, since an edit can keep a file's line counts; files still on screen load theirs again. Large files
  * the user opened with "Show diff" stay opened until the folder or mode changes.
  */
-export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: string; mode: DiffMode; active: boolean }) {
+export function useDiffFiles({ cwd, base, mode, active, bridge }: { cwd: string; base?: string; mode: DiffMode; active: boolean; bridge: MilagreBridge }) {
   const scope = JSON.stringify([cwd, base, mode]);
   const [snapshot, setSnapshot] = useState<{ scope: string; list: DiffList }>({ scope, list: { state: "idle" } });
   const list: DiffList = snapshot.scope === scope ? snapshot.list : { state: "idle" };
@@ -50,8 +50,8 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
   // Bumped whenever the cache is dropped, so a patch read that started before it doesn't land in the new one.
   const epoch = useRef(0);
   const forced = useRef(new Set<string>());
-  const request = useRef({ cwd, base, mode });
-  request.current = { cwd, base, mode };
+  const request = useRef({ cwd, base, mode, bridge });
+  request.current = { cwd, base, mode, bridge };
   const bump = () => setVersion((version) => version + 1);
 
   const dropPatches = useCallback(() => {
@@ -61,12 +61,12 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
   }, []);
 
   const refresh = useCallback(async () => {
-    const { cwd, base, mode } = request.current;
+    const { cwd, base, mode, bridge } = request.current;
     const scope = JSON.stringify([cwd, base, mode]);
     const current = ++generation.current;
     setSnapshot((previous) => ({ scope, list: previous.scope === scope && previous.list.state === "ready" ? previous.list : { state: "loading" } }));
     try {
-      const result = await window.milagre.git.diffFiles({ cwd, base, mode });
+      const result = await bridge.git.diffFiles({ cwd, base, mode });
       if (current === generation.current) {
         dropPatches();
         setSnapshot({ scope, list: { state: "ready", ...result } });
@@ -86,7 +86,7 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
     return () => {
       generation.current++;
     };
-  }, [active, cwd, base, mode, refresh, dropPatches]);
+  }, [active, cwd, base, mode, bridge, refresh, dropPatches]);
 
   const pump = useCallback(() => {
     while (inFlight.current < MAX_IN_FLIGHT && queue.current.length) queue.current.shift()!();
@@ -95,7 +95,7 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
   /** Starts loading a file's patch unless it is cached or already loading. `force` is "Show diff" on a large file. */
   const load = useCallback(
     (file: DiffFileEntry, force = false) => {
-      const { cwd, base, mode } = request.current;
+      const { cwd, base, mode, bridge } = request.current;
       const key = patchKey(cwd, mode, file);
       if (force) forced.current.add(file.path);
       if (cache.current.has(key) || file.binary || (isLarge(file) && !forced.current.has(file.path))) return;
@@ -104,7 +104,7 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
       bump();
       queue.current.push(() => {
         inFlight.current++;
-        window.milagre.git
+        bridge.git
           .diffFile({ cwd, base, mode, path: file.path, oldPath: file.oldPath, untracked: file.untracked })
           .then<PatchState, PatchState>(
             (result) => ({ status: "ready", ...result }),

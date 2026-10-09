@@ -39,7 +39,6 @@
   "ignoreBinaries": [],
   "ignoreIssues": {
     "apps/mobile/src/update-sheet.tsx": ["exports"],
-    "apps/mobile/src/accounts-section.tsx": ["exports"],
-    "apps/desktop/app/src/lib/computer-bridge.ts": ["exports"]
+    "apps/mobile/src/accounts-section.tsx": ["exports"]
   }
 }

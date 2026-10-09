@@ -4,9 +4,11 @@ import type { NamedProjectLink } from "@milagre/shared/model";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { ProjectAvatarStack } from "./ProjectAvatarStack";
+import { bridgeForKey } from "../lib/computer-bridge";
 type Project = { id: string; name: string; path: string };
 /** Creates a Link, or edits `link`'s name and member Projects. Chats already started keep their Worktrees. */
 export function LinkProjectDialog({ link, onClose, onCreated }: { link?: NamedProjectLink; onClose: () => void; onCreated: (link: NamedProjectLink) => void }) {
+  const bridge = bridgeForKey(link ? `milagre-link:${link.id}` : null);
   const dialog = useRef<HTMLDialogElement>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -18,7 +20,7 @@ export function LinkProjectDialog({ link, onClose, onCreated }: { link?: NamedPr
   useEffect(() => {
     dialog.current?.showModal();
     let live = true;
-    void window.milagre
+    void bridge
       .listProjects()
       .then((rows) => {
         if (live) setProjects(rows);
@@ -47,7 +49,7 @@ export function LinkProjectDialog({ link, onClose, onCreated }: { link?: NamedPr
     setError(null);
     try {
       const request = { name: name.trim(), projectIds: selected };
-      onCreated(await (link ? window.milagre.updateNamedLink({ id: link.id, ...request }) : window.milagre.createNamedLink(request)));
+      onCreated(await (link ? bridge.updateNamedLink({ id: link.id, ...request }) : bridge.createNamedLink(request)));
     } catch (error) {
       setError(ipcErrorMessage(error));
       setSaving(false);

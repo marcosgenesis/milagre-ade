@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SkillCatalog } from "../model";
+import { bridgeForKey } from "../lib/computer-bridge";
 
 const EMPTY_CATALOG: SkillCatalog = { skills: [], warnings: [] };
 
@@ -11,13 +12,14 @@ export function useSkills(projectPath: string, open: boolean, revision = 0) {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    if (typeof window.milagre.listSkills !== "function") {
+    const bridge = bridgeForKey(projectPath);
+    if (typeof bridge.listSkills !== "function") {
       setResult({ path: projectPath, catalog: { skills: [], warnings: ["Restart Milagre to enable skill discovery."] } });
       setLoading(false);
       return;
     }
     setLoading(true);
-    window.milagre
+    bridge
       .listSkills(projectPath)
       .then((catalog) => {
         if (!cancelled) setResult({ path: projectPath, catalog });

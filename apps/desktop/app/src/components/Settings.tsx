@@ -32,6 +32,7 @@ import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
+import { bridgeForKey } from "../lib/computer-bridge";
 import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
 import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from "../lib/devices";
 import { GlideGroup, RailButton } from "./SidebarNav";
@@ -1101,22 +1102,26 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
     const next = pending.current;
     pending.current = null;
     if (next === null) return;
-    window.milagre.saveFilesToCopy(projectPath, parsePatterns(next)).then(
-      () => setSaveError(null),
-      (error) => setSaveError(ipcErrorMessage(error)),
-    );
+    bridgeForKey(projectPath)
+      .saveFilesToCopy(projectPath, parsePatterns(next))
+      .then(
+        () => setSaveError(null),
+        (error) => setSaveError(ipcErrorMessage(error)),
+      );
   };
 
   // The preview runs shortly after typing stops; only the latest answer is shown.
   const refreshPreview = () => {
     const seq = ++previewSeq.current;
-    void window.milagre.previewFilesToCopy(projectPath, parsePatterns(current.current)).then(
-      (next) => {
-        // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
-        if (seq === previewSeq.current) setFound(next);
-      },
-      () => {},
-    );
+    void bridgeForKey(projectPath)
+      .previewFilesToCopy(projectPath, parsePatterns(current.current))
+      .then(
+        (next) => {
+          // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
+          if (seq === previewSeq.current) setFound(next);
+        },
+        () => {},
+      );
   };
 
   // .worktreeinclude can change in an editor while Settings is open.
@@ -1131,17 +1136,19 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
     setText(null);
     setFound(null);
     setLoadError(null);
-    window.milagre.readFilesToCopy(projectPath).then(
-      (saved) => {
-        if (cancelled) return;
-        current.current = saved.filesToCopy.join("\n");
-        setText(current.current);
-        setFound(saved);
-      },
-      (error) => {
-        if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
-      },
-    );
+    bridgeForKey(projectPath)
+      .readFilesToCopy(projectPath)
+      .then(
+        (saved) => {
+          if (cancelled) return;
+          current.current = saved.filesToCopy.join("\n");
+          setText(current.current);
+          setFound(saved);
+        },
+        (error) => {
+          if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
+        },
+      );
     // Leaving Settings saves what was typed last.
     return () => {
       cancelled = true;
@@ -1223,18 +1230,23 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
     const next = pending.current;
     pending.current = null;
     if (next === null) return;
-    window.milagre.saveWorktreeSetup(projectPath, next).then(
-      (saved) => {
-        setResolved(saved);
-        setError(null);
-      },
-      (failure) => setError(`Couldn't save: ${ipcErrorMessage(failure)}`),
-    );
+    bridgeForKey(projectPath)
+      .saveWorktreeSetup(projectPath, next)
+      .then(
+        (saved) => {
+          setResolved(saved);
+          setError(null);
+        },
+        (failure) => setError(`Couldn't save: ${ipcErrorMessage(failure)}`),
+      );
   };
 
   // .milagre/worktree.json can change in an editor while Settings is open.
   useEffect(() => {
-    const onFocus = () => void window.milagre.readWorktreeSetup(projectPath).then(setResolved, () => {});
+    const onFocus = () =>
+      void bridgeForKey(projectPath)
+        .readWorktreeSetup(projectPath)
+        .then(setResolved, () => {});
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [projectPath]);
@@ -1244,16 +1256,18 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
     setText(null);
     setResolved(null);
     setError(null);
-    window.milagre.readWorktreeSetup(projectPath).then(
-      (saved) => {
-        if (cancelled) return;
-        setText(saved.setupCommand);
-        setResolved(saved);
-      },
-      (failure) => {
-        if (!cancelled) setError(`Couldn't read the setup command: ${ipcErrorMessage(failure)}`);
-      },
-    );
+    bridgeForKey(projectPath)
+      .readWorktreeSetup(projectPath)
+      .then(
+        (saved) => {
+          if (cancelled) return;
+          setText(saved.setupCommand);
+          setResolved(saved);
+        },
+        (failure) => {
+          if (!cancelled) setError(`Couldn't read the setup command: ${ipcErrorMessage(failure)}`);
+        },
+      );
     // Leaving Settings saves what was typed last.
     return () => {
       cancelled = true;
@@ -1328,7 +1342,7 @@ function ProjectIconSetting({ project }: { project: SettingsProject }) {
     setBusy(true);
     setError(null);
     try {
-      setProjectImage(project.path, await window.milagre.setProjectIcon(project.path, await icon()));
+      setProjectImage(project.path, await bridgeForKey(project.path).setProjectIcon(project.path, await icon()));
     } catch (failure) {
       setError(failure instanceof DOMException ? "This file isn't an image Milagre can read." : ipcErrorMessage(failure));
     } finally {
@@ -1383,16 +1397,18 @@ function ShowInSidebarSetting({ project }: { project: SettingsProject }) {
   const [hidden, setHidden] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    window.milagre.listRecentProjects().then(
-      (list) => setHidden(Boolean(list.find((item) => item.path === project.path)?.hidden)),
-      () => setHidden(false),
-    );
+    bridgeForKey(project.path)
+      .listRecentProjects()
+      .then(
+        (list) => setHidden(Boolean(list.find((item) => item.path === project.path)?.hidden)),
+        () => setHidden(false),
+      );
   }, [project.path]);
   async function change(show: boolean) {
     setError(null);
     setHidden(!show);
     try {
-      const list = await window.milagre.setProjectHidden(project.path, !show);
+      const list = await bridgeForKey(project.path).setProjectHidden(project.path, !show);
       setHidden(Boolean(list.find((item) => item.path === project.path)?.hidden));
       window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
     } catch (failure) {
@@ -1547,7 +1563,7 @@ export function MainSyncSetting({ projectPath }: { projectPath: string }) {
     let live = true;
     // Started inside a promise, like the default above, so a bridge without the command shows an error, not a crash.
     Promise.resolve()
-      .then(() => window.milagre.readMainSync(projectPath))
+      .then(() => bridgeForKey(projectPath).readMainSync(projectPath))
       .then(
         (value) => live && setSync(value ?? null),
         (failure) => live && setError(ipcErrorMessage(failure)),
@@ -1565,7 +1581,7 @@ export function MainSyncSetting({ projectPath }: { projectPath: string }) {
   async function change(choice: MainSyncChoice) {
     setError(null);
     try {
-      setSync(await window.milagre.saveMainSync(projectPath, overrideOf(choice)));
+      setSync(await bridgeForKey(projectPath).saveMainSync(projectPath, overrideOf(choice)));
     } catch (failure) {
       setError(ipcErrorMessage(failure));
     }

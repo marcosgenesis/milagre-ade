@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { ChatMessage, ChatStep } from "../../model";
+import { bridgeForKey } from "../../lib/computer-bridge";
 
 // A saved message keeps long tool output in a sidecar on the host (the step has `hasDetail` and no `detail`), so the
 // state the windows receive stays small. Opening such a step reads its message once from the host.
@@ -25,7 +26,7 @@ function loadMessage(scope: string, id: number) {
   const key = `${scope}#${id}`;
   let message = loaded.get(key);
   if (!message) {
-    message = window.milagre.getMessage(scope, id);
+    message = bridgeForKey(scope).getMessage(scope, id);
     // A failed read is tried again the next time the step opens.
     message.catch(() => loaded.delete(key));
     loaded.set(key, message);

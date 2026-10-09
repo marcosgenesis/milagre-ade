@@ -63,7 +63,7 @@ function reapplyTheme() {
   for (const session of sessions.values()) session.term.options.theme = theme;
 }
 
-// applyPalette runs on every class change and then dispatches THEME_EVENT, so this one listener covers both.
+// THEME_EVENT fires after applyPalette and after the translucency class and sliders change (all move --surface).
 let themeWatched = false;
 function watchTheme() {
   if (themeWatched) return;

@@ -4,7 +4,7 @@ import type { PermissionMode } from "../model";
 import { DEFAULT_THEME_ID, isHex, resolvePalette, resolveThemeSettings } from "@milagre/shared/themes";
 import type { CustomTheme, ThemeChoice } from "@milagre/shared/themes";
 import type { ChatOrder } from "./chat-list";
-import { applyPalette } from "./theme-sheet";
+import { THEME_EVENT, applyPalette } from "./theme-sheet";
 
 export type ThemePreference = "system" | "light" | "dark";
 /** Whether plan usage reads as the share used or the share left. */
@@ -220,10 +220,12 @@ export function useApplyTheme() {
   // The window itself goes see-through in the main process; the renderer's backgrounds follow.
   useEffect(() => {
     document.documentElement.classList.toggle("translucent", windowTranslucent);
+    window.dispatchEvent(new Event(THEME_EVENT));
     void window.milagre?.setWindowTranslucent(windowTranslucent, scheme, palette.page).catch(() => {});
   }, [windowTranslucent, scheme, palette.page]);
   useEffect(() => {
     document.documentElement.style.setProperty("--window-translucency", String(windowTranslucency / 100));
     document.documentElement.style.setProperty("--panel-translucency", String(panelTranslucency / 100));
+    window.dispatchEvent(new Event(THEME_EVENT));
   }, [windowTranslucency, panelTranslucency]);
 }

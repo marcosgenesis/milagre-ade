@@ -60,11 +60,11 @@ async function browserChecks() {
     await waitFor(`!!${tile("Milagre Blue")}`);
     assert.equal(await evaluate(`${tile("Milagre Blue")}.getAttribute('aria-checked')`), "true", "Milagre Blue is the default");
     await evaluate(`${mode("Dark")}.click()`);
-    await delay(100);
+    await waitFor(`document.documentElement.classList.contains('dark')`);
     const blueDark = await page();
     await screenshot("milagre-blue-dark");
     await evaluate(`${mode("Light")}.click()`);
-    await delay(100);
+    await waitFor(`!document.documentElement.classList.contains('dark')`);
     await screenshot("milagre-blue-light");
     await evaluate(`${mode("Dark")}.click()`);
     await evaluate(`${tile("Catppuccin Mocha")}.click()`);

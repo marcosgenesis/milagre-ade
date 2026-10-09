@@ -162,7 +162,7 @@ function buildPhone(kind: PhoneKind, video: HTMLVideoElement) {
     button(0.2, side, 0.12);
   }
 
-  return { phone, screenMaterial, texture };
+  return { phone, texture };
 }
 
 export function mountPhone3D({ host, video, kind, tilt }: { host: HTMLElement; video: HTMLVideoElement; kind: PhoneKind; tilt: () => number }) {
@@ -179,7 +179,7 @@ export function mountPhone3D({ host, video, kind, tilt }: { host: HTMLElement; v
   const scene = new Scene();
   const pmrem = new PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  const { phone, screenMaterial, texture } = buildPhone(kind, video);
+  const { phone, texture } = buildPhone(kind, video);
   scene.add(phone);
 
   // The canvas is larger than the phone's box (see .phone-canvas), so the turned phone and its edges fit.
@@ -209,7 +209,6 @@ export function mountPhone3D({ host, video, kind, tilt }: { host: HTMLElement; v
   addEventListener("pointermove", onPointer, { passive: true });
 
   let frame = 0;
-  const dim = new Color(1, 1, 1);
   const render = () => {
     frame = requestAnimationFrame(render);
     const follow = still.matches ? 0 : 1;
@@ -217,10 +216,6 @@ export function mountPhone3D({ host, video, kind, tilt }: { host: HTMLElement; v
     const targetX = 0.05 + pointer.y * 0.12 * follow;
     phone.rotation.y += (targetY - phone.rotation.y) * 0.06;
     phone.rotation.x += (targetX - phone.rotation.x) * 0.06;
-    // Follows the page's loop fade on the screen only, like the flat frames do.
-    const fading = host.closest(".demo")?.classList.contains("fading");
-    dim.setScalar(fading ? 0.2 : 1);
-    screenMaterial.color.lerp(dim, 0.12);
     renderer.render(scene, camera);
   };
   phone.rotation.y = tilt();

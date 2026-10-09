@@ -34,7 +34,7 @@ export function Attachments({
   // A remote chat's images come from its computer; its other files have no preview here.
   const scope = useScope();
   const remote = isRemoteKey(scope);
-  const { sources: remoteSources } = useRemoteMedia(remote ? scope : null, [
+  const { sources: remoteSources, failed: remoteFailed } = useRemoteMedia(remote ? scope : null, [
     ...images.flatMap((image) => (image.dataUrl || !image.path ? [] : [image.path])),
     ...files.filter((path) => mediaKind(path) === "image"),
   ]);
@@ -42,6 +42,7 @@ export function Attachments({
   const items = [
     ...images.map((image) => ({
       id: image.id,
+      path: image.dataUrl ? undefined : image.path,
       name: image.name,
       src: image.dataUrl ?? sourceOf(image.path ?? ""),
       kind: "image" as const,
@@ -52,6 +53,7 @@ export function Attachments({
       .filter((path) => !images.some((image) => (image.sourcePath ?? image.path) === path))
       .map((path) => ({
         id: path,
+        path,
         name: path.split("/").at(-1) || path,
         src: sourceOf(path),
         kind: remote && mediaKind(path) !== "image" ? null : mediaKind(path),
@@ -59,7 +61,9 @@ export function Attachments({
         remove: removeFile ? () => removeFile(path) : undefined,
       })),
   ];
-  const media = items.filter((item): item is typeof item & LightboxItem => !!item.kind);
+  // The viewer pages only through what has an image to show: one still loading, or one that failed, has none.
+  const media = items.filter((item): item is typeof item & LightboxItem => !!item.kind && !!item.src);
+  const failedRemote = (item: (typeof items)[number]) => remote && item.kind === "image" && !item.src && !!item.path && !!remoteFailed[item.path];
   const close = useCallback(() => setOpen(null), []);
   const thumbFor = useCallback((id: string) => thumbs.current.get(id), []);
   const showing = (id: string) => open !== null && media[open]?.id === id;
@@ -69,7 +73,9 @@ export function Attachments({
       {leading}
       {items.map((item) => (
         <div key={item.id} className="relative max-w-full rounded-lg border border-line bg-inset p-1">
-          {item.kind ? (
+          {failedRemote(item) ? (
+            <FileTile path={item.id} name={item.name} unavailable />
+          ) : item.kind ? (
             <button
               ref={(el) => {
                 if (el) thumbs.current.set(item.id, el);
@@ -121,9 +127,19 @@ export function Attachments({
 }
 
 /** A file that isn't an image or video (a .txt, a .md): a square tile the size of a media thumbnail, with its extension. */
-function FileTile({ path, name, file }: { path: string; name: string; file?: File }) {
+function FileTile({ path, name, file, unavailable }: { path: string; name: string; file?: File; unavailable?: boolean }) {
   const [open, setOpen] = useState(false);
   const extension = /\.([^./]+)$/.exec(name)?.[1];
+  if (unavailable)
+    return (
+      <span data-attachment-unavailable title={`${name} couldn't be loaded from its computer`} className="block rounded">
+        <span className="flex size-20 flex-col items-center justify-center gap-1 rounded bg-surface text-ink-3">
+          <HugeiconsIcon icon={File01Icon} size={22} strokeWidth={1.6} color="currentColor" aria-hidden />
+          <span className="text-[10px]">Unavailable</span>
+        </span>
+        <span className="block max-w-20 truncate px-1 text-center text-[10px] text-ink-2">{name}</span>
+      </span>
+    );
   return (
     <>
       <button

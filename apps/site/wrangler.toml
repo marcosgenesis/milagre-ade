@@ -1,7 +1,13 @@
 name = "milagre-site"
 main = "worker/worker.ts"
 compatibility_date = "2026-09-01"
-routes = [{ pattern = "milagre.cloud", custom_domain = true }, { pattern = "www.milagre.cloud", custom_domain = true }]
+routes = [
+  { pattern = "milagre.cloud", custom_domain = true },
+  { pattern = "www.milagre.cloud", custom_domain = true },
+  # milagre.dev belongs to another Cloudflare account; it reaches us as a Cloudflare for SaaS custom hostname
+  { pattern = "milagre.dev/*", zone_name = "milagre.cloud" },
+  { pattern = "www.milagre.dev/*", zone_name = "milagre.cloud" },
+]
 
 [assets]
 directory = "./dist"

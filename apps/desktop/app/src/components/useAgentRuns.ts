@@ -78,6 +78,10 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
     .map((computer) => computer.id)
     .join("\n");
   const known = computers.map((computer) => computer.id).join("\n");
+  const away = computers
+    .filter((computer) => computer.state !== "online")
+    .map((computer) => computer.id)
+    .join("\n");
   useEffect(() => {
     for (const id of online.split("\n").filter(Boolean)) {
       const asked = generation.current.get(id) ?? 0;
@@ -89,6 +93,19 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
         .catch(() => {});
     }
   }, [online, take]);
+  // A computer that isn't online has no turn running that this window can know of: its spinners and approvals go (its
+  // chats stay, from its offline copy), and the snapshot asked for when it comes back online brings its turns again.
+  useEffect(() => {
+    if (!away) return;
+    let next = runsRef.current;
+    for (const id of away.split("\n").filter(Boolean)) {
+      if (!Object.keys(next).some((key) => computerOfKey(key) === id)) continue;
+      next = dropComputerRuns(next, id);
+      taken.current.delete(id);
+      generation.current.set(id, (generation.current.get(id) ?? 0) + 1);
+    }
+    if (next !== runsRef.current) setAll(next);
+  }, [away, setAll]);
   useEffect(() => {
     const ids = new Set(known.split("\n").filter(Boolean));
     let next = runsRef.current;

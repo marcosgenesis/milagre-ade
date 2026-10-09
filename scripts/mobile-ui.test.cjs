@@ -2303,6 +2303,63 @@ test("a long Chat opens hidden and jumps to its newest message without animating
   assert.equal(page().props.style.opacity, 0, "switching Chats hides the next transcript until it is placed");
 });
 
+test("first send keeps the placed transcript mounted when the draft adopts its saved Chat", async () => {
+  const sending = deferred();
+  const screen = chatHost({ effects: true, call: (method) => (method === "project:branches" ? Promise.resolve(["main"]) : sending.promise) });
+  const page = () => find(screen.render(), (node) => node.type === "KeyboardChatScrollView");
+  const initial = page();
+  initial.props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  initial.props.onContentSizeChange(0, 300);
+  assert.equal(page().props.style.opacity, 1);
+  screen.send();
+  await settle();
+  const preview = page();
+  const request = screen.calls.find((call) => call.method === "chat:send").args[0];
+  const state = screen.session.snapshot.project.state;
+  state.sessions[7] = { id: 7, worktree_id: 1, provider: "codex", status: "Created" };
+  state.messages = [{ id: 8, session_id: 7, role: "user", body: "first message", clientMessageId: request.clientMessageId }];
+  sending.resolve({ sessionId: 7 });
+  await settle();
+  assert.equal(screen.params.id, "7");
+  assert.equal(page().key, preview.key, "saving the same Chat must not recreate its native scroll view");
+  assert.equal(page().props.style.opacity, 1, "acknowledgement must not hide an already placed transcript");
+  screen.session.pendingChats = {};
+  assert.equal(page().key, preview.key, "retiring the preview keeps its scroll position");
+  delete screen.params.id;
+  assert.notEqual(page().key, preview.key, "a new draft in the same Worktree must not reuse the saved Chat's scroll state");
+  assert.equal(page().props.style.opacity, 0);
+  screen.params.id = "42";
+  state.sessions[42] = { id: 42, worktree_id: 1, provider: "codex", status: "Created" };
+  assert.notEqual(page().key, preview.key, "opening another Chat still resets placement");
+  assert.equal(page().props.style.opacity, 0);
+});
+
+test("first send stays visible while the saved Chat's first page is still loading", async (t) => {
+  const screen = chatHost({ effects: true });
+  const state = screen.session.snapshot.project.state;
+  state.messagesInChats = true;
+  let saved = [];
+  let loading = true;
+  globalThis.chatPage = (client, _path, id) =>
+    client && id === 7 ? { messages: saved, hasMore: false, total: saved.length, loading, loadEarlier: async () => {} } : undefined;
+  t.after(() => delete globalThis.chatPage);
+  screen.send();
+  await settle();
+  const input = () => transcriptMessages(screen).find((message) => message.role === "user");
+  assert.equal(input()?.body, "first message");
+  const request = screen.calls.find((call) => call.method === "chat:send").args[0];
+  state.sessions[7] = { id: 7, worktree_id: 1, provider: "codex", status: "Created", summary: { count: 1, clientMessageIds: [request.clientMessageId] } };
+  assert.equal(input()?.body, "first message", "the summary must not remove the preview before the page arrives");
+  screen.sending.resolve({ sessionId: 7 });
+  await settle();
+  screen.session.pendingChats = {};
+  assert.equal(input()?.body, "first message", "the input survives acknowledgement while the page loads");
+  saved = [{ id: 8, session_id: 7, role: "user", body: "first message", clientMessageId: request.clientMessageId }];
+  loading = false;
+  assert.equal(input()?.id, 8);
+  assert.equal(transcriptMessages(screen).length, 1);
+});
+
 test("mobile navigation spans a long Chat with at most 15 lines and loads older targets before scrolling", () => {
   const screen = chatHost();
   screen.params.id = "42";

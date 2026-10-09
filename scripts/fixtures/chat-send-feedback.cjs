@@ -22,7 +22,7 @@ function leanState() {
   const copy = structuredClone(state);
   for (const session of Object.values(copy.sessions)) {
     const chat = copy.messages.filter((message) => message.session_id === session.id);
-    session.summary = { count: chat.length, ...(chat.length ? { firstId: chat[0].id, lastId: chat.at(-1).id } : {}), titleLine: chat.find((message) => message.role === "user")?.body };
+    session.summary = { count: chat.length, ...(chat.length ? { firstId: chat[0].id, lastId: chat.at(-1).id } : {}), titleLine: chat.find((message) => message.role === "user")?.body, clientMessageIds: chat.flatMap(message => message.clientMessageId ? [message.clientMessageId] : []) };
   }
   return { ...copy, messages: [], messagesInChats: true };
 }
@@ -41,6 +41,7 @@ window.milagre = new Proxy({
   // ?lean: a host that keeps messages by Chat (chat-pages-v1), paging them like chat:messages does.
   readChatMessages: async (_scope, chatId, { before, turns = 10, limit = 75 } = {}) => {
     window.calls.pages = (window.calls.pages ?? 0) + 1;
+    if (window.holdPages) await new Promise(resolve => { window.releasePages = () => { window.holdPages = false; resolve(); }; });
     const chat = state.messages.filter((message) => message.session_id === chatId);
     let end = chat.length;
     const at = before === undefined ? -1 : chat.findIndex((message) => message.id === before);
@@ -77,7 +78,7 @@ window.milagre = new Proxy({
         state.sessions[sessionId] ??= { id: sessionId, worktree_id: request.worktreeId, agent_name: "Local chat", status: "Created" };
         state.sessions[sessionId].provider = request.provider;
         state.messages.push({ id: state.next_id++, session_id: sessionId, body: request.body, images: request.images, files: request.files, clientMessageId: request.clientMessageId, context: null, role: "user", model: request.model });
-        const publish = () => listeners.forEach(listener => listener({ chatId: "/fixture#" + sessionId, event: { type: "message-sent", model: request.model }, state: structuredClone(state) }));
+        const publish = () => listeners.forEach(listener => listener({ chatId: "/fixture#" + sessionId, event: { type: "message-sent", model: request.model }, state: lean ? leanState() : structuredClone(state) }));
         if (window.holdState) { window.holdState = false; window.releaseState = publish; } else publish();
         window.ackSend = () => resolve({ sessionId });
       };

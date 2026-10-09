@@ -215,7 +215,7 @@ function artifactToolDefinitions(chatId, api) {
     {
       name: "artifact_show",
       description:
-        "Show a design to the user in this Chat: a self-contained HTML document (inline CSS and JS; https images, fonts and CDN scripts load, network requests do not). The Chat shows it as a card the user can open beside the chat, on desktop and phone. width and height are the screen it is laid out on, 1280 by 800 unless you say (390 by 844 for a phone screen); the user sees every design of the Chat side by side on a canvas. An id is optional (lowercase letters, digits and dashes); a new id creates a design, and showing an existing id again adds a version the user sees in place of the old one, which stays available.",
+        "Show a design to the user in this Chat: a self-contained HTML document (inline CSS and JS; https images, fonts and CDN scripts load, network requests do not). The Chat shows it as a card the user can open beside the chat, on desktop and phone. width and height are the screen it is laid out on, 1280 by 800 unless you say (390 by 844 for a phone screen); the user sees every design of the Chat side by side on a canvas. An id is optional (lowercase letters, digits and dashes); a new id creates a design, and showing an existing id again adds a version the user sees in place of the old one, which stays available. Do not use it when the user asked for another design tool (Pencil, Figma or any other); use that tool instead.",
       input: {
         title: z.string().min(1).max(120),
         html: z.string().min(1).max(MAX_HTML),

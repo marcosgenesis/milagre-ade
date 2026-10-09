@@ -1,4 +1,4 @@
-import { contrastRatio, mix, withAlpha } from "./color.ts";
+import { mix, onColor, withAlpha } from "./color.ts";
 import type { Ansi, Scheme, ThemePalette, ThemeSource } from "./types.ts";
 import type { SyntaxKind } from "../file-syntax.mjs";
 
@@ -30,7 +30,7 @@ export function buildPalette(source: ThemeSource, scheme: Scheme): ThemePalette 
     field: toward(dark ? 0.06 : 0.04),
     ink2: mix(ink, page, 0.36),
     ink3: mix(ink, page, 0.56),
-    onAccent: contrastRatio("#ffffff", accent) >= contrastRatio(page, accent) ? "#ffffff" : page,
+    onAccent: onColor(accent, page),
     line: toward(dark ? 0.09 : 0.07),
     lineStrong: toward(dark ? 0.14 : 0.12),
     lineSoft: toward(dark ? 0.06 : 0.045),
@@ -50,7 +50,8 @@ export function buildPalette(source: ThemeSource, scheme: Scheme): ThemePalette 
     cursor: ink,
     selection: withAlpha(accent, 0.3),
   };
-  return { ...derived, ...source } as ThemePalette;
+  const given = Object.fromEntries(Object.entries(source).filter(([, value]) => value !== undefined));
+  return { ...derived, ...given } as ThemePalette;
 }
 
 export function ansi(c: {

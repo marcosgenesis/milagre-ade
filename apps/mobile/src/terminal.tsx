@@ -353,7 +353,7 @@ function KeyButton({ label, onPress, held = false }: { label: string; onPress():
         backgroundColor: held ? colors.accent : pressed ? colors.hover : colors.inset,
       })}
     >
-      <Text style={{ color: held ? colors.onInk : colors.ink, fontSize: 14, fontFamily: "Menlo" }}>{label}</Text>
+      <Text style={{ color: held ? colors.onAccent : colors.ink, fontSize: 14, fontFamily: "Menlo" }}>{label}</Text>
     </Pressable>
   );
 }

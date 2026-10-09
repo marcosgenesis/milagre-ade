@@ -38,6 +38,8 @@ import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from 
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ModeControl, ThemePicker } from "./settings/ThemePicker";
+import { CustomThemeEditor } from "./settings/CustomThemeEditor";
+import { DEFAULT_THEME_ID, seedsFrom } from "@milagre/shared/themes";
 import { ProviderLogo } from "./ProviderLogo";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { WorkspaceIcon } from "./WorkspaceIcon";
@@ -430,8 +432,27 @@ function ExperimentalSettings() {
         >
           <Switch label="Ultracode Fatality" checked={settings.ultracodeFatality} onChange={(ultracodeFatality) => updateSettings({ ultracodeFatality })} />
         </Row>
+        <Row label="Custom theme" description={'Build a theme from a few colors. It shows up as "Custom" in Appearance.'}>
+          <Switch
+            label="Custom theme"
+            checked={settings.customThemeEnabled}
+            onChange={(customThemeEnabled) => {
+              if (!customThemeEnabled) {
+                updateSettings({ customThemeEnabled, ...(settings.colorTheme === "custom" ? { colorTheme: DEFAULT_THEME_ID } : {}) });
+              } else {
+                const from = settings.colorTheme === "custom" ? DEFAULT_THEME_ID : settings.colorTheme;
+                updateSettings({ customThemeEnabled, customTheme: settings.customTheme ?? seedsFrom(from), colorTheme: "custom" });
+              }
+            }}
+          />
+        </Row>
         <LinearSettings />
       </Group>
+      {settings.customThemeEnabled && (
+        <Group title="Custom theme">
+          <CustomThemeEditor />
+        </Group>
+      )}
       {navigator.platform.startsWith("Mac") && (
         <Group title="Window">
           <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_THEME_ID, getTheme, resolvePalette, resolveThemeSettings, themes, isHex, contrastRatio } from "./index.ts";
+import { DEFAULT_THEME_ID, getTheme, resolvePalette, resolveThemeSettings, themes, isHex, contrastRatio, onColor } from "./index.ts";
 
 test("registers the twelve themes in picker order", () => {
   assert.deepEqual(
@@ -65,4 +65,24 @@ test("custom needs the Experimental switch and saved seeds", () => {
   assert.equal(resolveThemeSettings({ colorTheme: "custom", customThemeEnabled: true, customTheme }), "custom");
   assert.equal(resolveThemeSettings({ colorTheme: "custom", customThemeEnabled: false, customTheme }), "milagre-blue");
   assert.equal(resolveThemeSettings({ colorTheme: "custom", customThemeEnabled: true, customTheme: null }), "milagre-blue");
+});
+
+test("every theme's onAccent reads on its accent, in both schemes", () => {
+  for (const theme of themes)
+    for (const scheme of ["light", "dark"] as const) {
+      const p = resolvePalette(theme.id, scheme);
+      // Gray must look exactly like the app did before theming: white on #3d9aff in dark (2.89:1), kept on purpose.
+      if (theme.id === "gray" && scheme === "dark") continue;
+      assert.ok(contrastRatio(p.onAccent, p.accent) >= 3, `${theme.id} ${scheme} onAccent ${p.onAccent} on ${p.accent}`);
+    }
+});
+
+test("onColor picks the better of white and the page, so text on ink reads", () => {
+  assert.equal(onColor("#f2f3f4", "#17181a"), "#17181a");
+  assert.equal(onColor("#17181a", "#fafafb"), "#ffffff");
+  for (const theme of themes)
+    for (const scheme of ["light", "dark"] as const) {
+      const p = resolvePalette(theme.id, scheme);
+      assert.ok(contrastRatio(onColor(p.ink, p.page), p.ink) >= 4.5, `${theme.id} ${scheme} onInk`);
+    }
 });

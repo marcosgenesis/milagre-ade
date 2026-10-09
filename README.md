@@ -60,8 +60,8 @@ Apple and Linux signing credentials and the Cloudflare account ID are configured
 
 After adding the secrets:
 
-1. Publish a stable release with **Publish installers**, selecting `platforms=all` and `initialize_linux_repository=true` for the first Linux release.
-2. Run **Deploy Linux package repository** for that public release tag to publish `packages.milagre.cloud`.
+1. Set the `RELEASE_WINDOWS` repository variable to `true`, so **Publish** builds Windows too.
+2. Publish a stable release with **Publish** (`channel=stable`). It also redeploys `packages.milagre.cloud`.
 3. Validate the signed Windows installer and WinGet manifest, then submit the manifest to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). The public WinGet command becomes available after acceptance.
 
 See [desktop distribution](docs/agents/distribution.md) for build commands, native test evidence and release instructions. Windows/Linux ARM64, Chocolatey, Scoop, Flatpak and Snap are outside this implementation.

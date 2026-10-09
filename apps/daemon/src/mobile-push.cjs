@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { attentionNotice } = require("@milagre/shared/attention");
-const { isTurnEnd, projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
+const { isTurnEnd, projectOfKey, sessionIdFromKey, subagentActive } = require("@milagre/shared/agent-runs");
 const { isLinkScopeKey } = require("@milagre/shared/chat-scopes");
 const validOwner = (owner) => path.isAbsolute(owner) || isLinkScopeKey(owner);
 
@@ -57,6 +57,11 @@ function createMobilePush({ dataDir, send, context, now = Date.now, onError = ()
   let devices = new Map();
   const focus = new Map();
   const chats = new Map();
+  // Per chat, the ids of the background subagents still at work (their results wake the chat with a turn of its own)
+  // and the completion held while they do ({ run, event }): the turn a result wakes announces its own end instead, and
+  // a completion whose last subagent ends with no turn to take the result is delivered then.
+  const background = new Map();
+  const held = new Map();
   const work = new Set();
   let writes = Promise.resolve();
   let epoch = 0;
@@ -207,14 +212,33 @@ function createMobilePush({ dataDir, send, context, now = Date.now, onError = ()
         run = { requests: new Set(), seen: new Set(), preview: "", ended: false, turnId: event.turnId };
         chats.delete(chatId);
         chats.set(chatId, run);
+        held.delete(chatId);
       }
       if (!run) {
         run = { requests: new Set(), seen: new Set(), preview: "", ended: false };
         chats.set(chatId, run);
       }
-      if (chats.size > MAX_CHATS) chats.delete(chats.keys().next().value);
+      if (chats.size > MAX_CHATS) {
+        const oldest = chats.keys().next().value;
+        chats.delete(oldest);
+        background.delete(oldest);
+        held.delete(oldest);
+      }
       if (event.type === "text-delta" && !run.ended) run.preview = (run.preview + (event.text || "")).slice(-240);
-      if (event.type === "permission-request" || event.type === "question-request") {
+      if (event.type === "subagent-update" && event.agent?.background) {
+        const ids = background.get(chatId) ?? new Set();
+        if (subagentActive(event.agent)) ids.add(event.agent.id);
+        else ids.delete(event.agent.id);
+        if (ids.size) background.set(chatId, ids);
+        else {
+          background.delete(chatId);
+          const waiting = held.get(chatId);
+          if (waiting && run.ended) {
+            held.delete(chatId);
+            deliver(chatId, waiting.run, waiting.event);
+          }
+        }
+      } else if (event.type === "permission-request" || event.type === "question-request") {
         if (run.ended || typeof event.requestId !== "string" || run.seen.has(event.requestId) || run.seen.size >= 100) return;
         run.seen.add(event.requestId);
         run.requests.add(event.requestId);
@@ -225,7 +249,10 @@ function createMobilePush({ dataDir, send, context, now = Date.now, onError = ()
       } else if (isTurnEnd(event) && !run.ended) {
         run.ended = true;
         run.requests.clear();
-        if (event.type !== "turn-cancelled") deliver(chatId, run, event);
+        if (event.type === "turn-cancelled") return;
+        // A turn that ends while the chat's background subagents still work isn't the end of the work.
+        if (event.type === "turn-completed" && background.get(chatId)?.size) held.set(chatId, { run, event });
+        else deliver(chatId, run, event);
       }
     },
     async clear() {

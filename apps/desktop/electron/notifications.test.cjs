@@ -224,3 +224,50 @@ test("forgetComputer closes what a removed computer waited on and clears the bad
   assert.equal(badges.at(-1), "1");
   assert.equal(notifier.open.size, 1);
 });
+const backgroundAgent = (id, status) => ({
+  type: "subagent-update",
+  agent: { id, title: "Review", status, background: true, startedAt: 1, updatedAt: 1, transcript: [] },
+});
+test("a turn that ends while a background subagent runs is held; the turn its result wakes is announced once", () => {
+  const { notifier, shown } = setup();
+  notifier.sync({ projectPath: "/shop", activeChatId: null, unread: [], notifyOnCompletion: true });
+  notifier.observe("/shop#2", { type: "turn-started", turnId: "t1" });
+  notifier.observe("/shop#2", backgroundAgent("a", "running"));
+  notifier.observe("/shop#2", { type: "text-delta", text: "Waiting on the reviewer." });
+  notifier.observe("/shop#2", { type: "turn-completed" });
+  assert.equal(notifier.notifyCompletion({ chatId: "/shop#2", title: "shop", subtitle: "Fix login" }), false);
+  assert.equal(shown.length, 0);
+  notifier.observe("/shop#2", { type: "turn-started", turnId: "t2", continues: "t1" });
+  notifier.observe("/shop#2", backgroundAgent("a", "completed"));
+  notifier.observe("/shop#2", { type: "text-delta", text: "Review done: all good." });
+  notifier.observe("/shop#2", { type: "turn-completed" });
+  assert.equal(notifier.notifyCompletion({ chatId: "/shop#2", title: "shop", subtitle: "Fix login" }), true);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].options.body, "Review done: all good.");
+});
+test("a held completion shows once its last background subagent ends with no turn to take the result; failures and foreground subagents never hold", () => {
+  const { notifier, shown } = setup();
+  notifier.sync({ projectPath: "/shop", activeChatId: null, unread: [], notifyOnCompletion: true });
+  notifier.observe("/shop#2", { type: "turn-started", turnId: "t1" });
+  notifier.observe("/shop#2", backgroundAgent("a", "running"));
+  notifier.observe("/shop#2", backgroundAgent("b", "running"));
+  notifier.observe("/shop#2", { type: "text-delta", text: "Dispatched two reviewers." });
+  notifier.observe("/shop#2", { type: "turn-completed" });
+  assert.equal(notifier.notifyCompletion({ chatId: "/shop#2", title: "shop", subtitle: "Fix login" }), false);
+  notifier.observe("/shop#2", backgroundAgent("a", "completed"));
+  assert.equal(shown.length, 0);
+  notifier.observe("/shop#2", backgroundAgent("b", "failed"));
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].options.title, "shop - Turn completed");
+  assert.equal(shown[0].options.subtitle, "Fix login");
+  assert.equal(shown[0].options.body, "Dispatched two reviewers.");
+  notifier.observe("/shop#3", { type: "turn-started", turnId: "t3" });
+  notifier.observe("/shop#3", backgroundAgent("c", "running"));
+  notifier.observe("/shop#3", { type: "turn-failed", message: "Connection lost" });
+  assert.equal(notifier.notifyCompletion({ chatId: "/shop#3", title: "shop" }), true);
+  notifier.observe("/shop#4", { type: "turn-started", turnId: "t4" });
+  notifier.observe("/shop#4", { type: "subagent-update", agent: { id: "d", title: "Review", status: "running", startedAt: 1, updatedAt: 1, transcript: [] } });
+  notifier.observe("/shop#4", { type: "turn-completed" });
+  assert.equal(notifier.notifyCompletion({ chatId: "/shop#4", title: "shop" }), true);
+  assert.equal(shown.length, 3);
+});

@@ -428,6 +428,8 @@ export interface Subagent {
   retryable?: boolean;
   archived?: boolean;
   parentId?: string;
+  /** Launched by the chat to run in the background: its result wakes the chat with a turn of its own. */
+  background?: boolean;
   title: string;
   prompt?: string;
   status: "initializing" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "unknown";

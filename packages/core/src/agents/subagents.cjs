@@ -1,7 +1,7 @@
 // Provider-owned children have their own lifecycle; a launch tool finishing is not a child finishing.
 const { capOutput, claudeStep, codexStep } = require("./steps.cjs");
 const { createHash } = require("node:crypto");
-const active = (agent) => ["running", "initializing", "waiting"].includes(agent.status);
+const { subagentActive: active } = require("@milagre/shared/agent-runs");
 function update(state, id, patch, entry) {
   state.subagents ??= new Map();
   const previous = state.subagents.get(id);
@@ -48,13 +48,20 @@ function claudeSubagents(message, state) {
   if (message.type === "assistant" && Array.isArray(content)) {
     for (const [index, block] of content.entries()) {
       if (block.type === "tool_use" && ["Agent", "Task"].includes(block.name)) {
-        if (!parent && !block.input?.run_in_background) {
+        // A background Agent of the chat's own returns at once; its result wakes the chat later, with a turn of its own.
+        const background = !parent && Boolean(block.input?.run_in_background);
+        if (!parent && !background) {
           state.foregroundChildren ??= new Set();
           state.foregroundChildren.add(block.id);
           events.push({ type: "subagents-waiting", waiting: true });
         }
         events.push(
-          update(state, block.id, { title: block.input?.description || "Subagent", prompt: block.input?.prompt, ...(parent ? { parentId: parent } : {}) }),
+          update(state, block.id, {
+            title: block.input?.description || "Subagent",
+            prompt: block.input?.prompt,
+            ...(parent ? { parentId: parent } : {}),
+            ...(background ? { background: true } : {}),
+          }),
         );
         if (block.input?.name) {
           state.subagentNames ??= new Map();

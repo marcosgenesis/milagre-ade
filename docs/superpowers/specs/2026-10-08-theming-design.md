@@ -67,8 +67,9 @@ variables; the phone maps them to its camelCase keys.
 - Tooltip: `tooltipBg`, `tooltipFg`, `tooltipMuted`, `tooltipBorder`
 - Diff: `diffAdd`, `diffAddWord`, `diffRemove`, `diffRemoveWord`
 - Terminal: 16 ANSI colors plus `cursor` and `selection`
-- Syntax: `keyword`, `string`, `number`, `comment`, `function`, `type`,
-  `variable`, `constant`, `punctuation`, `tag`, `attribute`
+- Syntax: the existing `SyntaxKind` set from `file-syntax.mjs`: `plain`,
+  `comment`, `keyword`, `string`, `number`, `function`, `type`, `tag`,
+  `property`, `operator`, `punctuation`
 
 Shadows, stripes and `grid-line` stay in CSS: they are built from the
 tokens above or from black/white alpha, and differ only by mode.
@@ -107,9 +108,11 @@ Settings (`apps/desktop/app/src/lib/settings.ts`):
 - New `customTheme: { light: Seeds; dark: Seeds } | null` and
   `customThemeEnabled: boolean` (the Experimental switch).
 
-Applying (`useApplyTheme`): resolve the palette for the current id and
-scheme, then write every token as a CSS variable on `<html>`, replacing the
-static values in `styles.css`. `styles.css` keeps today's Milagre Blue values
+Applying (`useApplyTheme`, and `applyThemeNow()` before the first render):
+resolve the palette for the current id and scheme, then write it as one
+generated `<style id="milagre-theme">` sheet under `html:root`, which
+outranks the static values in `styles.css`. The sheet also carries the
+translucent variants, so `.translucent` no longer needs hand-copied values. `styles.css` keeps today's Milagre Blue values
 as the static fallback, so the first paint before React mounts is already
 correct. The `.dark` class stays for shadows, Shiki and `@custom-variant dark`.
 
@@ -124,9 +127,9 @@ What changes to follow the theme:
   `var(--syntax-keyword)` and change with the theme without re-highlighting.
   Desktop diff syntax uses the same tokens.
 - **Diff tints**: the `--diff-*` variables move into the palette.
-- **Translucent window** (`styles.css` `.translucent` rules): use
-  `color-mix(in oklch, var(--page) <alpha>, transparent)` instead of copied
-  oklch literals. `window-translucency.cjs` `OPAQUE_BACKGROUND` becomes a
+- **Translucent window** (`styles.css` `.translucent` rules): replaced by
+  `html:root.translucent` rules in the generated sheet, using
+  `color-mix(in srgb, <theme color> <alpha>, transparent)`. `window-translucency.cjs` `OPAQUE_BACKGROUND` becomes a
   value the renderer sends over the existing IPC (the current `page`), so
   the window background matches the theme.
 - **Viewers** (`components/agents/viewerTheme.ts`): already reads CSS

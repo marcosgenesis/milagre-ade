@@ -30,7 +30,12 @@ const ogImage = new URL("/og.png", Astro.site);
       if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) document.documentElement.dataset.platform = "ios";
       else if (/Android/.test(ua)) document.documentElement.dataset.platform = "android";
       else if (/Windows/.test(ua)) document.documentElement.dataset.platform = "windows";
-      else if (/Linux|X11/.test(ua) && !/Android/.test(ua)) document.documentElement.dataset.platform = "linux";
+      else if (/Linux|X11/.test(ua) && !/Android/.test(ua)) {
+        document.documentElement.dataset.platform = "linux";
+        // Only some browsers name the distribution (Firefox on Ubuntu, Debian, Mint and Fedora does; Chrome doesn't).
+        if (/Ubuntu|Debian|Mint|Pop!_OS|elementary|Zorin|Kali|Raspbian/i.test(ua)) document.documentElement.dataset.linux = "deb";
+        else if (/Fedora|Red Hat|CentOS|Rocky|AlmaLinux|openSUSE|SUSE|Mageia/i.test(ua)) document.documentElement.dataset.linux = "rpm";
+      }
     </script>
   </head>
   <body>

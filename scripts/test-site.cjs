@@ -158,7 +158,7 @@ const checks = [
     },
   },
   {
-    name: "Linux gets the AppImage with .deb and .rpm links, Windows gets its own button, and every desktop lists the others",
+    name: "Linux gets the AppImage (or the .deb or .rpm when the browser names the distribution), Windows gets its own button, and every desktop lists the others",
     async run(open, evaluate, shot) {
       const linux = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
       const visible = (selector) => `[...document.querySelectorAll('${selector}')].filter((a) => a.offsetParent).map((a) => a.getAttribute("href"))`;
@@ -176,6 +176,24 @@ const checks = [
       await assertOneScreen(evaluate, window);
       await shot(window, "linux.png");
       window.destroy();
+      const ubuntu = await open({ width: 1440, height: 900, userAgent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:141.0) Gecko/20100101 Firefox/141.0" });
+      assert.deepEqual(await evaluate(ubuntu, visible(".cta a")), [
+        "/download/linux-deb",
+        "/download/linux-appimage",
+        "/download/linux-rpm",
+        "/download/mac-arm64",
+        "/download/windows",
+      ]);
+      ubuntu.destroy();
+      const fedora = await open({ width: 1440, height: 900, userAgent: "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:141.0) Gecko/20100101 Firefox/141.0" });
+      assert.deepEqual(await evaluate(fedora, visible(".cta a")), [
+        "/download/linux-rpm",
+        "/download/linux-appimage",
+        "/download/linux-deb",
+        "/download/mac-arm64",
+        "/download/windows",
+      ]);
+      fedora.destroy();
       const windows = await open({
         width: 1440,
         height: 900,

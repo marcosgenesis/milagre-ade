@@ -5155,6 +5155,7 @@ test("mobile Experimental Custom theme switch selects Custom on, Milagre Blue of
     "expo-router": { useFocusEffect() {} },
     "./custom-theme-section": { CustomThemeSection: "CustomThemeSection" },
     "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
+    "./ultracode-fatality-setting": { useUltracodeFatality: () => [false, () => {}] },
     "./session": { useSession: () => ({ client: null }) },
     "./theme": {
       useTheme: () => ({

@@ -371,7 +371,17 @@ async function browserChecks() {
         assert.equal(await evaluate("window.renderedMessageIds.filter(id => id > 0).length"), 0, "streaming leaves the loaded saved message cards memoized");
       }
       await evaluate(`window.emitAgent(99, { type: 'turn-started' }); window.emitAgent(99, { type: 'text-delta', text: 'Other chat' })`);
-      await delay(100);
+      // The open chat's own streamed text schedules a trailing 250 ms rail refresh; let it land before counting.
+      let railStableSince = Date.now();
+      let railSeen = await evaluate("window.railItemsRendered");
+      while (Date.now() - railStableSince < 500) {
+        await delay(50);
+        const now = await evaluate("window.railItemsRendered");
+        if (now !== railSeen) {
+          railSeen = now;
+          railStableSince = Date.now();
+        }
+      }
       await evaluate("window.transcriptRenders = 0; window.railItemsRendered = 0");
       for (let update = 0; update < 5; update++) {
         await evaluate(`window.emitAgent(99, { type: 'text-delta', text: ' background output' })`);

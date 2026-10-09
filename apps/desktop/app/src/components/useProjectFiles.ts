@@ -31,7 +31,7 @@ export function useProjectFiles(root: string, query: string, enabled: boolean) {
       current = false;
       clearTimeout(timer);
     };
-  }, [root, query, enabled]);
+  }, [bridge, root, query, enabled]);
   const matches = result.root === root && result.query === query;
   return { files: matches ? result.files : [], error: matches ? result.error : "", loading };
 }

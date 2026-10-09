@@ -417,6 +417,8 @@ function App() {
   }, []);
   // The computer whose Project or Link is open was removed, or Other computers turned off: this Mac's Project comes back.
   const { computers: pairedComputers } = useComputers();
+  // The Mac that was last told which chat is on screen (see the effect that sends it).
+  const openChatComputer = useRef<string>(LOCAL_COMPUTER);
   const knownComputers = pairedComputers.map((computer) => computer.id).join("\n");
   useEffect(() => {
     const open = selectedLinkRef.current ? `milagre-link:${selectedLinkRef.current.link.id}` : projectRef.current?.path;
@@ -424,6 +426,8 @@ function App() {
     const computerId = computerOfKey(open);
     if (knownComputers.split("\n").includes(computerId)) return;
     forgetBridge(computerId);
+    // Its bridge must not be recreated to tell it nothing is open: this Mac's Project is about to open.
+    if (openChatComputer.current === computerId) openChatComputer.current = LOCAL_COMPUTER;
     void loadInitialProject();
   }, [knownComputers]);
   // The open Project's computer, when it is another Mac: read-only while it isn't online, with the banner while it is away.
@@ -853,9 +857,15 @@ function App() {
   // The main process reads the chat on screen (on opening it, and when the window regains focus over it),
   // and leaves a chat unread when its turn ends anywhere else, or while no window has focus. The Mac that had the
   // chat on screen before hears there is none when the next one is on another Mac.
-  const openChatComputer = useRef<string>(LOCAL_COMPUTER);
   useEffect(() => {
-    if (selectedLink) return;
+    // A Link on screen is no Project's chat: whichever Mac had one open hears there is none now.
+    if (selectedLink) {
+      void bridgeFor(openChatComputer.current)
+        .setOpenChat(null)
+        .catch(() => {});
+      openChatComputer.current = LOCAL_COMPUTER;
+      return;
+    }
     const key = view === "chat" && project && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null;
     const computerId = project ? computerOfKey(project.path) : LOCAL_COMPUTER;
     if (openChatComputer.current !== computerId)

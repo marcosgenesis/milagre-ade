@@ -6,6 +6,9 @@ export const REPO_API = "https://api.github.com/repos/the-ptf/milagre-ade";
 const TARGETS = {
   "mac-arm64": /^Milagre-.+-arm64\.dmg$/,
   "mac-x64": /^Milagre-.+-x64\.dmg$/,
+  "linux-appimage": /^Milagre-.+-x86_64\.AppImage$/,
+  "linux-deb": /^Milagre-.+-amd64\.deb$/,
+  "linux-rpm": /^Milagre-.+-x86_64\.rpm$/,
 };
 
 function githubInit(token, timeoutMs) {

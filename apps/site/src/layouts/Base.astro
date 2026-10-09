@@ -25,9 +25,10 @@ const ogImage = new URL("/og.png", Astro.site);
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <script is:inline>
-      // iPhones and iPads get the iPhone beta instead of the Mac download. iPadOS reports itself as a Mac with touch.
-      if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1))
-        document.documentElement.dataset.platform = "ios";
+      // Each device sees its own download, chosen before first paint. iPadOS reports itself as a Mac with touch.
+      const ua = navigator.userAgent;
+      if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) document.documentElement.dataset.platform = "ios";
+      else if (/Linux|X11/.test(ua) && !/Android/.test(ua)) document.documentElement.dataset.platform = "linux";
     </script>
   </head>
   <body>

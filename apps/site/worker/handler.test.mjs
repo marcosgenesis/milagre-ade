@@ -10,6 +10,10 @@ const release = {
     { name: "Milagre-0.92.0-arm64.dmg", browser_download_url: "https://example.test/arm64.dmg" },
     { name: "Milagre-0.92.0-x64.dmg.blockmap", browser_download_url: "https://example.test/x64.dmg.blockmap" },
     { name: "Milagre-0.92.0-x64.dmg", browser_download_url: "https://example.test/x64.dmg" },
+    { name: "Milagre-0.92.0-x86_64.AppImage", browser_download_url: "https://example.test/x86_64.AppImage" },
+    { name: "Milagre-0.92.0-amd64.deb", browser_download_url: "https://example.test/amd64.deb" },
+    { name: "Milagre-0.92.0-x86_64.rpm", browser_download_url: "https://example.test/x86_64.rpm" },
+    { name: "milagre-linux-repository.tar.gz", browser_download_url: "https://example.test/repository.tar.gz" },
   ],
 };
 
@@ -153,4 +157,11 @@ test("answers a byte range with 206 and only those bytes, as Safari needs for vi
   assert.equal((await ranged("bytes=20-")).status, 416);
   const whole = await withRange(new Request("https://milagre.cloud/demo/phone.mp4"), file());
   assert.equal(whole.status, 200);
+});
+
+test("resolves the Linux AppImage, .deb and .rpm, never the repository archive", async () => {
+  const { fetchImpl } = github(release);
+  assert.equal(await latestDownload("linux-appimage", fetchImpl), "https://example.test/x86_64.AppImage");
+  assert.equal(await latestDownload("linux-deb", fetchImpl), "https://example.test/amd64.deb");
+  assert.equal(await latestDownload("linux-rpm", fetchImpl), "https://example.test/x86_64.rpm");
 });

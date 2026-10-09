@@ -301,3 +301,17 @@ test("accounts saved before Antigravity existed still load and default Antigravi
     ["codex", "claude", "antigravity"],
   );
 });
+
+test("an added Claude account picks up the connected account's MCP servers when its environment is built", async (t) => {
+  const f = fixture(t);
+  await f.accounts.list();
+  const added = group(await f.accounts.add("claude", "Work"), "claude").accounts[1];
+  const dir = f.children[0].opts.env.CLAUDE_CONFIG_DIR;
+  // Claude Code writes the Account's .claude.json at sign-in.
+  fs.writeFileSync(path.join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "work@example.test" } }));
+  fs.writeFileSync(path.join(f.home, ".claude.json"), JSON.stringify({ mcpServers: { pencil: { command: "/Applications/Pen.app/mcp" } } }));
+  f.accounts.environment("claude", added.id);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, ".claude.json"), "utf8")).mcpServers, { pencil: { command: "/Applications/Pen.app/mcp" } });
+  fs.writeFileSync(path.join(f.home, ".claude.json"), "{ not json");
+  assert.equal(f.accounts.environment("claude", added.id).CLAUDE_CONFIG_DIR, dir, "an unreadable config never blocks the Chat");
+});

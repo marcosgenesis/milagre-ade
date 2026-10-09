@@ -136,7 +136,13 @@ async function expandSkillPrompt(projectPath, prompt, options) {
     if (totalBytes > MAX_SKILL_BYTES) throw new Error("Selected skills are too large for one request. Use fewer skills.");
     sections.push(`Skill /${skill.name}\nSource: ${skill.path}\nResolve relative references from: ${path.dirname(skill.path)}\n\n${content}`);
   }
-  return `${prompt}\n\nThe user invoked the following skills. Read and apply their instructions for this request, subject to the user's instructions and the current permission mode.\n\n${sections.join("\n\n")}`;
+  // Claude Code runs a message that starts with `/name` as its own slash command, and when it has no such command
+  // it tells the model the skill is not installed and did not run. Only skills in .claude folders are its own,
+  // so a message led by any other skill gets a first line that doesn't start with a slash.
+  const leading = promptSkillTokens(prompt)[0];
+  const lead = leading && !prompt.slice(0, leading.start).trim() ? selected.find((skill) => skill.name.toLowerCase() === leading.name.toLowerCase()) : null;
+  const intro = lead && lead.provider !== "claude" ? `The user invoked the skill /${lead.name} with this message:\n\n` : "";
+  return `${intro}${prompt}\n\nThe user invoked the following skills. Read and apply their instructions for this request, subject to the user's instructions and the current permission mode.\n\n${sections.join("\n\n")}`;
 }
 
 module.exports = { discoverSkills, expandSkillPrompt, readDiscoveredSkill, skillCommands };

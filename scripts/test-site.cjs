@@ -109,6 +109,35 @@ const checks = [
     },
   },
   {
+    name: "an iPhone gets the iPhone beta instead of the Mac download",
+    async run(open, evaluate, shot) {
+      const iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1";
+      const window = await open({ width: 390, height: 844, mobile: true, userAgent: iphone });
+      const visible = (selector) => `[...document.querySelectorAll('${selector}')].filter((a) => a.offsetParent).length`;
+      assert.equal(await evaluate(window, visible('.hero a[href="https://testflight.apple.com/join/K9ExV7bV"]')), 1);
+      assert.equal(await evaluate(window, visible('.hero a[href="/download/mac-arm64"]')), 0);
+      await assertOneScreen(evaluate, window);
+      await shot(window, "iphone.png");
+      window.destroy();
+      const mac = await open({ width: 1440, height: 900 });
+      assert.equal(await evaluate(mac, visible('.hero a[href="https://testflight.apple.com/join/K9ExV7bV"]')), 0);
+      mac.destroy();
+    },
+  },
+  {
+    name: "the loop fades the screens but keeps the device frames solid",
+    async run(open, evaluate) {
+      const window = await open({ width: 1440, height: 900, reducedMotion: true });
+      await evaluate(window, `document.querySelector(".demo").classList.add("fading")`);
+      assert.deepEqual(await evaluate(window, `[".mac", ".phone"].map((s) => getComputedStyle(document.querySelector(s)).opacity)`), ["1", "1"]);
+      assert.deepEqual(await evaluate(window, `[".mac-video", ".phone-video"].map((s) => getComputedStyle(document.querySelector(s)).opacity)`), [
+        "0.2",
+        "0.2",
+      ]);
+      window.destroy();
+    },
+  },
+  {
     name: "star pill stays a plain link when the count is unavailable",
     async run(open, evaluate) {
       const window = await open({ width: 1440, height: 900 });
@@ -181,12 +210,13 @@ async function browserChecks() {
   const url = `http://127.0.0.1:${server.address().port}/`;
   const errors = [];
   const opened = [];
-  async function open({ width, height, mobile = false, reducedMotion = false }) {
+  async function open({ width, height, mobile = false, reducedMotion = false, userAgent }) {
     const window = new BrowserWindow({ width, height, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
     opened.push(window);
     window.webContents.on("console-message", (event) => {
       if (event.level === "error") errors.push(event.message);
     });
+    if (userAgent) window.webContents.setUserAgent(userAgent);
     await window.loadURL(url);
     if (mobile || reducedMotion) {
       // Device emulation before the first navigation crashes Electron 44, so emulate after the first load and reload.

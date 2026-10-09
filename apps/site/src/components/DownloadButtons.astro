@@ -1,16 +1,27 @@
 ---
-import { DOWNLOAD_ARM64, DOWNLOAD_X64 } from "../links";
+import { DOWNLOAD_ARM64, DOWNLOAD_X64, IPHONE_BETA_URL } from "../links";
 ---
-<div class="downloads">
+<!-- Both sets ship; Base.astro marks iPhones and iPads before first paint, so each device sees its own. -->
+<div class="downloads mac-only">
   <a class="button button-primary" href={DOWNLOAD_ARM64}>
     <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M8 1.5v8.2l2.9-2.9 1 1L8 12.4 4.1 7.8l1-1L8 9.7V1.5h0zM2.5 13h11v1.5h-11z"/></svg>
     Download for macOS
   </a>
-  <p class="arch">For Apple Silicon Macs. <a class="intel" href={DOWNLOAD_X64}>Intel Mac</a></p>
+  <p class="note">For Apple Silicon Macs. <a href={DOWNLOAD_X64}>Intel Mac</a></p>
+</div>
+<div class="downloads ios-only">
+  <a class="button button-primary" href={IPHONE_BETA_URL}>
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M8 1.5v8.2l2.9-2.9 1 1L8 12.4 4.1 7.8l1-1L8 9.7V1.5h0zM2.5 13h11v1.5h-11z"/></svg>
+    Get the iPhone beta
+  </a>
+  <p class="note">Free on TestFlight. Pairs with Milagre on your Mac.</p>
 </div>
 
 <style>
   .downloads { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-  .arch { margin: 0; color: var(--ink-2); font-size: 14px; }
-  .intel { color: var(--ink); text-decoration: underline; }
+  .note { margin: 0; color: var(--ink-2); font-size: 14px; }
+  .note a { color: var(--ink); text-decoration: underline; }
+  .ios-only { display: none; }
+  :global(html[data-platform="ios"]) .ios-only { display: flex; }
+  :global(html[data-platform="ios"]) .mac-only { display: none; }
 </style>

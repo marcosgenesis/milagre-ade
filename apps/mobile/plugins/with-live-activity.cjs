@@ -3,6 +3,30 @@ const fs = require("node:fs");
 const path = require("node:path");
 const NAME = "MilagreAgentActivity";
 module.exports = function withLiveActivity(config) {
+  const eas = config.extra?.eas ?? {};
+  const build = eas.build ?? {};
+  const experimental = build.experimental ?? {};
+  const ios = experimental.ios ?? {};
+  const extensions = ios.appExtensions ?? [];
+  config.extra = {
+    ...config.extra,
+    eas: {
+      ...eas,
+      build: {
+        ...build,
+        experimental: {
+          ...experimental,
+          ios: {
+            ...ios,
+            appExtensions: [
+              ...extensions.filter((extension) => extension.targetName !== NAME),
+              { targetName: NAME, bundleIdentifier: `${config.ios.bundleIdentifier}.LiveActivity`, entitlements: {} },
+            ],
+          },
+        },
+      },
+    },
+  };
   config = withInfoPlist(config, (c) => {
     c.modResults.NSSupportsLiveActivities = true;
     return c;

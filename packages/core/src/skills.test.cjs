@@ -138,12 +138,24 @@ test("expands requested skills once, preserving arguments and reference director
   await skill(project, ".agents", "unused", "DO NOT INCLUDE THIS");
   const prompt = "/review src/main.ts\nAlso /review";
   const expanded = await expandSkillPrompt(project, prompt, { home, bundledDirectory: null });
-  assert.ok(expanded.startsWith(prompt));
+  assert.ok(expanded.startsWith(`The user invoked the skill /review with this message:\n\n${prompt}`));
   assert.ok(expanded.includes(`Resolve relative references from: ${path.dirname(file)}`));
   assert.equal(expanded.split("Review the diff.").length, 2);
   assert.ok(!expanded.includes("DO NOT INCLUDE THIS"));
   await fs.writeFile(file, "Updated instructions");
   assert.ok((await expandSkillPrompt(project, "/review", { home, bundledDirectory: null })).includes("Updated instructions"));
+});
+
+test("a message led by a skill Claude Code doesn't know never starts with a slash", async (t) => {
+  const { project, home, skill } = await fixture(t);
+  await skill(project, ".agents", "review", "Review instructions");
+  await skill(home, ".claude", "native", "Native instructions");
+  // Claude Code would answer that /review is not installed and drop the request.
+  assert.ok(!(await expandSkillPrompt(project, "  /review the PR", { home, bundledDirectory: null })).trimStart().startsWith("/"));
+  // Its own skills stay first so the CLI runs them, and a skill later in the message changes nothing.
+  assert.ok((await expandSkillPrompt(project, "/native the PR", { home, bundledDirectory: null })).startsWith("/native the PR"));
+  assert.ok((await expandSkillPrompt(project, "Please /review the PR", { home, bundledDirectory: null })).startsWith("Please /review the PR"));
+  assert.ok((await expandSkillPrompt(project, "/native then /review", { home, bundledDirectory: null })).startsWith("/native then /review"));
 });
 
 test("does not treat paths, URLs, inline code or fenced code as invocations", async (t) => {
@@ -210,7 +222,7 @@ test("bundles tldr with its checklist for machines without installed skills", as
     ],
   );
   const expanded = await expandSkillPrompt(project, "/tldr Rewrite this paragraph", { home });
-  assert.ok(expanded.startsWith("/tldr Rewrite this paragraph"));
+  assert.ok(expanded.startsWith("The user invoked the skill /tldr with this message:\n\n/tldr Rewrite this paragraph"));
   assert.ok(expanded.includes(await fs.readFile(skills.find((skill) => skill.name === "tldr").path, "utf8")));
   assert.ok((await fs.readFile(path.join(path.dirname(skills.find((skill) => skill.name === "tldr").path), "eval.md"), "utf8")).includes("# tldr eval"));
 });

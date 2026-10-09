@@ -24,10 +24,10 @@
 
   if (demo && stage && desktop && phone) {
     const narrow = matchMedia("(max-width: 700px)");
-    // The demo is a fixed-size canvas scaled to the room the page leaves it. On a wide screen it runs a fifth past the
-    // bottom, where the download band blurs it away; the phone alone stays smaller, so its approval card clears the band.
+    // The demo is a fixed-size canvas scaled to the room the page leaves it, a little short of it, so the approval
+    // cards clear the download button while the bottom of the devices runs under its blurred band.
     const fit = () => {
-      const reach = narrow.matches ? 0.92 : 1.22;
+      const reach = 0.92;
       const scale = Math.min(1.25, stage.clientWidth / demo.offsetWidth, (stage.clientHeight * reach) / demo.offsetHeight);
       demo.style.setProperty("--scale", String(Math.max(scale, 0.1)));
     };

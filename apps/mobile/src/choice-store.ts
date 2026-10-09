@@ -10,8 +10,6 @@ type ChoiceRequest = {
   items: ChoiceItem[];
   icon?: IconData;
   leading?: ReactElement;
-  /** Titles in the mono font, for branch and worktree names; prose like issue titles stays in the body font. */
-  mono?: boolean;
   /** Tabs over the list (Linear workspaces); `tab` is the one `items` came from. Shown only with two or more. */
   tabs?: { id: string; label: string }[];
   tab?: string;

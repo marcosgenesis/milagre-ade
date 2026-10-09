@@ -1871,7 +1871,6 @@ test("searching the choice sheet filters full names and selection applies only a
     title: "Branch from",
     placeholder: "Search branches",
     emptyLabel: "No branches found.",
-    mono: true,
     items: [
       { id: "main", title: "main", checked: true },
       { id: longName, title: longName },
@@ -1923,7 +1922,7 @@ test("searching the choice sheet filters full names and selection applies only a
   const row = list().props.renderItem({ item: list().props.data[0] });
   assert.equal(row.props.accessibilityLabel, longName);
   assert.equal(find(row, (node) => node.type === "Text").props.numberOfLines, undefined, "the full name can wrap");
-  assert.equal(find(row, (node) => node.type === "Text").props.style.fontFamily, "mono", "branch names keep the mono font");
+  assert.equal(find(row, (node) => node.type === "Text").props.style.fontFamily, undefined, "names use the body font");
   assert.equal(find(render(), (node) => node.type === "EdgeFade").props.edge, "top", "rows blur under the title bar");
   field().props.onChangeText({ nativeEvent: { text: "missing" } });
   assert.equal(list().props.data.length, 0);
@@ -1937,43 +1936,6 @@ test("searching the choice sheet filters full names and selection applies only a
   assert.deepEqual(picks, [], "route updates wait for the native sheet to leave");
   react.cleanup();
   assert.deepEqual(picks, [longName]);
-});
-
-test("choice sheet titles use the body font unless the request asks for mono", () => {
-  const choices = require("../apps/mobile/src/choice-store.ts");
-  choices.showChoiceSheet({
-    title: "Start from a Linear issue",
-    placeholder: "Search issues",
-    emptyLabel: "No issues found.",
-    items: [{ id: "ENG-1", title: "ENG-1 Fix the login screen" }],
-    onSelect: () => {},
-  });
-  const react = hookHost();
-  react.useEffect = react.effect;
-  const { default: Screen } = load("app/choice-sheet.tsx", {
-    react,
-    "react/jsx-runtime": { jsx, jsxs: jsx },
-    "react-native": { FlatList: "FlatList", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { hairlineWidth: 1 } },
-    "expo-router": {
-      router: { back() {} },
-      Stack: {
-        Title: "StackTitle",
-        SearchBar: "SearchBar",
-        Toolbar: Object.assign(function Toolbar() {}, { Button: "ToolbarButton", SearchBarSlot: "SearchBarSlot" }),
-      },
-    },
-    "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 20 }) },
-    "@hugeicons/core-free-icons": {},
-    "../bottom-fade": { EdgeFade: "EdgeFade" },
-    "../choice-store": choices,
-    "../icons": { Icon: "Icon" },
-  });
-  react.begin();
-  const list = find(Screen(), (node) => node.type === "FlatList");
-  react.flush();
-  const row = list.props.renderItem({ item: list.props.data[0] });
-  assert.equal(find(row, (node) => node.type === "Text").props.style.fontFamily, undefined);
-  react.cleanup();
 });
 
 // A Project with one Chat (5) in a Milagre worktree that holds an uncommitted file, its turn running.

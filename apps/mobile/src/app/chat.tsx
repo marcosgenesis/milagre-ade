@@ -1206,7 +1206,6 @@ export default function ChatScreen() {
                       searchable={{
                         placeholder: newWorktree ? "Search branches" : "Search worktrees",
                         emptyLabel: newWorktree ? "No branches found." : "No worktrees found.",
-                        mono: true,
                       }}
                       nativeTrigger={{ title: branchName, systemImage: "arrow.triangle.branch", disabled: branchDisabled, maxWidth: 180 }}
                       sections={[

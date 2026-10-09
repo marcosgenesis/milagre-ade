@@ -703,7 +703,6 @@ function NewChatHeader({
                   description={row.description}
                   selected={row.selected}
                   wrapLabel
-                  mono
                   onClick={() => {
                     row.choose();
                     close();

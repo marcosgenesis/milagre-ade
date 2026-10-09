@@ -7,7 +7,7 @@ import { EdgeFade } from "../bottom-fade";
 import { currentChoice } from "../choice-store";
 import { Icon } from "../icons";
 import { useStyles } from "../ui";
-import { fonts, useTheme } from "../theme";
+import { useTheme } from "../theme";
 
 /** The grabber and title bar of the sheet, which content scrolls under. */
 const SHEET_HEADER_HEIGHT = 76;
@@ -140,10 +140,8 @@ export default function ChoiceSheet() {
             })}
           >
             {entry.leading ?? <Icon icon={entry.icon ?? GitBranchIcon} tone={item.checked ? "accent" : "ink3"} size={18} />}
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={{ color: colors.ink, fontSize: 15, lineHeight: 21, ...(entry.mono ? { fontFamily: fonts.mono, fontSize: 14 } : {}) }}>
-                {item.title}
-              </Text>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ color: colors.ink, fontSize: 15, lineHeight: 20 }}>{item.title}</Text>
               {item.subtitle && (
                 <Text numberOfLines={1} ellipsizeMode="middle" style={styles.caption}>
                   {item.subtitle}

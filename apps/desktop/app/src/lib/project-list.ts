@@ -29,16 +29,7 @@ export function projectRows({ recent, currentPath, currentName }: { recent: Rece
   });
 }
 
-/**
- * The sidebar's group order for this session: keys already shown keep their place, and a key seen for the first
- * time (a project just added) goes on top. Opening a project reorders the recent list; the sidebar doesn't follow.
- */
-export function stableOrder(previous: string[], next: string[]): string[] {
-  const present = new Set(next);
-  const kept = previous.filter((key) => present.has(key));
-  const known = new Set(kept);
-  return [...next.filter((key) => !known.has(key)), ...kept];
-}
+export { stableOrder } from "@milagre/shared/stable-order";
 
 /** Fired on window after a project is hidden or shown again, so lists read from the main process refresh. */
 export const RECENT_PROJECTS_CHANGED = "milagre:recent-projects-changed";

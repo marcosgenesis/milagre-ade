@@ -1,4 +1,5 @@
 import { reconcileState } from "@milagre/shared/reconcile";
+import { keepOrder } from "@milagre/shared/stable-order";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { createClient, type ClientHost, type Client, type OpenProject, type RecentProject, type Snapshot, type ProjectPreview } from "./client";
@@ -290,7 +291,8 @@ function useSessionState() {
     if (!client) return;
     const current = generation.current;
     const projects = await client.recentScopes();
-    if (current === generation.current) setRecent(projects);
+    // Opening a Chat opens its Project, which moves it to the top of the host's recent list; rows keep their place.
+    if (current === generation.current) setRecent((previous) => keepOrder(previous, projects, (item) => item.path));
   }, [client]);
   const projectPath = snapshot?.project.path;
   const refresh = useCallback(async () => {

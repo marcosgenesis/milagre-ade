@@ -822,6 +822,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "../ui": ui,
     "../agent-controls": { AgentControls: "AgentControls", PermissionChip: "PermissionChip" },
+    "../ultracode-glow": { UltracodeGlow: () => null },
     "../turn-options": require("../apps/mobile/src/turn-options.ts"),
     "../handoff-sides": require("../apps/mobile/src/handoff-sides.ts"),
     "../handoff-divider": { HandoffDivider: "HandoffDivider" },
@@ -5044,6 +5045,7 @@ test("mobile Experimental page shows the Mac's Linear switch and status, re-read
     "react-native": { View: "View", Text: "Text" },
     "expo-router": { useFocusEffect: (fn) => focused.push(fn) },
     "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
+    "./ultracode-fatality-setting": { useUltracodeFatality: () => [false, () => {}] },
     "./session": { useSession: () => session },
     "./ui": { ErrorNotice: "ErrorNotice", Toggle: "Toggle", styles: {} },
   });

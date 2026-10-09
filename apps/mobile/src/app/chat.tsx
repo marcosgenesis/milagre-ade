@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Reanimated from "react-native-reanimated";
 import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
 import { LiquidGlassView } from "@sbaiahmed1/react-native-blur";
+import { UltracodeGlow } from "../ultracode-glow";
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import type { NavigationProp } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -345,6 +346,7 @@ export default function ChatScreen() {
   const turn = turnTarget(composer.preferences[chatId], chat?.provider, composer.defaults);
   const actualProvider = turn.provider;
   const model = selectedModel(actualProvider, turn.model || (chat && !turn.picked ? lastUserModel(project.state, chat.id) : ""), session.models);
+  const ultracodeOn = model.ultracode && !!preferences.ultracode;
   const worktreeId = chat?.worktree_id ?? Number(params.worktreeId);
   const worktree = project.state.worktrees[worktreeId];
   const branches = branchList?.client === client && branchList.path === project.path ? branchList : null;
@@ -1029,7 +1031,7 @@ export default function ChatScreen() {
                   paddingHorizontal: 8,
                   paddingBottom: 6,
                   gap: 4,
-                  boxShadow: "0 4px 20px #0000000f",
+                  boxShadow: ultracodeOn ? `0 4px 22px ${hex(scheme).purple}47` : "0 4px 20px #0000000f",
                 }}
               >
                 <LiquidGlassView
@@ -1039,6 +1041,8 @@ export default function ChatScreen() {
                   reducedTransparencyFallbackColor={hex(scheme).surface}
                   style={[StyleSheet.absoluteFill, { borderRadius: 24, borderCurve: "continuous" }]}
                 />
+                {/* With Ultracode on, the composer takes its purple: a breathing tint and border, and a glow. */}
+                {ultracodeOn && <UltracodeGlow radius={24} />}
                 {!params.id && !project.link && (
                   <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
                     <PullDown
@@ -1246,6 +1250,9 @@ export default function ChatScreen() {
                   </PullDown>
                   <AgentControls
                     model={model}
+                    effort={preferences.effort}
+                    fastMode={preferences.fastMode}
+                    ultracode={preferences.ultracode}
                     onToggle={() => {
                       router.push({
                         pathname: "/model-sheet",

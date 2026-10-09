@@ -1,5 +1,5 @@
 // Loads the built landing page in headless Electron at desktop and phone sizes.
-// npm run build:site && npm run test:site
+// npm run test:site (builds the site first)
 // Set MILAGRE_SCREENSHOT_DIR (outside the repo) to save screenshots.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -275,10 +275,8 @@ if (process.versions.electron) {
     require("electron").app.exit(1);
   });
 } else {
-  if (!fs.existsSync(path.join(dist, "index.html"))) {
-    console.error("Build the site first: npm run build:site");
-    process.exit(1);
-  }
+  // Builds the site first, so the checks always see the current source (CI's Electron shards have no build of their own).
+  require("node:child_process").execFileSync("npx", ["astro", "build"], { cwd: path.dirname(dist), stdio: ["ignore", "ignore", "inherit"] });
   const child = spawn(require("electron"), [__filename], { stdio: "inherit", env: { ...process.env, ELECTRON_RUN_AS_NODE: "" } });
   child.on("exit", (code) => process.exit(code ?? 1));
 }

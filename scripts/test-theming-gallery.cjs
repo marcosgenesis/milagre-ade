@@ -435,6 +435,8 @@ async function browserChecks() {
         `${label}: the output uses all sixteen ANSI colors`,
       );
       // And the terminal paints them: each background swatch's center pixel, read from the window's own capture, is the palette's color.
+      // Only on macOS: Linux CI runners capture the terminal before its GPU layer composites, so the pixels read as background.
+      if (process.platform !== "darwin") return;
       const geometry = await evaluate(
         `(() => { const t = window.__gallery.terminal(), b = t.buffer.active, box = t.element.querySelector('.xterm-screen').getBoundingClientRect(); let row = -1; for (let r = b.viewportY; r < b.viewportY + t.rows; r++) { const cell = b.getLine(r)?.getCell(0); if (cell?.isBgPalette() && cell.getBgColor() === 0) row = r - b.viewportY; } return { row, left: box.left, top: box.top, cw: box.width / t.cols, ch: box.height / t.rows, width: innerWidth }; })()`,
       );

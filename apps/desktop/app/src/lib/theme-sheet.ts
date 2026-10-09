@@ -25,7 +25,8 @@ const see = (color: string, amount: string) => `color-mix(in srgb, ${color} calc
 /** The resolved theme as one stylesheet; `html:root` outranks the static fallbacks in styles.css. */
 export function themeStylesheet(palette: ThemePalette, scheme: Scheme) {
   const lines: string[] = [];
-  for (const [key, value] of Object.entries(palette)) if (typeof value === "string") lines.push(`--${kebab(key)}: ${value};`);
+  // `purple` stays Ultracode's brand color on desktop (styles.css), like the provider logos.
+  for (const [key, value] of Object.entries(palette)) if (typeof value === "string" && key !== "purple") lines.push(`--${kebab(key)}: ${value};`);
   palette.ansi.forEach((color, index) => lines.push(`--ansi-${index}: ${color};`));
   for (const [kind, color] of Object.entries(palette.syntax)) lines.push(`--syntax-${kind}: ${color};`);
   for (const [name, kind] of Object.entries(SHIKI)) lines.push(`${name}: ${palette.syntax[kind]};`);

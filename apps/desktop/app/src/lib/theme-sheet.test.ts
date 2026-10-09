@@ -29,3 +29,7 @@ test("translucent variants use the theme's own page, not today's gray", () => {
   assert.match(css, /0\.95\)/);
   assert.match(themeStylesheet(resolvePalette("dracula", "light"), "light"), /0\.7\)/);
 });
+
+test("leaves --purple to Ultracode's brand color", () => {
+  assert.doesNotMatch(themeStylesheet(resolvePalette("catppuccin-mocha", "dark"), "dark"), /--purple:/);
+});

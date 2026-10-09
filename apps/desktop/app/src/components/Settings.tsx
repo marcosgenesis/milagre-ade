@@ -2,6 +2,7 @@ import { showUpdateNotice } from "./UpdateNotice";
 import { ProjectAccountsGroup, ProjectAccountsSettings } from "./ProjectAccountsSettings";
 import { AccountsSettings } from "./AccountsSettings";
 import { SkillsSettings } from "./SkillsSettings";
+import { McpSettings } from "./McpSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import {
   LINEAR_ADD_WORKSPACE,
@@ -29,6 +30,7 @@ import {
   LaptopIcon,
   MagicWand01Icon,
   PaintBoardIcon,
+  PlugSocketIcon,
   SecurityCheckIcon,
   Settings01Icon,
   SmartphoneIcon,
@@ -47,7 +49,7 @@ import { RangeSlider } from "./primitives/RangeSlider";
 import type { ClaudeReplies, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
-import { bridgeForKey } from "../lib/computer-bridge";
+import { bridgeFor, bridgeForKey } from "../lib/computer-bridge";
 import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
 import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from "../lib/devices";
 import { GlideGroup, RailButton } from "./SidebarNav";
@@ -76,6 +78,7 @@ export type SettingsSection =
   | "accounts"
   | "appearance"
   | "skills"
+  | "mcp"
   | "devices"
   | "experimental"
   | "about"
@@ -88,6 +91,7 @@ const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> =
   { key: "project-accounts", label: "Project Accounts", icon: UserMultipleIcon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
   { key: "skills", label: "Skills", icon: MagicWand01Icon },
+  { key: "mcp", label: "MCP", icon: PlugSocketIcon },
   { key: "devices", label: "Devices", icon: SmartphoneIcon },
   { key: "experimental", label: "Experimental", icon: TestTube01Icon },
   { key: "about", label: "About", icon: InformationCircleIcon },
@@ -327,6 +331,12 @@ function ComputerSettings({ id, onRemoved }: { id: string; onRemoved: () => void
           )}
         </div>
       </Group>
+      {computer.state === "online" && (
+        <section data-computer-mcp className="mt-6">
+          <h2 className="px-1 text-[12px] font-medium text-ink-3">MCP servers</h2>
+          <McpSettings key={id} bridge={bridgeFor(id)} />
+        </section>
+      )}
       {error && (
         <p role="alert" className="mt-3 text-[13px] text-red">
           {error}
@@ -1752,6 +1762,7 @@ export function SettingsPanel({
           ) : (
             <p className="mt-6 text-[13px] text-ink-3">Open a project to see its skills.</p>
           ))}
+        {section === "mcp" && <McpSettings />}
         {section === "devices" && <DevicesSettings />}
         {section === "experimental" && <ExperimentalSettings />}
         {section === "computer" && computerId && <ComputerSettings key={computerId} id={computerId} onRemoved={() => onSectionChange?.("devices")} />}

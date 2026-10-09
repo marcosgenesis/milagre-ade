@@ -28,7 +28,8 @@
     "apps/site": {
       "entry": ["worker/worker.ts", "worker/*.test.mjs"],
       "project": ["src/**", "worker/**"],
-      "ignore": ["worker/handler.d.mts"]
+      "ignore": ["worker/handler.d.mts"],
+      "ignoreDependencies": ["cookie"]
     },
     "packages/core": {
       "entry": ["src/*.cjs", "src/agents/*.cjs"],

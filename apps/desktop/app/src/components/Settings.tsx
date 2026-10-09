@@ -29,7 +29,7 @@ import { providerForId, resolveModel } from "../lib/models";
 import { updateSettings, useSettings } from "../lib/settings";
 import { PANEL_TRANSLUCENCY_RANGE, WINDOW_TRANSLUCENCY_RANGE } from "../lib/settings";
 import { RangeSlider } from "./primitives/RangeSlider";
-import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
+import type { ClaudeReplies, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
 import { bridgeForKey } from "../lib/computer-bridge";
@@ -37,6 +37,7 @@ import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneSta
 import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from "../lib/devices";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
+import { ModeControl, ThemePicker } from "./settings/ThemePicker";
 import { ProviderLogo } from "./ProviderLogo";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { WorkspaceIcon } from "./WorkspaceIcon";
@@ -611,20 +612,14 @@ function AppearanceSettings() {
   const settings = useSettings();
   return (
     <>
-      <Group title="Theme">
-        <Row label="Theme" description="System follows your macOS appearance. Press ⌘⇧T to switch between light and dark.">
-          <Select<ThemePreference>
-            label="Theme"
-            value={settings.theme}
-            onChange={(theme) => updateSettings({ theme })}
-            options={[
-              { value: "system", label: "System" },
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-            ]}
-          />
+      <Group title="Mode">
+        <Row label="Mode" description="System follows macOS. Every theme has a light and a dark version. ⌘⇧T switches.">
+          <ModeControl value={settings.theme} onChange={(theme) => updateSettings({ theme })} />
         </Row>
       </Group>
+      <section className="mt-6">
+        <ThemePicker />
+      </section>
     </>
   );
 }

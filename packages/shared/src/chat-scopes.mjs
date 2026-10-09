@@ -11,7 +11,8 @@ const QUALIFIER = /^([A-Za-z0-9-]{1,64})\|/;
 function parts(key) {
   const link = key.startsWith(PREFIX);
   const rest = link ? key.slice(PREFIX.length) : key;
-  const match = QUALIFIER.exec(rest);
+  const found = QUALIFIER.exec(rest);
+  const match = found && found[1] !== LOCAL_COMPUTER ? found : null;
   return { link, computerId: match ? match[1] : LOCAL_COMPUTER, bare: match ? rest.slice(match[0].length) : rest };
 }
 
@@ -29,7 +30,8 @@ export function unqualifyKey(key) {
 
 /** A computer's key as this window keeps it: unchanged for this Mac, and for a key that already names a computer. */
 export function qualifyKey(computerId, key) {
-  if (typeof key !== "string" || !computerId || computerId === LOCAL_COMPUTER || !COMPUTER_ID.test(computerId)) return key;
+  if (typeof key !== "string" || !computerId || computerId === LOCAL_COMPUTER) return key;
+  if (!COMPUTER_ID.test(computerId)) throw new Error("Invalid computer id.");
   const { link, computerId: current, bare } = parts(key);
   if (current !== LOCAL_COMPUTER) return key;
   return link ? `${PREFIX}${computerId}|${bare}` : `${computerId}|${key}`;

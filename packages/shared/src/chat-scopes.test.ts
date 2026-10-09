@@ -43,3 +43,15 @@ test("a paired computer's keys carry its id, and this Mac's keys are unchanged",
   assert.deepEqual(s.scopeFromChatKey(`milagre-link:${id}|${linkId}#4`), { kind: "link", linkId: `${id}|${linkId}` });
   assert.equal(s.validLinkId(`${id}|${linkId}`), false, "the daemon's own check of a Link id stays strict");
 });
+
+test("an invalid computer id throws instead of collapsing onto this Mac's key, and `local|` is never a qualifier", async () => {
+  const s = await import("./chat-scopes.mjs");
+  for (const bad of ["a_b", "a.b", "a|b", "a".repeat(65)]) assert.throws(() => s.qualifyKey(bad, "/code/app"), bad);
+  assert.equal(s.qualifyKey("", "/code/app"), "/code/app");
+  assert.equal(s.qualifyKey(null, "/code/app"), "/code/app");
+  assert.equal(s.computerOfKey("/code/a|b#1"), "local");
+  assert.equal(s.unqualifyKey("/code/a|b#1"), "/code/a|b#1");
+  assert.equal(s.computerOfKey("local|/x"), "local");
+  assert.equal(s.unqualifyKey("local|/x"), "local|/x");
+  assert.equal(s.isLinkScopeKey("milagre-link:local|f1713d69-569d-405b-a0b2-19bfdf565a76"), false);
+});

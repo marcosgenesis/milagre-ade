@@ -1,3 +1,4 @@
+import { canCopyImage } from "../../lib/media";
 import { animate, AnimatePresence, motion, type MotionValue, type Transition, useMotionValue, useReducedMotion, useTransform } from "motion/react";
 import { type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -396,7 +397,7 @@ function Slide({
           onError={loaded}
           // Stopped here, since React bubbles it through the portal to whatever opened the viewer.
           onContextMenu={
-            item.file
+            canCopyImage(item.file)
               ? (event) => {
                   event.preventDefault();
                   event.stopPropagation();

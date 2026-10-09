@@ -3,7 +3,7 @@ import type { ComponentProps } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Copy01Icon, Download04Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { ChatStep } from "../../model";
-import { mediaUrl } from "../../lib/media";
+import { canCopyImage, mediaUrl } from "../../lib/media";
 import { isRemoteKey, useScope } from "../../lib/computer-bridge";
 import { useRemoteMedia } from "../../lib/remote-media";
 import { ImageGeneration } from "./ImageGeneration";
@@ -59,6 +59,7 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
   if (step.status === "failed" || (step.status === "done" && !src && !pending))
     return <StepRow step={step.status === "failed" ? step : { ...step, status: "failed", title: "Couldn't show the generated image" }} />;
   const status: ImageGenerationStatus = step.status === "done" && size ? "complete" : "generating";
+  const canCopy = canCopyImage(file);
   const copy = () => {
     if (!file) return;
     void window.milagre
@@ -77,7 +78,7 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
         status === "complete"
           ? (event) => {
               event.preventDefault();
-              if (file) void window.milagre.showImageMenu(file);
+              if (canCopy) void window.milagre.showImageMenu(file);
             }
           : undefined
       }
@@ -92,10 +93,12 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
         resolution={size ? `${size.width} × ${size.height}` : ""}
         aspectRatio={size ? `${size.width} / ${size.height}` : "1 / 1"}
         actions={
-          <>
-            <ImageAction label={copied ? "Copied" : "Copy image"} icon={copied ? Tick02Icon : Copy01Icon} onClick={copy} />
-            <ImageAction label="Download image" icon={Download04Icon} onClick={save} />
-          </>
+          canCopy ? (
+            <>
+              <ImageAction label={copied ? "Copied" : "Copy image"} icon={copied ? Tick02Icon : Copy01Icon} onClick={copy} />
+              <ImageAction label="Download image" icon={Download04Icon} onClick={save} />
+            </>
+          ) : undefined
         }
       >
         {src ? (
@@ -121,7 +124,7 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
       </ImageGeneration>
       {open && src && (
         <MediaLightbox
-          items={[{ id: step.id, name: (step.file ?? "").split("/").at(-1) || "Generated image", src, kind: "image", file }]}
+          items={[{ id: step.id, name: (step.file ?? "").split("/").at(-1) || "Generated image", src, kind: "image", file: canCopy ? file : undefined }]}
           start={0}
           thumbFor={thumbFor}
           close={close}

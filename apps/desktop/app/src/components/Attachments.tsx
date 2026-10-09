@@ -1,3 +1,4 @@
+import { canCopyImage } from "../lib/media";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { File01Icon } from "@hugeicons/core-free-icons";
@@ -78,7 +79,7 @@ export function Attachments({
               aria-label={`Preview ${item.name}`}
               onClick={item.src ? () => setOpen(media.findIndex((entry) => entry.id === item.id)) : undefined}
               onContextMenu={
-                item.file
+                canCopyImage(item.file)
                   ? (event) => {
                       event.preventDefault();
                       void window.milagre.showImageMenu(item.file!, item.name);

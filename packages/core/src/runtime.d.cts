@@ -26,6 +26,8 @@ export interface RuntimeOptions {
   expandSkills?: boolean;
   /** worktree:pull-request; the default asks `gh`. */
   readPullRequest?: (worktreePath: string) => Promise<unknown>;
+  /** worktree:link-issue's PR lookup: `known: false` when it couldn't ask; the default asks `gh`. */
+  readPullRequestState?: (worktreePath: string) => Promise<{ known: boolean; pr: unknown }>;
   /** The Linear connection; tests point it at a fake Linear and a fake browser. */
   linear?: {
     clientId?: string;

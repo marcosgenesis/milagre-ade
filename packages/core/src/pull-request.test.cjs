@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { readPullRequest, readPullRequests, createPullRequestReader } = require("./pull-request.cjs");
+const { readPullRequest, readPullRequestState, readPullRequests, createPullRequestReader } = require("./pull-request.cjs");
 
 const title = "Show pull requests in the chat sidebar";
 const url = "https://github.com/example/project/pull/10213";
@@ -374,4 +374,21 @@ test("no branch, no gh and bad output are null", async () => {
   const { exec } = batchStub({ branches: { "/a": "x" }, prs: [] });
   const garbled = async (command, args, options) => (command === "gh" ? { stdout: "not json" } : exec(command, args, options));
   assert.equal(await createPullRequestReader({ exec: garbled })("/a"), null);
+});
+
+test("readPullRequestState reports a CLOSED PR as known, and a failed lookup as unknown", async () => {
+  const closed = async (command, args) => {
+    if (command === "git") return { stdout: "milagre/login\n" };
+    return { stdout: JSON.stringify([{ number: 4, url, state: "CLOSED", title }]) };
+  };
+  const state = await readPullRequestState("/project/worktree", closed);
+  assert.equal(state.known, true);
+  assert.equal(state.pr.state, "CLOSED");
+  assert.equal(await readPullRequest("/project/worktree", closed), null, "readPullRequest still hides a closed PR");
+  const down = async () => {
+    throw new Error("gh is down");
+  };
+  assert.deepEqual(await readPullRequestState("/project/worktree", down), { known: false, pr: null });
+  const none = async (command) => (command === "git" ? { stdout: "milagre/login\n" } : { stdout: "[]" });
+  assert.deepEqual(await readPullRequestState("/project/worktree", none), { known: true, pr: null });
 });

@@ -13,6 +13,7 @@ import {
   markAnswered,
   modelForChat,
   replaceComputerEntries,
+  modelForOpenChat,
   sentDecision,
   sentReply,
 } from "./agent-runs.ts";
@@ -54,6 +55,23 @@ test("picks a model from the chat's provider", () => {
   assert.equal(modelForChat(opus, "claude", lastUsed, catalog), opus);
   assert.equal(modelForChat(codex, "claude", lastUsed, catalog), sonnet);
   assert.equal(modelForChat(codex, "claude", [], catalog), opus);
+});
+
+test("each open chat shows its own model", () => {
+  const catalog: ModelOption[] = [
+    { id: "gpt-6-sol", name: "GPT-6 Sol", provider: "codex", description: "" },
+    { id: "claude-opus-5-5", name: "Claude Opus 5.5", provider: "claude", description: "" },
+    { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", provider: "claude", description: "" },
+  ];
+  const [codex, opus, sonnet] = catalog;
+  const ranSonnet = [{ id: 1, session_id: 2, body: "hi", context: null, role: "user" as const, model: "claude-sonnet-5-5" }];
+
+  assert.equal(modelForOpenChat("claude-opus-5-5", "claude", ranSonnet, catalog, codex), opus);
+  assert.equal(modelForOpenChat(undefined, "claude", ranSonnet, catalog, opus), sonnet);
+  assert.equal(modelForOpenChat("gpt-6-sol", "claude", ranSonnet, catalog, codex), sonnet);
+  assert.equal(modelForOpenChat(undefined, "claude", [], catalog, sonnet), sonnet);
+  assert.equal(modelForOpenChat(undefined, "claude", [], catalog, codex), opus);
+  assert.equal(modelForOpenChat(undefined, undefined, [], catalog, codex), codex);
 });
 
 const approval = (requestId: string): PermissionRequest => ({

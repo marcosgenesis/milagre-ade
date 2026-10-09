@@ -17,10 +17,12 @@ import {
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
-import type { ChatMessage, PullRequestActionContext } from "@milagre/shared/model";
+import type { ChatMessage, LinkIssueResult, PullRequestActionContext } from "@milagre/shared/model";
 import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
 import { messageSender } from "@milagre/shared/advisor-result";
 import { messageNavigationIndices } from "@milagre/shared/message-navigation";
+import { LINK_PR_HINT, issueChipLabel, issueFirstMessage, type LinearIssue, type LinearIssuesResult } from "@milagre/shared/linear";
+import { worktreeShared } from "@milagre/shared/archive";
 import type { Client, OpenProject } from "../client";
 import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
 import { pullRequestBlockers } from "@milagre/shared/pr-blockers";
@@ -47,7 +49,9 @@ import { useDotBackground } from "../dot-background";
 import { Approval, Questions } from "../questions";
 import { AgentControls, PermissionChip } from "../agent-controls";
 import { afterSend, modelsFor, selectedModel, sendOptions, turnTarget } from "../turn-options";
-import { Icon } from "../icons";
+// Linear's mark as a template image, so iOS tints it like the SF Symbols beside it in menus.
+import LINEAR_MARK from "../../assets/linear-mark.png";
+import { Icon, LinearLogo } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
 import { useOpenProject } from "../use-open-project";
@@ -62,6 +66,9 @@ import { runChatAction } from "../chat-actions";
 import { useChatPage } from "../chat-pages";
 import { MessageNavigation } from "../message-navigation";
 import { AttentionPill } from "../attention";
+import { useLinear } from "../use-linear";
+import { useWorktreeLinearIssues } from "../use-worktree-linear-issues";
+import { showChoiceSheet } from "../choice-store";
 
 const PAGE = 40;
 
@@ -80,11 +87,21 @@ export default function ChatScreen() {
   const [picking, setPicking] = useState(false);
   const [dockHeight, setDockHeight] = useState(140);
   const [error, setError] = useState("");
+  // Bumped after a link or unlink so the Linear issues of the Worktrees are read again.
+  const [linkVersion, setLinkVersion] = useState(0);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
   const [isolation, setIsolation] = useState<"local" | "worktree">("local");
   const [baseBranch, setBaseBranch] = useState("");
   const [branchList, setBranchList] = useState<{ client: Client; path: string; items: string[]; error?: string } | null>(null);
   // A failed send can retry in the checkout already created for this draft.
-  const preparedTarget = useRef<{ client: Client; path: string; base: string; worktreeId: number; sessionId: number } | null>(null);
+  const preparedTarget = useRef<{ client: Client; path: string; base: string; issueKey?: string; worktreeId: number; sessionId: number } | null>(null);
   const scroll = useRef<Reanimated.ScrollView>(null);
   const dots = useDotBackground();
   const following = useRef(true);
@@ -125,6 +142,9 @@ export default function ChatScreen() {
   // Stable props keep each memoized ChatReply from re-rendering on every keystroke and poll tick.
   const connected = session.client;
   const projectPath = session.snapshot?.project.path;
+  // Linear is read only while the Mac has it on and connected; a linked Chat has no Worktrees of its own.
+  const { active: linearActive } = useLinear(connected);
+  const linearIssues = useWorktreeLinearIssues(connected, linearActive && projectPath && !session.snapshot?.project.link ? [projectPath] : [], linkVersion);
   const targetMatches = (!params.projectPath || params.projectPath === projectPath) && (!params.hostId || params.hostId === connected?.url);
   const originChatId = `${projectPath}#${params.id ?? `new:${params.worktreeId}`}`;
   const pending = targetMatches
@@ -275,6 +295,8 @@ export default function ChatScreen() {
   );
   // A comment or a choice from the design sheet is sent from here when the Chat comes back into view. Sent while the
   // Chat is busy, it waits and goes once it no longer is; one that fails waits for the Chat's next focus.
+  // A Chat started from an issue: the choice sheet outlives this render, so it calls the latest send through this ref.
+  const startIssue = useRef<(issue: LinearIssue) => void>(() => {});
   const sendDesign = useRef<() => void>(() => {});
   const designDeferred = useRef(false);
   const designKey = session.client && session.snapshot ? `${session.client.url}|${session.snapshot.project.path}#${params.id}` : null;
@@ -368,6 +390,7 @@ export default function ChatScreen() {
       setPicking(false);
     }
   }
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref, read only from effects and the choice sheet.
   sendDesign.current = () => {
     const message = designKey ? peekDesignMessage(designKey) : null;
     if (!message || !designKey) return;
@@ -376,8 +399,42 @@ export default function ChatScreen() {
       if (sent === true) designMessageSent(designKey, message);
     });
   };
-  /** Whether the message went: "busy" when it wasn't tried, the Chat being busy. */
-  async function send(body = draft, withAttachments = true, prAction?: PullRequestActionContext): Promise<boolean | "busy"> {
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref, read only when an issue is picked in the choice sheet.
+  startIssue.current = (issue) => void send(issueFirstMessage(issue, draft), true, undefined, issue.key);
+  /** Lists the open issues in the choice sheet; picking one starts the Chat from it. */
+  async function chooseIssue() {
+    await pickLinearIssue("Start from a Linear issue", (issue) => startIssue.current(issue));
+  }
+  /** Shows the open issues in the choice sheet under `title` and hands the picked one to `onPick`. */
+  async function pickLinearIssue(title: string, onPick: (issue: LinearIssue) => void) {
+    if (targetDisabled || !client) return;
+    setError("");
+    let result: LinearIssuesResult;
+    try {
+      result = await client.call<LinearIssuesResult>("linear:issues", [{}]);
+    } catch (e) {
+      setError((e as Error).message);
+      return;
+    }
+    if ("error" in result) {
+      setError(result.error);
+      return;
+    }
+    const issues = result.issues;
+    showChoiceSheet({
+      title,
+      placeholder: "Search issues",
+      emptyLabel: "No issues found.",
+      leading: <LinearLogo size={18} tone="ink" />,
+      items: issues.map((issue) => ({ id: issue.key, title: `${issue.key} ${issue.title}`, subtitle: issue.state.name })),
+      onSelect: (key) => {
+        const issue = issues.find((item) => item.key === key);
+        if (issue) onPick(issue);
+      },
+    });
+  }
+  /** Whether the message went: "busy" when it wasn't tried, the Chat being busy. An issue key starts the Chat in its own new worktree. */
+  async function send(body = draft, withAttachments = true, prAction?: PullRequestActionContext, issueKey?: string): Promise<boolean | "busy"> {
     // A turn running now takes this message as a steer, on the provider it already runs.
     const steered = Boolean(run);
     if (!body && !(withAttachments && attachments.length)) return false;
@@ -390,7 +447,8 @@ export default function ChatScreen() {
     const sending = withAttachments ? attachments : [];
     const focus = focused.current;
     const current = () => focus !== null && focused.current === focus && session.isSelected();
-    const clearsDraft = sent === draft;
+    const clearsDraft = sent === draft || issueKey !== undefined;
+    const creates = newWorktree || issueKey !== undefined;
     const key = `${client.url}|${chatId}`;
     const operationId = project.link ? composer.linkOperations.forSend(key, JSON.stringify([sent, sending.map((item) => item.id)]), randomUUID) : null;
     const preview = createPendingChat({
@@ -413,7 +471,7 @@ export default function ChatScreen() {
         originChatId: chatId,
         originSessionId: params.id ? Number(params.id) : null,
         worktreeId,
-        newWorktree,
+        newWorktree: creates,
         accepted: false,
       },
     }));
@@ -427,16 +485,16 @@ export default function ChatScreen() {
     try {
       const media = await prepareAttachments(client, sendingProjectPath, sending);
       let target = { sessionId: params.id ? Number(params.id) : (null as number | null), worktreeId };
-      if (newWorktree) {
+      if (creates) {
         if (!base) throw new Error(branches?.error || "Choose a base branch before sending.");
         let ready = preparedTarget.current;
-        if (!ready || ready.client !== client || ready.path !== sendingProjectPath || ready.base !== base) {
+        if (!ready || ready.client !== client || ready.path !== sendingProjectPath || ready.base !== base || ready.issueKey !== issueKey) {
           const created = await client.call<{ project: OpenProject; worktreeId: number }>("worktree:create", [
-            { projectPath: sendingProjectPath, baseBranch: base, prompt: sent },
+            { projectPath: sendingProjectPath, baseBranch: base, prompt: sent, ...(issueKey !== undefined ? { issueKey } : {}) },
           ]);
           const chat = sessionForWorktree(created.project.state, created.worktreeId);
           if (!chat) throw new Error("No Chat was created for the new worktree.");
-          ready = { client, path: sendingProjectPath, base, worktreeId: created.worktreeId, sessionId: chat.id };
+          ready = { client, path: sendingProjectPath, base, issueKey, worktreeId: created.worktreeId, sessionId: chat.id };
           preparedTarget.current = ready;
         }
         target = { sessionId: ready.sessionId, worktreeId: ready.worktreeId };
@@ -616,6 +674,50 @@ export default function ChatScreen() {
   const prActionRequest = pr && blockers[0] ? pullRequestActionContext({ action: blockers[0], pr: pr.number, url: pr.url }) : null;
   const agents = (chat?.subagents || []).filter((agent) => !agent.archived);
   const diff = worktree?.diff;
+  const linearIssue: LinearIssue | undefined = worktree ? linearIssues[worktree.path] : undefined;
+  function openLinearIssue(url: string) {
+    // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the issue comes from the host's JSON, so url may be missing and startsWith would throw
+    if (/^https:\/\//.test(url)) void Linking.openURL(url).catch(() => {});
+  }
+  // A Chat's own Worktree (not the main checkout, not one another Chat shares) can link an issue; a stored one is shown
+  // with its hint when Linear can't see it. Nothing about the link shows while Linear is off.
+  const canLink = linearActive && !!chat && !project.link && !!worktree?.path && worktree.path !== project.path && !worktreeShared(project.state, chat.id);
+  const storedIssue = linearActive ? worktree?.linearIssue : undefined;
+  const linkHint = storedIssue && !(worktree?.name ?? "").toLowerCase().includes(storedIssue.toLowerCase()) ? LINK_PR_HINT(storedIssue) : null;
+  /** Picks an issue from the list and links it to this Chat's Worktree. */
+  /** A short confirmation over the transcript that goes away on its own, for results that need no answer. */
+  function showToast(message: string) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(message);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
+  }
+  function linkIssue() {
+    if (!worktree) return;
+    void pickLinearIssue("Link a Linear issue", (issue) => void linkWorktreeIssue(issue.key));
+  }
+  async function linkWorktreeIssue(key: string) {
+    if (!worktree) return;
+    setError("");
+    try {
+      const result = await client.call<LinkIssueResult>("worktree:link-issue", [{ projectPath: project.path, worktreeId: worktree.id, key }]);
+      await session.refresh();
+      setLinkVersion((version) => version + 1);
+      showToast(result.mode === "renamed" ? `Branch renamed to ${result.branch}.` : `Issue linked. ${LINK_PR_HINT(key)}`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function unlinkWorktreeIssue() {
+    if (!worktree) return;
+    setError("");
+    try {
+      await client.call("worktree:unlink-issue", [{ projectPath: project.path, worktreeId: worktree.id }]);
+      await session.refresh();
+      setLinkVersion((version) => version + 1);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   const header = (
     <>
       <View style={{ alignItems: "center", maxWidth: 230 }}>
@@ -657,6 +759,16 @@ export default function ChatScreen() {
             onPress={() => headerAction("pr")}
           >{`Pull request #${pr.number}`}</Stack.Toolbar.MenuAction>
         )}
+        {linearIssue && (
+          <Stack.Toolbar.MenuAction icon={LINEAR_MARK} iconRenderingMode="template" onPress={() => openLinearIssue(linearIssue.url)}>
+            {issueChipLabel(linearIssue)}
+          </Stack.Toolbar.MenuAction>
+        )}
+        {linkHint && (
+          <Stack.Toolbar.MenuAction icon="info.circle" disabled>
+            {linkHint}
+          </Stack.Toolbar.MenuAction>
+        )}
         {agents.length > 0 && (
           <Stack.Toolbar.MenuAction icon="person.2" subtitle={String(agents.length)} onPress={() => headerAction("agents")}>
             Subagents
@@ -667,6 +779,16 @@ export default function ChatScreen() {
             <Stack.Toolbar.MenuAction icon="pencil" onPress={() => headerAction("rename")}>
               Rename
             </Stack.Toolbar.MenuAction>
+            {canLink &&
+              (storedIssue ? (
+                <Stack.Toolbar.MenuAction icon={LINEAR_MARK} iconRenderingMode="template" disabled={busy} onPress={() => void unlinkWorktreeIssue()}>
+                  Unlink issue
+                </Stack.Toolbar.MenuAction>
+              ) : (
+                <Stack.Toolbar.MenuAction icon={LINEAR_MARK} iconRenderingMode="template" disabled={busy} onPress={linkIssue}>
+                  Link issue…
+                </Stack.Toolbar.MenuAction>
+              ))}
             <Stack.Toolbar.MenuAction icon={chat.archived ? "tray.and.arrow.up" : "archivebox"} disabled={busy} onPress={() => headerAction("archive")}>
               {chat.archived ? "Restore" : "Archive"}
             </Stack.Toolbar.MenuAction>
@@ -819,6 +941,16 @@ export default function ChatScreen() {
         transcript's top padding does and gradually strengthens toward the status bar. */}
         <EdgeFade edge="top" height={insets.top + 84} />
         <AttentionPill projectPath={project.path} />
+        {toast ? (
+          <View pointerEvents="none" style={{ position: "absolute", left: 16, right: 16, top: insets.top + 64, alignItems: "center" }}>
+            <View
+              accessibilityLiveRegion="polite"
+              style={{ maxWidth: 360, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.ink }}
+            >
+              <Text style={{ color: colors.surface, fontSize: 14 }}>{toast}</Text>
+            </View>
+          </View>
+        ) : null}
         <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
         <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
           {showJumpToBottom && (
@@ -1012,6 +1144,25 @@ export default function ChatScreen() {
                         <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
                       </View>
                     </PullDown>
+                    {linearActive && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Start from a Linear issue"
+                        disabled={targetDisabled}
+                        onPress={() => void chooseIssue()}
+                        style={({ pressed }) => ({
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          paddingHorizontal: 10,
+                          paddingVertical: 6,
+                          opacity: targetDisabled ? 0.35 : pressed ? 0.6 : 1,
+                        })}
+                      >
+                        <LinearLogo size={13} />
+                        <Text style={styles.label}>Linear issue</Text>
+                      </Pressable>
+                    )}
                   </View>
                 )}
                 {!!attachments.length && (

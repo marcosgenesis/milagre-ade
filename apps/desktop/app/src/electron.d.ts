@@ -1,5 +1,5 @@
 import type { MainSyncSettings, MainSyncStatus } from "@milagre/shared/main-sync";
-import type { LinearStatus } from "@milagre/shared/linear";
+import type { LinearIssue, LinearIssuesResult, LinearStatus } from "@milagre/shared/linear";
 import type {
   ProjectAccountScope,
   ProjectAccountsSnapshot,
@@ -45,6 +45,7 @@ import type {
   QuestionAnswers,
   SkillCatalog,
   UsageSnapshot,
+  LinkIssueResult,
   WorktreeRequest,
 } from "./model";
 
@@ -209,6 +210,10 @@ export type MilagreBridge = {
   getAppVersion: () => Promise<string>;
   /** `setupNote`: why the repo's setup file was ignored. */
   createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number; setupNote?: string }>;
+  /** Links an existing worktree to a Linear issue: a Milagre-named branch with no open PR takes the issue's branch name. */
+  linkWorktreeIssue: (request: { projectPath: string; worktreeId: number; key: string }) => Promise<LinkIssueResult>;
+  /** Removes the stored issue link; the branch keeps its name. */
+  unlinkWorktreeIssue: (request: { projectPath: string; worktreeId: number }) => Promise<{ project: OpenProject & { state: CoordinatorState } }>;
   /** The folders Milagre keeps its worktrees in (the configured one and its real path). */
   getWorktreeRoots: () => Promise<string[]>;
   /** What archiving would lose from a worktree. Rejects when git can't tell. */
@@ -245,6 +250,12 @@ export type MilagreBridge = {
   readLinearEnabled: () => Promise<{ enabled: boolean }>;
   saveLinearEnabled: (value: boolean) => Promise<{ enabled: boolean }>;
   onLinearStatusChanged: (callback: (status: LinearStatus) => void) => () => void;
+  /** The Experimental Linear switch changed, on this Mac or from a phone. */
+  onLinearEnabledChanged: (callback: (value: { enabled: boolean }) => void) => () => void;
+  /** Assigned issues when query is empty, otherwise workspace matches (a key also finds that issue first). Never rejects. */
+  listLinearIssues: (query?: string) => Promise<LinearIssuesResult>;
+  /** Each Worktree's Linear issue by worktree path, for the chips. {} when off, disconnected or on error. */
+  readWorktreeLinearIssues: (projectPath: string) => Promise<Record<string, LinearIssue>>;
   /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */
   onWorktreeRenamed: (callback: (rename: WorktreeRename) => void) => () => void;
   /** Re-reads the given worktrees' diff stats in the main process, e.g. after a commit from the "Commit and open PR" dialog. */

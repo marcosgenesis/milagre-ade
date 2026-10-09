@@ -1,5 +1,5 @@
 import { bridgeForKey } from "./computer-bridge.ts";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CoordinatorState, LinkState, OpenProject } from "@milagre/shared/model";
 import type { AgentRuns } from "@milagre/shared/agent-runs";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
@@ -84,6 +84,9 @@ let listening = 0;
 
 export function useScopeStates(enabled: boolean, keys: string[]) {
   const [states, setStates] = useState<Record<string, CoordinatorState | LinkState>>(() => ({ ...scopeStateCache }));
+  // Scopes whose read failed, so the sidebar can say so instead of loading forever.
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const [attempt, setAttempt] = useState(0);
   const joined = keys.join("\n");
 
   useEffect(() => {
@@ -95,6 +98,12 @@ export function useScopeStates(enabled: boolean, keys: string[]) {
       if (!state?.sessions) return;
       scopeStateCache[key] = state;
       setStates((previous) => ({ ...previous, [key]: state }));
+      setFailed((previous) => {
+        if (!previous.has(key)) return previous;
+        const next = new Set(previous);
+        next.delete(key);
+        return next;
+      });
     };
     const offProject = stateEvents.onProjectState(({ path, state }) => {
       const copy = projectCopies.get(path);
@@ -128,10 +137,22 @@ export function useScopeStates(enabled: boolean, keys: string[]) {
           scopeStateCache[key] = opened.state;
           setStates((previous) => ({ ...previous, [key]: opened.state }));
         },
-        () => requestedKeys.delete(key),
+        () => {
+          requestedKeys.delete(key);
+          setFailed((previous) => new Set(previous).add(key));
+        },
       );
     }
-  }, [enabled, joined]);
+  }, [enabled, joined, attempt]);
 
-  return states;
+  const retry = useCallback((key: string) => {
+    setFailed((previous) => {
+      const next = new Set(previous);
+      next.delete(key);
+      return next;
+    });
+    setAttempt((value) => value + 1);
+  }, []);
+
+  return { states, failed, retry };
 }

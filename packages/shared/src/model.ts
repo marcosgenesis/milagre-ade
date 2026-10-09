@@ -80,6 +80,8 @@ export interface Worktree {
   name: string;
   /** The ref a worktree Milagre created started from; its changes are measured against it. */
   base?: string;
+  /** The Linear issue this Worktree was started from (its key); the branch may also name one. */
+  linearIssue?: string;
   /** Lines changed against the base, refreshed in the background so the hover card shows it at once. */
   diff?: DiffStat;
   sharedChat?: { linkId: string; sessionId: number };
@@ -532,6 +534,7 @@ export interface WorktreeRequest {
   projectPath: string;
   baseBranch: string;
   prompt: string;
+  issueKey?: string;
 }
 
 export interface CoordinatorState {
@@ -558,6 +561,13 @@ export interface OpenProject {
   state: CoordinatorState;
   /** Only on the first open after chats came back from linked worktrees' old files. */
   restoredChats?: RestoredChats[];
+}
+
+/** worktree:link-issue's answer: `renamed` when the branch took the issue's name, `stored` when only the key was kept. */
+export interface LinkIssueResult {
+  project: OpenProject;
+  mode: "renamed" | "stored";
+  branch: string;
 }
 
 export function sortedWorktrees(state: CoordinatorState) {

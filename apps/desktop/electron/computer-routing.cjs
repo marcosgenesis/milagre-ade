@@ -117,6 +117,8 @@ const RESULTS = {
   "chat:runs": (id, result) => field(id, result, "runs", keyed),
   "agent:ports": keyed,
   "worktree:create": (id, result) => field(id, result, "project", withPath),
+  "worktree:link-issue": (id, result) => field(id, result, "project", withPath),
+  "worktree:unlink-issue": (id, result) => field(id, result, "project", withPath),
   "terminal:list": (id, result) => field(id, result, "terminals", (id, list) => each(id, list, withChat)),
   "terminal:open": withChat,
   "accounts:scopes": (id, result) =>

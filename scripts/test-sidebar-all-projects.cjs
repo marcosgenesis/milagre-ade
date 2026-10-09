@@ -59,7 +59,7 @@ updateSettings({ sidebarAllProjects: true });
 createRoot(document.getElementById("root")).render(
   <div style={{ display: "flex", height: "100vh", padding: "60px 12px 12px" }}>
     <SidebarNav fill workspaceName="arketa" projectPath="/work/arketa" recents={[{ id: "1", label: "Fix the login flow" }]} activeId="1"
-      runningKeys={"/work/shop#7\\nmilagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7#3"} waitingKeys="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7#3" onOpenScopeChat={(key, id) => { window.opened = key + "#" + id; }} />
+      runningKeys={"/work/shop#7\\nmilagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7#3"} waitingKeys="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7#3" attentionPaths={["/work/shop"]} onOpenScopeChat={(key, id) => { window.opened = key + "#" + id; }} />
   </div>,
 );
 `;
@@ -97,7 +97,11 @@ async function browserChecks() {
   // Other checks share this storage: leave the sidebar as they expect it.
   const reset = () => evaluate(`window.showAll?.(false); localStorage.removeItem("milagre.sidebarClosedScopes")`).catch(() => {});
   const scopes = () => evaluate(`[...document.querySelectorAll("[data-sidebar-scope]")].map((node) => node.dataset.sidebarScope)`);
-  const chats = (scope) => evaluate(`[...document.querySelectorAll('[data-sidebar-scope="${scope}"] [data-chat-id]')].map((node) => node.textContent.trim())`);
+  // A folded group keeps its rows mounted (inert, zero height) so it can animate shut; they don't count as shown.
+  const chats = (scope) =>
+    evaluate(
+      `[...document.querySelectorAll('[data-sidebar-scope="${scope}"] [data-chat-id]')].filter((node) => !node.closest("[inert]")).map((node) => node.textContent.trim())`,
+    );
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`!!document.querySelector('[data-sidebar-scope="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7"] [data-chat-id]')`);
@@ -142,6 +146,24 @@ async function browserChecks() {
       "A Link's stacked avatars start on the Projects' icon line and end before its name",
     );
     await screenshot("all-projects");
+
+    // A waiting group's dot rests at the row's right edge and slides left of the actions that hover reveals.
+    const dot = `document.querySelector('[data-sidebar-scope="/work/shop"] [aria-label="Needs attention"]')`;
+    const dotGap = () =>
+      evaluate(`(() => {
+        const row = ${dot}.parentElement.getBoundingClientRect();
+        return Math.round(row.right - ${dot}.getBoundingClientRect().right);
+      })()`);
+    assert.equal(await dotGap(), 12, "At rest the dot sits at the row's right edge");
+    const toggle = await evaluate(
+      `(() => { const r = document.querySelector('[data-sidebar-scope="/work/shop"] [data-scope-toggle]').getBoundingClientRect(); return { x: Math.round(r.x + 40), y: Math.round(r.y + r.height / 2) }; })()`,
+    );
+    window.webContents.sendInputEvent({ type: "mouseMove", ...toggle });
+    await delay(300);
+    assert.equal(await dotGap(), 64, "On hover it moves left of the menu and New chat buttons");
+    await screenshot("attention-hover");
+    window.webContents.sendInputEvent({ type: "mouseMove", x: 900, y: 400 });
+    await delay(300);
 
     // One open scope; the others offer New chat in <name>; only a Project's ⋯ menu on a non-current scope has Remove.
     assert.equal(await evaluate(`document.querySelectorAll("[data-sidebar-scope][data-current]").length`), 1, "Exactly one scope is open");

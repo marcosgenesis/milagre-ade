@@ -50,7 +50,7 @@ import {
   chatsRunning,
   chatsWaitingForUser,
   lastUserModel,
-  modelForChat,
+  modelForOpenChat,
   projectOfKey,
   sentDecision,
   sentReply,
@@ -77,6 +77,9 @@ import { DiffToolbar, useDiffPreferences, useDiffPresence } from "./components/c
 import { useChanges } from "./components/changes/useChanges";
 import { gitChatContext, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
+import { useLinear } from "./components/useLinear";
+import { useWorktreeLinearIssues } from "./components/useWorktreeLinearIssues";
+import { issueFirstMessage, LINK_PR_HINT, restoredDraft, type LinearIssue } from "@milagre/shared/linear";
 import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
 import { REMOTE_FILES_NOTICE, usePastedImages } from "./components/usePastedImages";
 import { DotBackground } from "./components/DotBackground";
@@ -89,6 +92,7 @@ import { createPendingChat, isListedChat, pendingChatSessionId, withPendingChat,
 import { getSettings, toggleTheme, updateSettings, useApplyTheme, useSettings } from "./lib/settings";
 import { EditorLinks, Notice } from "./components/editor-links";
 // Notice above is editor-links' toast; this is the dismissable notice card.
+import { showNotice } from "./lib/notice";
 import { Notice as NoticeCard } from "./components/Notice";
 import { openInEditor } from "./lib/editors";
 import type { RuntimeConnection } from "./electron";
@@ -150,6 +154,16 @@ const NO_REFS: string[] = [];
 // `sent`: the main process saved the message; the preview stays until the saved message reaches the window's state.
 type PendingSend = PendingChat & { view: number; projectPath: string; originSessionId: number | null; originWorktreeId: number; sent?: boolean };
 const NO_WORKTREE = -1;
+// The model picked in each open chat, by chat key.
+const CHAT_MODELS_KEY = "milagre.chatModels";
+function readChatModels(): Record<string, string> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(CHAT_MODELS_KEY) ?? "{}");
+    return saved && typeof saved === "object" ? (saved as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
 type PreparedSendTarget = { view: number; projectPath: string; sessionId: number | null; worktreeId: number };
 type FailedSend = PendingSend & { draft: string; error: string; target: PreparedSendTarget | null };
 
@@ -286,10 +300,18 @@ function App() {
       nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, preferredProvider: preferredProviderRef.current }),
     );
   }, [models]);
+  // A pick in an open Project chat stays with that chat; elsewhere (the new-chat screen, a Link) it becomes the default.
+  const chatModels = useRef<Record<string, string>>(readChatModels());
   const chooseModel = (model: ModelOption) => {
     pickedModel.current = true;
     setSelectedModel(model);
-    updateSettings({ defaultModelId: model.id });
+    const sessionId = selectedSessionRef.current;
+    if (sessionId === null || !projectRef.current || selectedLinkRef.current) {
+      updateSettings({ defaultModelId: model.id });
+      return;
+    }
+    chatModels.current = { ...chatModels.current, [chatKey(projectRef.current.path, sessionId)]: model.id };
+    localStorage.setItem(CHAT_MODELS_KEY, JSON.stringify(chatModels.current));
   };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
@@ -549,6 +571,8 @@ function App() {
     return latest ? lastUserModel(latest, sessionIdFromKey(chatId)) : "";
   });
   const { pullRequests, chatPullRequests: chatPrs, dismissedBlockers, dismissBlockerAction } = useWorktreePullRequests(project?.path ?? "", state);
+  const linear = useLinear();
+  const { issues: linearIssues, refresh: refreshLinearIssues } = useWorktreeLinearIssues(project?.path ?? "", linear.active);
   const sidePanels = useSidePanels();
   const changes = useChanges({
     cwd: selectedWorktree?.path,
@@ -650,12 +674,15 @@ function App() {
     void agentRuns.answerQuestion(chatKey(project.path, selectedSession.id), pendingQuestion.requestId, answers).catch(() => {});
   }
 
-  // A chat stays on the agent it started with; the picker follows the open chat.
+  // The picker follows the open chat: the model picked there, else the one it last ran, on the agent it's bound to.
   useEffect(() => {
-    if (!selectedSession?.provider) return;
-    const next = modelForChat(selectedModel, selectedSession.provider, messages, models);
+    if (!project || !selectedSession) return;
+    const own = messages.filter((message) => message.session_id === selectedSession.id);
+    const picked = chatModels.current[chatKey(project.path, selectedSession.id)];
+    const fallback = resolveModel(models, defaultModelId, providerForId(defaultModelId));
+    const next = modelForOpenChat(picked, selectedSession.provider, own, models, fallback);
     if (next.id !== selectedModel.id) setSelectedModel(next);
-  }, [selectedSession?.id, selectedSession?.provider]);
+  }, [project?.path, selectedSession?.id, selectedSession?.provider, messages, models]);
 
   function receiveState(projectPath: string, next: CoordinatorState | LinkState) {
     if (isLinkScopeKey(projectPath)) {
@@ -758,6 +785,11 @@ function App() {
           branch: worktree?.name,
           path: worktree?.path,
           diff: worktree?.diff,
+          linearIssue: worktree ? linearIssues[worktree.path] : undefined,
+          // The stored link (Worktree.linearIssue) and whether "Link issue…" applies: the chat's own Worktree,
+          // not the main checkout, and not one another chat shares.
+          linearKey: linear.active ? worktree?.linearIssue : undefined,
+          linkable: linear.active && !!worktree && worktree.path !== project?.path && !worktreeShared(state, session.id),
           pullRequests: worktree
             ? chatPullRequests(
                 session.summary ? (summary.pullRequests ?? NO_REFS) : readPullRequestRefs(chatKey(project?.path ?? "", session.id), sessionMessages),
@@ -785,12 +817,14 @@ function App() {
     running,
     pullRequests,
     chatPrs,
+    linearIssues,
+    linear.active,
     agentPorts,
     project,
     archivingChats,
   ]);
-  const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat });
-  latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat };
+  const latest = useRef({ patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat, linkChatIssue, unlinkChatIssue });
+  latest.current = { patchChat, revealChat, openChatInEditor, openGitDialog, checkArchive, archiveChat, linkChatIssue, unlinkChatIssue };
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
@@ -1267,14 +1301,20 @@ function App() {
 
   // Where a message goes: an open chat keeps its session, a new local chat (session null) gets one
   // from the main process, and a new chat in "New worktree" isolation gets its own worktree first.
-  async function resolveSendTarget(body: string) {
+  // A chat started from a Linear issue always gets its own worktree, whatever the isolation picker says.
+  async function resolveSendTarget(body: string, issueKey?: string) {
     if (!state || !project || !selectedWorktree) return null;
-    if (preparedTarget.current?.view === chatView.current && preparedTarget.current.projectPath === project.path) return preparedTarget.current;
+    if (!issueKey && preparedTarget.current?.view === chatView.current && preparedTarget.current.projectPath === project.path) return preparedTarget.current;
     if (selectedSession) return { sessionId: selectedSession.id as number | null, worktreeId: selectedWorktree.id };
-    if (isolation === "local") return { sessionId: null, worktreeId: selectedWorktree.id };
+    if (isolation === "local" && !issueKey) return { sessionId: null, worktreeId: selectedWorktree.id };
     setBaseBranch(effectiveBaseBranch);
     saveChatPreferences(localStorage, project.path, { baseBranch: effectiveBaseBranch });
-    const created = await bridgeForKey(project.path).createWorktree({ projectPath: project.path, baseBranch: effectiveBaseBranch, prompt: body });
+    const created = await bridgeForKey(project.path).createWorktree({
+      projectPath: project.path,
+      baseBranch: effectiveBaseBranch,
+      prompt: body,
+      ...(issueKey ? { issueKey } : {}),
+    });
     receiveState(project.path, created.project.state);
     const session = sessionForWorktree(created.project.state, created.worktreeId);
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
@@ -1296,6 +1336,7 @@ function App() {
     files: string[] = imageDraft.files,
     preserveComposer = false,
     prAction?: PullRequestActionContext,
+    issueKey?: string,
   ): Promise<boolean> {
     if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
     // A file attached from this Mac is a path the other Mac can't read; pasted images travel as data and still go.
@@ -1318,7 +1359,7 @@ function App() {
     const submittedDraft = draftStore.get();
     // A chat bound for a worktree that doesn't exist yet shows no worktree (and none of its PRs) until it does.
     const prepared = preparedTarget.current?.view === view && preparedTarget.current.projectPath === project.path ? preparedTarget.current : null;
-    const previewWorktreeId = prepared?.worktreeId ?? (selectedSession || isolation === "local" ? selectedWorktree.id : NO_WORKTREE);
+    const previewWorktreeId = prepared?.worktreeId ?? (selectedSession || (isolation === "local" && !issueKey) ? selectedWorktree.id : NO_WORKTREE);
     const preview = createPendingChat({
       state,
       sessionId: selectedSession?.id,
@@ -1355,7 +1396,7 @@ function App() {
     let target: Awaited<ReturnType<typeof resolveSendTarget>> = null;
     let sent = false;
     try {
-      target = await resolveSendTarget(body);
+      target = await resolveSendTarget(body, issueKey);
       if (!target) return false;
       if (firstMessage && stillHere()) preparedTarget.current = { ...target, view, projectPath: project.path };
       setPendingSend((pending) =>
@@ -1397,7 +1438,7 @@ function App() {
         setNewChatError(message);
         if (!preserveComposer) {
           const nextDraft = draftStore.get();
-          setDraft([submittedDraft || body, nextDraft].filter(Boolean).join("\n\n"));
+          setDraft([restoredDraft(body, submittedDraft, issueKey !== undefined), nextDraft].filter(Boolean).join("\n\n"));
           imageDraft.restore(images, files);
         }
       } else {
@@ -1410,7 +1451,7 @@ function App() {
               projectPath: project.path,
               originSessionId: selectedSession?.id ?? null,
               originWorktreeId: selectedWorktree.id,
-              draft: submittedDraft || body,
+              draft: restoredDraft(body, submittedDraft, issueKey !== undefined),
               error: message,
               target: target ? { ...target, view, projectPath: project.path } : null,
             },
@@ -1434,6 +1475,38 @@ function App() {
     changes.closeDiff();
     if (await executeSend(formatCommentsMessage(sent, { mode: changes.mode, base }), permissionMode, [], [], true))
       diffComments.removeMany(sent.map((comment) => comment.id));
+  }
+
+  // The new chat starts at once from an issue: its first message is the issue, then whatever the user typed.
+  function startFromIssue(issue: LinearIssue) {
+    void executeSend(issueFirstMessage(issue, draftStore.get()), permissionMode, imageDraft.images, imageDraft.files, false, undefined, issue.key);
+  }
+
+  // The chat's Worktree gets the issue (its branch is renamed when the branch is still a milagre/ one with no open PR).
+  async function linkChatIssue(sessionId: number, key: string) {
+    const path = project?.path;
+    const worktreeId = openState()?.sessions[sessionId]?.worktree_id;
+    if (!path || worktreeId === undefined) return;
+    const linked = async () => {
+      const result = await bridgeForKey(path).linkWorktreeIssue({ projectPath: path, worktreeId, key });
+      receiveState(path, result.project.state);
+      refreshLinearIssues();
+      // A toast, as on the phone: the result needs no answer.
+      showNotice(result.mode === "renamed" ? `Branch renamed to ${result.branch}.` : `Issue linked. ${LINK_PR_HINT(key)}`);
+    };
+    await reportChatAction(linked(), "Could not link issue", setNotice);
+  }
+
+  async function unlinkChatIssue(sessionId: number) {
+    const path = project?.path;
+    const worktreeId = openState()?.sessions[sessionId]?.worktree_id;
+    if (!path || worktreeId === undefined) return;
+    const unlinked = async () => {
+      const result = await bridgeForKey(path).unlinkWorktreeIssue({ projectPath: path, worktreeId });
+      receiveState(path, result.project.state);
+      refreshLinearIssues();
+    };
+    await reportChatAction(unlinked(), "Could not unlink issue", setNotice);
   }
 
   async function sendMessage() {
@@ -1599,6 +1672,8 @@ function App() {
       onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
       // The row shows the progress until this settles.
       onArchive: (id, mode, plan) => latest.current.archiveChat(Number(id), mode, plan),
+      onLinkIssue: (id, key) => void latest.current.linkChatIssue(Number(id), key),
+      onUnlinkIssue: (id) => void latest.current.unlinkChatIssue(Number(id)),
     }),
     [remoteProject],
   );
@@ -2185,6 +2260,8 @@ function App() {
                     earlier={earlierMessages}
                     onSend={() => void sendMessage()}
                     onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
+                    linearActive={linear.active}
+                    onStartFromIssue={startFromIssue}
                     onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
                     pullRequestAction={
                       selectedSession && selectedPullRequest && pullRequestBlocker && pullRequestActionRequest

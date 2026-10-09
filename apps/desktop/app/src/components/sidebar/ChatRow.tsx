@@ -1,4 +1,7 @@
 import { ChatTitle } from "./ChatTitle";
+import { issueChipLabel, LINK_PR_HINT, type LinearIssue } from "@milagre/shared/linear";
+import { LinearLogo } from "../ProviderLogo";
+import { LinearIssuePicker } from "../LinearIssuePicker";
 import { SpinnerRing } from "../primitives/SpinnerRing";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -58,6 +61,12 @@ type ChatDetails = {
   diff?: DiffStat;
   /** PRs the chat created or merged, then its worktree branch's PR, in the order they were made. */
   pullRequests?: PullRequest[];
+  /** The Linear issue the chat's Worktree was started from or names. */
+  linearIssue?: LinearIssue;
+  /** The key the chat's Worktree is stored as linked to (Worktree.linearIssue). Only while Linear is on. */
+  linearKey?: string;
+  /** The chat has its own Worktree that another chat doesn't share, so "Link issue…" is offered. Only while Linear is on. */
+  linkable?: boolean;
   /** The chat's last turn failed. */
   failed?: boolean;
   /** Ports the chat's commands listen on. */
@@ -98,6 +107,10 @@ export type ChatRowActions = {
   /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
   onArchiveCheck?: (id: string) => Promise<ArchivePlan>;
   onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => Promise<unknown> | void;
+  /** Links the chat's Worktree to a Linear issue by key. */
+  onLinkIssue?: (id: string, key: string) => void;
+  /** Removes the Worktree's stored Linear issue link. */
+  onUnlinkIssue?: (id: string) => void;
 };
 
 /** What the confirm step offers when nothing is known about the worktree: only hide the chat. */
@@ -119,7 +132,16 @@ const ROW_PR_LIMIT = 2;
 const HOVER_CARD_WIDTH = 256;
 const MENU_WIDTH = 240;
 
-type MenuEntry = { key: string; label: string; icon: HugeIconData; onSelect: () => void; disabled?: boolean; danger?: boolean; archiveChoice?: boolean };
+type MenuEntry = {
+  key: string;
+  label: string;
+  icon?: HugeIconData;
+  /** Drawn instead of `icon`, e.g. a brand mark. */ leading?: ReactNode;
+  onSelect: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  archiveChoice?: boolean;
+};
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
 
@@ -197,17 +219,22 @@ export const ChatRow = memo(function ChatRow({
   const archivePending = useRef(false);
   const mark = item.mark ?? "idle";
   const pullRequests = !collapsed ? rowPullRequests(item.details?.pullRequests ?? []) : [];
+  const linearIssue = !collapsed ? item.details?.linearIssue : undefined;
   const hasPullRequests = pullRequests.length > 0;
+  // The chip row shows for a Linear issue alone, too.
+  const hasChips = hasPullRequests || linearIssue !== undefined;
   const shownPullRequests = pullRequests.slice(0, ROW_PR_LIMIT);
   const hiddenPullRequests = pullRequests.length - shownPullRequests.length;
-  const twoLines = hasPullRequests || item.worktreeCount !== undefined || Boolean(computer);
+  const twoLines = hasChips || item.worktreeCount !== undefined || Boolean(computer);
   // This Mac alone keeps the single-Project placement; the computer line is what changes it.
-  const prLines = hasPullRequests || Boolean(computer);
+  const prLines = hasChips || Boolean(computer);
   const rowRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<number | null>(null);
   const [card, setCard] = useState<{ top: number; left: number; flip: boolean } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // The issue picker opened from the menu's "Link issue…", at the menu's place.
+  const [linking, setLinking] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
 
   const clearHover = () => {
@@ -309,7 +336,7 @@ export const ChatRow = memo(function ChatRow({
           </button>
         )}
 
-        {(hasPullRequests || computer) && !renaming && (
+        {(hasChips || computer) && !renaming && (
           <div
             data-chat-prs
             className={`sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2 ${archiving ? "opacity-30" : ""}`}
@@ -323,11 +350,12 @@ export const ChatRow = memo(function ChatRow({
             {computer && item.worktreeCount !== undefined && (
               <span className="shrink-0 text-[12px] leading-4 text-ink-3">· {item.worktreeCount} Worktrees</span>
             )}
-            {computer && hasPullRequests && (
+            {computer && hasChips && (
               <span aria-hidden className="text-[12px] leading-4 text-ink-3 opacity-60">
                 ·
               </span>
             )}
+            {linearIssue && <LinearIssueChip issue={linearIssue} />}
             {shownPullRequests.map((pr) => (
               <PullRequestChip key={pr.url} pr={pr} labelled={pullRequests.length === 1} />
             ))}
@@ -387,6 +415,7 @@ export const ChatRow = memo(function ChatRow({
             trigger={triggerRef}
             onClose={() => setMenu(null)}
             onRename={() => setRenaming(true)}
+            onLink={() => setLinking(menu)}
             actions={{
               ...actions,
               onArchive: actions.onArchive
@@ -403,6 +432,16 @@ export const ChatRow = memo(function ChatRow({
                   }
                 : undefined,
             }}
+          />
+        )}
+        {linking && (
+          <LinkIssuePopover
+            position={linking}
+            onPick={(issue) => {
+              setLinking(null);
+              actions.onLinkIssue?.(item.id, issue.key);
+            }}
+            onClose={() => setLinking(null)}
           />
         )}
       </div>
@@ -431,6 +470,25 @@ const isReadyToMerge = (pr: PullRequest) => pullRequestPresentation(pr).ready;
 const isChecking = (pr: PullRequest) => pullRequestPresentation(pr).checking;
 
 /** One PR under the chat's title. Only a chat's single PR has room to spell out its blocker or "Ready". */
+function LinearIssueChip({ issue }: { issue: LinearIssue }) {
+  return (
+    <button
+      type="button"
+      data-linear-issue-chip
+      title={issue.title}
+      aria-label={`Open Linear issue ${issue.key}: ${issue.title}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        window.open(issue.url, "_blank", "noopener,noreferrer");
+      }}
+      className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      <LinearLogo size={11} />
+      <span className="truncate">{issueChipLabel(issue)}</span>
+    </button>
+  );
+}
+
 function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean }) {
   const blocker = pullRequestBlockers(pr)[0];
   const readyToMerge = isReadyToMerge(pr);
@@ -644,6 +702,27 @@ function ChatHoverCard({
             <span className="truncate">{details.branch}</span>
           </CardLine>
         )}
+        {details.linearIssue && (
+          <CardLine icon={<LinearLogo size={13} />}>
+            <a
+              href={details.linearIssue.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-chat-card-linear-issue
+              onClick={onOpenLink}
+              className="min-w-0 truncate text-ink-2 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {issueChipLabel(details.linearIssue)} · {details.linearIssue.title}
+            </a>
+          </CardLine>
+        )}
+        {details.linearKey && !(details.branch ?? "").toLowerCase().includes(details.linearKey.toLowerCase()) && (
+          <CardLine icon={<LinearLogo size={13} />}>
+            <span data-chat-card-link-hint className="min-w-0 whitespace-normal text-[12px] leading-snug text-ink-3">
+              {LINK_PR_HINT(details.linearKey)}
+            </span>
+          </CardLine>
+        )}
         {details.path && (
           <CardLine icon={<HugeIcon icon={Folder01Icon} size={14} />}>
             <span className="truncate">{folderName(details.path)}</span>
@@ -674,12 +753,40 @@ function CardLine({ icon, children }: { icon: ReactNode; children: ReactNode }) 
  * From the row's ⋮ button or a right-click. Archive hides the
  * chat for good (there is no archived list), so it asks twice.
  * ───────────────────────────────────────────────────────── */
+/** The issue list over the menu's place, for "Link issue…". Picking an issue hands its key up and closes. */
+function LinkIssuePopover({ position, onPick, onClose }: { position: { x: number; y: number }; onPick: (issue: LinearIssue) => void; onClose: () => void }) {
+  useDismiss(true, onClose, (target) => !!target.closest("[data-picker-panel]"));
+  const ref = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState(position.y);
+  // Opens above the menu's place when there isn't room below, and never above the window's top edge.
+  // Measured again as the issue list fills in, since its height isn't known on the first paint.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const place = () => {
+      const height = element.getBoundingClientRect().height;
+      setTop(position.y + height > window.innerHeight - 8 ? Math.max(8, position.y - height - 8) : position.y);
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [position.y]);
+  return createPortal(
+    <div ref={ref} data-linear-link-picker className="fixed z-[70]" style={{ top, left: Math.min(position.x, window.innerWidth - 420 - 8) }}>
+      <LinearIssuePicker className="w-[420px] max-w-[calc(100vw-2rem)]" title="Link a Linear issue" onPick={onPick} onClose={onClose} />
+    </div>,
+    document.body,
+  );
+}
+
 function ChatMenu({
   item,
   position,
   trigger,
   onClose,
   onRename,
+  onLink,
   actions,
 }: {
   item: SidebarRecent;
@@ -688,6 +795,7 @@ function ChatMenu({
   trigger: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onRename: () => void;
+  onLink: () => void;
   actions: ChatRowActions;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -772,6 +880,20 @@ function ChatMenu({
     { key: "copy-path", label: "Copy path", icon: Copy01Icon, onSelect: copy(details.path ?? ""), disabled: !details.path },
     { key: "copy-branch", label: "Copy branch name", icon: GitBranchIcon, onSelect: copy(details.branch ?? ""), disabled: !details.branch },
     { key: "rename", label: "Rename chat", icon: PencilEdit02Icon, onSelect: run(onRename), disabled: !actions.onRename },
+    // Unlink and Link are offered on the same Worktrees (own, not shared, not the main checkout), as on the phone.
+    ...(details.linkable
+      ? details.linearKey
+        ? [
+            {
+              key: "unlink-issue",
+              label: "Unlink issue",
+              leading: <LinearLogo size={14} />,
+              onSelect: run(() => actions.onUnlinkIssue?.(item.id)),
+              disabled: !actions.onUnlinkIssue,
+            },
+          ]
+        : [{ key: "link-issue", label: "Link issue…", leading: <LinearLogo size={14} />, onSelect: run(onLink), disabled: !actions.onLinkIssue }]
+      : []),
     item.unread
       ? { key: "read", label: "Mark as read", icon: Tick02Icon, onSelect: run(() => actions.onMarkUnread?.(item.id, false)), disabled: !actions.onMarkUnread }
       : {
@@ -852,7 +974,7 @@ function ChatMenu({
               className={`relative z-10 flex w-full items-center gap-2 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40 ${entry.archiveChoice ? "min-h-8 py-1.5" : "h-8"} ${entry.danger ? "text-red" : "text-ink"}`}
             >
               <span className={`flex size-5 shrink-0 items-center justify-center ${entry.danger ? "text-red" : "text-ink-2"}`}>
-                <HugeIcon icon={entry.icon} size={16} />
+                {entry.leading ?? (entry.icon && <HugeIcon icon={entry.icon} size={16} />)}
               </span>
               <span className={`min-w-0 flex-1 text-[13px] ${entry.archiveChoice ? "leading-snug" : "truncate"}`}>{entry.label}</span>
             </button>

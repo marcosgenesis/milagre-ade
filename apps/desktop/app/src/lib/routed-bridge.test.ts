@@ -73,6 +73,9 @@ const ALLOWED: Record<string, string[]> = {
   "components/usage/useUsage.ts": ["onAccountsChanged", "readUsage", "getCachedUsage"],
   "components/terminal/TerminalPanel.tsx": ["onCloseFocusedTerminal", "setTerminalFocused"],
   "components/SkillsSettings.tsx": ["openSkill", "revealSkill"],
+  // This Mac's Linear account and its Experimental switch.
+  "components/useLinear.ts": ["readLinearEnabled", "readLinearStatus", "onLinearStatusChanged", "onLinearEnabledChanged"],
+  "components/LinearIssuePicker.tsx": ["listLinearIssues"],
   "components/Attachments.tsx": ["showImageMenu"],
   "components/agents/GeneratedImage.tsx": ["copyImage", "saveImage", "showImageMenu"],
   "components/motion/MediaLightbox.tsx": ["showImageMenu"],

@@ -17,6 +17,8 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, LaptopIcon } from "@hugeicons/core-free-icons";
+import { LinearLogo } from "./ProviderLogo";
+import type { LinearIssue } from "@milagre/shared/linear";
 import type {
   AgentCliStatus,
   EffortLevel,
@@ -34,6 +36,7 @@ import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
+import { LinearIssuePicker } from "./LinearIssuePicker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { HandoffDivider } from "./Handover";
@@ -459,6 +462,9 @@ interface ChatComposerProps {
   branches: string[];
   baseBranch: string;
   onBaseBranchChange: (branch: string) => void;
+  /** Linear is on and connected: the new-chat header offers a Linear issue to start from. */
+  linearActive?: boolean;
+  onStartFromIssue?: (issue: LinearIssue) => void;
   newChatError: string | null;
   notice?: string | null;
   onDismissNotice?: () => void;
@@ -469,7 +475,20 @@ const ISOLATIONS: Array<{ id: Isolation; name: string; description: string; icon
   { id: "worktree", name: "New worktree", description: "Start a new branch in its own worktree", icon: GitForkIcon },
 ];
 
-function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: string; open: boolean; onClick: (trigger: HTMLElement) => void }) {
+function ChipButton({
+  icon,
+  leading,
+  label,
+  open,
+  onClick,
+}: {
+  icon?: IconData;
+  /** Drawn instead of `icon`, e.g. a brand mark. */
+  leading?: ReactNode;
+  label: string;
+  open: boolean;
+  onClick: (trigger: HTMLElement) => void;
+}) {
   return (
     <button
       type="button"
@@ -477,7 +496,7 @@ function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: str
       onClick={(event) => onClick(event.currentTarget)}
       className={`flex h-7 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : "text-ink-2"}`}
     >
-      <Icon icon={icon} size={14} />
+      {leading ?? (icon && <Icon icon={icon} size={14} />)}
       {label}
       <span className="text-ink-3">
         <Icon icon={ArrowDown01Icon} size={12} />
@@ -488,7 +507,16 @@ function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: str
 
 type NewChatHeaderProps = Pick<
   ChatComposerProps,
-  "worktrees" | "selectedWorktreeId" | "onWorktreeChange" | "isolation" | "onIsolationChange" | "branches" | "baseBranch" | "onBaseBranchChange"
+  | "worktrees"
+  | "selectedWorktreeId"
+  | "onWorktreeChange"
+  | "isolation"
+  | "onIsolationChange"
+  | "branches"
+  | "baseBranch"
+  | "onBaseBranchChange"
+  | "linearActive"
+  | "onStartFromIssue"
 >;
 
 function NewChatHeader({
@@ -500,8 +528,10 @@ function NewChatHeader({
   branches,
   baseBranch,
   onBaseBranchChange,
+  linearActive = false,
+  onStartFromIssue,
 }: NewChatHeaderProps) {
-  const [menu, setMenu] = useState<"isolation" | "branch" | null>(null);
+  const [menu, setMenu] = useState<"isolation" | "branch" | "issue" | null>(null);
   const [query, setQuery] = useState("");
   const [popover, setPopover] = useState({ left: 0, maxHeight: 480 });
   const selected = worktrees.find((worktree) => worktree.id === selectedWorktreeId) ?? worktrees[0];
@@ -540,7 +570,7 @@ function NewChatHeader({
     },
   );
 
-  function toggle(next: "isolation" | "branch", trigger: HTMLElement) {
+  function toggle(next: "isolation" | "branch" | "issue", trigger: HTMLElement) {
     place(trigger);
     setQuery("");
     setMenu((current) => (current === next ? null : next));
@@ -573,6 +603,9 @@ function NewChatHeader({
             open={menu === "branch"}
             onClick={(trigger) => toggle("branch", trigger)}
           />
+          {linearActive && onStartFromIssue && (
+            <ChipButton leading={<LinearLogo size={13} />} label="Linear issue" open={menu === "issue"} onClick={(trigger) => toggle("issue", trigger)} />
+          )}
           {menu === "isolation" && (
             <PickerPanel title="Isolation" className="absolute top-[calc(100%+0.375rem)] w-[320px]" style={popoverStyle}>
               {ISOLATIONS.map((option) => (
@@ -589,6 +622,16 @@ function NewChatHeader({
                 />
               ))}
             </PickerPanel>
+          )}
+          {menu === "issue" && (
+            <LinearIssuePicker
+              style={popoverStyle}
+              onPick={(issue) => {
+                onStartFromIssue?.(issue);
+                close();
+              }}
+              onClose={close}
+            />
           )}
           {menu === "branch" && (
             <PickerPanel
@@ -694,6 +737,8 @@ export function ChatComposer({
   branches,
   baseBranch,
   onBaseBranchChange,
+  linearActive,
+  onStartFromIssue,
   newChatError,
   findOpen = false,
   findSignal = 0,
@@ -894,6 +939,8 @@ export function ChatComposer({
                 branches={branches}
                 baseBranch={baseBranch}
                 onBaseBranchChange={onBaseBranchChange}
+                linearActive={linearActive}
+                onStartFromIssue={onStartFromIssue}
               />
             )}
             {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}

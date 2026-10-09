@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { ANTIGRAVITY_LOGO, CLAUDE_LOGO, CODEX_LOGO } from "@milagre/shared/provider-logos";
+import { ANTIGRAVITY_LOGO, CLAUDE_LOGO, CODEX_LOGO, LINEAR_LOGO } from "@milagre/shared/provider-logos";
 import type { ModelProvider } from "../model";
 
 /** Each agent's brand mark in its own colors (shapes in @milagre/shared/provider-logos). */
@@ -49,6 +49,15 @@ export function ProviderLogo({ provider, size = 15 }: { provider: ModelProvider;
           </g>
         </>
       )}
+    </svg>
+  );
+}
+
+/** Linear's mark, on Linear issue chips and pickers, in the color of the text beside it. */
+export function LinearLogo({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className="shrink-0" data-linear-logo>
+      <path d={LINEAR_LOGO.d} fill="currentColor" />
     </svg>
   );
 }

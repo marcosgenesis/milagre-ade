@@ -96,6 +96,8 @@ function load(file, modules, extra = "") {
   vm.runInNewContext(compiled, {
     exports,
     require: (id) => {
+      // Image assets are opaque sources; any value stands in.
+      if (id.endsWith(".png") && !(id in modules)) return { uri: id };
       assert.ok(id in modules, `Unexpected import: ${id}`);
       return modules[id];
     },
@@ -668,9 +670,10 @@ function find(node, predicate) {
     if (found) return found;
   }
 }
-function chatHost({ pickAttachments = async () => [], call, effects = false, alert = () => {} } = {}) {
+function chatHost({ pickAttachments = async () => [], call, effects = false, alert = () => {}, linear = { active: false } } = {}) {
   const sending = deferred();
   const calls = [];
+  const choices = [];
   const params = { worktreeId: "1" };
   const session = {
     client: {
@@ -803,6 +806,11 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "@milagre/shared/agent-runs": { lastUserModel: () => "" },
     "@milagre/shared/chats": require("@milagre/shared/chats"),
     "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
+    "@milagre/shared/linear": require("@milagre/shared/linear"),
+    "@milagre/shared/archive": require("@milagre/shared/archive"),
+    "../use-linear": { useLinear: () => linear },
+    "../use-worktree-linear-issues": { useWorktreeLinearIssues: () => ({}) },
+    "../choice-store": { showChoiceSheet: (request) => choices.push(request) },
     "../session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
     "../attachment-picker": { pickAttachments },
     "../attachments": require("../apps/mobile/src/attachments.ts"),
@@ -833,7 +841,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     return { ...props, value: props.draft };
   };
   const send = () => find(render(), (node) => node.type === "IconButton" && ["Send message", "Send follow-up"].includes(node.props.label)).props.onPress();
-  return { session, sending, params, field, send, render, router, calls };
+  return { session, sending, params, field, send, render, router, calls, choices };
 }
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -1160,6 +1168,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "@milagre/shared/chats": require("@milagre/shared/chats"),
     "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
     "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "@milagre/shared/linear": require("@milagre/shared/linear"),
     "./icons": { Icon: "Icon" },
     "./ui": { PullDown: "PullDown", colors: { ink2: "ink2", green: "green", purple: "purple", red: "red", orange: "orange" } },
   });
@@ -1192,6 +1201,8 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "./indicators": require("../apps/mobile/src/indicators.ts"),
     "./status-indicators": { ChatMarkIcon: "ChatMarkIcon" },
     "./use-chat-pull-requests": { useChatPullRequests: () => ({}) },
+    "./use-linear": { useLinear: () => ({ active: false }) },
+    "./use-worktree-linear-issues": { useWorktreeLinearIssues: () => ({}) },
     "./chat-pull-request-chips": { ChatPullRequestChips },
     "./icons": { Icon: "Icon", SpinnerRing: "SpinnerRing" },
     "./loading-logo": { LoadingLogo: "LoadingLogo" },
@@ -5090,4 +5101,162 @@ test("mobile advisor Stop and Retry call the owning Chat and show failures witho
   assert.equal(host.state.sessions[7].subagents.length, 2);
   await host.button("Retry Plan").props.onPress();
   assert.deepEqual(host.calls[1], { method: "advisor:retry", args: ["/project#7", "advisor:failed"] });
+});
+
+const linearIssue = {
+  key: "ENG-12",
+  title: "Fix login",
+  url: "https://linear.app/acme/issue/ENG-12",
+  branchName: "eng-12-fix-login",
+  state: { name: "In Progress", type: "started", color: "#f2c94c" },
+};
+
+test("a new Chat offers a Linear issue chip only while Linear is on and connected", () => {
+  const chip = (screen) => find(screen.render(), (node) => node.props?.accessibilityLabel === "Start from a Linear issue");
+  assert.ok(!chip(chatHost({ linear: { active: false } })), "off hides the chip");
+  assert.ok(chip(chatHost({ linear: { active: true } })), "on and connected shows it after the branch picker");
+});
+
+test("picking a Linear issue starts a Chat in its own worktree with the issue as the first message", async () => {
+  const { issueFirstMessage } = require("@milagre/shared/linear");
+  const screen = chatHost({
+    effects: true,
+    linear: { active: true },
+    call: async (method) => {
+      if (method === "project:branches") return ["main"];
+      if (method === "linear:issues") return { issues: [linearIssue] };
+      if (method === "worktree:create") return { worktreeId: 9, project: { state: { sessions: { 7: { id: 7, worktree_id: 9 } } } } };
+      return { sessionId: 7 };
+    },
+  });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: "main" } };
+  find(screen.render(), (node) => node.props?.accessibilityLabel === "Start from a Linear issue").props.onPress();
+  await settle();
+  // Objects built inside the Chat's vm realm: compare as JSON, not by prototype.
+  assert.equal(JSON.stringify(screen.calls.find((call) => call.method === "linear:issues").args), "[{}]");
+  const request = screen.choices.at(-1);
+  assert.equal(request.title, "Start from a Linear issue");
+  assert.equal(JSON.stringify(request.items), JSON.stringify([{ id: "ENG-12", title: "ENG-12 Fix login", subtitle: "In Progress" }]));
+  // The branch list lands after the sheet opened; the screen re-renders with it before the pick.
+  screen.render();
+  request.onSelect("ENG-12");
+  await settle();
+  const created = screen.calls.find((call) => call.method === "worktree:create").args[0];
+  assert.equal(created.issueKey, "ENG-12");
+  assert.equal(created.baseBranch, "main");
+  const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
+  assert.equal(sent.body, issueFirstMessage(linearIssue, "first message"));
+  assert.equal(screen.params.id, "7");
+});
+
+test("a Chat row shows its Worktree's Linear issue even without pull requests", () => {
+  const external = [];
+  const { ChatPullRequestChips } = load("chat-pull-request-chips.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Pressable: "Pressable", Text: "Text", View: "View" },
+    "expo-linking": { openURL: async (url) => external.push(url) },
+    "@hugeicons/core-free-icons": {},
+    "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "@milagre/shared/linear": require("@milagre/shared/linear"),
+    "./icons": { Icon: "Icon" },
+    "./ui": { PullDown: "PullDown", colors: { ink2: "ink2", green: "green", purple: "purple", red: "red", orange: "orange" } },
+  });
+  const tree = ChatPullRequestChips({ pullRequests: [], linearIssue });
+  const link = find(tree, (node) => node.props?.accessibilityLabel === "Open Linear issue ENG-12");
+  assert.ok(find(link, (node) => node.type === "Text" && node.props.children === "ENG-12 · In Progress"));
+  link.props.onPress({ stopPropagation() {} });
+  assert.deepEqual(external, [linearIssue.url]);
+  assert.equal(ChatPullRequestChips({ pullRequests: [] }), null, "no pull requests and no issue renders nothing");
+});
+
+/** A Chat on its own Worktree (path /p/wt), with the Linear issue picker answering with ENG-12. */
+function linkableChat({ linear = { active: true }, worktree = { path: "/p/wt", name: "feature" }, call, alert } = {}) {
+  const screen = chatHost({
+    effects: true,
+    linear,
+    alert,
+    call:
+      call ??
+      (async (method) => {
+        if (method === "project:branches") return ["main"];
+        if (method === "linear:issues") return { issues: [linearIssue] };
+        if (method === "worktree:link-issue") return { project: { state: {} }, mode: "stored", branch: worktree.name };
+        if (method === "worktree:unlink-issue") return { project: { state: {} } };
+        return {};
+      }),
+  });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, project_id: 1, ...worktree } };
+  screen.session.snapshot.project.state.sessions = { 7: { id: 7, worktree_id: 1, title: "Chat", archived: false, subagents: [] } };
+  screen.params.id = "7";
+  delete screen.params.worktreeId;
+  return screen;
+}
+const menuEntry = (screen, label) => find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === label);
+
+test("a Chat's own Worktree offers Link issue only while Linear is on", () => {
+  assert.ok(menuEntry(linkableChat({ linear: { active: true } }), "Link issue…"), "on shows Link");
+  assert.ok(!menuEntry(linkableChat({ linear: { active: false } }), "Link issue…"), "off hides Link");
+  assert.ok(!menuEntry(linkableChat({ worktree: { path: "/p", name: "main" } }), "Link issue…"), "the main checkout offers no Link");
+});
+
+test("picking a Linear issue links it to the Chat's Worktree and toasts the PR hint when stored", async () => {
+  const { LINK_PR_HINT } = require("@milagre/shared/linear");
+  const alerts = [];
+  const shown = [];
+  const screen = linkableChat({ alert: (...args) => shown.push(args) });
+  const originalCall = screen.session.client.call;
+  screen.session.client.call = (method, args) => {
+    if (method === "worktree:link-issue") alerts.push(["link", args]);
+    return originalCall(method, args);
+  };
+  menuEntry(screen, "Link issue…").props.onPress();
+  await settle();
+  const request = screen.choices.at(-1);
+  assert.equal(request.title, "Link a Linear issue");
+  request.onSelect("ENG-12");
+  await settle();
+  // Objects built inside the Chat's vm realm: compare as JSON, not by prototype.
+  assert.equal(JSON.stringify(alerts[0]), JSON.stringify(["link", [{ projectPath: "/p", worktreeId: 1, key: "ENG-12" }]]));
+  assert.equal(screen.calls.at(-1).method, "worktree:link-issue");
+  // The stored result toasts the PR hint, which names the key the branch doesn't; no alert to dismiss.
+  assert.equal(shown.length, 0, "no alert");
+  assert.ok(
+    find(screen.render(), (n) => n.type === "Text" && n.props.children === `Issue linked. ${LINK_PR_HINT("ENG-12")}`),
+    "the toast shows the hint",
+  );
+});
+
+test("a stored Linear issue is hidden everywhere while Linear is off", () => {
+  const { LINK_PR_HINT } = require("@milagre/shared/linear");
+  const screen = linkableChat({ linear: { active: false }, worktree: { path: "/p/wt", name: "feature", linearIssue: "ENG-12" } });
+  assert.ok(!menuEntry(screen, "Unlink issue"), "no Unlink");
+  assert.ok(!menuEntry(screen, LINK_PR_HINT("ENG-12")), "no hint");
+});
+
+test("a Worktree another Chat shares offers no Link, and Unlink uses the minus.circle symbol", () => {
+  const shared = linkableChat();
+  shared.session.snapshot.project.state.sessions[8] = { id: 8, worktree_id: 1, title: "Other", archived: false, subagents: [] };
+  assert.ok(!menuEntry(shared, "Link issue…"), "a shared Worktree offers no Link");
+  const stored = linkableChat({ worktree: { path: "/p/wt", name: "feature", linearIssue: "ENG-12" } });
+  assert.equal(menuEntry(stored, "Unlink issue").props.iconRenderingMode, "template", "Unlink shows Linear's mark, tinted like the SF Symbols");
+});
+
+test("a stored Linear issue shows Unlink, which calls worktree:unlink-issue, and the hint while the branch lacks the key", async () => {
+  const { LINK_PR_HINT } = require("@milagre/shared/linear");
+  const screen = linkableChat({ worktree: { path: "/p/wt", name: "feature", linearIssue: "ENG-12" } });
+  assert.ok(!menuEntry(screen, "Link issue…"), "a stored issue hides Link");
+  assert.ok(
+    find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === LINK_PR_HINT("ENG-12")),
+    "hint shows",
+  );
+  menuEntry(screen, "Unlink issue").props.onPress();
+  await settle();
+  const unlink = screen.calls.find((call) => call.method === "worktree:unlink-issue");
+  assert.equal(JSON.stringify(unlink.args), JSON.stringify([{ projectPath: "/p", worktreeId: 1 }]));
+});
+
+test("no PR hint when the branch already names the stored issue", () => {
+  const { LINK_PR_HINT } = require("@milagre/shared/linear");
+  const screen = linkableChat({ worktree: { path: "/p/wt", name: "eng-12-fix-login", linearIssue: "ENG-12" } });
+  assert.ok(!find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === LINK_PR_HINT("ENG-12")));
 });

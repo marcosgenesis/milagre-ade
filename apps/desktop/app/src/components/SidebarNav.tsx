@@ -226,8 +226,13 @@ function ScopeHeader({
         <span data-scope-name className={`min-w-0 flex-1 truncate text-[13px] ${current ? "font-medium text-ink" : "text-ink-2"}`}>
           {name}
         </span>
-        {attention && <AttentionDot />}
       </button>
+      {/* Rests at the right edge; slides left when hover reveals the actions it would sit under. */}
+      {attention && (
+        <AttentionDot
+          className={`pointer-events-none absolute right-3 transition-transform duration-150 ease-out ${menu.length > 0 ? "group-hover/scope:-translate-x-[52px] group-has-[:focus-visible]/scope:-translate-x-[52px]" : "group-hover/scope:-translate-x-[26px] group-has-[:focus-visible]/scope:-translate-x-[26px]"}`}
+        />
+      )}
       <div className="absolute right-1 flex items-center gap-0.5">
         {menu.length > 0 && <ScopeMenuButton name={name} items={menu} />}
         <Tooltip label="New chat" shortcut={current ? "⌘N" : undefined} align="end">
@@ -965,7 +970,11 @@ export default memo(function SidebarNav({
     everyProject ? [...projects.map((row) => row.path), ...remoteScopes.filter((scope) => !scope.link).map((scope) => scope.key)] : NO_PATHS,
   );
   const showAll = everyProject && !collapsed;
-  const scopeStates = useScopeStates(
+  const {
+    states: scopeStates,
+    failed: failedScopes,
+    retry: retryScope,
+  } = useScopeStates(
     showAll,
     scopes.filter((scope) => scope.key !== currentKey).map((scope) => scope.key),
   );
@@ -1380,12 +1389,32 @@ export default memo(function SidebarNav({
                         }
                         menu={scopeMenu(scope, current)}
                       />
-                      {open &&
-                        (rest.length > 0 ? (
-                          <ChatList recents={rest} {...list} hintOffset={pinned.length} header={null} />
-                        ) : pinned.length > 0 ? null : (
-                          <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state || current ? "No chats yet" : "Loading chats…"}</p>
-                        ))}
+                      {/* Rows grow open and shut instead of appearing at once; closed ones leave the tab order. */}
+                      <div
+                        inert={!open}
+                        data-scope-body
+                        className="grid transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
+                        style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}
+                      >
+                        <div className="min-w-0 overflow-hidden">
+                          {rest.length > 0 ? (
+                            <ChatList recents={rest} {...list} hintOffset={pinned.length} header={null} />
+                          ) : pinned.length > 0 ? null : !state && !current && failedScopes.has(scope.key) ? (
+                            <p className="mx-2 flex h-8 items-center gap-1 pl-9 text-[13px] text-ink-3">
+                              Couldn't load chats.
+                              <button
+                                type="button"
+                                onClick={() => retryScope(scope.key)}
+                                className="cursor-pointer text-ink-2 underline-offset-2 hover:underline"
+                              >
+                                Retry
+                              </button>
+                            </p>
+                          ) : (
+                            <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state || current ? "No chats yet" : "Loading chats…"}</p>
+                          )}
+                        </div>
+                      </div>
                     </section>
                   );
                 })}

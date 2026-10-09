@@ -20,7 +20,8 @@ export function ExperimentalSection() {
       if (!client) return;
       let live = true;
       Promise.all([client.call<{ enabled: boolean }>("linear:enabled:read", []), client.call<LinearStatus>("linear:status", [])]).then(
-        ([value, status]) => live && setLinear({ enabled: value.enabled, status }),
+        // An older Mac answers null for commands it lacks: no Linear card.
+        ([value, status]) => live && setLinear(value && status ? { enabled: value.enabled === true, status } : null),
         () => live && setLinear(null),
       );
       return () => {

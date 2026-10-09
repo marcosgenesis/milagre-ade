@@ -68,6 +68,7 @@ export default function Layout() {
                     <Stack.Screen name="notifications" options={{ title: "Notifications" }} />
                     <Stack.Screen name="usage" options={{ title: "Plan usage" }} />
                     <Stack.Screen name="skills" options={{ title: "Skills" }} />
+                    <Stack.Screen name="appearance" options={{ title: "Appearance" }} />
                     <Stack.Screen name="experimental" options={{ title: "Experimental" }} />
                     <Stack.Screen name="skill" options={{ title: "Skill" }} />
                     <Stack.Screen name="add-computer" options={{ ...sheet, sheetAllowedDetents: [1] }} />

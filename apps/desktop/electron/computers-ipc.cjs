@@ -44,9 +44,10 @@ function readOffline(cache, id, method, args) {
  *   cache?: any;
  *   send: (channel: string, payload: unknown) => void;
  *   onRemoteEvent?: (computerId: string, channel: string, payload: any) => void;
+ *   onForget?: (computerId: string) => void;
  * }} options
  */
-function registerComputers({ ipcMain, computers, thisMac, send, cache = null, onRemoteEvent = () => {} }) {
+function registerComputers({ ipcMain, computers, thisMac, send, cache = null, onRemoteEvent = () => {}, onForget = () => {} }) {
   // A cache that fails never fails a call, but it says so once per computer and kind of error.
   const warned = new Set();
   const warn = (computerId, error) => {
@@ -92,10 +93,16 @@ function registerComputers({ ipcMain, computers, thisMac, send, cache = null, on
   });
   ipcMain.handle("computers:remove", async (_event, id) => {
     await computers.remove(String(id));
+    onForget(String(id));
     await cache?.remove(String(id)).catch(() => {});
     return snapshot();
   });
-  ipcMain.handle("computers:set-enabled", (_event, on) => computers.setEnabled(on === true));
+  ipcMain.handle("computers:set-enabled", async (_event, on) => {
+    const ids = computers.list().map((item) => item.id);
+    await computers.setEnabled(on === true);
+    // Switched off, no computer reports any more: what it was waiting on must not keep the dock badge up.
+    if (on !== true) for (const id of ids) onForget(id);
+  });
   // One call on a computer: this Mac's own actions are refused, its id leaves the arguments, and what comes back names it.
   ipcMain.handle("computers:invoke", async (_event, id, channel, args) => {
     const computerId = String(id);

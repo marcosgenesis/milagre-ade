@@ -159,6 +159,7 @@ test("a damaged cache file is deleted so it rebuilds, warns once, and never fail
   const { createComputerCaches } = require("./computer-cache.cjs");
   const ID = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "computers-ipc-corrupt-"));
+  const seed = createComputerCaches({ dir });
   const cache = createComputerCaches({ dir });
   const warnings = [];
   const original = console.warn;
@@ -168,8 +169,8 @@ test("a damaged cache file is deleted so it rebuilds, warns once, and never fail
     cache.close();
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
-  cache.put(ID, "recent", "", [{ path: "/p", name: "p" }]);
-  cache.close();
+  seed.put(ID, "recent", "", [{ path: "/p", name: "p" }]);
+  seed.close();
   await fs.writeFile(path.join(dir, ID, "cache.sqlite"), Buffer.alloc(4096, 7));
   let state = "offline";
   const { call } = setup({ list: () => [{ ...studio, id: ID, state }], invoke: async () => [{ path: "/p", name: "p" }] }, { cache });

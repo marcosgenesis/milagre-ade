@@ -250,6 +250,7 @@ async function startDesktop() {
         notifier.notify({ ...payload, subtitle: labelFor(payload.subtitle, name) });
       }
     },
+    onForget: (id) => notifier.forgetComputer(id),
     thisMac: () => (thisMacName ??= computerName()),
     send: (channel, payload) => {
       for (const window of BrowserWindow.getAllWindows())

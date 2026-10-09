@@ -1,4 +1,5 @@
 const { isTurnEnd: isTerminal } = require("@milagre/shared/agent-runs");
+const { computerOfKey } = require("@milagre/shared/chat-scopes");
 
 const MAX_TITLE = 120;
 const MAX_BODY = 240;
@@ -181,6 +182,20 @@ class AttentionNotifier {
     const notification = this.open.get(key);
     this.open.delete(key);
     notification?.close();
+  }
+
+  /** A computer was removed or switched off: what it waited on, and its unread chats, leave the badge. */
+  forgetComputer(computerId) {
+    const mine = (chatId) => computerOfKey(chatId) === computerId;
+    for (const key of [...this.open.keys()]) if (mine(key.slice(0, key.lastIndexOf("\n")))) this.close(key);
+    for (const chatId of [...this.unread]) if (mine(chatId)) this.unread.delete(chatId);
+    for (const [chatId, notification] of [...this.completionNotifications]) {
+      if (!mine(chatId)) continue;
+      notification.close();
+      this.completionNotifications.delete(chatId);
+    }
+    for (const map of [this.completed, this.previews]) for (const chatId of [...map.keys()]) if (mine(chatId)) map.delete(chatId);
+    this.updateBadge();
   }
 
   closeAll() {

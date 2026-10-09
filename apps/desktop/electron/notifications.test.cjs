@@ -207,3 +207,20 @@ test("a remote chat's notification puts its computer before the subtitle", () =>
   assert.equal(labelFor(undefined, "studio"), "studio");
   assert.equal(labelFor("Fix login", null), "Fix login");
 });
+
+test("forgetComputer closes what a removed computer waited on and clears the badge", () => {
+  const badges = [];
+  const { notifier, shown } = setup();
+  notifier.setBadge = (badge) => badges.push(badge);
+  const remote = "c1|/shop#2";
+  notifier.observe(remote, question);
+  notifier.observe("/mine#1", question);
+  notifier.notify({ ...notice, chatId: remote });
+  notifier.unread.add("c1|/shop#3");
+  notifier.updateBadge();
+  assert.equal(badges.at(-1), "3");
+  notifier.forgetComputer("c1");
+  assert.equal(shown[0].closed, true);
+  assert.equal(badges.at(-1), "1");
+  assert.equal(notifier.open.size, 1);
+});

@@ -241,6 +241,45 @@ function listenHere(channel, callback) {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
+/** @type {Map<string, Set<(payload: any) => void>>} */
+const computerSubscribers = new Map();
+/** @type {Set<(event: any) => void>} */
+const anyComputerSubscribers = new Set();
+/** @param {unknown} _event @param {any} event */
+function dispatchComputerEvent(_event, event) {
+  for (const callback of [...anyComputerSubscribers]) callback(event);
+  const set = computerSubscribers.get(`${event?.computerId}|${event?.channel}`);
+  if (set) for (const callback of [...set]) callback(event.payload);
+}
+/** One ipcRenderer listener serves every computer subscription (many would pass EventEmitter's MaxListeners). */
+function syncComputerListener() {
+  const wanted = computerSubscribers.size > 0 || anyComputerSubscribers.size > 0;
+  ipcRenderer.removeListener("computers:event", dispatchComputerEvent);
+  if (wanted) ipcRenderer.on("computers:event", dispatchComputerEvent);
+}
+/** @param {string} id @param {string} channel @param {(payload: any) => void} callback */
+function listenComputer(id, channel, callback) {
+  const key = `${id}|${channel}`;
+  let set = computerSubscribers.get(key);
+  if (!set) computerSubscribers.set(key, (set = new Set()));
+  set.add(callback);
+  syncComputerListener();
+  return () => {
+    set.delete(callback);
+    if (!set.size && computerSubscribers.get(key) === set) computerSubscribers.delete(key);
+    syncComputerListener();
+  };
+}
+/** @param {(event: any) => void} callback */
+function listenAnyComputer(callback) {
+  anyComputerSubscribers.add(callback);
+  syncComputerListener();
+  return () => {
+    anyComputerSubscribers.delete(callback);
+    syncComputerListener();
+  };
+}
+
 /** This Mac's own IPC. */
 const local = makeBridge(
   (channel, ...args) => ipcRenderer.invoke(channel, ...args),
@@ -261,10 +300,7 @@ function remote(computerId) {
   if (!bridge) {
     bridge = makeBridge(
       (channel, ...args) => (isLocalOnly(channel) ? Promise.reject(new Error(NOT_REMOTE)) : ipcRenderer.invoke("computers:invoke", id, channel, args)),
-      (channel, callback) =>
-        listenHere("computers:event", (event) => {
-          if (event?.computerId === id && event.channel === channel) callback(event.payload);
-        }),
+      (channel, callback) => listenComputer(id, channel, callback),
       () => {},
     );
     remotes.set(id, bridge);
@@ -288,6 +324,6 @@ const bridge = {
   },
   onComputersChanged: (callback) => listenHere("computers:changed", callback),
   onComputerAddPending: (callback) => listenHere("computers:pending", () => callback()),
-  onComputerEvent: (callback) => listenHere("computers:event", callback),
+  onComputerEvent: (callback) => listenAnyComputer(callback),
 };
 contextBridge.exposeInMainWorld("milagre", bridge);

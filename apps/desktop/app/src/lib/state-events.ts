@@ -1,6 +1,7 @@
 import { applyStatePatch } from "@milagre/shared/state-patch";
 import { projectOfKey } from "@milagre/shared/agent-runs";
-import { scopeKey } from "@milagre/shared/chat-scopes";
+import { isLinkScopeKey, scopeKey } from "@milagre/shared/chat-scopes";
+import { bridgeForKey } from "./computer-bridge.ts";
 import type { StatePatch } from "@milagre/shared/state-patch";
 import type { AgentEvent, CoordinatorState, LinkState } from "../model.ts";
 import type { MessageChanges } from "../electron.d.ts";
@@ -67,7 +68,7 @@ async function readAgain(scope: string, first: Numbered) {
     for (let attempt = 0; attempt < 3; attempt++) {
       // A read that doesn't answer soon gives up: the events held back behind it (a turn streaming) must not wait on it.
       const read = await Promise.race([
-        window.milagre.readState(scope),
+        bridgeForKey(scope).readState(scope),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error("The state read took too long")), READ_TIMEOUT_MS)),
       ]);
       let current = { epoch: read.epoch, version: read.version, state: read.state as AnyState };
@@ -100,14 +101,14 @@ async function readAgain(scope: string, first: Numbered) {
 }
 
 function announce(scope: string, state: AnyState) {
-  if (scope.startsWith(linkPrefix)) for (const listener of linkListeners) listener({ linkId: scope.slice(linkPrefix.length), state: state as LinkState });
+  if (isLinkScopeKey(scope)) for (const listener of linkListeners) listener({ linkId: scope.slice(linkPrefix.length), state: state as LinkState });
   else for (const listener of projectListeners) listener({ path: scope, state: state as CoordinatorState });
 }
 
 function subscribe() {
   if (subscribed) return;
   subscribed = true;
-  window.milagre.onProjectState?.((update) => {
+  const project = (update: { path: string; state?: CoordinatorState } & Numbered) => {
     if (!numbered(update)) {
       held.delete(update.path);
       if (update.state) for (const listener of projectListeners) listener({ path: update.path, state: update.state });
@@ -115,8 +116,8 @@ function subscribe() {
     }
     const state = stateFor(update.path, update);
     if (state) for (const listener of projectListeners) listener({ path: update.path, state: state as CoordinatorState });
-  });
-  window.milagre.onLinkState?.((update) => {
+  };
+  const link = (update: { linkId: string; state?: LinkState } & Numbered) => {
     const scope = scopeKey({ kind: "link", linkId: update.linkId });
     if (!numbered(update)) {
       held.delete(scope);
@@ -125,8 +126,8 @@ function subscribe() {
     }
     const state = stateFor(scope, update);
     if (state) for (const listener of linkListeners) listener({ linkId: update.linkId, state: state as LinkState });
-  });
-  window.milagre.onAgentEvent?.((update) => {
+  };
+  const agent = (update: AgentEventUpdate & Numbered) => {
     const { patch: _patch, base: _base, version: _version, epoch: _epoch, resync: _resync, state: whole, ...event } = update;
     const scope = projectOfKey(update.chatId);
     // While its scope is read again, a chat's events wait their turn behind the ones held back.
@@ -145,6 +146,15 @@ function subscribe() {
       }
     } else if (scope && state) held.delete(scope);
     for (const listener of agentListeners) listener({ ...event, ...(state ? { state } : {}) });
+  };
+  window.milagre.onProjectState?.(project);
+  window.milagre.onLinkState?.(link);
+  window.milagre.onAgentEvent?.(agent);
+  // A paired computer's events arrive with keys that name it (computer-routing.cjs), so its scopes keep apart from this Mac's.
+  window.milagre.onComputerEvent?.((event) => {
+    if (event.channel === "project:state") project(event.payload);
+    else if (event.channel === "link:state") link(event.payload);
+    else if (event.channel === "agent:event") agent(event.payload);
   });
 }
 

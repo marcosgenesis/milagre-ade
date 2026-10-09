@@ -29,3 +29,16 @@ test("selecting another draft notifies subscribers", () => {
   store.set("text");
   assert.equal(calls, 2);
 });
+
+test("the same path on this Mac and on a paired computer keeps two drafts", () => {
+  const remote = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7|/p";
+  const store = createDraftStore(draftKey("/p", 1));
+  store.set("here");
+  store.select(draftKey(remote, 1));
+  assert.equal(store.get(), "");
+  store.set("there");
+  store.select(draftKey("/p", 1));
+  assert.equal(store.get(), "here");
+  store.select(draftKey(remote, 1));
+  assert.equal(store.get(), "there");
+});

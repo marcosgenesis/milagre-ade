@@ -1,3 +1,4 @@
+import { bridgeForKey } from "./computer-bridge.ts";
 import { useEffect, useState } from "react";
 import type { CoordinatorState, LinkState, OpenProject } from "@milagre/shared/model";
 import type { AgentRuns } from "@milagre/shared/agent-runs";
@@ -118,7 +119,8 @@ export function useScopeStates(enabled: boolean, keys: string[]) {
     for (const key of joined.split("\n")) {
       if (requestedKeys.has(key)) continue;
       requestedKeys.add(key);
-      const read = isLinkScopeKey(key) ? window.milagre.readLink(key.slice("milagre-link:".length)) : window.milagre.readProject(key);
+      const bridge = bridgeForKey(key);
+      const read = isLinkScopeKey(key) ? bridge.readLink(key.slice("milagre-link:".length)) : bridge.readProject(key);
       read.then(
         (opened) => {
           if (!opened.state?.sessions) return;

@@ -1,3 +1,4 @@
+import { bridgeForKey } from "./computer-bridge.ts";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type { ChatMessage } from "../model.ts";
 import type { MessageChanges } from "../electron.d.ts";
@@ -65,7 +66,7 @@ function load(scope: string, chatId: number) {
   const key = keyOf(scope, chatId);
   let loading = loads.get(key);
   if (!loading) {
-    loading = window.milagre
+    loading = bridgeForKey(scope)
       .readChatMessages(scope, chatId, { turns: TURNS })
       .then(
         (page) => set(key, { messages: page.messages, hasMore: page.hasMore, total: page.total, loading: false }),
@@ -85,7 +86,7 @@ async function loadEarlier(scope: string, chatId: number, turns = TURNS) {
   const key = keyOf(scope, chatId);
   const current = windows.get(key);
   if (!current?.hasMore || !current.messages.length) return;
-  const page = await window.milagre.readChatMessages(scope, chatId, { before: current.messages[0].id, turns });
+  const page = await bridgeForKey(scope).readChatMessages(scope, chatId, { before: current.messages[0].id, turns });
   const latest = windows.get(key) ?? current;
   const known = new Set(latest.messages.map((message) => message.id));
   set(key, { ...latest, messages: [...page.messages.filter((message) => !known.has(message.id)), ...latest.messages], hasMore: page.hasMore });

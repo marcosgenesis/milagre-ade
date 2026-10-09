@@ -1898,6 +1898,7 @@ test("searching the choice sheet filters full names and selection applies only a
     },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 20 }) },
     "@hugeicons/core-free-icons": {},
+    "../bottom-fade": { EdgeFade: "EdgeFade" },
     "../choice-store": choices,
     "../icons": { Icon: "Icon" },
     "../ui": { CircleButton: "CircleButton", Field: "Field", colors: {}, styles: {} },
@@ -1921,6 +1922,8 @@ test("searching the choice sheet filters full names and selection applies only a
   const row = list().props.renderItem({ item: list().props.data[0] });
   assert.equal(row.props.accessibilityLabel, longName);
   assert.equal(find(row, (node) => node.type === "Text").props.numberOfLines, undefined, "the full name can wrap");
+  assert.equal(find(row, (node) => node.type === "Text").props.style.fontFamily, undefined, "names use the body font");
+  assert.equal(find(render(), (node) => node.type === "EdgeFade").props.edge, "top", "rows blur under the title bar");
   field().props.onChangeText({ nativeEvent: { text: "missing" } });
   assert.equal(list().props.data.length, 0);
   assert.equal(list().props.ListEmptyComponent.props.children, "No branches found.");

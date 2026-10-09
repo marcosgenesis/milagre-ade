@@ -5097,6 +5097,8 @@ test("mobile Experimental page shows the Mac's Linear switch and status, re-read
     },
     "react-native": { View: "View", Text: "Text" },
     "expo-router": { useFocusEffect: (fn) => focused.push(fn) },
+    "@milagre/shared/themes": { DEFAULT_THEME_ID: "milagre-blue", seedsFrom: (id) => ({ from: id }) },
+    "./custom-theme-section": { CustomThemeSection: "CustomThemeSection" },
     "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
     "./ultracode-fatality-setting": { useUltracodeFatality: () => [false, () => {}] },
     "./session": { useSession: () => session },
@@ -5136,6 +5138,55 @@ test("mobile Experimental page shows the Mac's Linear switch and status, re-read
   );
   assert.equal(
     find(empty, (n) => n.props?.title === "Linear"),
+    undefined,
+  );
+});
+
+test("mobile Experimental Custom theme switch selects Custom on, Milagre Blue off, and shows the editor only while on", () => {
+  const react = hookHost();
+  const saved = [];
+  let settings = { colorTheme: "nord", customThemeEnabled: false, customTheme: null };
+  const { ExperimentalSection } = load("experimental-section.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/linear": { LINEAR_TITLE: "Linear", LINEAR_HINT: "hint", linearStatusLine: () => "" },
+    "@milagre/shared/themes": { DEFAULT_THEME_ID: "milagre-blue", seedsFrom: (id) => ({ from: id }) },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { useFocusEffect() {} },
+    "./custom-theme-section": { CustomThemeSection: "CustomThemeSection" },
+    "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
+    "./session": { useSession: () => ({ client: null }) },
+    "./theme": {
+      useTheme: () => ({
+        colors: fakePalette,
+        scheme: "dark",
+        settings,
+        set(patch) {
+          saved.push(patch);
+          settings = { ...settings, ...patch };
+        },
+      }),
+    },
+    "./ui": { ErrorNotice: "ErrorNotice", Toggle: "Toggle", styles: {} },
+  });
+  const render = () => {
+    react.begin();
+    return ExperimentalSection();
+  };
+  let tree = render();
+  assert.equal(
+    find(tree, (n) => n.type === "CustomThemeSection"),
+    undefined,
+  );
+  find(tree, (n) => n.props?.title === "Custom theme").props.onPress();
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.at(-1))), { customThemeEnabled: true, customTheme: { from: "nord" }, colorTheme: "custom" });
+  tree = render();
+  assert.ok(find(tree, (n) => n.type === "CustomThemeSection"));
+  find(tree, (n) => n.props?.title === "Custom theme").props.onPress();
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.at(-1))), { customThemeEnabled: false, colorTheme: "milagre-blue" });
+  assert.deepEqual(JSON.parse(JSON.stringify(settings.customTheme)), { from: "nord" }, "the seeds are kept");
+  assert.equal(
+    find(render(), (n) => n.type === "CustomThemeSection"),
     undefined,
   );
 });

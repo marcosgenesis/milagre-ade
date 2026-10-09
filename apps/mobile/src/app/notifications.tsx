@@ -72,37 +72,34 @@ export function NotificationsView() {
           disabled={activity.busy || !activity.available || !session.hosts.length}
           onPress={() => void activity.toggle()}
         />
-        <Text style={styles.muted}>Chat activity and short question choices on your Lock Screen and Dynamic Island.</Text>
         <View style={styles.separator} />
-        <Text style={styles.subtitle}>Show in Live Activities</Text>
-        <PullDown
-          label="Show in Live Activities"
-          title="Show in Live Activities"
-          sections={[
-            {
-              items: [
-                { id: "all", title: "Running agents and questions", checked: activity.mode === "all" },
-                { id: "questions", title: "Questions only", checked: activity.mode === "questions" },
-              ],
-            },
-          ]}
-          nativeTrigger={{
-            title: activity.mode === "questions" ? "Questions only" : "Running agents and questions",
-            systemImage: "list.bullet",
-            disabled: activity.busy,
-            maxWidth: 320,
-          }}
-          onSelect={(id) => {
-            if (id === "all" || id === "questions") void activity.changeMode(id);
-          }}
-        >
-          <Text style={styles.text}>{activity.mode === "questions" ? "Questions only" : "Running agents and questions"}</Text>
-        </PullDown>
-        <Text style={styles.muted}>
-          {activity.mode === "questions"
-            ? "Appears when a Chat needs your answer or approval. Hidden while agents are only running."
-            : "Shows running agents, then questions and approvals when a Chat needs you."}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={{ color: colors.ink, fontSize: 17, flex: 1 }}>Show in Live Activities</Text>
+          <PullDown
+            label="Show in Live Activities"
+            title="Show in Live Activities"
+            sections={[
+              {
+                items: [
+                  { id: "all", title: "Running agents and questions", checked: activity.mode === "all" },
+                  { id: "questions", title: "Questions only", checked: activity.mode === "questions" },
+                ],
+              },
+            ]}
+            nativeTrigger={{
+              title: activity.mode === "questions" ? "Questions only" : "Agents + questions",
+              systemImage: "list.bullet",
+              showIcon: false,
+              disabled: activity.busy,
+              maxWidth: 150,
+            }}
+            onSelect={(id) => {
+              if (id === "all" || id === "questions") void activity.changeMode(id);
+            }}
+          >
+            <Text style={styles.text}>{activity.mode === "questions" ? "Questions only" : "Running agents and questions"}</Text>
+          </PullDown>
+        </View>
         {!activity.available ? <Text style={styles.muted}>Live Activities are unavailable in this build or disabled in system settings.</Text> : null}
         {activity.error ? <ErrorNotice message={activity.error} /> : null}
       </View>

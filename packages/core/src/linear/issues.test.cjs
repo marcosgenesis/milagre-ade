@@ -53,6 +53,24 @@ test("with no query the list is the issues assigned to me, started or unstarted,
   assert.match(linear.calls[0].document, /type: \{ in: \["started", "unstarted"\] \}/);
 });
 
+test("the assigned list is kept for a minute, and fresh reads it again", async () => {
+  let clock = 0;
+  const linear = fakeLinear({ answer: () => ({ viewer: { assignedIssues: { nodes: [node("ENG-1")] } } }) });
+  const issues = createLinearIssues({ linear, now: () => clock });
+  await issues.list();
+  clock = 59_000;
+  assert.deepEqual(
+    (await issues.list()).issues.map((issue) => issue.key),
+    ["ENG-1"],
+  );
+  assert.equal(linear.calls.length, 1, "A reopen within the minute asks Linear nothing");
+  await issues.list(undefined, { fresh: true });
+  assert.equal(linear.calls.length, 2, "Refresh asks Linear again");
+  clock = 120_000;
+  await issues.list();
+  assert.equal(linear.calls.length, 3, "An old list is read again");
+});
+
 test("a search asks the workspace for 25 matches, and a key lookup comes first without duplicates", async () => {
   const linear = fakeLinear({
     answer: (document, variables) => {

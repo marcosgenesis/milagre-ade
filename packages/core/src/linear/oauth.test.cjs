@@ -34,6 +34,7 @@ test("the callback resolves the code and ignores other paths", async () => {
     assert.equal((await fetch(callback.redirectUri.replace("/linear/callback", "/favicon.ico"))).status, 404);
     const page = await fetch(`${callback.redirectUri}?code=abc&state=right`);
     assert.equal(page.status, 200);
+    assert.match(await page.text(), /<h1>Signed in to Linear<\/h1>/);
     assert.equal(await callback.code, "abc");
   } finally {
     await callback.close();

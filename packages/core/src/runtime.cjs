@@ -951,7 +951,7 @@ function createRuntime(options) {
   });
   // Issues are read through the same connection; both answer without throwing (see linear/issues.cjs).
   const linearIssues = createLinearIssues({ linear });
-  commands.handle("linear:issues", (_event, value) => linearIssues.list(value?.query));
+  commands.handle("linear:issues", (_event, value) => linearIssues.list(value?.query, { fresh: value?.fresh === true }));
   commands.handle("linear:worktree-issues", async (_event, projectPath) => {
     try {
       await environmentReady;

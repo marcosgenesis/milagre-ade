@@ -73,6 +73,11 @@ import { showChoiceSheet } from "../choice-store";
 
 const PAGE = 40;
 
+/** The choice sheet's rows for a list of Linear issues. */
+function issueChoices(issues: LinearIssue[]) {
+  return issues.map((issue) => ({ id: issue.key, title: `${issue.key} ${issue.title}`, subtitle: issue.state.name }));
+}
+
 export default function ChatScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -423,13 +428,20 @@ export default function ChatScreen() {
       setError(result.error);
       return;
     }
-    const issues = result.issues;
+    let issues = result.issues;
     showChoiceSheet({
       title,
       placeholder: "Search issues",
       emptyLabel: "No issues found.",
       leading: <LinearLogo size={18} tone="ink" />,
-      items: issues.map((issue) => ({ id: issue.key, title: `${issue.key} ${issue.title}`, subtitle: issue.state.name })),
+      items: issueChoices(issues),
+      // The Mac keeps the list for a minute; a pull reads it from Linear again.
+      refresh: async () => {
+        const next = await client.call<LinearIssuesResult>("linear:issues", [{ fresh: true }]);
+        if ("error" in next) throw new Error(next.error);
+        issues = next.issues;
+        return issueChoices(issues);
+      },
       onSelect: (key) => {
         const issue = issues.find((item) => item.key === key);
         if (issue) onPick(issue);

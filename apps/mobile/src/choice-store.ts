@@ -10,9 +10,12 @@ type ChoiceRequest = {
   items: ChoiceItem[];
   icon?: IconData;
   leading?: ReactElement;
+  /** Reads the items again; given, the sheet refreshes on pull and keeps its error for the empty state. */
+  refresh?: () => Promise<ChoiceItem[]>;
   onSelect: (id: string) => void;
 };
 type ChoiceRequestEntry = Omit<ChoiceRequest, "onSelect"> & { choose: (id: string | null) => void };
+export type { ChoiceItem };
 
 let current: ChoiceRequestEntry | null = null;
 let present: (() => void) | null = null;
@@ -24,16 +27,18 @@ export function currentChoice() {
   return current;
 }
 
-export function showChoiceSheet({ onSelect, ...request }: ChoiceRequest) {
+export function showChoiceSheet({ onSelect, refresh, ...request }: ChoiceRequest) {
   current?.choose(null);
   let done = false;
   const entry: ChoiceRequestEntry = {
     ...request,
+    // A refresh replaces the entry's items, so a pick from the new list is still checked against what was shown.
+    ...(refresh ? { refresh: async () => (entry.items = await refresh()) } : {}),
     choose(id) {
       if (done) return;
       done = true;
       if (current === entry) current = null;
-      if (id !== null && request.items.some((item) => item.id === id && !item.disabled)) onSelect(id);
+      if (id !== null && entry.items.some((item) => item.id === id && !item.disabled)) onSelect(id);
     },
   };
   current = entry;

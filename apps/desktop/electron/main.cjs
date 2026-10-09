@@ -213,8 +213,25 @@ async function startDesktop() {
     for (const method of runtime.methods) {
       if (registered.has(method)) continue;
       registered.add(method);
-      ipcMain.handle(method, (_event, ...args) => runtime.invoke(method, args));
+      ipcMain.handle(method, (event, ...args) => {
+        const answer = runtime.invoke(method, args);
+        if (method === "linear:connect")
+          void answer.then(
+            () => bringBack(event.sender),
+            () => {},
+          );
+        return answer;
+      });
     }
+  }
+  // A Linear sign-in ends in a browser tab that can't close itself, so the window that started it comes back to the front.
+  function bringBack(contents) {
+    const window = BrowserWindow.fromWebContents(contents);
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    if (process.platform === "darwin") app.focus({ steal: true });
+    window.focus();
   }
   registerHostMethods();
   ipcMain.handle("app:version", () => app.getVersion());

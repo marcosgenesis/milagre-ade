@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Stack, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GitBranchIcon, Tick02Icon } from "@hugeicons/core-free-icons";
@@ -19,6 +19,9 @@ export default function ChoiceSheet() {
   const styles = useStyles();
   const [entry] = useState(currentChoice);
   const [query, setQuery] = useState("");
+  const [allItems, setAllItems] = useState(() => entry?.items ?? []);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
   const chosen = useRef<string | null>(null);
   const closing = useRef(false);
   const insets = useSafeAreaInsets();
@@ -32,7 +35,21 @@ export default function ChoiceSheet() {
   }, [entry]);
   if (!entry) return null;
   const search = query.trim().toLowerCase();
-  const items = entry.items.filter((item) => item.title.toLowerCase().includes(search));
+  const refresh = entry.refresh;
+  const items = allItems.filter((item) => item.title.toLowerCase().includes(search));
+  const pullToRefresh = refresh
+    ? async () => {
+        setRefreshing(true);
+        try {
+          setAllItems(await refresh());
+          setRefreshError("");
+        } catch (error) {
+          setRefreshError(error instanceof Error ? error.message : String(error));
+        } finally {
+          setRefreshing(false);
+        }
+      }
+    : undefined;
   const close = (id: string | null) => {
     if (closing.current) return;
     closing.current = true;
@@ -48,12 +65,15 @@ export default function ChoiceSheet() {
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
+        refreshControl={pullToRefresh ? <RefreshControl refreshing={refreshing} onRefresh={() => void pullToRefresh()} tintColor={colors.ink3} /> : undefined}
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom, 16) }}
         ListHeaderComponent={
           <View style={{ paddingTop: 16, paddingBottom: 12 }}>
             <Text style={styles.caption}>
               {items.length} {items.length === 1 ? "result" : "results"}
+              {refresh ? " · Pull to refresh" : ""}
             </Text>
+            {refreshError ? <Text style={[styles.caption, { color: colors.error, marginTop: 4 }]}>{refreshError}</Text> : null}
           </View>
         }
         ItemSeparatorComponent={ChoiceSeparator}

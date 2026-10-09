@@ -19,9 +19,14 @@ const issues = [
 ];
 const linearOn = new URLSearchParams(location.search).get('linear') === 'on';
 window.__queries = [];
+window.__fresh = [];
+// While __hold is set, answers wait for window.__release(), so the loading state can be seen.
+window.__hold = new URLSearchParams(location.search).get('hold') === 'on';
 window.milagre = {
-  listLinearIssues: async (query) => {
+  listLinearIssues: async (query, options) => {
     window.__queries.push(query ?? null);
+    window.__fresh.push(options?.fresh === true);
+    if (window.__hold) await new Promise((resolve) => (window.__release = resolve));
     const search = (query ?? '').trim().toLowerCase();
     return { issues: issues.filter((issue) => !search || (issue.key + ' ' + issue.title).toLowerCase().includes(search)) };
   },
@@ -97,13 +102,24 @@ async function checks(url) {
       "no chip while Linear is off",
     );
     assert.equal(await evaluate(`!!document.querySelector('[data-linear-issue-chip]')`), false, "no row chip without an issue");
-    await window.loadURL(url + "?linear=on");
+    await window.loadURL(url + "?linear=on&hold=on");
     await waitFor(`!!document.querySelector('[data-new-chat-pickers]')`);
     await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Linear issue')`);
 
     // (a) Linear on: the chip opens the issue list, typing filters through listLinearIssues, picking starts the chat.
+    // Until the list arrives the panel shows skeleton rows at full height, not a "Loading" line it then grows out of.
     await click("Linear issue");
+    await waitFor(`!!document.querySelector('[data-linear-issue-skeleton]') && typeof window.__release === 'function'`);
+    assert.equal(await evaluate(`document.body.textContent.includes('No issues found.')`), false, "no empty label while loading");
+    await screenshot("linear-issue-loading");
+    await evaluate(`window.__hold = false; window.__release()`);
     await waitFor(`document.querySelectorAll('[data-linear-issue-row]').length === 2`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-linear-issue-skeleton]')`), false, "the skeleton goes once issues arrive");
+    assert.equal(await evaluate(`window.__fresh[0]`), false, "opening reads the list the Mac kept");
+    await evaluate(`document.querySelector('[data-linear-issues-refresh]').click()`);
+    await waitFor(`window.__fresh.length === 2`);
+    assert.equal(await evaluate(`window.__fresh[1]`), true, "refresh asks Linear again");
+    await waitFor(`!document.querySelector('[data-linear-issues-refresh]').disabled`);
     assert.equal(await evaluate(`!!document.querySelector('[data-linear-issue-row] [data-linear-logo]')`), true, "picker rows show Linear's mark");
     assert.equal(await evaluate(`document.body.textContent.includes('Start from a Linear issue')`), true, "the picker is titled");
     await screenshot("linear-issue-menu");

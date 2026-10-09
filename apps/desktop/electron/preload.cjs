@@ -126,7 +126,7 @@ function makeBridge(invoke, listen, send) {
     saveLinearEnabled: (value) => invoke("linear:enabled:save", value),
     onLinearStatusChanged: (callback) => listen("linear:status-changed", callback),
     onLinearEnabledChanged: (callback) => listen("linear:enabled-changed", callback),
-    listLinearIssues: (query) => invoke("linear:issues", { query }),
+    listLinearIssues: (query, options) => invoke("linear:issues", { query, fresh: options?.fresh === true }),
     readWorktreeLinearIssues: (projectPath) => invoke("linear:worktree-issues", projectPath),
     onWorktreeRenamed: (callback) => listen("worktree:renamed", callback),
     refreshDiffs: (projectPath, worktreeIds) => invoke("worktree:refresh-diffs", projectPath, worktreeIds),

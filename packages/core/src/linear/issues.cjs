@@ -39,6 +39,7 @@ function isNotFound(error) {
 function createLinearIssues({ linear, now = Date.now }) {
   const cache = new Map(); // key -> { at, issue }, the issue null when Linear has no such key
   let teams = null; // { at, keys }, the workspace's team keys in upper case
+  let assigned = null; // { at, account, issues }, the viewer's open issues the picker opens on
 
   // Why issues can't be read right now, or null when they can.
   function unavailable() {
@@ -105,14 +106,21 @@ function createLinearIssues({ linear, now = Date.now }) {
   }
 
   // The Chat list's picker: the issue picker shows the assigned issues, or the workspace matches for a query.
-  async function list(query) {
+  // The assigned list is kept for a minute so reopening the picker is instant; `fresh` (its refresh button) reads it again.
+  async function list(query, { fresh = false } = {}) {
     const unready = unavailable();
     if (unready) return unready;
     const text = typeof query === "string" ? query.trim() : "";
     try {
       if (!text) {
+        // Another sign-in is another account's issues.
+        const { viewer, organization } = linear.status();
+        const account = `${viewer?.email ?? ""} ${organization?.urlKey ?? ""}`;
+        if (!fresh && assigned?.account === account && now() - assigned.at < ISSUE_TTL_MS) return { issues: assigned.issues };
         const data = await linear.query(ASSIGNED);
-        return { issues: (data?.viewer?.assignedIssues?.nodes ?? []).map(toIssue) };
+        const issues = (data?.viewer?.assignedIssues?.nodes ?? []).map(toIssue);
+        assigned = { at: now(), account, issues };
+        return { issues };
       }
       const exact = isIssueKey(text) ? await fetchOne(text.toUpperCase()) : null;
       const data = await linear.query(SEARCH, { q: text });

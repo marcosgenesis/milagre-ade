@@ -92,6 +92,7 @@ import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
+import { useApplyOtherComputers } from "./lib/computers";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import { messageCommands, messageCommandsFrom } from "./lib/message-commands";
@@ -378,6 +379,7 @@ function App() {
     chat: GitChatContext;
   } | null>(null);
   useApplyTheme();
+  useApplyOtherComputers();
   useEffect(() => {
     const idle = window.requestIdleCallback ?? ((run: () => void) => window.setTimeout(run, 1000));
     idle(() => {

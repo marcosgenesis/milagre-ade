@@ -207,6 +207,12 @@ function ExperimentalSettings() {
       >
         <Switch label="Murilo mode" checked={settings.muriloMode} onChange={(muriloMode) => updateSettings({ muriloMode })} />
       </Row>
+      <Row
+        label="Other computers"
+        description="Drive the chats of other Macs running Milagre from this window. Add one from the laptop button at the bottom of the sidebar; their Projects join the sidebar."
+      >
+        <Switch label="Other computers" checked={settings.otherComputers} onChange={(otherComputers) => updateSettings({ otherComputers })} />
+      </Row>
       <LinearSettings />
     </Group>
   );

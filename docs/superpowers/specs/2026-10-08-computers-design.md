@@ -81,6 +81,7 @@ Behavior over the socket does not change; the existing daemon tests must pass un
 `policy` is checked in `dispatch` before the method chain. The socket gets none. Paired desktops get a deny set:
 
 - `phone:*` and `devices:*` (pairing and device management)
+- `linear:connect` and `linear:disconnect` (signing this Mac in to Linear, #338)
 - `push:*`
 - `daemon:stop`
 
@@ -127,8 +128,9 @@ a Cloudflare tunnel use the bearer token and are not listed. "Reset all" stays a
 
 - `fs:list-dirs({ path })`: folder names, whether each is a git repo and its branch, and whether it is already a
   Project. Starts at the home folder; refuses paths outside it. Feeds the remote folder picker.
-- `media:read({ path })`: the bytes of an image or file a chat references, limited to files the daemon already serves to
-  the phone (`attachment-preview.cjs` rules). Replaces `milagre-media://` for remote chats.
+- `media:read({ scope, path })`: the bytes of an image or file a chat references, limited to the files the daemon
+  already serves to the phone (`serveMedia` in `mobile-bridge.cjs`, moved to a shared `media-access.cjs`). The scope
+  names the Project or Link whose folders are allowed. Replaces `milagre-media://` for remote chats.
 
 ### Allowing a new computer
 
@@ -182,7 +184,7 @@ deletes its folder.
 ## Renderer
 
 - A chat's identity becomes `{ computerId, key }`. `local` is this Mac, and local keys are unchanged, so drafts,
-  pinned chats and settings keep their stored keys. Remote keys are stored as `${computerId}|${key}`.
+  pinned chats and settings keep their stored keys. Remote keys qualify the scope: `${computerId}|${path}#${id}` for a Project and `milagre-link:${computerId}|${linkId}#${id}` for a Link (the prefix stays first because renderer code slices it).
 - Central changes: `@milagre/shared/agent-runs` (key helpers take an optional computer), `state-events.ts` (one state
   per computer and scope), `sidebar-scopes.ts` (scopes from every computer, merged by Project name order), and
   `chat-messages.ts`, `draft-store.ts`. `App.tsx` reads the selected chat's computer and routes through it.
@@ -207,7 +209,8 @@ deletes its folder.
 ## Errors
 
 - A computer that stops answering: its dot turns amber ("Reconnecting…"), then grey ("Offline, seen 2h ago") after 30 s.
-  Its rows dim and read-only mode starts; queued sends are refused with "studio is offline".
+  Its rows dim and read-only mode starts; the composer is disabled and sends are refused with "studio is offline";
+  nothing is queued.
 - Removed on the other Mac: `hostAccept` refuses with `unknown-phone`; the computer shows "Removed on studio. Pair
   again with a new link." and its cache stays until removed here.
 - A pairing link past its 10 minutes: "This link expired. Copy a new one on studio."

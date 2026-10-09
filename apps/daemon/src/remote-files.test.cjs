@@ -75,3 +75,16 @@ test("a listing holds at most 500 entries", async (t) => {
   await Promise.all(Array.from({ length: 520 }, (_, index) => fs.mkdir(path.join(many, `d${index}`))));
   assert.equal((await listDirs({ path: many }, options)).entries.length, 500);
 });
+
+test("more than 500 folders: the first 500 by name are listed, flagged truncated", async (t) => {
+  const { homeDir, options } = await home(t);
+  const many = path.join(homeDir, "many");
+  await fs.mkdir(many);
+  for (let i = 0; i < 502; i++) await fs.mkdir(path.join(many, `d${String(i).padStart(3, "0")}`));
+  const listing = await listDirs({ path: many }, options);
+  assert.equal(listing.entries.length, 500);
+  assert.equal(listing.truncated, true);
+  assert.equal(listing.entries[0].name, "d000");
+  assert.equal(listing.entries.at(-1).name, "d499");
+  assert.equal((await listDirs(undefined, options)).truncated, undefined);
+});

@@ -58,6 +58,15 @@ export function AddProjectDialog({ onClose, onOpened }: { onClose: () => void; o
     if (!computer) setOn(THIS_MAC);
     else if (!reachable) reads.current++;
   }, [on, computer, reachable]);
+  // It came back after being away: the folder on screen is read again, since it may have changed (or the last read was cut off).
+  const wasReachable = useRef(reachable);
+  const folderOnScreen = useRef<string | undefined>(undefined);
+  folderOnScreen.current = listing?.path;
+  useEffect(() => {
+    const returned = reachable && !wasReachable.current;
+    wasReachable.current = reachable;
+    if (returned && on !== THIS_MAC) void browse(folderOnScreen.current);
+  }, [reachable]);
 
   async function chooseHere() {
     setError(null);
@@ -182,6 +191,11 @@ export function AddProjectDialog({ onClose, onOpened }: { onClose: () => void; o
                 </button>
               ))}
             </ScrollArea>
+            {listing?.truncated && (
+              <p data-add-project-truncated className="mt-1.5 text-[12px] text-ink-3">
+                Showing the first 500 folders.
+              </p>
+            )}
           </>
         )}
         {error && (

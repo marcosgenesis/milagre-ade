@@ -461,6 +461,8 @@ export type DirListing = {
   home: string;
   parent: string | null;
   entries: Array<{ name: string; path: string; git: boolean; branch: string | null; project: boolean }>;
+  /** The folder holds more subfolders than are listed (the first 500 by name). */
+  truncated?: boolean;
 };
 /** An image a chat shows, read from its computer (media:read). */
 export type MediaBytes = { type: string; size: number; base64: string };

@@ -29,7 +29,7 @@ async function checkoutOf(folder) {
  * One folder's subfolders, for a paired desktop's remote folder picker (spec "Remote-only helpers"): each one's name, real
  * path, whether it is a git checkout and its branch, and whether it is already a Project. Starts at `home`; a path
  * outside it is refused, checked as written and again after realpath, so a symlink can't lead out. Hidden folders and
- * files are left out; at most MAX_ENTRIES. `projectPaths()` gives the real paths of the Projects this Mac knows.
+ * files are left out; at most MAX_ENTRIES (the first by name, with `truncated: true` when more were cut). `projectPaths()` gives the real paths of the Projects this Mac knows.
  * @param {{ path?: unknown } | undefined} request
  * @param {{ home: string; projectPaths: () => Promise<string[]> }} options
  */
@@ -39,12 +39,13 @@ async function listDirs(request, { home, projectPaths }) {
   if (asked !== undefined && asked !== null && (typeof asked !== "string" || !path.isAbsolute(asked))) throw outside();
   const lexical = typeof asked === "string" ? path.resolve(asked) : realHome;
   if (!inside(realHome, lexical) && !inside(path.resolve(home), lexical)) throw outside();
-  const folder = await fs.realpath(lexical).catch(() => {
+  const folder = await fs.realpath(lexical).catch((error) => {
+    if (error?.code === "EACCES" || error?.code === "EPERM") throw Object.assign(new Error("Milagre can't open that folder on this Mac."), { code: "EACCES" });
     throw Object.assign(new Error("That folder is no longer there."), { code: "ENOENT" });
   });
   if (!inside(realHome, folder)) throw outside();
   const projects = new Set(await projectPaths().catch(() => []));
-  const entries = [];
+  const found = [];
   for (const entry of await fs.readdir(folder, { withFileTypes: true })) {
     if (entry.name.startsWith(".")) continue;
     let real = path.join(folder, entry.name);
@@ -52,11 +53,14 @@ async function listDirs(request, { home, projectPaths }) {
       real = await fs.realpath(real).catch(() => "");
       if (!real || !inside(realHome, real) || !(await fs.stat(real).catch(() => null))?.isDirectory()) continue;
     } else if (!entry.isDirectory()) continue;
-    entries.push({ name: entry.name, path: real, ...(await checkoutOf(real)), project: projects.has(real) });
-    if (entries.length >= MAX_ENTRIES) break;
+    found.push({ name: entry.name, path: real });
   }
-  entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-  return { path: folder, home: realHome, parent: folder === realHome ? null : path.dirname(folder), entries };
+  // Sorted before the cut, so the first MAX_ENTRIES by name are the ones shown; only those are looked into for git.
+  found.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  const truncated = found.length > MAX_ENTRIES;
+  const entries = [];
+  for (const item of found.slice(0, MAX_ENTRIES)) entries.push({ ...item, ...(await checkoutOf(item.path)), project: projects.has(item.path) });
+  return { path: folder, home: realHome, parent: folder === realHome ? null : path.dirname(folder), entries, ...(truncated ? { truncated: true } : {}) };
 }
 
 module.exports = { listDirs };

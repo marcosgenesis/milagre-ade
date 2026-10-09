@@ -300,6 +300,7 @@ const remotes = new Map();
  */
 function remote(computerId) {
   const id = String(computerId);
+  if (id === "local") return local;
   let bridge = remotes.get(id);
   if (!bridge) {
     bridge = makeBridge(
@@ -311,6 +312,12 @@ function remote(computerId) {
   }
   return bridge;
 }
+
+// A forgotten computer's bridge goes with it, so pairing it again starts clean.
+ipcRenderer.on("computers:changed", (_event, snapshot) => {
+  const known = new Set((snapshot?.computers ?? []).map((/** @type {{ id: string }} */ computer) => computer.id));
+  for (const id of [...remotes.keys()]) if (!known.has(id)) remotes.delete(id);
+});
 
 /** @type {Window["milagre"]} */
 const bridge = {

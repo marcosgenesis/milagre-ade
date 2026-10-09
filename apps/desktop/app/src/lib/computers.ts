@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { ComputersSnapshot, ComputerView } from "../electron.d.ts";
-import { getSettings, useSettings } from "./settings.ts";
+import { useSettings } from "./settings.ts";
 
 /**
  * Tells main whether to connect the saved computers: at launch, and each time Settings › Experimental › Other computers
@@ -115,9 +115,3 @@ export function useComputers(): ComputersSnapshot {
   const current = useSyncExternalStore(subscribe, () => snapshot);
   return otherComputers ? current : current === snapshot ? off : { thisMac: current.thisMac, computers: [] };
 }
-/** The same outside React. */
-export function getComputers(): ComputersSnapshot {
-  start();
-  return getSettings().otherComputers ? snapshot : off;
-}
-export const computerById = (id: string) => getComputers().computers.find((computer) => computer.id === id);

@@ -59,7 +59,7 @@ import { showChoiceSheet } from "./choice-store";
 import { NativePickerIcon, type NativePickerIconName } from "./native-picker-icon";
 import { Icon, type IconData, type Tone } from "./icons";
 
-export const makeStyles = (colors: Palette) =>
+const makeStyles = (colors: Palette) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.page },
     content: { padding: 20, gap: 20, paddingBottom: 36 },

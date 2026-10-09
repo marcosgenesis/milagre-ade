@@ -16,7 +16,7 @@ Follows #375, which makes added Claude and Codex accounts inherit the connected 
 | --- | --- |
 | Source of truth | Both. The CLI configs (`~/.claude.json`, `~/.codex/config.toml`) stay the source for each provider, and the tab edits them. A Milagre-owned "Everywhere" list adds a server to every provider that lacks it, Antigravity included. |
 | Status | Checked live when the tab opens, with Refresh. Not saved between sessions. |
-| OAuth | Handed off to each CLI. Codex: `codex mcp login <name>`. Claude: a Milagre terminal tab running `claude` with `/mcp` typed. Milagre stores no MCP tokens. |
+| OAuth | Handed off to each CLI. Codex: its app-server's `mcpServer/oauth/login`. Claude: a Milagre terminal tab running `claude` with `/mcp` typed. Milagre stores no MCP tokens. |
 | Edit scope | User level, per provider, written to the default account's config. #375 carries it to added accounts. Project servers (`.mcp.json`, `projects[path].mcpServers`) are read-only. |
 | Deletions reach added accounts | Yes. #375 is extended to remove servers it copied once they leave the source. |
 | Turning a server off | Milagre's off list, per provider and account, applied when a Chat starts (Claude has no user-level switch). The terminal CLIs are unaffected. |
@@ -44,7 +44,8 @@ A new tab between Skills and Devices. It shows the Mac selected in the Settings 
   account: `Claude · personal ✓`, `Claude · rdplus ⚠ sign in`, `Codex ✗ failed`, `Antigravity –`. A chip's tooltip
   holds the error text and the tool count.
 - Row actions: Edit, Remove, an on/off switch per chip, Sign in on a `needs sign-in` chip, and Everywhere.
-- A collapsed "From projects" section lists project servers read-only, each with its file path.
+- A collapsed "From projects and plugins" section lists project, local, plugin and claude.ai servers read-only, with
+  their source.
 - Add server opens a sheet: name, command or URL, command with args and env (or URL with headers), and checkboxes for
   Claude, Codex and Everywhere. Saving runs the writes, then re-checks that server.
 - Opening the tab starts a check. Chips show a spinner until their account reports. Refresh runs it again.
@@ -59,22 +60,24 @@ the Mac".
 
 ### Adapters
 
-One file per provider, each exporting `list(account)`, `check(account)`, `add(account, server)`,
+One file per provider, each exporting `check(account)`, `add(account, server)`,
 `remove(account, name)` and `signIn(account, name)`. Every subprocess runs with `accounts.environment(account)`, so it
 reads and writes that account's config folder.
 
 - `claude.cjs`
-  - `list`: reads `mcpServers` and `projects[path].mcpServers` from the account's `.claude.json`, plus each open
-    Project's `.mcp.json`. Read only.
-  - `check`: a short SDK query in the account's environment. Waits for `init`, calls `mcpServerStatus()`, closes the
-    query. Maps `connected`, `failed`, `needs-auth`, `pending`, `disabled` to chip states.
+  - `check`: an idle SDK query in the account's environment (the `listClaudeModels` pattern in `agents/models.cjs`).
+    Polls `mcpServerStatus()` until no server is `pending`, then closes the query. One call lists every server the
+    account loads, with `scope` (`user`, `local`, `project`, `dynamic` for plugins, `claudeai` for claude.ai
+    connectors), `status`, `error`, `tools` and `config.type`. Measured 2026-10-09: 24 servers settled in 2.3 s.
+    No config file is parsed.
   - `add`: `claude mcp add-json <name> <json> --scope user`. `remove`: `claude mcp remove <name> --scope user`.
   - `signIn`: returns a terminal request (below); the desktop opens it.
 - `codex.cjs`
-  - `list` and `check`: start an app-server with the account's `CODEX_HOME`, call `config/read` for `mcp_servers`,
-    start a throwaway thread and collect the MCP startup notifications (`events.cjs` ignores them today), then stop.
+  - `check`: an app-server with the account's `CODEX_HOME` (the `listCodexModels` pattern), `config/read` for each
+    server's transport, then `mcpServerStatus/list` with `detail: "toolsAndAuthOnly"`, which connects every server
+    without a thread and returns `tools`, `toolsError` and `authStatus`. Measured 2026-10-09: 12 servers in 1.6 s.
   - `add`: `codex mcp add`. `remove`: `codex mcp remove`.
-  - `signIn`: runs `codex mcp login <name>`, which opens the browser.
+  - `signIn`: the app-server's `mcpServer/oauth/login` request, which opens the browser.
 - `antigravity.cjs`
   - No user MCP config of its own: `list` returns the Everywhere servers. `check` starts an ACP `session/new` with them
     and reads which connected.
@@ -94,10 +97,12 @@ reads and writes that account's config folder.
 
 `index.cjs`:
 
-- `snapshot()` merges every adapter's `list` into rows grouped by server name, each with its chips, and marks an
-  Everywhere server "shadowed" for a provider whose config has a server with the same name.
-- `check()` runs every account's `check` in parallel, 30 s cap per account. A server that hasn't reported by then is
-  `failed (timeout)`. Results stream as events so chips fill in as accounts finish.
+- Rows are grouped by server name in `@milagre/shared/mcp` (`groupMcpRows`), shared by desktop and phone. A row whose
+  chips are all outside `user` scope goes under "From projects and plugins", read-only. PR 3 marks an Everywhere
+  server "shadowed" for a provider whose config has one with the same name.
+- `accounts()` lists every provider and account to check. `check(provider, accountId)` checks one, with a 30 s cap;
+  a server still pending then is `failed (timeout)`. The tab calls `check` for every account in parallel, so chips
+  fill in as each account answers, without an event stream.
 - `forSession(provider, account)` returns the Everywhere servers missing from that account's config and its off list.
 
 ### #375 deletion fix
@@ -116,14 +121,13 @@ name no longer in the source is removed from the account. Servers the account ad
 
 ## Commands
 
-In `runtime.cjs`: `mcp:snapshot`, `mcp:check`, `mcp:add`, `mcp:remove`, `mcp:toggle`, `mcp:everywhere`, `mcp:signIn`.
-`mcp:check` emits `mcp:status` events per account as results arrive.
+In `runtime.cjs`: `mcp:accounts`, `mcp:check`, `mcp:add`, `mcp:remove`, `mcp:toggle`, `mcp:everywhere`, `mcp:signIn`.
 
 - Desktop: called through the computer bridge, so they reach the selected Mac. Not added to the local-only lists in
   `preload.cjs` or `computer-routing.cjs`.
 - Daemon: `peer-policy.cjs` and `mobile-bridge.cjs` `METHODS` allow all but `mcp:signIn`. From a phone or peer,
   `mcp:add` or an edit with a command server returns `NOT_AVAILABLE_REMOTELY`. The phone gets a push signal when a
-  check finishes.
+  server is added, removed or toggled (PR 2).
 
 ### Claude sign-in
 
@@ -157,11 +161,11 @@ the tab closes, that account is re-checked.
 
 Each PR ships desktop and phone together. All JS, so the phone gets each as an OTA update.
 
-1. **Read only.** Adapters' `list` and `check`, `mcp:snapshot`, `mcp:check`, the tab with chips and Refresh, the phone
+1. **Read only.** Adapters' `check`, `mcp:accounts`, `mcp:check`, the tab with chips and Refresh, the phone
    screen, the GLOSSARY entry.
 2. **Edit.** Add, remove and on/off through the CLIs; the off list at Chat start; phone and peer rules; the #375
    deletion fix.
-3. **Everywhere and sign-in.** `mcp.json`, injection on all three providers, Antigravity chips, `codex mcp login`, the
+3. **Everywhere and sign-in.** `mcp.json`, injection on all three providers, Antigravity chips, Codex `mcpServer/oauth/login`, the
    Claude `/mcp` terminal hand-off.
 
 ## Out of scope

@@ -98,6 +98,9 @@ async function connectPeer({
     /** @type {(method: string, args?: unknown[]) => Promise<any>} */
     call: async () => undefined,
     close: () => {},
+    /** @type {(beforeClose?: () => void) => void} */
+    closeWhenIdle: () => {},
+    keepOpen: () => {},
   });
   const pending = new Map();
   const reader = createFrameReader("evt");
@@ -109,6 +112,22 @@ async function connectPeer({
   let answered = false;
   /** @type {Error | null} */
   let failure = null;
+  // Paged replies being read (readPages): a call whose answer is still arriving page by page.
+  let paging = 0;
+  /** @type {(() => void) | null} */
+  let whenIdle = null;
+  /** Runs a pending closeWhenIdle once nothing is in flight. */
+  function closeIfIdle() {
+    if (!whenIdle || client.closed || pending.size > 0 || paging > 0) return;
+    const before = whenIdle;
+    whenIdle = null;
+    try {
+      before();
+    } catch {
+      /* the caller's bug must not keep the channel open */
+    }
+    client.close();
+  }
   let handshake, silence, ping, allowDeadline;
   /** @type {{ resolve: (value: unknown) => void; reject: (error: Error) => void } | null} */
   let settle = null;
@@ -182,20 +201,27 @@ async function connectPeer({
     if (frame.error) request.reject(Object.assign(new Error(frame.error.message), { code: frame.error.code }));
     else if (frame.pages) request.resolve(readPages(frame.pages));
     else request.resolve(frame.result);
+    closeIfIdle();
   }
   // A response too large for one frame (a big Project's state) arrives as pages, read one at a time in order.
   async function readPages({ pageId, pageCount }) {
-    if (!Number.isSafeInteger(pageCount) || pageCount < 1 || pageCount > MAX_PAGES) throw new Error("The daemon sent an invalid paged response");
-    const parts = [];
-    let chars = 0;
-    for (let index = 0; index < pageCount; index++) {
-      const part = await client.call("daemon:result-page", [pageId, index]);
-      if (typeof part !== "string") throw new Error("The daemon sent an invalid paged response");
-      chars += part.length;
-      if (chars > maxPagedChars) throw new Error("The daemon's paged response is too large");
-      parts.push(part);
+    paging++;
+    try {
+      if (!Number.isSafeInteger(pageCount) || pageCount < 1 || pageCount > MAX_PAGES) throw new Error("The daemon sent an invalid paged response");
+      const parts = [];
+      let chars = 0;
+      for (let index = 0; index < pageCount; index++) {
+        const part = await client.call("daemon:result-page", [pageId, index]);
+        if (typeof part !== "string") throw new Error("The daemon sent an invalid paged response");
+        chars += part.length;
+        if (chars > maxPagedChars) throw new Error("The daemon's paged response is too large");
+        parts.push(part);
+      }
+      return JSON.parse(parts.join(""));
+    } finally {
+      paging--;
+      closeIfIdle();
     }
-    return JSON.parse(parts.join(""));
   }
 
   socket.onopen = () => {
@@ -265,6 +291,7 @@ async function connectPeer({
         () => {
           pending.delete(id);
           reject(new Error(`Timed out: ${method}. It may still be running; do not retry a mutation without checking state.`));
+          closeIfIdle();
         },
         deadlineFor(method, timeoutMs),
       );
@@ -272,6 +299,15 @@ async function connectPeer({
       for (const text of texts) send(channel.sealEncoded(text));
     });
   client.close = () => end(new PeerError("lost"));
+  /** Closes once no call waits for its answer (`beforeClose` runs just before), or now when none does. */
+  client.closeWhenIdle = (beforeClose = () => {}) => {
+    whenIdle = beforeClose;
+    closeIfIdle();
+  };
+  /** Takes back a closeWhenIdle that hasn't closed yet. */
+  client.keepOpen = () => {
+    whenIdle = null;
+  };
 
   await opened;
   let status;

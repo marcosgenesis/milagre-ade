@@ -584,3 +584,32 @@ test("a computer whose calls fail after its channel opens is dialed less and les
   mac.failing = null;
   await until(() => state() === "online", "online again", 3000);
 });
+
+test("a call already on the relay when the LAN opens finishes there, and the runtime moves once it is answered", async (t) => {
+  const mac = fakeMac({ lan: [LAN] });
+  // The relay holds one answer back; the LAN address doesn't answer its probe until the test says so.
+  mac.hold = (socket, frame) => !socket.url.startsWith(LAN) && frame.method === "project:recent";
+  let lanAnswers = false;
+  const { computers, changes, state } = await paired(t, mac, {
+    checkEveryMs: 20,
+    fetch: async () => ({ ok: lanAnswers, json: async () => ({ v: 1, hostId: HOST }) }),
+  });
+  await computers.add(macLink(mac), { name: "studio" });
+  await computers.setEnabled(true);
+  await until(() => state() === "online", "online");
+  const id = computers.list()[0].id;
+  const slow = computers.invoke(id, "project:recent", ["slow"]);
+  await until(() => mac.held.length === 1, "the call to wait on the relay");
+  lanAnswers = true;
+  await until(() => mac.urls.some((url) => url.startsWith(LAN)), "the LAN channel to open");
+  await delay(60);
+  assert.equal(computers.list()[0].route, "relay", "no move while a call waits on the relay");
+  mac.hold = null;
+  mac.release();
+  assert.deepEqual(await slow, { echo: ["slow"] });
+  await until(() => computers.list()[0].route === "lan", "on the LAN once the relay is free");
+  assert.equal(
+    changes.some((list) => list[0]?.state === "reconnecting"),
+    false,
+  );
+});

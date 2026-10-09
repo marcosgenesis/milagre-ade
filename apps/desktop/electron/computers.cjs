@@ -217,18 +217,26 @@ function createComputers({
       openLan: (endpoint, _lan, onLost) => openLan(entry, endpoint, onLost),
       now,
     });
-    // A LAN route that opens while the runtime is on the relay: closing the relay channel makes the runtime reconnect,
-    // and its connect takes the LAN one. Its brief disconnect is a switch, not an outage: `down` lets the first
-    // disconnect after it go by, and a call made meanwhile (invoke) waits for `recovery`.
+    // A LAN route that opens while the runtime is on the relay: the relay channel closes once no call waits on it (calls
+    // already there finish there), and the runtime's reconnect then takes the LAN channel. Its brief disconnect is a
+    // switch, not an outage: `down` lets the first disconnect after it go by, and a call made meanwhile (invoke) waits
+    // for `recovery`. A LAN route lost before the relay was free leaves the runtime where it is.
     entry.supervisor.subscribe((route) => {
-      if (route.kind !== "lan" || entry.route !== "relay" || !entry.client || route.transport.used) return;
-      entry.switching = true;
-      if (!entry.recovery) {
-        let done;
-        const promise = new Promise((resolve) => (done = resolve));
-        entry.recovery = { promise, done };
+      const client = entry.client;
+      if (!client || entry.route !== "relay") return;
+      if (route.kind !== "lan") {
+        client.keepOpen?.();
+        return;
       }
-      entry.client.close();
+      if (route.transport.used) return;
+      client.closeWhenIdle(() => {
+        entry.switching = true;
+        if (!entry.recovery) {
+          let done;
+          const promise = new Promise((resolve) => (done = resolve));
+          entry.recovery = { promise, done };
+        }
+      });
     });
     entries.set(id, entry);
     return entry;

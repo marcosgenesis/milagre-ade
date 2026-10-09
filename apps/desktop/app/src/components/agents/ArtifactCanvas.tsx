@@ -4,6 +4,7 @@ import { ArrowLeft01Icon, ArrowRight01Icon, CheckmarkCircle02Icon } from "@hugei
 import { ARTIFACT_CSP, ARTIFACT_ESCAPE, artifactDocument, type Artifact } from "@milagre/shared/artifact";
 import type { ArtifactRef } from "../../model";
 import Tooltip from "../primitives/Tooltip";
+import { bridgeForKey } from "../../lib/computer-bridge";
 
 /** A comment the user pinned on a design and hasn't sent yet. */
 export type DesignPin = { key: string; design: ArtifactRef; x: number; y: number; text: string; resolved?: string };
@@ -17,6 +18,8 @@ export type PinControls = {
   onOpen: (key: string | null) => void;
   onText: (key: string, text: string) => void;
   onRemove: (key: string) => void;
+  /** Sends every comment waiting and the chosen design, as the Send button does. */
+  onSend: () => void;
 };
 /** The design the user chose and sent, the one chosen but not sent yet, and what toggles it. */
 export type ChoiceControls = {
@@ -28,6 +31,7 @@ export type CanvasView = { x: number; y: number; scale: number };
 export type CanvasHandle = { zoomBy: (factor: number) => void; fitAll: () => void };
 
 const GAP = 80;
+const SEND_KEYS = /Mac/.test(navigator.userAgent) ? "⌘Enter" : "Ctrl+Enter";
 // The title row above each frame, in screen pixels.
 const HEADER = 32;
 const MIN_SCALE = 0.05;
@@ -40,11 +44,11 @@ const versionsRead = new Map<string, Promise<Artifact>>();
 const versionsKept = new Map<string, Artifact>();
 const KEEP = 48;
 function readArtifact(chatId: string, id: string, version: number | null): Promise<Artifact> {
-  if (version === null) return window.milagre.artifacts.get({ chatId, id });
+  if (version === null) return bridgeForKey(chatId).artifacts.get({ chatId, id });
   const key = `${chatId}\n${id}\n${version}`;
   let read = versionsRead.get(key);
   if (!read) {
-    read = window.milagre.artifacts.get({ chatId, id, version });
+    read = bridgeForKey(chatId).artifacts.get({ chatId, id, version });
     versionsRead.set(key, read);
     read.then(
       (artifact) => {
@@ -466,8 +470,8 @@ const DesignFrame = memo(function DesignFrame({
 
 /**
  * A pinned comment, Figma-like: the pin marks the spot, and its bubble beside it holds the comment. Enter or a click
- * elsewhere closes the bubble, keeping the comment for Send; one closed empty is removed. Both stay the same size on
- * screen however far the canvas zooms.
+ * elsewhere closes the bubble, keeping the comment for Send; ⌘Enter sends it right away with the rest of the
+ * feedback; one closed empty is removed. Both stay the same size on screen however far the canvas zooms.
  */
 function CommentPin({
   pin,
@@ -545,7 +549,11 @@ function CommentPin({
                 placeholder="Add a comment"
                 onChange={(event) => comments.onText(pin.key, event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
+                    if (pin.text.trim()) comments.onSend();
+                    else close();
+                  } else if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     close();
                   } else if (event.key === "Escape") {
@@ -560,7 +568,7 @@ function CommentPin({
                 <button type="button" onClick={() => comments.onRemove(pin.key)} className="rounded px-1 py-0.5 hover:bg-hover hover:text-ink">
                   Delete
                 </button>
-                <span>Enter to keep · sent with Send</span>
+                <span>Enter to keep · {SEND_KEYS} to send</span>
               </div>
             </>
           )}

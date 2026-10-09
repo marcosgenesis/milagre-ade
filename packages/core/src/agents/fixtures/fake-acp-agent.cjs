@@ -10,8 +10,9 @@
 //   plan             a plan with three entries
 //   json             a fenced JSON object naming the session's model, cwd and mcpServers (text generation)
 //   json-permission  a command asks first; the JSON object names the option picked
-//   slow             the prompt waits for session/cancel, then ends "cancelled"
+//   slow             the prompt waits for session/cancel, then ends "cancelled"; fake/finish ends it "end_turn"
 //   stubborn         the prompt never ends and session/cancel is ignored
+//   stubborn-command as stubborn, with a command running in a process group of its own (fake/received names its pid)
 //   crash            the agent logs an error and exits during the prompt
 //   logged-out       session/new fails with -32000 Authentication required
 //   prompt-login     session/prompt fails with -32000
@@ -30,6 +31,7 @@ let mode = "default";
 let promptWaiter = null;
 let waiting = null;
 let nextServerId = 0;
+let commandPid = null;
 let sessionCwd = null;
 let sessionMcp = null;
 
@@ -183,6 +185,10 @@ async function runPrompt(id, sessionId) {
       return end();
     case "slow":
     case "stubborn":
+    case "stubborn-command":
+      // Antigravity's harness runs each command in a group of its own, outside the agent's.
+      if (scenario === "stubborn-command")
+        commandPid = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" }).pid;
       text(sessionId, "Working");
       promptWaiter = { id, sessionId };
       return undefined;
@@ -262,8 +268,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         promptWaiter = null;
       }
       return undefined;
+    case "fake/finish":
+      if (promptWaiter) send({ id: promptWaiter.id, result: { stopReason: "end_turn" } });
+      promptWaiter = null;
+      return send({ id, result: {} });
     case "fake/received":
-      return send({ id, result: { received, sessions, model, mode } });
+      return send({ id, result: { received, sessions, model, mode, commandPid } });
     default:
       if (id !== undefined) send({ id, error: { code: -32601, message: `unknown method ${method}` } });
       return undefined;

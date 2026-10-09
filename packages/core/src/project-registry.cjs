@@ -3,7 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { resolveProject } = require("./project-identity.cjs");
 const { createLink, pruneLinks } = require("./project-links.cjs");
-const { createProjectGroup, validProjectGroup } = require("./project-groups.cjs");
+const { createProjectGroup, updateProjectGroup, validProjectGroup } = require("./project-groups.cjs");
 
 const DEFAULT_ROOTS = [path.join(os.homedir(), "Developer"), path.join(os.homedir(), ".milagre", "worktrees")];
 const SKIP = new Set([".git", "node_modules", ".next", ".cache"]);
@@ -118,6 +118,16 @@ function createProjectRegistry(file, { roots = DEFAULT_ROOTS, now = () => new Da
         return data;
       });
       return created;
+    },
+    updateProjectGroup: async (request) => {
+      let updated;
+      await update(async (data) => {
+        data.projectGroups ??= [];
+        updated = updateProjectGroup(data.projectGroups, data.projects, request);
+        data.projectGroups = data.projectGroups.map((group) => (group.id === updated.id ? updated : group));
+        return data;
+      });
+      return updated;
     },
     // Called when the canvas first needs the registry. The marker is persisted even if the scan finds nothing.
     list: () =>

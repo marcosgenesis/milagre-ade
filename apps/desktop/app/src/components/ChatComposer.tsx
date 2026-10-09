@@ -1,8 +1,12 @@
 import { providerName } from "@milagre/shared/providers";
 import { SubagentTrack } from "./agents/SubagentTrack";
+import { UpdatePillSlot } from "./UpdateNotice";
 import { BrowserTrack } from "./agents/BrowserTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
+import { AnswerCard } from "./agents/AnswerCard";
+import { PullRequestActionCard } from "./agents/PullRequestActionCard";
+import { isPullRequestAction } from "@milagre/shared/pr-action";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
 import { useEvent } from "../lib/stable";
@@ -13,6 +17,8 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { ComponentProps, DragEvent, ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, LaptopIcon } from "@hugeicons/core-free-icons";
+import { LinearLogo } from "./ProviderLogo";
+import type { LinearIssue } from "@milagre/shared/linear";
 import type {
   AgentCliStatus,
   EffortLevel,
@@ -30,6 +36,7 @@ import { Attachments } from "./Attachments";
 import type { ImageDraft } from "./usePastedImages";
 import { PromptComposer } from "./PromptComposer";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
+import { LinearIssuePicker } from "./LinearIssuePicker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { HandoffDivider } from "./Handover";
@@ -147,10 +154,14 @@ const MessageSection = memo(function MessageSection({
   if (isHandoff(message)) return <HandoffDivider context={message.context} models={models} />;
   const linked = linkedContext(message);
   const advisor = typeof message.context === "object" && message.context?.kind === "advisor-result" ? message.context : null;
+  // A PR-blocker pill's message shows as a card, not as the skill prompt the agent read.
+  const prAction = isUser && isPullRequestAction(message.context) ? message.context : null;
   // A message another Chat sent sits apart from the user's own: left-aligned, with its sender over it.
   // Feedback sent from the design canvas shows as a card, not as the text the agent reads.
-  const feedback = isUser && !linked && !advisor ? parseDesignFeedback(message.body) : null;
-  const bubble = isUser && !linked && !advisor && !feedback;
+  const feedback = isUser && !linked && !advisor && !prAction ? parseDesignFeedback(message.body) : null;
+  // So do the answers to the agent's questions.
+  const answered = isUser && !linked && !advisor && !feedback && message.answered?.length ? message.answered : null;
+  const bubble = isUser && !linked && !advisor && !feedback && !answered && !prAction;
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
   const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
@@ -163,7 +174,7 @@ const MessageSection = memo(function MessageSection({
       data-from={messageSender(message)}
       data-linked={linked?.kind}
       data-streaming={streaming || undefined}
-      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble || feedback ? "items-end pl-12" : ""}`}
+      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble || feedback || answered || prAction ? "items-end pl-12" : ""}`}
       style={animate ? { animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}
     >
       {advisor && (
@@ -173,11 +184,15 @@ const MessageSection = memo(function MessageSection({
       )}
       {linked && <LinkedMessageHeader context={linked} onOpenChat={onOpenChat} />}
       <div
-        className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : feedback ? "w-full max-w-md" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
+        className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : feedback || answered || prAction ? "w-full max-w-md" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
       >
         <Attachments images={isUser ? message.images : message.images?.filter((image) => !image.sourcePath)} files={message.files} />
-        {feedback ? (
+        {prAction ? (
+          <PullRequestActionCard action={prAction} />
+        ) : feedback ? (
           <DesignFeedbackCard feedback={feedback} messageId={message.id} />
+        ) : answered ? (
+          <AnswerCard answered={answered} />
         ) : isUser ? (
           message.body.trim() ? (
             <UserBody body={message.body} />
@@ -240,8 +255,10 @@ const MessageTranscript = memo(function MessageTranscript({
   onOpenLinkedChat,
   findOpen,
   models,
+  earlier,
 }: Pick<
   ChatComposerProps,
+  | "earlier"
   | "messages"
   | "pendingMessageId"
   | "isSending"
@@ -290,12 +307,24 @@ const MessageTranscript = memo(function MessageTranscript({
     restore();
     return () => cancelAnimationFrame(frame);
   }, [page]);
-  function showEarlier() {
+  // Messages the host still holds before the ones here (chat-pages-v1); find in chat reads them all.
+  const remote = earlier?.count ?? 0;
+  useEffect(() => {
+    if (findOpen && remote > 0) void earlier?.loadAll();
+  }, [findOpen, remote, earlier]);
+  async function showEarlier() {
     const column = earlierButton.current?.parentElement;
     const element = column?.querySelector<HTMLElement>('[data-slot="message"]');
     const viewport = column?.closest<HTMLElement>('[aria-label="Conversation"]');
     if (element && viewport) anchor.current = { element, viewport, top: element.getBoundingClientRect().top };
-    setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
+    if (start > 0 || !earlier) {
+      setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
+      return;
+    }
+    // None left here: read the next turns from the host, then show everything held (no message has this id, and unlike
+    // NaN it equals itself, so the page comparison below settles).
+    await earlier.load();
+    setPage({ chat: chatId, firstId: Number.NEGATIVE_INFINITY });
   }
   const streamingMessage: AppChatMessage | undefined =
     isSending && (streamingText || streamingSteps?.length)
@@ -310,14 +339,14 @@ const MessageTranscript = memo(function MessageTranscript({
   const openingIds = openingMessages.current.ids;
   return (
     <>
-      {start > 0 && (
+      {start + remote > 0 && (
         <button
           ref={earlierButton}
           type="button"
-          onClick={showEarlier}
+          onClick={() => void showEarlier()}
           className="self-center rounded-control border border-line px-3 py-1.5 text-xs text-ink-2 hover:bg-hover"
         >
-          Show earlier messages ({start})
+          Show earlier messages ({start + remote})
         </button>
       )}
       {transcript.map((message) => (
@@ -342,6 +371,8 @@ const MessageTranscript = memo(function MessageTranscript({
 });
 
 interface ChatComposerProps {
+  /** The chat's computer is away: the composer is disabled and says so. */
+  offlineName?: string | null;
   /** Sends a comment on a design, or the design the user chose, to the agent; resolves whether it went. */
   onSendDesignMessage?: (text: string) => Promise<boolean>;
   scopeKind?: "project" | "link";
@@ -353,6 +384,8 @@ interface ChatComposerProps {
   onFindClose?: () => void;
   imageDraft: ImageDraft;
   projectPath: string;
+  /** Messages of the Chat the host holds before `messages` (chat-pages-v1): how many, and reading them. */
+  earlier?: { count: number; load: () => Promise<void>; loadAll: () => Promise<void> };
   /** The Project or Link (scope key) the messages belong to, for step output the host keeps out of the state. */
   messageScope?: string;
   messages: AppChatMessage[];
@@ -429,6 +462,9 @@ interface ChatComposerProps {
   branches: string[];
   baseBranch: string;
   onBaseBranchChange: (branch: string) => void;
+  /** Linear is on and connected: the new-chat header offers a Linear issue to start from. */
+  linearActive?: boolean;
+  onStartFromIssue?: (issue: LinearIssue) => void;
   newChatError: string | null;
   notice?: string | null;
   onDismissNotice?: () => void;
@@ -439,7 +475,20 @@ const ISOLATIONS: Array<{ id: Isolation; name: string; description: string; icon
   { id: "worktree", name: "New worktree", description: "Start a new branch in its own worktree", icon: GitForkIcon },
 ];
 
-function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: string; open: boolean; onClick: (trigger: HTMLElement) => void }) {
+function ChipButton({
+  icon,
+  leading,
+  label,
+  open,
+  onClick,
+}: {
+  icon?: IconData;
+  /** Drawn instead of `icon`, e.g. a brand mark. */
+  leading?: ReactNode;
+  label: string;
+  open: boolean;
+  onClick: (trigger: HTMLElement) => void;
+}) {
   return (
     <button
       type="button"
@@ -447,7 +496,7 @@ function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: str
       onClick={(event) => onClick(event.currentTarget)}
       className={`flex h-7 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : "text-ink-2"}`}
     >
-      <Icon icon={icon} size={14} />
+      {leading ?? (icon && <Icon icon={icon} size={14} />)}
       {label}
       <span className="text-ink-3">
         <Icon icon={ArrowDown01Icon} size={12} />
@@ -458,7 +507,16 @@ function ChipButton({ icon, label, open, onClick }: { icon: IconData; label: str
 
 type NewChatHeaderProps = Pick<
   ChatComposerProps,
-  "worktrees" | "selectedWorktreeId" | "onWorktreeChange" | "isolation" | "onIsolationChange" | "branches" | "baseBranch" | "onBaseBranchChange"
+  | "worktrees"
+  | "selectedWorktreeId"
+  | "onWorktreeChange"
+  | "isolation"
+  | "onIsolationChange"
+  | "branches"
+  | "baseBranch"
+  | "onBaseBranchChange"
+  | "linearActive"
+  | "onStartFromIssue"
 >;
 
 function NewChatHeader({
@@ -470,8 +528,10 @@ function NewChatHeader({
   branches,
   baseBranch,
   onBaseBranchChange,
+  linearActive = false,
+  onStartFromIssue,
 }: NewChatHeaderProps) {
-  const [menu, setMenu] = useState<"isolation" | "branch" | null>(null);
+  const [menu, setMenu] = useState<"isolation" | "branch" | "issue" | null>(null);
   const [query, setQuery] = useState("");
   const [popover, setPopover] = useState({ left: 0, maxHeight: 480 });
   const selected = worktrees.find((worktree) => worktree.id === selectedWorktreeId) ?? worktrees[0];
@@ -510,7 +570,7 @@ function NewChatHeader({
     },
   );
 
-  function toggle(next: "isolation" | "branch", trigger: HTMLElement) {
+  function toggle(next: "isolation" | "branch" | "issue", trigger: HTMLElement) {
     place(trigger);
     setQuery("");
     setMenu((current) => (current === next ? null : next));
@@ -543,6 +603,9 @@ function NewChatHeader({
             open={menu === "branch"}
             onClick={(trigger) => toggle("branch", trigger)}
           />
+          {linearActive && onStartFromIssue && (
+            <ChipButton leading={<LinearLogo size={13} />} label="Linear issue" open={menu === "issue"} onClick={(trigger) => toggle("issue", trigger)} />
+          )}
           {menu === "isolation" && (
             <PickerPanel title="Isolation" className="absolute top-[calc(100%+0.375rem)] w-[320px]" style={popoverStyle}>
               {ISOLATIONS.map((option) => (
@@ -559,6 +622,16 @@ function NewChatHeader({
                 />
               ))}
             </PickerPanel>
+          )}
+          {menu === "issue" && (
+            <LinearIssuePicker
+              style={popoverStyle}
+              onPick={(issue) => {
+                onStartFromIssue?.(issue);
+                close();
+              }}
+              onClose={close}
+            />
           )}
           {menu === "branch" && (
             <PickerPanel
@@ -603,10 +676,12 @@ function NewChatHeader({
 const EMPTY_SUBAGENTS: Subagent[] = [];
 
 export function ChatComposer({
+  offlineName,
   scopeKind,
   imageDraft,
   projectPath,
   messageScope,
+  earlier,
   messages,
   pendingMessageId,
   draft,
@@ -662,6 +737,8 @@ export function ChatComposer({
   branches,
   baseBranch,
   onBaseBranchChange,
+  linearActive,
+  onStartFromIssue,
   newChatError,
   findOpen = false,
   findSignal = 0,
@@ -689,8 +766,10 @@ export function ChatComposer({
     if (isNewChat) setScrolled(false);
   }, [isNewChat]);
 
+  // The runtime knows a Chat by its Project's path, not the Worktree's `projectPath` it runs in.
+  const runtimeChat = typeof chatId === "number" && chatId > 0 && projectPath ? (agentChatId ?? `${messageScope ?? projectPath}#${chatId}`) : null;
   // Designs are read through the Chat's key, which a new Chat and a shared Link Chat don't have here.
-  const artifactChat = typeof chatId === "number" && chatId > 0 && projectPath && scopeKind !== "link" ? `${projectPath}#${chatId}` : null;
+  const artifactChat = scopeKind !== "link" ? runtimeChat : null;
   const artifactSteps = useMemo(() => [...messages.flatMap((message) => message.steps ?? []), ...(streamingSteps ?? [])], [messages, streamingSteps]);
   const userMessages = useMemo(() => messages.filter((message) => message.role === "user").map(({ id, body }) => ({ id, body })), [messages]);
 
@@ -717,6 +796,7 @@ export function ChatComposer({
       >
         <SubagentCanvas
           key={`canvas-${chatId}`}
+          chatKey={runtimeChat}
           opened={canvasOpened}
           agents={subagents}
           working={isSending}
@@ -760,6 +840,7 @@ export function ChatComposer({
                   <StepDetailsScope scope={messageScope}>
                     <MessageTranscript
                       findOpen={findOpen}
+                      earlier={earlier}
                       messages={messages}
                       pendingMessageId={pendingMessageId}
                       isSending={isSending}
@@ -831,11 +912,10 @@ export function ChatComposer({
             <PortTrack key={`ports-${messages[0]?.session_id ?? "new"}`} ports={ports} onStop={onStopPort} />
             <TaskTrack key={`tasks-${messages[0]?.session_id ?? "new"}`} tasks={tasks} />
             <BrowserTrack key={`browser-${agentChatId ?? chatId}`} chatId={agentChatId} />
-            {!isNewChat && typeof chatId === "number" && chatId > 0 && projectPath && (
-              <SimulatorTrack key={`simulator-${projectPath}-${chatId}`} chatId={`${projectPath}#${chatId}`} />
-            )}
+            {!isNewChat && runtimeChat && <SimulatorTrack key={`simulator-${runtimeChat}`} chatId={runtimeChat} />}
             <SubagentTrack
               key={chatId}
+              chatKey={runtimeChat}
               agents={subagents}
               provider={sessionProvider ?? selectedModel.provider}
               onOpenCanvas={() => setCanvasChat(chatId)}
@@ -846,8 +926,10 @@ export function ChatComposer({
             />
           </div>
 
-          <div className={`mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "relative z-20 -mt-1.5"}`}>
-            {isNewChat && scopeKind !== "link" && (
+          <div className={`relative mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "z-20 -mt-1.5"}`}>
+            {/* The update pill floats centred on the chip row's line, outside its flow. */}
+            {!canvasOpened && <UpdatePillSlot className="bottom-full mb-2" />}
+            {isNewChat && scopeKind !== "link" && !offlineName && (
               <NewChatHeader
                 worktrees={worktrees}
                 selectedWorktreeId={selectedWorktreeId}
@@ -857,38 +939,43 @@ export function ChatComposer({
                 branches={branches}
                 baseBranch={baseBranch}
                 onBaseBranchChange={onBaseBranchChange}
+                linearActive={linearActive}
+                onStartFromIssue={onStartFromIssue}
               />
             )}
             {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
             {approval && <div className="mb-2 w-full">{approval}</div>}
-            <PromptComposer
-              imageDraft={imageDraft}
-              projectPath={projectPath}
-              draft={draft}
-              onDraftChange={onDraftChange}
-              onSend={onSend}
-              onStop={onStop}
-              sendBlocked={sendBlocked}
-              running={isSending}
-              models={models}
-              cliStatus={cliStatus}
-              onModelPickerOpen={onModelPickerOpen}
-              onUpdateCli={onUpdateCli}
-              updatingCli={updatingCli}
-              selectedModel={selectedModel}
-              onModelChange={onModelChange}
-              capability={capability}
-              effort={effort}
-              onEffortChange={onEffortChange}
-              ultracode={ultracode}
-              onUltracodeChange={onUltracodeChange}
-              fastMode={fastMode}
-              onFastModeChange={onFastModeChange}
-              permissionMode={permissionMode}
-              onPermissionModeChange={onPermissionModeChange}
-              alwaysExpanded={isNewChat}
-              contextUsage={contextUsage}
-            />
+            <div className={offlineName ? "pointer-events-none opacity-60" : undefined}>
+              <PromptComposer
+                offlineName={offlineName}
+                imageDraft={imageDraft}
+                projectPath={projectPath}
+                draft={draft}
+                onDraftChange={onDraftChange}
+                onSend={onSend}
+                onStop={onStop}
+                sendBlocked={sendBlocked}
+                running={isSending}
+                models={models}
+                cliStatus={cliStatus}
+                onModelPickerOpen={onModelPickerOpen}
+                onUpdateCli={onUpdateCli}
+                updatingCli={updatingCli}
+                selectedModel={selectedModel}
+                onModelChange={onModelChange}
+                capability={capability}
+                effort={effort}
+                onEffortChange={onEffortChange}
+                ultracode={ultracode}
+                onUltracodeChange={onUltracodeChange}
+                fastMode={fastMode}
+                onFastModeChange={onFastModeChange}
+                permissionMode={permissionMode}
+                onPermissionModeChange={onPermissionModeChange}
+                alwaysExpanded={isNewChat}
+                contextUsage={contextUsage}
+              />
+            </div>
             {newChatError && (
               <p role="alert" className="mt-2 px-1 text-[12px] text-red">
                 {newChatError}

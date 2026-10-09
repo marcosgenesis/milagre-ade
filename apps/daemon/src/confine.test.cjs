@@ -82,6 +82,7 @@ const refusedBody = { v: 1, error: { message: REFUSED } };
 const callsAt = (target, demo) => [
   ["project:open", [target]],
   ["project:branches", [target]],
+  ["linear:worktree-issues", [target]],
   ["skills:list", [target]],
   ["skills:read", [target, path.join(target, "SKILL.md")]],
   ["chat:send", [{ projectPath: target, sessionId: 1, body: "hi", provider: "codex", model: "demo", permissionMode: "ask" }]],
@@ -101,6 +102,8 @@ const callsAt = (target, demo) => [
   ["worktree:pull-request", [target]],
   ["worktree:pull-requests", [target, ["246"]]],
   ["worktree:create", [{ projectPath: target, baseBranch: "main", prompt: "Escape" }]],
+  ["worktree:link-issue", [{ projectPath: target, worktreeId: 1, key: "ENG-1" }]],
+  ["worktree:unlink-issue", [{ projectPath: target, worktreeId: 1 }]],
   ["git:diff-files", [{ cwd: target, mode: "uncommitted" }]],
   ["git:diff-file", [{ cwd: target, mode: "uncommitted", path: "secret.png" }]],
   ["worktree:status", [target, "main"]],
@@ -221,6 +224,7 @@ test("inside the folder the phone browses, reads changes, sends and sees images;
   const chat = Object.values(snapshot.result.project.state.sessions)[0];
   assert.equal((await f.rpc("git:diff-files", [{ cwd: f.demo, mode: "uncommitted" }])).status, 200);
   assert.equal((await f.rpc("project:branches", [f.demo])).status, 200);
+  assert.equal((await f.rpc("linear:worktree-issues", [f.demo])).status, 200);
   assert.equal((await f.rpc("chat:patch", [f.demo, chat.id, { title: "Inside" }])).status, 200);
   assert.equal((await f.request(`/media?projectPath=${encodeURIComponent(f.demo)}&path=${encodeURIComponent(path.join(f.demo, "shot.png"))}`)).status, 200);
   assert.equal(await f.live(f.demo), 101);
@@ -564,6 +568,44 @@ test("a confined bridge refuses phone:routes even when it has the hook", async (
   assert.equal((await f.rpc("phone:routes", [{ phoneKey: "p".repeat(43) }])).status, 403);
 });
 
+// The global default reaches every Project on the Mac, so a demo-confined phone can read it but not change it.
+test("a confined phone reads the main sync default but can't change it", async () => {
+  const confine = createConfinement({ allowedRoot: os.tmpdir() });
+  await confine.checkCall("main-sync:default:read", []);
+  await assert.rejects(confine.checkCall("main-sync:default:save", [true]), { status: 403, message: REFUSED });
+});
+
+// Linear is the Mac's connection: a confined phone sees whether it is on and connected, and changes nothing.
+test("a confined phone reads Linear status and the switch but can't change it", async () => {
+  const confine = createConfinement({ allowedRoot: os.tmpdir() });
+  await confine.checkCall("linear:status", []);
+  await confine.checkCall("linear:enabled:read", []);
+  await assert.rejects(confine.checkCall("linear:enabled:save", [true]), { status: 403, message: REFUSED });
+});
+
+test("a confined phone reads Linear issues, and only its own Project's worktree issues", async () => {
+  const confine = createConfinement({ allowedRoot: os.tmpdir() });
+  await confine.checkCall("linear:issues", [{ query: "ENG" }]);
+  await assert.rejects(confine.checkCall("linear:worktree-issues", ["/not/a/project"]), { status: 403, message: REFUSED });
+});
+
+test("a confined phone links and unlinks an issue only in its own Project", async (t) => {
+  const f = await fixture(t);
+  assert.equal((await f.rpc("project:open", [f.demo])).status, 200);
+  // Linear is off in this fixture, so the call reaches the daemon and fails there: never refused by the confinement.
+  const link = await f.rpc("worktree:link-issue", [{ projectPath: f.demo, worktreeId: 1, key: "ENG-1" }]);
+  assert.notEqual(link.status, 403, JSON.stringify(link.body));
+  const unlink = await f.rpc("worktree:unlink-issue", [{ projectPath: f.demo, worktreeId: 1 }]);
+  assert.notEqual(unlink.status, 403, JSON.stringify(unlink.body));
+  assert.equal((await f.rpc("worktree:link-issue", [{ projectPath: f.outside, worktreeId: 1, key: "ENG-1" }])).status, 403);
+  assert.equal((await f.rpc("worktree:unlink-issue", [{ projectPath: f.outside, worktreeId: 1 }])).status, 403);
+});
+
+test("phones can't connect or disconnect Linear", () => {
+  assert.equal(METHODS.has("linear:connect"), false);
+  assert.equal(METHODS.has("linear:disconnect"), false);
+});
+
 test("advisor controls are allowlisted and confined to the owning Project", async (t) => {
   const f = await fixture(t);
   for (const method of ["advisor:stop", "advisor:retry"]) {
@@ -571,5 +613,14 @@ test("advisor controls are allowlisted and confined to the owning Project", asyn
     assert.ok(PATHS[method]);
     const reply = await f.rpc(method, [`${f.outside}#1`, "advisor:foreign"]);
     assert.equal(reply.status, 403);
+  }
+});
+
+test("device management is never a phone command, confined or not", async () => {
+  const confine = createConfinement({ allowedRoot: os.tmpdir() });
+  for (const method of ["devices:list", "devices:remove", "devices:pending", "devices:allow", "devices:deny"]) {
+    assert.equal(METHODS.has(method), false, method);
+    assert.equal(PATHS[method], undefined, method);
+    await assert.rejects(confine.checkCall(method, []), { status: 403, message: REFUSED });
   }
 });

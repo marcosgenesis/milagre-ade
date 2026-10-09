@@ -61,6 +61,16 @@ function staleOwner(lockPath) {
   return owner;
 }
 
+// An owner writes its record right after making the lock, so an empty lock older than a minute was left by a crash
+// between the two (or during a release) and has no owner to protect.
+function abandoned(lockPath) {
+  try {
+    return fs.readdirSync(lockPath).length === 0 && Date.now() - fs.statSync(lockPath).mtimeMs > 60_000;
+  } catch {
+    return false;
+  }
+}
+
 // Removes a stale lock. A second directory makes the takeover itself exclusive, so two processes that both found the
 // lock stale can't remove the one the other has just taken. A takeover left behind by a crash expires after a minute.
 function clearStale(lockPath) {
@@ -76,8 +86,7 @@ function clearStale(lockPath) {
   }
   try {
     // Read again inside the takeover: the lock may have changed hands since it was first found stale.
-    const owner = staleOwner(lockPath);
-    if (!owner) return false;
+    if (!staleOwner(lockPath) && !abandoned(lockPath)) return false;
     fs.rmSync(lockPath, { recursive: true, force: true });
     return true;
   } finally {

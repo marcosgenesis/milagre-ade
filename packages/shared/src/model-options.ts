@@ -20,6 +20,20 @@ export function capabilityFor(model: ModelOption, capabilities: ModelCapabilitie
   return { efforts: modern ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high", "max"], ultracode: modern, fastMode };
 }
 
+// Neither agent reports a model's context window before a turn, so these are read off the agents themselves.
+// Claude Code 2.1.293's model table gives every Claude model from Opus 4.7 on 1M; these older ones have 200K.
+const CLAUDE_200K = /^claude-(3-|haiku-4|sonnet-4|opus-4(-[0-6])?$)/;
+// codex-cli 0.160.0's models cache gives every GPT model 272K; Gemini models in Antigravity report 1,048,576.
+const CODEX_WINDOW = 272_000;
+const GEMINI_WINDOW = 1_048_576;
+
+/** The model's context window in tokens, or undefined when it isn't known. */
+export function contextWindowFor(model: Pick<ModelOption, "provider" | "id">): number | undefined {
+  if (model.provider === "claude") return CLAUDE_200K.test(model.id) ? 200_000 : 1_000_000;
+  if (model.provider === "codex") return CODEX_WINDOW;
+  return model.id.startsWith("gemini") ? GEMINI_WINDOW : undefined;
+}
+
 /** Keeps the chosen effort when the model takes it, else its default, else the nearest middle level. */
 export function effortFor(capability: ModelCapability, effort: EffortLevel): EffortLevel | undefined {
   const { efforts } = capability;

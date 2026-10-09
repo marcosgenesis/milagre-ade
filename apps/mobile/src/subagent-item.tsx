@@ -3,10 +3,13 @@ import { AiBrainIcon } from "@hugeicons/core-free-icons";
 import { subagentActivityLabel, subagentRoleLabel } from "@milagre/shared/agent-activity";
 import type { Subagent } from "@milagre/shared/model";
 import { ActivityItem } from "./activity-item";
-import { colors, styles } from "./ui";
+import { useStyles } from "./ui";
+import { useTheme } from "./theme";
 
 /** Subagent data adapted to the same icon, shimmer and output surface used by tool activity. */
 export function SubagentItem({ agent }: { agent: Subagent }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const state =
     agent.status === "initializing" || agent.status === "running"
       ? "running"

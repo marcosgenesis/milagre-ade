@@ -1,6 +1,7 @@
 import { subagentActive } from "./subagents.ts";
 import type { ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionDecision } from "../model";
 import { chatInProject, sessionIdFromKey } from "@milagre/shared/agent-runs";
+import { LOCAL_COMPUTER, computerOfKey } from "@milagre/shared/chat-scopes";
 import type { AgentRun, AgentRuns, SentAnswer } from "@milagre/shared/agent-runs";
 
 export type { AgentRun, AgentRuns, SentAnswer } from "@milagre/shared/agent-runs";
@@ -70,4 +71,43 @@ export function modelForChat(selected: ModelOption, provider: ModelProvider | un
   if (!provider || selected.provider === provider) return selected;
   const lastUsed = [...messages].reverse().find((message) => catalog.some((option) => option.id === message.model && option.provider === provider));
   return catalog.find((option) => option.id === lastUsed?.model) ?? catalog.find((option) => option.provider === provider) ?? selected;
+}
+
+/** `record` (keyed by chat key) with one computer's entries replaced by `next`, a snapshot from it; the others stay. */
+export function replaceComputerEntries<T>(record: Record<string, T>, computerId: string, next: Record<string, T>): Record<string, T> {
+  const kept = Object.entries(record).filter(([key]) => computerOfKey(key) !== computerId);
+  const taken = Object.entries(next ?? {}).filter(([key]) => computerOfKey(key) === computerId);
+  return Object.fromEntries([...kept, ...taken]);
+}
+/** `runs` without a computer's turns: it was removed, or Other computers was turned off. */
+export const dropComputerRuns = (runs: AgentRuns, computerId: string) => replaceComputerEntries(runs, computerId, {});
+
+/** Whether an agent event is newer than what its computer's snapshot holds (`taken` is the snapshot's last number per computer). */
+export const eventIsNew = (taken: ReadonlyMap<string, number>, chatId: string, seq: number | undefined) =>
+  seq === undefined || seq > (taken.get(computerOfKey(chatId)) ?? 0);
+
+/** `record` (keyed by chat key) without the entries of computers outside `known`; this Mac's always stay. Same object when none go. */
+export function keepComputers<T>(record: Record<string, T>, known: ReadonlySet<string>): Record<string, T> {
+  const entries = Object.entries(record);
+  const kept = entries.filter(([key]) => {
+    const id = computerOfKey(key);
+    return id === LOCAL_COMPUTER || known.has(id);
+  });
+  return kept.length === entries.length ? record : Object.fromEntries(kept);
+}
+
+/**
+ * The model the picker shows for an open chat: the one picked in that chat, else the one its last turn ran, else the
+ * fallback (the default for new chats). A pick or turn on another provider than the chat's own doesn't count.
+ */
+export function modelForOpenChat(
+  picked: string | undefined,
+  provider: ModelProvider | undefined,
+  messages: ChatMessage[],
+  catalog: ModelOption[],
+  fallback: ModelOption,
+): ModelOption {
+  const usable = (id: string | null | undefined) => catalog.find((option) => option.id === id && (!provider || option.provider === provider));
+  const lastUsed = [...messages].reverse().find((message) => usable(message.model));
+  return usable(picked) ?? usable(lastUsed?.model) ?? modelForChat(fallback, provider, [], catalog);
 }

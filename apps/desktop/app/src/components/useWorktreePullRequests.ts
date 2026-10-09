@@ -4,6 +4,7 @@ import type { CoordinatorState, PullRequest } from "../model";
 import { chatInProject, sessionIdFromKey } from "../lib/agent-runs";
 import { pullRequestRefs, type PullRequestRef } from "../lib/chat-pull-requests";
 import { type PullRequestBlocker, updateBlockerDismissals } from "../lib/pr-blockers";
+import { bridgeForKey, onAnyAgentEvent } from "../lib/computer-bridge";
 
 // Conflict entries are bare PR URLs, so this key keeps its name from when conflicts were the only blocker.
 const DISMISSED_BLOCKERS = "milagre.dismissed-conflict-actions";
@@ -15,7 +16,7 @@ const FOCUS_GAP_MS = 5000;
  * Runs `refresh` every `POLL_MS` only while the window is visible and focused. A hidden or blurred window
  * stops its timer (no wake-ups, no gh calls); coming back refreshes once, unless it just did, and resumes.
  */
-function pollWhileActive(refresh: () => void, lastRefresh: () => number): () => void {
+export function pollWhileActive(refresh: () => void, lastRefresh: () => number): () => void {
   const active = () => document.visibilityState === "visible" && document.hasFocus();
   let interval: number | undefined;
   const stop = () => {
@@ -65,14 +66,20 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
   const stateRef = useRef(state);
   stateRef.current = state;
   const [snapshot, setSnapshot] = useState<{ projectPath: string; prs: Record<string, PullRequest | null> }>({ projectPath: "", prs: {} });
+  // The Worktrees whose Chats have a message, from each Chat's summary (an older host's state, without one, from its messages).
   const pathsKey = JSON.stringify(
     [
       ...new Set(
-        state?.messages.flatMap((message) => {
-          const session = state.sessions[message.session_id];
-          const worktree = session && !session.archived ? state.worktrees[session.worktree_id] : undefined;
-          return worktree ? [worktree.path] : [];
-        }) ?? [],
+        Object.values(state?.sessions ?? {}).every((session) => session.summary)
+          ? Object.values(state?.sessions ?? {}).flatMap((session) => {
+              const worktree = !session.archived && session.summary!.count > 0 ? state!.worktrees[session.worktree_id] : undefined;
+              return worktree ? [worktree.path] : [];
+            })
+          : (state?.messages.flatMap((message) => {
+              const session = state.sessions[message.session_id];
+              const worktree = session && !session.archived ? state.worktrees[session.worktree_id] : undefined;
+              return worktree ? [worktree.path] : [];
+            }) ?? []),
       ),
     ].sort(),
   );
@@ -90,7 +97,9 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
           if (pending.has(path)) return;
           pending.add(path);
           try {
-            const pr = await window.milagre.readPullRequest(path).catch(() => null);
+            const pr = await bridgeForKey(projectPath)
+              .readPullRequest(path)
+              .catch(() => null);
             if (!disposed) {
               setDismissedBlockers((current) => updateBlockerDismissals(current, pr));
               setSnapshot((current) => ({
@@ -109,7 +118,7 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
       () => void refresh(),
       () => lastRefresh,
     );
-    const unsubscribe = window.milagre.onAgentEvent(({ chatId, event }) => {
+    const unsubscribe = onAnyAgentEvent(({ chatId, event }) => {
       if (!chatInProject(projectPath, chatId) || !isTurnEnd(event)) return;
       const current = stateRef.current;
       const session = current?.sessions[sessionIdFromKey(chatId)];
@@ -129,7 +138,9 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
     for (const session of Object.values(state?.sessions ?? {})) {
       const worktree = !session.archived ? state?.worktrees[session.worktree_id] : undefined;
       if (!worktree) continue;
-      const refs = pullRequestRefs(state!.messages.filter((message) => message.session_id === session.id));
+      const refs = session.summary
+        ? (session.summary.pullRequests ?? [])
+        : pullRequestRefs(state!.messages.filter((message) => message.session_id === session.id));
       if (refs.length) byPath[worktree.path] = [...new Set([...(byPath[worktree.path] ?? []), ...refs])];
     }
     return byPath;
@@ -157,7 +168,9 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
         entries.map(async ([path, refs]) => {
           const selected = refs.filter((ref) => known[path]?.[ref]?.state !== "MERGED");
           if (!selected.length) return;
-          const prs = await window.milagre.readPullRequests(path, selected).catch(() => selected.map(() => null));
+          const prs = await bridgeForKey(projectPath)
+            .readPullRequests(path, selected)
+            .catch(() => selected.map(() => null));
           if (disposed) return;
           setChatSnapshot((current) => {
             const previous = current.projectPath === projectPath ? current.prs : {};

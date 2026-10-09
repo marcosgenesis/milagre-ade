@@ -6,13 +6,15 @@ import { SKILL_SCOPES, shadowedBy, shortenHome, skillBody, skillProviderLabel } 
 import { useSession } from "../session";
 import { useRpc } from "../use-rpc";
 import { Markdown } from "../markdown";
-import { ErrorNotice, PageScroll, PillButton, styles } from "../ui";
-import { overrides, skillBadge, useSkillCatalog } from "../use-skills";
+import { ErrorNotice, PageScroll, PillButton, useStyles } from "../ui";
+import { overrides, useSkillBadge, useSkillCatalog } from "../use-skills";
 
 const scopeLabel = (scope: string) => SKILL_SCOPES.find((item) => item.scope === scope)?.label ?? scope;
 
 /** One skill: where it lives, the same-named skills it hides and its SKILL.md. Editor and Finder stay on the Mac. */
 export default function SkillScreen() {
+  const styles = useStyles();
+  const skillBadge = useSkillBadge();
   const { name } = useLocalSearchParams<{ name: string }>();
   const { client } = useSession();
   const { projectPath, data, error: listError, refresh: reload } = useSkillCatalog();

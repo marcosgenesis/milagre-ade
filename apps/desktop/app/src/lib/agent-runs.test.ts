@@ -7,8 +7,13 @@ import {
   chatsRunning,
   chatsWaitingForUser,
   clearAnswered,
+  dropComputerRuns,
+  eventIsNew,
+  keepComputers,
   markAnswered,
   modelForChat,
+  replaceComputerEntries,
+  modelForOpenChat,
   sentDecision,
   sentReply,
 } from "./agent-runs.ts";
@@ -50,6 +55,23 @@ test("picks a model from the chat's provider", () => {
   assert.equal(modelForChat(opus, "claude", lastUsed, catalog), opus);
   assert.equal(modelForChat(codex, "claude", lastUsed, catalog), sonnet);
   assert.equal(modelForChat(codex, "claude", [], catalog), opus);
+});
+
+test("each open chat shows its own model", () => {
+  const catalog: ModelOption[] = [
+    { id: "gpt-6-sol", name: "GPT-6 Sol", provider: "codex", description: "" },
+    { id: "claude-opus-5-5", name: "Claude Opus 5.5", provider: "claude", description: "" },
+    { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", provider: "claude", description: "" },
+  ];
+  const [codex, opus, sonnet] = catalog;
+  const ranSonnet = [{ id: 1, session_id: 2, body: "hi", context: null, role: "user" as const, model: "claude-sonnet-5-5" }];
+
+  assert.equal(modelForOpenChat("claude-opus-5-5", "claude", ranSonnet, catalog, codex), opus);
+  assert.equal(modelForOpenChat(undefined, "claude", ranSonnet, catalog, opus), sonnet);
+  assert.equal(modelForOpenChat("gpt-6-sol", "claude", ranSonnet, catalog, codex), sonnet);
+  assert.equal(modelForOpenChat(undefined, "claude", [], catalog, sonnet), sonnet);
+  assert.equal(modelForOpenChat(undefined, "claude", [], catalog, codex), opus);
+  assert.equal(modelForOpenChat(undefined, undefined, [], catalog, codex), codex);
 });
 
 const approval = (requestId: string): PermissionRequest => ({
@@ -168,4 +190,40 @@ test("what was sent reads back as a decision for approvals and a reply for quest
   assert.equal(sentReply(runs[key(1)], "r"), "answered");
   assert.equal(sentReply(runs[key(1)], "p"), null);
   assert.equal(sentReply(undefined, "q"), null);
+});
+
+test("a computer's snapshot replaces only its own turns, and a removed computer takes only its own", () => {
+  const ID = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+  const OTHER = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+  const run = (text: string) => ({ text, model: "", startedAt: 0, steps: [], approvals: [], questions: [], answered: {} });
+  const runs = { "/p#1": run("mine"), [`${ID}|/p#1`]: run("studio old"), [`${OTHER}|/p#1`]: run("arketa") };
+  const next = replaceComputerEntries(runs, ID, { [`${ID}|/p#2`]: run("studio new"), "/p#9": run("not studio's") });
+  assert.deepEqual(Object.keys(next).sort(), ["/p#1", `${ID}|/p#2`, `${OTHER}|/p#1`].sort());
+  assert.equal(next["/p#1"].text, "mine", "this Mac's chat at the same path is untouched");
+  const local = replaceComputerEntries(next, "local", { "/p#3": run("mine new") });
+  assert.deepEqual(Object.keys(local).sort(), ["/p#3", `${ID}|/p#2`, `${OTHER}|/p#1`].sort());
+  assert.deepEqual(Object.keys(dropComputerRuns(local, ID)).sort(), ["/p#3", `${OTHER}|/p#1`].sort());
+});
+
+test("each computer's events are compared with its own snapshot number", () => {
+  const ID = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+  const taken = new Map([
+    ["local", 50],
+    [ID, 5],
+  ]);
+  assert.equal(eventIsNew(taken, `${ID}|/p#1`, 6), true, "a computer's low numbers are not judged by this Mac's");
+  assert.equal(eventIsNew(taken, `${ID}|/p#1`, 5), false);
+  assert.equal(eventIsNew(taken, "/p#1", 6), false);
+  assert.equal(eventIsNew(taken, "/p#1", 51), true);
+  assert.equal(eventIsNew(new Map(), `${ID}|/p#1`, 1), true);
+  assert.equal(eventIsNew(taken, "/p#1", undefined), true);
+});
+
+test("keepComputers drops the entries of computers that are gone and keeps this Mac's", () => {
+  const ID = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+  const OTHER = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+  const record = { "/p#1": 1, [`${ID}|/p#1`]: 2, [`${OTHER}|/p#1`]: 3 };
+  assert.deepEqual(Object.keys(keepComputers(record, new Set([OTHER]))).sort(), ["/p#1", `${OTHER}|/p#1`].sort());
+  assert.deepEqual(Object.keys(keepComputers(record, new Set())), ["/p#1"]);
+  assert.equal(keepComputers(record, new Set([ID, OTHER])), record, "nothing to drop leaves the same object");
 });

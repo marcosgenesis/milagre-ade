@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Reanimated from "react-native-reanimated";
-import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { LiquidGlassView } from "@sbaiahmed1/react-native-blur";
+import { UltracodeGlow } from "../ultracode-glow";
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import type { NavigationProp } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,12 +18,16 @@ import {
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
-import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
+import type { ChatMessage, LinkIssueResult, PullRequestActionContext } from "@milagre/shared/model";
+import { chatTitle, createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
 import { messageSender } from "@milagre/shared/advisor-result";
 import { messageNavigationIndices } from "@milagre/shared/message-navigation";
+import { LINK_PR_HINT, issueChipLabel, issueFirstMessage, type LinearIssue, type LinearIssuesResult } from "@milagre/shared/linear";
+import { worktreeShared } from "@milagre/shared/archive";
 import type { Client, OpenProject } from "../client";
-import { lastUserModel } from "@milagre/shared/agent-runs";
-import { blockerPrompt, pullRequestBlockers } from "@milagre/shared/pr-blockers";
+import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
+import { pullRequestBlockers } from "@milagre/shared/pr-blockers";
+import { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } from "@milagre/shared/pr-action";
 import { useComposer, usePendingChats, useSession } from "../session";
 import { pickAttachments } from "../attachment-picker";
 import { appendAttachments, attachmentPrompt, prepareAttachments } from "../attachments";
@@ -30,6 +35,7 @@ import { PullRequestAction, SubagentChip, usePullRequest } from "../status-indic
 import { SimulatorChip } from "../simulator";
 import { BrowserChip } from "../browser";
 import { PortsChip } from "../ports";
+import { TerminalChip, terminalPlaces } from "../terminal";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { ChatReply } from "../chat-reply";
 import { designMessageSent, peekDesignMessage } from "../design-outbox";
@@ -44,42 +50,60 @@ import { useDotBackground } from "../dot-background";
 import { Approval, Questions } from "../questions";
 import { AgentControls, PermissionChip } from "../agent-controls";
 import { afterSend, modelsFor, selectedModel, sendOptions, turnTarget } from "../turn-options";
-import { Icon } from "../icons";
+// Linear's mark as a template image, so iOS tints it like the SF Symbols beside it in menus.
+import LINEAR_MARK from "../../assets/linear-mark.png";
+import { Icon, LinearLogo } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
-import { ArchiveProgress } from "../archive-progress";
 import { useOpenProject } from "../use-open-project";
-import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from "../ui";
+import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, useStyles } from "../ui";
 import { PromptField } from "../prompt-field";
 import { ContextRing } from "../context-ring";
-import { hex } from "../theme";
-import { archiveFromPhone } from "../archive";
+import { useTheme } from "../theme";
+import { archiveFromPhone, showArchiveNotice } from "../archive";
 import { confirmSheet } from "../confirm-store";
 import { randomUUID } from "expo-crypto";
 import { runChatAction } from "../chat-actions";
+import { useChatPage } from "../chat-pages";
 import { MessageNavigation } from "../message-navigation";
 import { AttentionPill } from "../attention";
+import { useLinear } from "../use-linear";
+import { useWorktreeLinearIssues } from "../use-worktree-linear-issues";
+import { showChoiceSheet } from "../choice-store";
 
 const PAGE = 40;
 
 export default function ChatScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const navigation = useNavigation<NavigationProp<{ chat: { worktreeId?: string } }, "chat">>();
   const params = useLocalSearchParams<{ id?: string; worktreeId?: string; projectPath?: string; hostId?: string }>();
   const session = useSession();
   const composer = useComposer();
   const pendingStore = usePendingChats();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
   const [actionBusy, setBusy] = useState(false);
+  // Answers just sent: the card leaves and the answers show at once, until the host's copy arrives.
+  const [sentAnswers, setSentAnswers] = useState<{ requestId: string; message: ChatMessage | null; count: number } | null>(null);
   const sendingRef = useRef(false);
   const [picking, setPicking] = useState(false);
   const [dockHeight, setDockHeight] = useState(140);
   const [error, setError] = useState("");
+  // Bumped after a link or unlink so the Linear issues of the Worktrees are read again.
+  const [linkVersion, setLinkVersion] = useState(0);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
   const [isolation, setIsolation] = useState<"local" | "worktree">("local");
   const [baseBranch, setBaseBranch] = useState("");
   const [branchList, setBranchList] = useState<{ client: Client; path: string; items: string[]; error?: string } | null>(null);
   // A failed send can retry in the checkout already created for this draft.
-  const preparedTarget = useRef<{ client: Client; path: string; base: string; worktreeId: number; sessionId: number } | null>(null);
+  const preparedTarget = useRef<{ client: Client; path: string; base: string; issueKey?: string; worktreeId: number; sessionId: number } | null>(null);
   const scroll = useRef<Reanimated.ScrollView>(null);
   const dots = useDotBackground();
   const following = useRef(true);
@@ -120,6 +144,9 @@ export default function ChatScreen() {
   // Stable props keep each memoized ChatReply from re-rendering on every keystroke and poll tick.
   const connected = session.client;
   const projectPath = session.snapshot?.project.path;
+  // Linear is read only while the Mac has it on and connected; a linked Chat has no Worktrees of its own.
+  const { active: linearActive } = useLinear(connected);
+  const linearIssues = useWorktreeLinearIssues(connected, linearActive && projectPath && !session.snapshot?.project.link ? [projectPath] : [], linkVersion);
   const targetMatches = (!params.projectPath || params.projectPath === projectPath) && (!params.hostId || params.hostId === connected?.url);
   const originChatId = `${projectPath}#${params.id ?? `new:${params.worktreeId}`}`;
   const pending = targetMatches
@@ -131,9 +158,8 @@ export default function ChatScreen() {
       )
     : undefined;
   const pendingCanonicalId = pending && session.snapshot ? pendingChatSessionId(session.snapshot.project.state, pending.preview) : null;
-  const [archiving, setArchiving] = useState(false);
   const archiveRequest = useRef(false);
-  const busy = actionBusy || !!pending || archiving;
+  const busy = actionBusy || !!pending;
   const focused = useRef<object | null>(null);
   useFocusEffect(
     useCallback(() => {
@@ -170,20 +196,28 @@ export default function ChatScreen() {
     }, [acceptedSessionId, pending?.promoted, pendingKey, setPendingChats]),
   );
   const allMessages = session.snapshot?.project.state.messages;
+  // A host that keeps messages by Chat sends the snapshot without them: the Chat on screen reads its own as pages.
+  const lean = !!session.snapshot?.project.state.messagesInChats;
+  const page = useChatPage(lean ? connected : null, projectPath, params.id ? Number(params.id) : null, session.snapshot);
+  const canonicalPage = useChatPage(lean && pendingCanonicalId !== null ? connected : null, projectPath, pendingCanonicalId, session.snapshot);
   const media = useCallback((path: string) => connected!.image(projectPath!, path), [connected, projectPath]);
   const savedMessages = useMemo(
-    () => (params.id && allMessages ? allMessages.filter((m) => m.session_id === Number(params.id)) : []),
-    [allMessages, params.id],
+    () => (lean ? page.messages : params.id && allMessages ? allMessages.filter((m) => m.session_id === Number(params.id)) : []),
+    [lean, page.messages, allMessages, params.id],
   );
   const messages = useMemo(
     () =>
       pending
         ? pendingCanonicalId !== null
-          ? (allMessages || []).filter((message) => message.session_id === pendingCanonicalId)
+          ? lean
+            ? canonicalPage.messages
+            : (allMessages || []).filter((message) => message.session_id === pendingCanonicalId)
           : [...savedMessages, pending.preview.message]
         : savedMessages,
-    [pending, pendingCanonicalId, allMessages, savedMessages],
+    [pending, pendingCanonicalId, lean, canonicalPage.messages, allMessages, savedMessages],
   );
+  // Messages the host still holds before the ones here.
+  const remote = lean && !pending ? page.total - page.messages.length : 0;
   // The design the user last chose on the design sheet, which its cards mark.
   const chosen = useMemo(() => chosenDesign(messages.filter((message) => message.role === "user").map((message) => message.body)), [messages]);
   const designChoice = chosen ? `${chosen.id}:${chosen.version}` : undefined;
@@ -263,6 +297,8 @@ export default function ChatScreen() {
   );
   // A comment or a choice from the design sheet is sent from here when the Chat comes back into view. Sent while the
   // Chat is busy, it waits and goes once it no longer is; one that fails waits for the Chat's next focus.
+  // A Chat started from an issue: the choice sheet outlives this render, so it calls the latest send through this ref.
+  const startIssue = useRef<(issue: LinearIssue) => void>(() => {});
   const sendDesign = useRef<() => void>(() => {});
   const designDeferred = useRef(false);
   const designKey = session.client && session.snapshot ? `${session.client.url}|${session.snapshot.project.path}#${params.id}` : null;
@@ -311,6 +347,7 @@ export default function ChatScreen() {
   const turn = turnTarget(composer.preferences[chatId], chat?.provider, composer.defaults);
   const actualProvider = turn.provider;
   const model = selectedModel(actualProvider, turn.model || (chat && !turn.picked ? lastUserModel(project.state, chat.id) : ""), session.models);
+  const ultracodeOn = model.ultracode && !!preferences.ultracode;
   const worktreeId = chat?.worktree_id ?? Number(params.worktreeId);
   const worktree = project.state.worktrees[worktreeId];
   const branches = branchList?.client === client && branchList.path === project.path ? branchList : null;
@@ -325,7 +362,7 @@ export default function ChatScreen() {
   const branchDisabled = targetDisabled || (newWorktree && !branches?.items.length);
   const branchName = newWorktree ? base || "Choose branch" : worktree?.name || "Choose branch";
   const unavailable = session.cliStatus?.[actualProvider]?.state !== undefined && session.cliStatus[actualProvider].state !== "ready";
-  const title = chat?.title || chat?.generatedTitle || pending?.preview.session.title || "New Chat";
+  const title = chat ? chatTitle(chat, messages) : pending?.preview.session.title || "New Chat";
   async function action(work: () => Promise<unknown>, allowPending = false) {
     if (actionBusy || (!allowPending && pending)) return false;
     setBusy(true);
@@ -356,6 +393,7 @@ export default function ChatScreen() {
       setPicking(false);
     }
   }
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref, read only from effects and the choice sheet.
   sendDesign.current = () => {
     const message = designKey ? peekDesignMessage(designKey) : null;
     if (!message || !designKey) return;
@@ -364,8 +402,42 @@ export default function ChatScreen() {
       if (sent === true) designMessageSent(designKey, message);
     });
   };
-  /** Whether the message went: "busy" when it wasn't tried, the Chat being busy. */
-  async function send(body = draft, withAttachments = true): Promise<boolean | "busy"> {
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref, read only when an issue is picked in the choice sheet.
+  startIssue.current = (issue) => void send(issueFirstMessage(issue, draft), true, undefined, issue.key);
+  /** Lists the open issues in the choice sheet; picking one starts the Chat from it. */
+  async function chooseIssue() {
+    await pickLinearIssue("Start from a Linear issue", (issue) => startIssue.current(issue));
+  }
+  /** Shows the open issues in the choice sheet under `title` and hands the picked one to `onPick`. */
+  async function pickLinearIssue(title: string, onPick: (issue: LinearIssue) => void) {
+    if (targetDisabled || !client) return;
+    setError("");
+    let result: LinearIssuesResult;
+    try {
+      result = await client.call<LinearIssuesResult>("linear:issues", [{}]);
+    } catch (e) {
+      setError((e as Error).message);
+      return;
+    }
+    if ("error" in result) {
+      setError(result.error);
+      return;
+    }
+    const issues = result.issues;
+    showChoiceSheet({
+      title,
+      placeholder: "Search issues",
+      emptyLabel: "No issues found.",
+      leading: <LinearLogo size={18} tone="ink" />,
+      items: issues.map((issue) => ({ id: issue.key, title: `${issue.key} ${issue.title}`, subtitle: issue.state.name })),
+      onSelect: (key) => {
+        const issue = issues.find((item) => item.key === key);
+        if (issue) onPick(issue);
+      },
+    });
+  }
+  /** Whether the message went: "busy" when it wasn't tried, the Chat being busy. An issue key starts the Chat in its own new worktree. */
+  async function send(body = draft, withAttachments = true, prAction?: PullRequestActionContext, issueKey?: string): Promise<boolean | "busy"> {
     // A turn running now takes this message as a steer, on the provider it already runs.
     const steered = Boolean(run);
     if (!body && !(withAttachments && attachments.length)) return false;
@@ -378,7 +450,8 @@ export default function ChatScreen() {
     const sending = withAttachments ? attachments : [];
     const focus = focused.current;
     const current = () => focus !== null && focused.current === focus && session.isSelected();
-    const clearsDraft = sent === draft;
+    const clearsDraft = sent === draft || issueKey !== undefined;
+    const creates = newWorktree || issueKey !== undefined;
     const key = `${client.url}|${chatId}`;
     const operationId = project.link ? composer.linkOperations.forSend(key, JSON.stringify([sent, sending.map((item) => item.id)]), randomUUID) : null;
     const preview = createPendingChat({
@@ -390,6 +463,7 @@ export default function ChatScreen() {
       files: sending.filter((item) => !item.image).map((item) => item.path || item.name),
       model: model.id,
       provider: actualProvider,
+      context: prAction ?? null,
     });
     pendingStore.setPendingChats((current) => ({
       ...current,
@@ -400,7 +474,7 @@ export default function ChatScreen() {
         originChatId: chatId,
         originSessionId: params.id ? Number(params.id) : null,
         worktreeId,
-        newWorktree,
+        newWorktree: creates,
         accepted: false,
       },
     }));
@@ -414,16 +488,16 @@ export default function ChatScreen() {
     try {
       const media = await prepareAttachments(client, sendingProjectPath, sending);
       let target = { sessionId: params.id ? Number(params.id) : (null as number | null), worktreeId };
-      if (newWorktree) {
+      if (creates) {
         if (!base) throw new Error(branches?.error || "Choose a base branch before sending.");
         let ready = preparedTarget.current;
-        if (!ready || ready.client !== client || ready.path !== sendingProjectPath || ready.base !== base) {
+        if (!ready || ready.client !== client || ready.path !== sendingProjectPath || ready.base !== base || ready.issueKey !== issueKey) {
           const created = await client.call<{ project: OpenProject; worktreeId: number }>("worktree:create", [
-            { projectPath: sendingProjectPath, baseBranch: base, prompt: sent },
+            { projectPath: sendingProjectPath, baseBranch: base, prompt: sent, ...(issueKey !== undefined ? { issueKey } : {}) },
           ]);
           const chat = sessionForWorktree(created.project.state, created.worktreeId);
           if (!chat) throw new Error("No Chat was created for the new worktree.");
-          ready = { client, path: sendingProjectPath, base, worktreeId: created.worktreeId, sessionId: chat.id };
+          ready = { client, path: sendingProjectPath, base, issueKey, worktreeId: created.worktreeId, sessionId: chat.id };
           preparedTarget.current = ready;
         }
         target = { sessionId: ready.sessionId, worktreeId: ready.worktreeId };
@@ -451,8 +525,10 @@ export default function ChatScreen() {
               clientMessageId: preview.message.clientMessageId,
               body: sent,
               ...media,
-              prompt: attachmentPrompt(sent, media.files),
+              // A Mac that predates PR actions ignores prAction and sends this prompt as it is.
+              prompt: prAction ? pullRequestActionPrompt(prAction) : attachmentPrompt(sent, media.files),
               ...options,
+              ...(prAction ? { prAction: { action: prAction.action, pr: prAction.pr, url: prAction.url } } : {}),
             },
           ]);
       accepted = true;
@@ -545,19 +621,23 @@ export default function ChatScreen() {
     else if (id === "archive" && chat?.archived) void action(() => client.call("chat:patch", [project.path, chat.id, { archived: false }]));
     else if (id === "archive" && chat) void archive(chat);
   }
-  // Archive asks first, as desktop does, with what removing the worktree would lose; a running turn is stopped. The
-  // Chat is left once it is archived; one whose worktree stayed is brought back, and the notice shows here.
+  // Archive asks first, as desktop does, with what removing the worktree would lose; a running turn is stopped. Once
+  // confirmed the phone goes to the Chat list right away and the archive finishes there, on the Chat's row. Nothing
+  // navigates when it ends, so the phone stays wherever it went in the meantime; a notice shows on the list.
   async function archive(target: NonNullable<typeof chat>) {
     if (busy || archiveRequest.current) return;
     archiveRequest.current = true;
-    const onConfirm = () => {
-      setArchiving(true);
-      session.expectActivity();
+    let left = false;
+    const leave = () => {
+      left = true;
+      router.replace("/projects");
     };
+    // By the time the archive ends the phone may show another Project, so the list's copy of this one is read too.
+    const refresh = () => Promise.all([session.refresh(), session.previewProject(project.path)]);
     setError("");
     try {
-      if (project.link) {
-        const result = await runChatAction({
+      if (project.link)
+        await runChatAction({
           action: "archive",
           client,
           projectPath: project.path,
@@ -565,39 +645,83 @@ export default function ChatScreen() {
           link: project.link,
           chat: target,
           running: !!run,
-          onConfirm: () => setArchiving(true),
+          onConfirm: leave,
           expectActivity: session.expectActivity,
-          refresh: session.refresh,
-          notify: setError,
+          refresh,
+          notify: showArchiveNotice,
         });
-        if (result === "hidden") router.replace("/projects");
-        return;
-      }
-      const result = await archiveFromPhone({
-        client,
-        alert: confirmSheet,
-        projectPath: project.path,
-        state: project.state,
-        chat: target,
-        running: !!run,
-        onConfirm,
-        notify: setError,
-        refresh: session.refresh,
-      });
-      if (result === "hidden" || result === "removed") router.replace("/projects");
+      else
+        await archiveFromPhone({
+          client,
+          alert: confirmSheet,
+          projectPath: project.path,
+          state: project.state,
+          chat: target,
+          running: !!run,
+          onConfirm: () => {
+            session.expectActivity();
+            leave();
+          },
+          notify: showArchiveNotice,
+          refresh,
+        });
     } catch (e) {
-      setError((e as Error).message);
+      if (left) showArchiveNotice(`Could not archive Chat: ${(e as Error).message}`);
+      else setError((e as Error).message);
     } finally {
       archiveRequest.current = false;
-      setArchiving(false);
     }
   }
   const blockers = pullRequestBlockers(pr);
+  // The pill's action, checked here too: a PR without a number yet shows no pill instead of sending a broken one.
+  const prActionRequest = pr && blockers[0] ? pullRequestActionContext({ action: blockers[0], pr: pr.number, url: pr.url }) : null;
   const agents = (chat?.subagents || []).filter((agent) => !agent.archived);
   const diff = worktree?.diff;
-  const header = archiving ? (
-    <ArchiveProgress />
-  ) : (
+  const linearIssue: LinearIssue | undefined = worktree ? linearIssues[worktree.path] : undefined;
+  function openLinearIssue(url: string) {
+    // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the issue comes from the host's JSON, so url may be missing and startsWith would throw
+    if (/^https:\/\//.test(url)) void Linking.openURL(url).catch(() => {});
+  }
+  // A Chat's own Worktree (not the main checkout, not one another Chat shares) can link an issue; a stored one is shown
+  // with its hint when Linear can't see it. Nothing about the link shows while Linear is off.
+  const canLink = linearActive && !!chat && !project.link && !!worktree?.path && worktree.path !== project.path && !worktreeShared(project.state, chat.id);
+  const storedIssue = linearActive ? worktree?.linearIssue : undefined;
+  const linkHint = storedIssue && !(worktree?.name ?? "").toLowerCase().includes(storedIssue.toLowerCase()) ? LINK_PR_HINT(storedIssue) : null;
+  /** Picks an issue from the list and links it to this Chat's Worktree. */
+  /** A short confirmation over the transcript that goes away on its own, for results that need no answer. */
+  function showToast(message: string) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(message);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
+  }
+  function linkIssue() {
+    if (!worktree) return;
+    void pickLinearIssue("Link a Linear issue", (issue) => void linkWorktreeIssue(issue.key));
+  }
+  async function linkWorktreeIssue(key: string) {
+    if (!worktree) return;
+    setError("");
+    try {
+      const result = await client.call<LinkIssueResult>("worktree:link-issue", [{ projectPath: project.path, worktreeId: worktree.id, key }]);
+      await session.refresh();
+      setLinkVersion((version) => version + 1);
+      showToast(result.mode === "renamed" ? `Branch renamed to ${result.branch}.` : `Issue linked. ${LINK_PR_HINT(key)}`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function unlinkWorktreeIssue() {
+    if (!worktree) return;
+    setError("");
+    try {
+      await client.call("worktree:unlink-issue", [{ projectPath: project.path, worktreeId: worktree.id }]);
+      await session.refresh();
+      setLinkVersion((version) => version + 1);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  const header = (
     <>
       <View style={{ alignItems: "center", maxWidth: 230 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -638,6 +762,16 @@ export default function ChatScreen() {
             onPress={() => headerAction("pr")}
           >{`Pull request #${pr.number}`}</Stack.Toolbar.MenuAction>
         )}
+        {linearIssue && (
+          <Stack.Toolbar.MenuAction icon={LINEAR_MARK} iconRenderingMode="template" onPress={() => openLinearIssue(linearIssue.url)}>
+            {issueChipLabel(linearIssue)}
+          </Stack.Toolbar.MenuAction>
+        )}
+        {linkHint && (
+          <Stack.Toolbar.MenuAction icon="info.circle" disabled>
+            {linkHint}
+          </Stack.Toolbar.MenuAction>
+        )}
         {agents.length > 0 && (
           <Stack.Toolbar.MenuAction icon="person.2" subtitle={String(agents.length)} onPress={() => headerAction("agents")}>
             Subagents
@@ -648,6 +782,16 @@ export default function ChatScreen() {
             <Stack.Toolbar.MenuAction icon="pencil" onPress={() => headerAction("rename")}>
               Rename
             </Stack.Toolbar.MenuAction>
+            {canLink &&
+              (storedIssue ? (
+                <Stack.Toolbar.MenuAction icon={LINEAR_MARK} iconRenderingMode="template" disabled={busy} onPress={() => void unlinkWorktreeIssue()}>
+                  Unlink issue
+                </Stack.Toolbar.MenuAction>
+              ) : (
+                <Stack.Toolbar.MenuAction icon={LINEAR_MARK} iconRenderingMode="template" disabled={busy} onPress={linkIssue}>
+                  Link issue…
+                </Stack.Toolbar.MenuAction>
+              ))}
             <Stack.Toolbar.MenuAction icon={chat.archived ? "tray.and.arrow.up" : "archivebox"} disabled={busy} onPress={() => headerAction("archive")}>
               {chat.archived ? "Restore" : "Archive"}
             </Stack.Toolbar.MenuAction>
@@ -657,6 +801,9 @@ export default function ChatScreen() {
     </Stack.Toolbar>
   );
   const question = run?.questions[0];
+  const answering = !!question && sentAnswers?.requestId === question.requestId;
+  // The host's message replaces the preview as soon as the transcript grows by it.
+  const answerPreview = answering && sentAnswers.count === messages.length ? sentAnswers.message : null;
   const pendingInput = pending && pendingCanonicalId === null ? pending.preview.message : null;
   const liveReply = run ? (
     <ChatReply
@@ -731,12 +878,14 @@ export default function ChatScreen() {
             </View>
           )}
           {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
-          {messages.length > visible && (
+          {messages.length + remote > visible && (
             <PillButton
-              title={`Show earlier messages (${messages.length - visible})`}
+              title={`Show earlier messages (${messages.length + remote - visible})`}
               secondary
-              onPress={() => {
+              onPress={async () => {
                 following.current = false;
+                // None left here: read the next turns from the host first.
+                if (messages.length <= visible) await page.loadEarlier().catch(() => {});
                 setShown({ id: params.id, count: visible + PAGE });
               }}
               style={{ alignSelf: "center" }}
@@ -771,6 +920,7 @@ export default function ChatScreen() {
             </View>,
           ])}
           {!pendingInput && liveReply}
+          {answerPreview && <ChatReply key="answers" message={answerPreview} media={media} chatId={chatId} onActivity={openActivity} />}
           {(run || pending) && (
             <ThinkingIndicator
               startedAt={pending?.preview.startedAt ?? run?.startedAt}
@@ -794,6 +944,16 @@ export default function ChatScreen() {
         transcript's top padding does and gradually strengthens toward the status bar. */}
         <EdgeFade edge="top" height={insets.top + 84} />
         <AttentionPill projectPath={project.path} />
+        {toast ? (
+          <View pointerEvents="none" style={{ position: "absolute", left: 16, right: 16, top: insets.top + 64, alignItems: "center" }}>
+            <View
+              accessibilityLiveRegion="polite"
+              style={{ maxWidth: 360, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.ink }}
+            >
+              <Text style={{ color: colors.surface, fontSize: 14 }}>{toast}</Text>
+            </View>
+          </View>
+        ) : null}
         <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
         <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
           {showJumpToBottom && (
@@ -807,13 +967,16 @@ export default function ChatScreen() {
             onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))}
             style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: dockPadding, gap: 8 }}
           >
-            {!question && (
+            {(!question || answering) && (
               <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 4, gap: 8 }}>
-                {pr && blockers.length > 0 && chat && (
-                  <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(blockerPrompt(blockers[0], pr), false)} />
+                {pr && prActionRequest && chat && (
+                  <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(pullRequestActionBody(prActionRequest), false, prActionRequest)} />
                 )}
                 <View style={{ flex: 1 }} />
                 <BrowserChip chatId={params.id ? chatId : undefined} />
+                {params.id && Number(params.id) > 0 && chat && !chat.archived && (
+                  <TerminalChip key={`terminal-${chatId}`} chatId={chatId} places={terminalPlaces(chat)} />
+                )}
                 {params.id && Number(params.id) > 0 && <PortsChip key={`ports-${chatId}`} chatId={chatId} />}
                 {params.id && Number(params.id) > 0 && <SimulatorChip key={chatId} chatId={chatId} />}
                 {agents.length > 0 && <SubagentChip agents={agents} onPress={() => headerAction("agents")} />}
@@ -832,19 +995,31 @@ export default function ChatScreen() {
                 }
               />
             ))}
-            {question ? (
-              <Questions
-                key={question.requestId}
-                request={question}
-                busy={actionBusy}
-                submit={(answers, summary) =>
-                  void action(async () => {
-                    const accepted = await client.call("agent:answer-question", [{ chatId, requestId: question.requestId, answers, summary }]);
-                    if (!accepted) throw new Error("This question is no longer pending. Refresh the Chat.");
-                  }, true)
-                }
-              />
-            ) : (
+            {question && (
+              // Hidden, not unmounted, while the answers travel: if they don't arrive, the card comes back as it was.
+              <View style={answering ? { display: "none" } : undefined}>
+                <Questions
+                  key={question.requestId}
+                  request={question}
+                  busy={actionBusy || answering}
+                  submit={(answers, summary) => {
+                    const answered = answeredQuestions(question, answers);
+                    setSentAnswers({
+                      requestId: question.requestId,
+                      message: answered && { id: -1, session_id: Number(params.id), body: summary, context: null, role: "user", answered },
+                      count: messages.length,
+                    });
+                    void action(async () => {
+                      const accepted = await client.call("agent:answer-question", [{ chatId, requestId: question.requestId, answers, summary }]);
+                      if (!accepted) throw new Error("This question is no longer pending. Refresh the Chat.");
+                    }, true).then((ok) => {
+                      if (!ok) setSentAnswers((current) => (current?.requestId === question.requestId ? null : current));
+                    });
+                  }}
+                />
+              </View>
+            )}
+            {(!question || answering) && (
               <View
                 style={{
                   backgroundColor: "transparent",
@@ -857,16 +1032,18 @@ export default function ChatScreen() {
                   paddingHorizontal: 8,
                   paddingBottom: 6,
                   gap: 4,
-                  boxShadow: "0 4px 20px #0000000f",
+                  boxShadow: ultracodeOn ? `0 4px 22px ${colors.purple}47` : "0 4px 20px #0000000f",
                 }}
               >
                 <LiquidGlassView
                   pointerEvents="none"
                   glassType="clear"
                   isInteractive={false}
-                  reducedTransparencyFallbackColor={hex(scheme).surface}
+                  reducedTransparencyFallbackColor={colors.surface}
                   style={[StyleSheet.absoluteFill, { borderRadius: 24, borderCurve: "continuous" }]}
                 />
+                {/* With Ultracode on, the composer takes its purple: a breathing tint and border, and a glow. */}
+                {ultracodeOn && <UltracodeGlow radius={24} />}
                 {!params.id && !project.link && (
                   <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
                     <PullDown
@@ -972,6 +1149,25 @@ export default function ChatScreen() {
                         <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
                       </View>
                     </PullDown>
+                    {linearActive && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Start from a Linear issue"
+                        disabled={targetDisabled}
+                        onPress={() => void chooseIssue()}
+                        style={({ pressed }) => ({
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          paddingHorizontal: 10,
+                          paddingVertical: 6,
+                          opacity: targetDisabled ? 0.35 : pressed ? 0.6 : 1,
+                        })}
+                      >
+                        <LinearLogo size={13} />
+                        <Text style={styles.label}>Linear issue</Text>
+                      </Pressable>
+                    )}
                   </View>
                 )}
                 {!!attachments.length && (
@@ -1055,6 +1251,9 @@ export default function ChatScreen() {
                   </PullDown>
                   <AgentControls
                     model={model}
+                    effort={preferences.effort}
+                    fastMode={preferences.fastMode}
+                    ultracode={preferences.ultracode}
                     onToggle={() => {
                       router.push({
                         pathname: "/model-sheet",

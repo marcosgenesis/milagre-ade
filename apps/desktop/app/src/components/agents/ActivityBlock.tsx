@@ -5,6 +5,7 @@ import { Alert02Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import type { ChatStep } from "../../model";
 import { activitySummary, titleSpans } from "../../lib/reply-parts";
 import type { ActivityEntry } from "../../lib/reply-parts";
+import { useSettings } from "../../lib/settings";
 import { Markdown } from "../markdown/Markdown";
 import { StepRow } from "./StepRow";
 
@@ -35,7 +36,8 @@ function Title({ title, shimmer }: { title: string; shimmer: boolean }) {
 /**
  * A reply's thinking, tool steps and the text between them, folded into one line. While the agent
  * works the line shows what it is doing now; once done it sums up the activity. It opens to show
- * every entry in order. A single step needs no fold and shows as its own row.
+ * every entry in order. A single step needs no fold and shows as its own row. Murilo mode (Settings >
+ * Experimental) skips the fold: every step is its own row in the chat, with the text between them.
  */
 export function ActivityBlock({
   entries,
@@ -47,7 +49,22 @@ export function ActivityBlock({
   waitingStepIds?: string[];
 }) {
   const [open, setOpen] = useState(false);
+  const { muriloMode } = useSettings();
   if (!entries.length) return null;
+  if (muriloMode)
+    return (
+      <div data-slot="activity-inline" className="-mx-1.5 my-1 flex min-w-0 flex-col">
+        {entries.map((entry, index) =>
+          entry.type === "step" ? (
+            <StepRow key={entry.step.id} step={entry.step} waiting={waitingStepIds.includes(entry.step.id)} />
+          ) : (
+            <div key={`text-${index}`} className="px-1.5 py-1.5">
+              <Markdown text={entry.text} />
+            </div>
+          ),
+        )}
+      </div>
+    );
   if (entries.length === 1 && entries[0].type === "step") return <StepRow step={entries[0].step} waiting={waitingStepIds.includes(entries[0].step.id)} />;
 
   const steps = entries.flatMap((entry): ChatStep[] => (entry.type === "step" ? [entry.step] : []));

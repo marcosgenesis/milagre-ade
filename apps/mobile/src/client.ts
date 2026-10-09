@@ -6,6 +6,7 @@ import { phoneSnapshot } from "./chat-scope.ts";
 import type { AgentRuns } from "@milagre/shared/agent-runs";
 import { openLive, type Live, type LiveOptions } from "./live.ts";
 import type { RelayTransport } from "./relay-transport.ts";
+import { localEndpoint, relayAddress, validAccess, validRelay, type Access, type RelayLink } from "@milagre/shared/pairing-link";
 
 export type OpenProject = {
   path: string;
@@ -17,6 +18,9 @@ export type OpenProject = {
 };
 /** A Project's streaming turns; `seq` numbers the last event they hold. */
 export type Runs = { runs: AgentRuns; seq?: number };
+/** A page of a Chat's messages, from a host that keeps them by Chat (the snapshot then has none: messagesInChats). */
+export type ChatPage = { messages: ChatMessage[]; hasMore: boolean; total: number };
+export type ChatSearchMatch = { message: { id: number; session_id: number }; score: number; snippet: string; highlight: [number, number]; term: string };
 export type Snapshot = { project: OpenProject; runs: Runs; previewOnly?: false };
 /** Drawer metadata only. Never use it as the Chat screen's snapshot. Older hosts return a full Snapshot. */
 export type ProjectPreview = Omit<Snapshot, "previewOnly"> & { previewOnly: true };
@@ -24,47 +28,9 @@ export type RegisteredProject = { id: string; path: string; name: string };
 /** `hidden`: the user keeps this Project out of the Projects list (and desktop's all-Projects sidebar). */
 export type RecentProject = { path: string; name?: string; hidden?: boolean; link?: NamedProjectLink; projects?: RegisteredProject[] };
 
-/** A Cloudflare Access service token: the edge drops any request to the host's tunnel without it. */
-export type Access = { id: string; secret: string };
-export function validAccess(value: unknown): Access | undefined {
-  const access = value as Partial<Access> | undefined;
-  if (!access?.id && !access?.secret) return undefined;
-  if (!/^[a-f0-9]{32}\.access$/.test(String(access.id)) || !/^[A-Za-z0-9_-]{32,128}$/.test(String(access.secret)))
-    throw new Error("This computer's Cloudflare access token is not valid. Scan its code again.");
-  return { id: String(access.id), secret: String(access.secret) };
-}
-
-export function localEndpoint(input: string): string {
-  let url: URL;
-  try {
-    url = new URL(input.trim());
-  } catch {
-    throw new Error("Enter your computer's HTTPS address or a local simulator address.");
-  }
-  const local = url.protocol === "http:" && ["127.0.0.1", "10.0.2.2"].includes(url.hostname);
-  if ((!local && url.protocol !== "https:") || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
-    throw new Error("Use an HTTPS address, or 127.0.0.1 on iOS / 10.0.2.2 on Android for a local simulator. Enter the token separately.");
-  }
-  return url.origin;
-}
-
-/** How the phone reaches a Mac with no tunnel: the public relay, the Mac's id there, and its pinned box key. */
-export type RelayLink = { url: string; hostId: string; key: string };
-export function validRelay(value: unknown): RelayLink {
-  const relay = value as Partial<RelayLink> | undefined;
-  const damaged = () => new Error("This pairing code is damaged. Scan the code again in Settings → Phone on your Mac.");
-  let url: URL;
-  try {
-    url = new URL(String(relay?.url ?? ""));
-  } catch {
-    throw damaged();
-  }
-  if (url.protocol !== "wss:" || url.username || url.password || url.search || url.hash || url.pathname !== "/") throw damaged();
-  if (!/^[A-Za-z0-9_-]{22}$/.test(String(relay?.hostId)) || !/^[A-Za-z0-9_-]{43}$/.test(String(relay?.key))) throw damaged();
-  return { url: url.origin, hostId: String(relay!.hostId), key: String(relay!.key) };
-}
-/** A relay computer's address and saved id: there is no URL to show, so its id on the relay stands in. */
-export const relayAddress = (hostId: string) => `relay://${hostId}`;
+// The pairing link's parts moved to @milagre/shared with parsePairing; the phone's modules still import them from here.
+export { localEndpoint, relayAddress, validAccess, validRelay };
+export type { Access, RelayLink };
 
 /** What a client needs to reach one computer: a direct address, or the relay. */
 export type ClientHost = { address: string; token: string; access?: Access; relay?: RelayLink };
@@ -175,8 +141,10 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     const held = numbered.get(owner);
     // In a header, so the route stays the one an older host answers with an ETag (and a 304 when nothing changed).
     const since = held ? `${held.epoch}:${held.version}` : "none";
+    // X-Milagre-Chat-Pages: the snapshot without messages; the chat screen reads its Chat's as pages (chatMessages).
     const answer = await request<SnapshotAnswer | NumberedAnswer>(`/snapshot?projectPath=${encodeURIComponent(owner)}`, undefined, timeoutMs, {
       "X-Milagre-Snapshot-Since": since,
+      "X-Milagre-Chat-Pages": "1",
     });
     if (!("epoch" in answer) || typeof answer.version !== "number") {
       numbered.delete(owner);
@@ -252,7 +220,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
         throw new Error(
           [401, 403].includes(response.status)
             ? through
-              ? "Your Mac refused this phone. Scan its code again in Settings → Phone."
+              ? "Your Mac refused this phone. Scan its code again in Settings → Devices."
               : "Your computer's Cloudflare access was refused. Scan its pairing code again."
             : response.status >= 500
               ? "Your computer isn't answering. Check that Milagre and its mobile host are running on your Mac."
@@ -359,6 +327,16 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     /** The image source to show: the authenticated URL directly, or the cached file through the relay. */
     image: (projectPath: string, path: string): { uri: string; headers?: Record<string, string> } | Promise<{ uri: string }> =>
       relay || lanNow() ? relayImage(projectPath, path) : media(projectPath, path),
+    /** A page of one Chat's messages: its latest turns, or those before the message `before`. */
+    chatMessages: (projectPath: string, chatId: number, options: { before?: number; turns?: number } = {}) =>
+      request<ChatPage>(
+        `/chat-messages?projectPath=${encodeURIComponent(projectPath)}&chatId=${chatId}` +
+          (options.before !== undefined ? `&before=${options.before}` : "") +
+          (options.turns !== undefined ? `&turns=${options.turns}` : ""),
+      ),
+    /** Matches across the Chats of a Project or Link, best first: where each is and what matched. */
+    searchChats: (projectPath: string, query: string) =>
+      request<ChatSearchMatch[]>(`/search?projectPath=${encodeURIComponent(projectPath)}&q=${encodeURIComponent(query)}`),
     /** One message with its tools' full output; the snapshot leaves that out. */
     message: (projectPath: string, id: number) => request<ChatMessage>(`/message?projectPath=${encodeURIComponent(projectPath)}&id=${id}`),
     snapshot: async (projectPath: string) => phoneSnapshot(await readSnapshot(projectPath)),

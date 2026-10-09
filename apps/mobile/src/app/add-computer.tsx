@@ -7,10 +7,13 @@ import { ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, ClipboardPasteIcon, Ke
 import { parsePairing, type Pairing } from "../pairing";
 import { useSession } from "../session";
 import { Icon } from "../icons";
-import { CircleButton, ErrorNotice, Field, PageScroll, PillButton, colors, styles } from "../ui";
+import { CircleButton, ErrorNotice, Field, PageScroll, PillButton, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /** One sheet, two steps: scan (with paste as a shortcut), or type the address and token. */
 export default function AddComputer() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const [permission, requestPermission] = useCameraPermissions();
   const [manual, setManual] = useState(false);
@@ -149,7 +152,7 @@ export default function AddComputer() {
             </View>
             <View style={{ gap: 6 }}>
               <Text style={styles.label}>On your Mac</Text>
-              <Text style={styles.text}>Open Milagre, go to Settings → Phone, turn on phone access and scan the QR code it shows.</Text>
+              <Text style={styles.text}>Open Milagre, go to Settings → Devices, turn on Allow devices to connect and scan the QR code it shows.</Text>
             </View>
             <View style={[styles.card, { paddingVertical: 0, gap: 0 }]}>
               {[

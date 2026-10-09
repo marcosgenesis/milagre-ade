@@ -9,6 +9,7 @@ import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
   Cancel01Icon,
+  CheckListIcon,
   FilterHorizontalIcon,
   FolderAddIcon,
   GitBranchIcon,
@@ -21,26 +22,40 @@ import {
   UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { chatMarkTone, chatPullRequests, comparePins, isListedChat, pendingChatSessionId, pullRequestRefs, withPendingChat } from "@milagre/shared/chats";
+import {
+  chatMarkTone,
+  chatPullRequests,
+  chatTitle,
+  comparePins,
+  isListedChat,
+  pendingChatSessionId,
+  pullRequestRefs,
+  withPendingChat,
+} from "@milagre/shared/chats";
 import { searchMessages } from "@milagre/shared/message-search";
 import type { AgentSession, PullRequest } from "@milagre/shared/model";
-import type { RegisteredProject } from "./client";
+import type { LinearIssue } from "@milagre/shared/linear";
+import type { ChatSearchMatch, RegisteredProject } from "./client";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
 import { usePendingChats, useSession, type MobilePendingChat } from "./session";
 import { chatMark, type ChatMark } from "./indicators";
 import { ChatMarkIcon } from "./status-indicators";
 import { Icon } from "./icons";
 import { LoadingLogo } from "./loading-logo";
-import { ErrorNotice, Field, IconButton, PullDown, colors, styles } from "./ui";
+import { ErrorNotice, Field, IconButton, PullDown, useStyles } from "./ui";
 import { ProjectIcon, ProjectIcons } from "./project-icon";
 import { ProjectSearch } from "./project-search";
 import { chatMenu, runChatAction } from "./chat-actions";
 import { confirm } from "./confirm-store";
-import { ArchiveProgress } from "./archive-progress";
+import { ArchivingOverlay, useArchiveActivity } from "./archive-progress";
+import { clearArchiveNotice, showArchiveNotice } from "./archive";
 import { AttentionDot, useAttention } from "./attention";
 import { projectOfKey } from "@milagre/shared/agent-runs";
 import { useChatPullRequests } from "./use-chat-pull-requests";
 import { ChatPullRequestChips } from "./chat-pull-request-chips";
+import { useLinear } from "./use-linear";
+import { useWorktreeLinearIssues } from "./use-worktree-linear-issues";
+import { createStylesHook, useTheme, type Palette } from "./theme";
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
@@ -49,12 +64,14 @@ type Row = { key: string; path: string } & (
   | {
       kind: "chat";
       chat: AgentSession;
+      title: string;
       worktree: string;
       mark: ChatMark;
       pending?: MobilePendingChat;
       prPath?: string;
       prRefs?: string[];
       pullRequests?: PullRequest[];
+      linearIssue?: LinearIssue;
     }
   | { kind: "message"; chat: AgentSession; title: string; snippet: string; highlight: [number, number] }
   | { kind: "notice"; message: string; failed?: boolean }
@@ -86,6 +103,9 @@ export function ProjectNavigation(props: NavigationProps) {
 }
 
 function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: NavigationProps) {
+  const s = useS();
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const { pendingChats } = usePendingChats();
   const insets = useSafeAreaInsets();
@@ -100,7 +120,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const [show, setShow] = useState<Show>("all");
   const [page, setPage] = useState<"add" | null>(null);
   const [busy, setBusy] = useState(false);
-  const [archiving, setArchiving] = useState<Set<string>>(new Set());
+  const archives = useArchiveActivity();
   const archiveRequests = useRef(new Set<string>());
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -149,14 +169,46 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     // One slow Project must not hold up the other expanded groups.
     void Promise.all(paths.map(load));
   }, [expanded, searching, listed, load]);
+  // Projects held without their messages (a drawer preview, or a host that keeps them by Chat) are searched on the host.
+  const [hostMatches, setHostMatches] = useState<{ query: string; matches: Record<string, ChatSearchMatch[]> }>({ query: "", matches: {} });
+  const hostSearchPaths = useMemo(
+    () =>
+      query.trim()
+        ? listed
+            .filter((item) => {
+              const copy = cachedProject(item.path);
+              return copy && (copy.previewOnly || copy.project.state.messagesInChats);
+            })
+            .map((item) => item.path)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- revision changes when a cached Project does.
+    [query, listed, cachedProject, revision],
+  );
+  const hostSearchKey = hostSearchPaths.join("\n");
+  useEffect(() => {
+    const needle = query.trim();
+    if (!needle || !hostSearchKey || !session.client) return;
+    let cancelled = false;
+    const client = session.client;
+    const timer = setTimeout(() => {
+      void Promise.all(hostSearchKey.split("\n").map(async (path) => [path, await client.searchChats(path, needle).catch(() => [])] as const)).then(
+        (found) => !cancelled && setHostMatches({ query: needle.toLowerCase(), matches: Object.fromEntries(found) }),
+      );
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, hostSearchKey, session.client]);
   const rows = useMemo(() => {
     const result: Row[] = [];
     const needle = query.trim().toLowerCase();
     // Each Project's Chats under the current filter, for the message search below when no Chat title matches.
     const searchable: {
       path: string;
-      messages: NonNullable<ReturnType<typeof cachedProject>>["project"]["state"]["messages"];
-      chats: Map<number, AgentSession>;
+      // Null for a Project searched on the host (hostMatches).
+      messages: NonNullable<ReturnType<typeof cachedProject>>["project"]["state"]["messages"] | null;
+      chats: Map<number, { chat: AgentSession; title: string }>;
     }[] = [];
     for (const project of listed) {
       const saved = project.path === currentPath && session.snapshot ? session.snapshot : cachedProject(project.path);
@@ -182,24 +234,35 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           pending && !byChat.get(chat.id)?.some((message) => message.clientMessageId !== pending.preview.message.clientMessageId)
             ? pending.preview.sortId
             : chat.id;
-        return { chat, run, pending, sortId, mark: pending && !pending.accepted ? ("running" as const) : chatMark(chat, run, byChat.get(chat.id) || []) };
+        return {
+          chat,
+          title: chatTitle(chat, byChat.get(chat.id)),
+          run,
+          pending,
+          sortId,
+          mark: pending && !pending.accepted ? ("running" as const) : chatMark(chat, run, byChat.get(chat.id) || []),
+        };
       });
       // Like desktop's sidebar, a worktree's empty starter Chat stays out until it has a message or a turn is starting.
       const shown = marked
-        .filter(({ chat, run }) => (show === "archived") === !!chat.archived && (run || isListedChat(chat, chatSummary(chat, byChat.get(chat.id)).count)))
+        .filter(
+          ({ chat, run }) =>
+            // A Chat stays in its place while its archive runs, under the progress, until the archive ends.
+            (show === "archived") === (!!chat.archived && !archives.chats.has(`${copy?.project.path}#${chat.id}`)) &&
+            (run || isListedChat(chat, chatSummary(chat, byChat.get(chat.id)).count)),
+        )
         .filter(({ mark }) => show !== "needs" || NEEDS.includes(mark))
         .filter(({ mark }) => show !== "running" || mark === "running");
       if (needle && copy)
         searchable.push({
           path: project.path,
-          messages: copy.project.state.messages,
-          chats: new Map(shown.filter(({ pending }) => !pending).map(({ chat }) => [chat.id, chat])),
+          messages: copy.previewOnly || copy.project.state.messagesInChats ? null : copy.project.state.messages,
+          chats: new Map(shown.filter(({ pending }) => !pending).map(({ chat, title }) => [chat.id, { chat, title }])),
         });
       const chats = shown
         .filter(
-          ({ chat }) =>
-            !needle ||
-            [name, chat.title, chat.generatedTitle, copy?.project.state.worktrees[chat.worktree_id]?.name].some((text) => text?.toLowerCase().includes(needle)),
+          ({ chat, title }) =>
+            !needle || [name, title, copy?.project.state.worktrees[chat.worktree_id]?.name].some((text) => text?.toLowerCase().includes(needle)),
         )
         // Pinned Chats first in their order, then the newest Chat first, by when it was created, so rows don't jump around as agents reply.
         .sort((a, b) => comparePins(a.chat, b.chat) || b.sortId - a.sortId);
@@ -209,12 +272,13 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         result.push({ key: `section:${section}`, path: "", kind: "section", name: section });
       result.push({ key: project.path, path: project.path, kind: "project", name, expanded: open, members: project.projects });
       if (!open) continue;
-      for (const { chat, mark, pending } of chats)
+      for (const { chat, title, mark, pending } of chats)
         result.push({
           key: `${project.path}#${chat.id}`,
           path: project.path,
           kind: "chat",
           chat,
+          title,
           pending,
           worktree: pending?.newWorktree ? "New worktree" : copy?.project.state.worktrees[chat.worktree_id]?.name || "Worktree",
           prPath: !pending && !copy?.project.link ? copy?.project.state.worktrees[chat.worktree_id]?.path : undefined,
@@ -242,17 +306,19 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
       const found: Row[] = [];
       for (const { path, messages, chats } of searchable) {
         const perChat = new Map<number, number>();
-        for (const match of searchMessages(messages, needle, 200)) {
-          const chat = chats.get(match.message.session_id);
+        const matches = messages ? searchMessages(messages, needle, 200) : hostMatches.query === needle ? (hostMatches.matches[path] ?? []) : [];
+        for (const match of matches) {
+          const entry = chats.get(match.message.session_id);
           const count = perChat.get(match.message.session_id) ?? 0;
-          if (!chat || count >= 3) continue;
+          if (!entry || count >= 3) continue;
+          const { chat, title } = entry;
           perChat.set(chat.id, count + 1);
           found.push({
             key: `${path}#${chat.id}:message:${match.message.id}`,
             path,
             kind: "message",
             chat,
-            title: chat.title || chat.generatedTitle || "New Chat",
+            title,
             snippet: match.snippet,
             highlight: match.highlight,
           });
@@ -265,7 +331,22 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- revision invalidates rows after the session's preview cache changes.
-  }, [revision, cachedProject, currentPath, expanded, failures, query, searching, show, listed, session.snapshot, session.client?.url, pendingChats]);
+  }, [
+    revision,
+    cachedProject,
+    currentPath,
+    expanded,
+    failures,
+    query,
+    searching,
+    show,
+    listed,
+    session.snapshot,
+    session.client?.url,
+    pendingChats,
+    archives.chats,
+    hostMatches,
+  ]);
 
   const prTargets = useMemo(() => {
     const byPath = new Map<string, Set<string>>();
@@ -278,10 +359,18 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     return [...byPath].map(([path, refs]) => ({ path, refs: [...refs] }));
   }, [rows]);
   const prStatus = useChatPullRequests(session.client, prTargets);
+  // A Worktree's Linear issue shows its chip on the Chat row, with or without pull requests, while Linear is on.
+  const { active: linearActive } = useLinear(session.client);
+  const linearPaths = useMemo(() => [...new Set(rows.flatMap((row) => (row.kind === "chat" && row.prPath ? [row.path] : [])))], [rows]);
+  const linearIssues = useWorktreeLinearIssues(session.client, linearActive ? linearPaths : []);
   const displayedRows = rows.map((row) => {
     if (row.kind !== "chat") return row;
     const status = row.prPath ? prStatus[row.prPath] : undefined;
-    return { ...row, pullRequests: chatPullRequests(row.prRefs || [], status?.found || {}, status?.branch) };
+    return {
+      ...row,
+      pullRequests: chatPullRequests(row.prRefs || [], status?.found || {}, status?.branch),
+      linearIssue: row.prPath ? linearIssues[row.prPath] : undefined,
+    };
   });
 
   // Choosing a Chat or a new Chat goes there at once; the Chat loads the Project behind the splash mark, so nothing
@@ -301,16 +390,19 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     else onNavigate({ pathname: "/chat", params: { ...params, id: String(chatId) } });
   }
   // A Chat's ⋯ choice runs against its own Project's copy, which is reread afterwards. Archiving the Chat showing
-  // behind the navigation leaves it for the project list.
+  // behind the navigation leaves it for the project list as soon as the archive is confirmed; the archive then runs on
+  // the Chat's row, and nothing navigates when it ends.
   async function act(projectPath: string, chat: AgentSession, action: string) {
     const copy = projectPath === currentPath && session.snapshot ? session.snapshot : cachedProject(projectPath);
     if (!copy || !session.client) return;
     const archiveKey = `${projectPath}#${chat.id}`;
     if (archiveRequests.current.has(archiveKey)) return;
     if (action === "archive" && !chat.archived) archiveRequests.current.add(archiveKey);
+    let confirmed = false;
     setError("");
+    clearArchiveNotice();
     try {
-      const result = await runChatAction({
+      await runChatAction({
         action,
         chat,
         running: !!copy.runs.runs[`${copy.project.path}#${chat.id}`],
@@ -318,24 +410,21 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         projectPath: copy.project.path,
         state: copy.project.state,
         link: copy.project.link,
-        onConfirm: () => setArchiving((previous) => new Set(previous).add(archiveKey)),
-        refresh: () => (projectPath === currentPath ? session.refresh() : load(projectPath)),
-        expectActivity: session.expectActivity,
-        notify: (message) => {
-          if (alive.current) setError(message);
+        onConfirm: () => {
+          confirmed = true;
+          if (projectPath === currentPath && chat.id === activeChatId) onNavigate("/projects");
         },
+        // The phone may show another Project by the time the archive ends, so the list's copy is read again too.
+        refresh: () =>
+          projectPath !== currentPath ? load(projectPath) : Promise.all([session.refresh(), action === "archive" ? load(projectPath) : undefined]),
+        expectActivity: session.expectActivity,
+        notify: showArchiveNotice,
       });
-      if ((result === "hidden" || result === "removed") && projectPath === currentPath && chat.id === activeChatId) onNavigate("/projects");
     } catch (e) {
-      if (alive.current) setError((e as Error).message);
+      if (confirmed) showArchiveNotice(`Could not archive Chat: ${(e as Error).message}`);
+      else if (alive.current) setError((e as Error).message);
     } finally {
       archiveRequests.current.delete(archiveKey);
-      if (alive.current)
-        setArchiving((previous) => {
-          const next = new Set(previous);
-          next.delete(archiveKey);
-          return next;
-        });
     }
   }
   // Removing a Project takes it off the recent list, as desktop does; its folder and Chats stay on the Mac.
@@ -346,6 +435,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     }
     if (isLinkScopeKey(projectPath)) {
       if (action === "copy") await Clipboard.setStringAsync(name);
+      if (action === "edit") onNavigate({ pathname: "/link-projects", params: { linkId: projectPath.slice("milagre-link:".length) } }, true);
       return;
     }
     if (action === "copy") {
@@ -411,6 +501,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         <Text style={s.secondary}>Add project</Text>
       </Pressable>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <IconButton label="Choose projects" icon={CheckListIcon} size={44} disabled={busy} onPress={() => onNavigate("/choose-projects", true)} />
         <IconButton label="Link projects" icon={Link04Icon} size={44} disabled={busy} onPress={() => onNavigate("/link-projects", true)} />
         <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => onNavigate("/settings", true)} />
       </View>
@@ -512,8 +603,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
             <Text style={s.secondary}>Opening...</Text>
           </View>
         )}
-        {archiving.size > 0 && <ArchiveProgress />}
-        {error ? <ErrorNotice message={error} /> : null}
+        {error || archives.notice ? <ErrorNotice message={error || archives.notice} /> : null}
       </View>
       <FlatList
         data={displayedRows}
@@ -552,6 +642,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                 items: [
                   { id: "new", title: "New Chat", systemImage: "square.and.pencil" },
                   { id: "copy", title: linked ? "Copy Link name" : "Copy path", systemImage: "doc.on.doc" },
+                  ...(linked ? [{ id: "edit", title: "Edit Link", systemImage: "pencil" }] : []),
                 ],
               },
               ...(!linked ? [{ items: [{ id: "remove", title: "Remove from list", systemImage: "minus.circle", destructive: true }] }] : []),
@@ -623,39 +714,47 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                 <Text style={[s.detail, item.failed && { color: colors.red }]}>{item.message}</Text>
               </Pressable>
             );
-          const title = item.chat.title || item.chat.generatedTitle || "New Chat";
+          const title = item.title;
           const selected = currentPath === item.path && activeChatId === item.chat.id;
           const tone = chatMarkTone(item.mark);
-          const hasPullRequests = !!item.pullRequests?.length;
+          const hasChips = !!item.pullRequests?.length || !!item.linearIssue;
           const copy = item.path === currentPath && session.snapshot ? session.snapshot : cachedProject(item.path);
           const menu = chatMenu(
             item.chat,
             copy?.project.link ? { path: copy.project.state.worktrees[item.chat.worktree_id]?.path } : copy?.project.state.worktrees[item.chat.worktree_id],
           );
+          // While it archives, the row stays put under the progress and takes no taps.
+          const archiving = archives.chats.has(`${copy?.project.path ?? item.path}#${item.chat.id}`);
           // A tap opens the Chat and a long press opens its ⋯ menu, as on desktop's sidebar.
           return (
-            <View style={[s.chat, { backgroundColor: selected ? colors.hover : "transparent" }]}>
-              <View style={{ flex: 1 }}>
+            <View pointerEvents={archiving ? "none" : "auto"} style={[s.chat, { backgroundColor: selected && !archiving ? colors.hover : "transparent" }]}>
+              <View
+                style={{ flex: 1, opacity: archiving ? 0.3 : 1 }}
+                accessibilityElementsHidden={archiving}
+                importantForAccessibility={archiving ? "no-hide-descendants" : "auto"}
+              >
                 <PullDown
                   label={`${title}${item.chat.pinned ? ", pinned" : ""}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}`}
                   title={title}
-                  sections={item.pending ? [] : menu}
+                  sections={item.pending || archiving ? [] : menu}
                   onSelect={(action) => {
-                    if (!item.pending) void act(item.path, item.chat, action);
+                    if (!item.pending && !archiving) void act(item.path, item.chat, action);
                   }}
-                  onPress={() => select(item.path, item.chat.id, item.pending)}
+                  onPress={() => {
+                    if (!archiving) select(item.path, item.chat.id, item.pending);
+                  }}
                   style={{ flex: 1 }}
                 >
-                  <View style={[s.chatBody, hasPullRequests && { minHeight: 28, paddingTop: 6, paddingBottom: 0 }]}>
+                  <View style={[s.chatBody, hasChips && { minHeight: 28, paddingTop: 6, paddingBottom: 0 }]}>
                     <ChatMarkIcon mark={item.mark} />
                     <View style={{ flex: 1, gap: 3 }}>
                       <Text
-                        numberOfLines={hasPullRequests ? 1 : 2}
+                        numberOfLines={hasChips ? 1 : 2}
                         style={[s.chatTitle, { color: item.chat.unread || selected ? colors.ink : colors.ink2, fontWeight: item.chat.unread ? "600" : "500" }]}
                       >
                         {title}
                       </Text>
-                      {!hasPullRequests && (
+                      {!hasChips && (
                         <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
                           {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
                           {!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}
@@ -670,8 +769,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                     </View>
                   </View>
                 </PullDown>
-                {hasPullRequests && (
-                  <ChatPullRequestChips pullRequests={item.pullRequests || []}>
+                {hasChips && (
+                  <ChatPullRequestChips pullRequests={item.pullRequests || []} linearIssue={item.linearIssue}>
                     {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
                     {!!labels[item.mark] && (
                       <Text numberOfLines={1} style={[s.detail, { flexShrink: 1, color: tone === "accent" ? colors.accentInk : colors[tone] }]}>
@@ -681,13 +780,14 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                   </ChatPullRequestChips>
                 )}
               </View>
-              {!item.pending && (
+              {!item.pending && !archiving && (
                 <PullDown label={`Actions for ${title}`} title={title} sections={menu} onSelect={(action) => void act(item.path, item.chat, action)}>
                   <View style={{ width: 40, height: 44, alignItems: "center", justifyContent: "center" }}>
                     <Icon icon={MoreHorizontalIcon} tone="ink3" size={18} />
                   </View>
                 </PullDown>
               )}
+              {archiving && <ArchivingOverlay title={title} />}
             </View>
           );
         }}
@@ -697,43 +797,45 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   );
 }
 
-const s = StyleSheet.create({
-  host: { color: colors.ink, fontSize: 17, fontWeight: "600" },
-  secondary: { color: colors.ink2, fontSize: 15 },
-  detail: { color: colors.ink2, fontSize: 12 },
-  computerIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    borderCurve: "continuous",
-    backgroundColor: colors.field,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  search: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderCurve: "continuous",
-    backgroundColor: colors.field,
-  },
-  project: { flexDirection: "row", alignItems: "center", marginTop: 12 },
-  projectTitle: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 8 },
-  chat: { flexDirection: "row", alignItems: "center", marginVertical: 2, borderRadius: 8, borderCurve: "continuous" },
-  chatBody: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingLeft: 12, paddingVertical: 8 },
-  filter: { width: 44, height: 44, borderRadius: 10, borderCurve: "continuous", alignItems: "center", justifyContent: "center" },
-  chatTitle: { color: colors.ink, fontSize: 15, lineHeight: 20 },
-  notice: { minHeight: 44, justifyContent: "center", paddingLeft: 42, paddingRight: 12 },
-  footer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-  },
-  footerAction: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 },
-});
+const makeS = (colors: Palette) =>
+  StyleSheet.create({
+    host: { color: colors.ink, fontSize: 17, fontWeight: "600" },
+    secondary: { color: colors.ink2, fontSize: 15 },
+    detail: { color: colors.ink2, fontSize: 12 },
+    computerIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 10,
+      borderCurve: "continuous",
+      backgroundColor: colors.field,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    search: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderCurve: "continuous",
+      backgroundColor: colors.field,
+    },
+    project: { flexDirection: "row", alignItems: "center", marginTop: 12 },
+    projectTitle: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 8 },
+    chat: { flexDirection: "row", alignItems: "center", marginVertical: 2, borderRadius: 8, borderCurve: "continuous" },
+    chatBody: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingLeft: 12, paddingVertical: 8 },
+    filter: { width: 44, height: 44, borderRadius: 10, borderCurve: "continuous", alignItems: "center", justifyContent: "center" },
+    chatTitle: { color: colors.ink, fontSize: 15, lineHeight: 20 },
+    notice: { minHeight: 44, justifyContent: "center", paddingLeft: 42, paddingRight: 12 },
+    footer: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.line,
+    },
+    footerAction: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 },
+  });
+const useS = createStylesHook(makeS);

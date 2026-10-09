@@ -6,6 +6,8 @@ const fixture = `
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { QuestionCard } from "/src/components/agents/QuestionCard";
+import { AnswerCard } from "/src/components/agents/AnswerCard";
+import { answeredQuestions } from "@milagre/shared/agent-runs";
 import "/src/styles.css";
 const option = (label, description) => ({ label, description });
 const request = { requestId: "q-1", questions: [
@@ -16,8 +18,11 @@ const request = { requestId: "q-1", questions: [
 function Fixture() {
   const [sent, setSent] = useState(undefined);
   window.sent = () => sent;
+  const answered = sent ? answeredQuestions(request, sent) : null;
+  // Once sent, the chat shows the answers as a card, as the user's message.
   return <div style={{ width: 620, padding: 12 }}>
-    <QuestionCard request={request} waiting={0} answering={sent === undefined ? null : sent ? "answered" : "dismissed"} onAnswer={setSent} />
+    {answered ? <div style={{ display: "flex", justifyContent: "flex-end", paddingLeft: 48 }}><AnswerCard answered={answered} /></div>
+      : <QuestionCard request={request} waiting={0} answering={sent === undefined ? null : sent ? "answered" : "dismissed"} onAnswer={setSent} />}
   </div>;
 }
 document.documentElement.classList.add("dark");
@@ -82,6 +87,18 @@ async function browserChecks() {
     await evaluate(`${primary}.click()`);
     await waitFor("window.sent() !== undefined");
     assert.deepEqual(await evaluate("window.sent()"), { review: ["Review card"], parts: ["Goal"], placement: ["Top of the picker"] });
+    // The answers show as a card: each question with what was answered.
+    await waitFor('!!document.querySelector("[data-slot=answer-card]")');
+    const rows = await evaluate(
+      '[...document.querySelectorAll("[data-slot=answer-card-row]")].map((row) => [...row.children].map((part) => part.textContent))',
+    );
+    assert.deepEqual(rows, [
+      ["How should the review step work?", "Review card"],
+      ["Which parts should the brief cover?", "Goal"],
+      ["Where does the handover row go?", "Top of the picker"],
+    ]);
+    assert.match(await evaluate('document.querySelector("[data-slot=answer-card]").textContent'), /Answered 3 questions/);
+    await shot("4-answer-card");
     console.log("Question card checks passed.");
     app.exit(0);
   } catch (error) {

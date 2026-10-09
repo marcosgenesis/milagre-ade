@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ModelProvider } from "../../model";
 import { useSettings } from "../../lib/settings";
 import { PROVIDER_NAMES, formatPercent, shownPercent, usageLabel, visibleProviders } from "./format";
-import { ProviderMark } from "./ProviderMark";
+import { ProviderLogo } from "../ProviderLogo";
 import { UsageBar } from "./UsageBar";
 import { USAGE_CARD_WIDTH, UsageCard } from "./UsageCard";
 import type { UsageState } from "./useUsage";
@@ -124,7 +124,7 @@ export function SidebarUsage({ usage }: { usage: UsageState }) {
             className={`sidebar-usage-row relative flex h-8 w-full min-w-0 items-center gap-1.5 rounded-[8px] px-2 text-[12px] tabular-nums text-ink-2 transition-[background-color,color,opacity] duration-150 hover:bg-hover-2 hover:text-ink ${expanded ? "bg-hover-2 text-ink" : ""} ${item.status === "error" ? "opacity-60" : ""}`}
           >
             <span className="flex shrink-0 items-center justify-center">
-              <ProviderMark provider={item.provider} size={13} />
+              <ProviderLogo provider={item.provider} size={13} />
             </span>
             <span className="sidebar-copy min-w-0 truncate text-ink-2">{PROVIDER_NAMES[item.provider]}</span>
             {item.windows.length === 0 ? (

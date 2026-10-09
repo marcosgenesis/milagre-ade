@@ -6,13 +6,16 @@ const { createChatScopes } = require("./chat-scopes.cjs");
 const { registerLinkRuntime } = require("./link-runtime.cjs");
 const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { PROVIDERS } = require("@milagre/shared/providers");
+const { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } = require("@milagre/shared/pr-action");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { createGit } = require("./git/client.cjs");
+const { syncMainBranch } = require("./main-sync.cjs");
 const fs = require("node:fs/promises");
 const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
 const { migrateImages, withDetails } = require("./project-content.cjs");
+const { chatPage, chatSearch } = require("./chat-pages.cjs");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
@@ -30,7 +33,16 @@ const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
 const { writeTranscript, generateBrief, createHandoverModels } = require("./agents/handover.cjs");
 const { discoverSkills, expandSkillPrompt, readDiscoveredSkill } = require("./skills.cjs");
-const { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
+const {
+  DEFAULT_WORKTREE_ROOT,
+  branchPushed,
+  createWorktree,
+  issueBranch,
+  listBranches,
+  moveWorktreeBranch,
+  newSuffix,
+  renameWorktreeBranch,
+} = require("./worktrees.cjs");
 const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
 const { previewFilesToCopy } = require("./worktree-files.cjs");
@@ -38,9 +50,12 @@ const { createProjectSettings } = require("./project-settings.cjs");
 const { WorktreeSetups, resolveSetupCommand } = require("./worktree-setup.cjs");
 const { readDiffStat } = require("./diffstat.cjs");
 const { registerGitHandlers } = require("./git-ipc.cjs");
-const { createPullRequestReader, readPullRequests } = require("./pull-request.cjs");
+const { createPullRequestReader, readPullRequestState, readPullRequests } = require("./pull-request.cjs");
 const { emptyState, reconcileState, markDisconnectedSubagents } = require("./project-state.cjs");
 const { migrateWorktreeChats } = require("./worktree-chats.cjs");
+const { createLinear } = require("./linear/index.cjs");
+const { createLinearIssues } = require("./linear/issues.cjs");
+const { isIssueKey } = require("./linear/links.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
@@ -164,6 +179,34 @@ function createRuntime(options) {
     commands.handle(`browser:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Browser access requires an authenticated connection");
       return browsers[method === "close" ? "closeViewer" : method](request, context.clientId);
+    });
+  }
+  // A Chat's Terminals start in its Worktree, or in one of a shared Chat's Worktrees. The host resolves them from the
+  // saved Chat: a client never names a folder it could not otherwise reach.
+  async function chatWorktrees(chatId) {
+    const scope = projectOfKey(chatId),
+      id = sessionIdFromKey(chatId);
+    if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope)) throw new Error("Open this Chat before opening a Terminal.");
+    const state = await scopeStates.get(scope);
+    const session = state.sessions[id];
+    if (!session) throw new Error("Open an existing Chat before opening a Terminal.");
+    if (session.archived) throw new Error("This Chat is archived.");
+    if (isLinkScopeKey(scope)) return (session.worktrees ?? []).map((member) => ({ path: member.worktreePath, label: member.alias }));
+    const worktree = state.worktrees?.[session.worktree_id];
+    return worktree?.path ? [{ path: worktree.path, label: path.basename(worktree.path) }] : [];
+  }
+  const terminals =
+    options.terminals ??
+    require("./terminals.cjs").createTerminals({
+      resolveChat: chatWorktrees,
+      onChange: (chatId) => emit("terminal:changed", { chatId }),
+      onShellsChanged: () => ports.wake(),
+    });
+  commands.handle("terminal:list", (_context, request) => terminals.list(request));
+  for (const method of ["open", "read", "input", "resize", "close"]) {
+    commands.handle(`terminal:${method}`, (context, request) => {
+      if (!context?.clientId) throw new Error("Terminal access requires an authenticated connection");
+      return terminals[method](request);
     });
   }
   const searchFiles = createFileSearch();
@@ -488,6 +531,7 @@ function createRuntime(options) {
       force,
       closeSession: async () => {
         for (const gone of goneChats) {
+          terminals.closeChat(gone);
           await advisorDelivery.stop(gone);
           await advisors.stopChat(gone);
         }
@@ -538,6 +582,51 @@ function createRuntime(options) {
     await projectSettings().setSetupCommand(projectPath, typeof command === "string" ? command : "");
     return readSetupCommand(projectPath);
   });
+  // Main branch sync (see main-sync.cjs): the setting, and one sync at a time per Project.
+  async function readMainSync(projectPath) {
+    const [settings, base] = await Promise.all([projectSettings().getMainSync(projectPath), git.resolveBase(projectPath).catch(() => ({ name: "main" }))]);
+    return { branch: base.name, ...settings };
+  }
+  const mainSyncs = new Map();
+  function syncMain(projectPath) {
+    let running = mainSyncs.get(projectPath);
+    if (!running) {
+      running = syncMainBranch(projectPath)
+        .then(async (last) => {
+          await projectSettings()
+            .recordMainSync(projectPath, last)
+            .catch((error) => console.warn("Milagre main sync:", error.message));
+          emit("main-sync:status", { projectPath, last });
+          return last;
+        })
+        .finally(() => mainSyncs.delete(projectPath));
+      mainSyncs.set(projectPath, running);
+    }
+    return running;
+  }
+  commands.handle("main-sync:read", async (_event, projectPath) => {
+    await knownFolder(projectPath);
+    await environmentReady;
+    return readMainSync(projectPath);
+  });
+  commands.handle("main-sync:save", async (_event, projectPath, override) => {
+    await knownFolder(projectPath);
+    await projectSettings().setMainSyncOverride(projectPath, typeof override === "boolean" ? override : null);
+    await environmentReady;
+    return readMainSync(projectPath);
+  });
+  commands.handle("main-sync:default:read", () => projectSettings().getMainSyncDefault());
+  commands.handle("main-sync:default:save", (_event, value) => projectSettings().setMainSyncDefault(value === true));
+
+  // A Linear issue's current copy, or a thrown error when Linear no longer has the key (nothing is created then).
+  async function readLinearIssue(key) {
+    // Checked before any query, so a Chat that can't reach Linear never creates a Worktree.
+    if (!linear.enabled()) throw new Error("Linear is off in Settings › Experimental.");
+    if (!linear.status().connected) throw new Error("Linear isn't connected.");
+    const issue = await linearIssues.readIssue(key);
+    if (!issue) throw new Error(`${key} no longer exists in Linear.`);
+    return issue;
+  }
 
   // A new worktree starts on its prompt's first words; a better name replaces its branch's once Haiku
   // picks one, so the chat never waits on it.
@@ -553,14 +642,29 @@ function createRuntime(options) {
     emit("worktree:renamed", { projectPath, path: created.path, from: created.branch, name });
   }
 
-  commands.handle("worktree:create", async (event, { projectPath, baseBranch, prompt }) => {
+  commands.handle("worktree:create", async (event, { projectPath, baseBranch, prompt, issueKey }) => {
     // Only these fields come from the renderer: the worktree folder and the files copied into it are main's call.
     const request = { projectPath, baseBranch, prompt };
     await ownProject(projectPath);
     await environmentReady;
+    // A Chat started from a Linear issue reads the issue again, never the renderer's copy. A missing issue creates nothing.
+    const issue = typeof issueKey === "string" ? await readLinearIssue(issueKey) : null;
+    const suffix = newSuffix();
+    const branch = issue ? await issueBranch({ projectPath, issue, suffix }) : undefined;
     const settings = await projectSettings().get(projectPath);
+    // Brings main up to its remote first, when the user asked for it. Never throws: a skipped or failed sync
+    // leaves main as it was and the Worktree starts from it as before.
+    const synced = (await projectSettings().getMainSync(projectPath)).enabled ? await syncMain(projectPath) : null;
     // The files are copied into the folder git just made; the rename that follows only changes the branch, so the path holds.
-    const created = await createWorktree({ ...request, root: worktreeRoot(), copyPatterns: settings.filesToCopy });
+    const created = await createWorktree({
+      ...request,
+      branch,
+      suffix,
+      root: worktreeRoot(),
+      copyPatterns: settings.filesToCopy,
+      // The sync already fetched main's upstream (or timed out trying): don't wait on it a second time.
+      fetched: synced?.branch === baseBranch,
+    });
     if (created.copy?.notes.length) console.warn("Milagre worktree file copy:", created.copy.notes.join(" "));
     // The setup command runs before the chat's first turn (see agent:start-turn).
     const resolved = await resolveSetupCommand(projectPath, settings.setupCommand);
@@ -570,10 +674,66 @@ function createRuntime(options) {
     if (!listed) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
     const state = await updateProject(request.projectPath, (latest) => {
       const worktree = latest.worktrees[listed.id];
-      return worktree ? { ...latest, worktrees: { ...latest.worktrees, [worktree.id]: { ...worktree, base: created.base } } } : latest;
+      return worktree
+        ? { ...latest, worktrees: { ...latest.worktrees, [worktree.id]: { ...worktree, base: created.base, ...(issue ? { linearIssue: issue.key } : {}) } } }
+        : latest;
     });
-    void track(() => nameWorktree(request.projectPath, created, request.prompt ?? ""), background).catch(() => {});
+    // A branch named after an issue keeps that name; only a chat named from its prompt gets the Haiku name.
+    if (!issue) void track(() => nameWorktree(request.projectPath, created, request.prompt ?? ""), background).catch(() => {});
     return { project: { ...project, state }, worktreeId: listed.id, ...(resolved.note ? { setupNote: resolved.note } : {}) };
+  });
+  // Links a Worktree that already exists to a Linear issue. A Milagre-named branch that was never pushed and has no PR
+  // takes the issue's branch name (the folder keeps its name); any other branch is left alone and only the key is stored.
+  commands.handle("worktree:link-issue", async (_event, { projectPath, worktreeId, key } = {}) => {
+    await ownProject(projectPath);
+    await environmentReady;
+    if (!isIssueKey(key)) throw new Error(`${JSON.stringify(String(key))} isn't a Linear issue key.`);
+    const issue = await readLinearIssue(key);
+    const project = await readProject(projectPath);
+    const worktree = project.state.worktrees[worktreeId];
+    if (!worktree) throw new Error("That worktree is no longer in this project.");
+    if (worktree.path === projectPath) throw new Error("The main checkout can't be linked to a Linear issue.");
+    const sharing = Object.values(project.state.sessions).filter((session) => session.worktree_id === worktreeId && !session.archived);
+    if (sharing.length > 1) throw new Error("Another chat uses this worktree, so it can't be linked to a Linear issue.");
+    // Only a Milagre branch is ever checked against git and gh; a branch the user named keeps its name without a lookup.
+    // The branch is renamed only when it was never pushed and gh definitely reports no PR in any state.
+    let renamable = false;
+    if (worktree.name.startsWith("milagre/") && !(await branchPushed(worktree.path, worktree.name))) {
+      const lookup = await readPullRequestStateOf(worktree.path).catch(() => ({ known: false, pr: null }));
+      renamable = lookup.known && lookup.pr === null;
+    }
+    if (renamable) {
+      // The suffix that tells this worktree's branch apart stays with it when the issue's name is taken.
+      const suffix = worktree.name.match(/-([a-z0-9]{4})$/)?.[1] ?? newSuffix();
+      const branch = await issueBranch({ projectPath, issue, suffix });
+      await moveWorktreeBranch({ worktreePath: worktree.path, from: worktree.name, to: branch });
+      const state = await updateProject(projectPath, (latest) => {
+        const renamed = renameWorktree(latest, { path: worktree.path, from: worktree.name, name: branch });
+        const item = renamed.worktrees[worktreeId];
+        return item ? { ...renamed, worktrees: { ...renamed.worktrees, [worktreeId]: { ...item, linearIssue: issue.key } } } : renamed;
+      });
+      emit("worktree:renamed", { projectPath, path: worktree.path, from: worktree.name, name: branch });
+      return { project: { ...project, state }, mode: "renamed", branch };
+    }
+    const state = await updateProject(projectPath, (latest) => {
+      const item = latest.worktrees[worktreeId];
+      return item ? { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: { ...item, linearIssue: issue.key } } } : latest;
+    });
+    return { project: { ...project, state }, mode: "stored", branch: worktree.name };
+  });
+  // Removes the stored issue link. The branch keeps its name: a branch that still names the issue keeps the chip.
+  commands.handle("worktree:unlink-issue", async (_event, { projectPath, worktreeId } = {}) => {
+    await ownProject(projectPath);
+    await environmentReady;
+    const project = await readProject(projectPath);
+    if (!project.state.worktrees[worktreeId]) throw new Error("That worktree is no longer in this project.");
+    const state = await updateProject(projectPath, (latest) => {
+      const item = latest.worktrees[worktreeId];
+      if (!item) return latest;
+      const { linearIssue: _unlinked, ...rest } = item;
+      return { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: rest } };
+    });
+    return { project: { ...project, state } };
   });
   // Re-reads some worktrees' diff stats at once, e.g. after a commit from the "Commit and open PR" dialog.
   commands.handle("worktree:refresh-diffs", (_event, projectPath, worktreeIds) => {
@@ -584,6 +744,7 @@ function createRuntime(options) {
     );
   });
   const readPullRequest = options.readPullRequest ?? createPullRequestReader();
+  const readPullRequestStateOf = options.readPullRequestState ?? readPullRequestState;
   commands.handle("worktree:pull-request", async (_event, worktreePath) => {
     await environmentReady;
     return readPullRequest(worktreePath);
@@ -630,8 +791,13 @@ function createRuntime(options) {
 
   // The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
   const ports = new PortWatcher({
-    isRunning: () => [...agents.sessions.values()].some((entry) => entry.session.turnActive),
-    roots: () => agents.processes(),
+    isRunning: () => terminals.size > 0 || [...agents.sessions.values()].some((entry) => entry.session.turnActive),
+    roots: () => {
+      // A Terminal's shell is a root too: what its commands listen on is the Chat's, like the agent's commands.
+      const roots = agents.processes();
+      for (const [chatId, shells] of terminals.shells()) roots.set(chatId, { ...roots.get(chatId), shells });
+      return roots;
+    },
     publish: (next) => {
       emit("agent:ports", next);
     },
@@ -772,6 +938,30 @@ function createRuntime(options) {
       return pending;
     });
 
+  // The Mac's Linear connection. Phones read it and the Experimental switch; only the Mac connects (mobile-bridge.cjs).
+  const linear = createLinear({ dataDir, ...options.linear, changed: () => emit("linear:status-changed", linear.status()) });
+  commands.handle("linear:status", () => linear.status());
+  commands.handle("linear:connect", () => linear.connect());
+  commands.handle("linear:disconnect", () => linear.disconnect());
+  commands.handle("linear:enabled:read", () => ({ enabled: linear.enabled() }));
+  commands.handle("linear:enabled:save", (_event, value) => {
+    const enabled = linear.setEnabled(value === true);
+    emit("linear:enabled-changed", { enabled });
+    return { enabled };
+  });
+  // Issues are read through the same connection; both answer without throwing (see linear/issues.cjs).
+  const linearIssues = createLinearIssues({ linear });
+  commands.handle("linear:issues", (_event, value) => linearIssues.list(value?.query));
+  commands.handle("linear:worktree-issues", async (_event, projectPath) => {
+    try {
+      await environmentReady;
+      const project = await readProject(projectPath);
+      return await linearIssues.worktreeIssues(Object.values(project.state.worktrees));
+    } catch {
+      return {};
+    }
+  });
+
   const chatTitles = new ChatTitles({
     states: scopeStates,
     update: updateProject,
@@ -805,8 +995,15 @@ function createRuntime(options) {
 
   commands.handle("chat:send", (_event, request) => {
     if (isLinkScopeKey(request?.projectPath) || !scopeStates.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
-    // Only Milagre marks a message as coming from another Chat.
-    return chats.send({ ...request, context: undefined }).then(({ sessionId }) => ({ sessionId }));
+    // Only Milagre marks a message as coming from another Chat. A PR-blocker pill is the one context a renderer can ask
+    // for, and Milagre checks it and writes its message and skill prompt itself.
+    const { prAction, ...rest } = request;
+    const action = prAction === undefined ? null : pullRequestActionContext(prAction);
+    if (prAction !== undefined && !action) throw new Error("That pull request action isn't valid.");
+    const message = action
+      ? { ...rest, body: pullRequestActionBody(action), prompt: pullRequestActionPrompt(action), images: [], files: [], context: action }
+      : { ...rest, context: undefined };
+    return chats.send(message).then(({ sessionId }) => ({ sessionId }));
   });
   commands.handle("chat:resume", (_event, projectPath, sessionId) => {
     if (!scopeStates.has(projectPath)) throw new Error("Open the project before continuing its chats.");
@@ -815,6 +1012,7 @@ function createRuntime(options) {
   commands.handle("chat:patch", async (_event, projectPath, sessionId, patch) => {
     if (!scopeStates.has(projectPath)) return;
     if (patch?.archived) {
+      terminals.closeChat(`${projectPath}#${sessionId}`);
       await advisorDelivery.stop(`${projectPath}#${sessionId}`);
       await advisors.stopChat(`${projectPath}#${sessionId}`);
     }
@@ -890,7 +1088,7 @@ function createRuntime(options) {
   commands.handle("agent:answer-question", async (_event, { chatId, requestId, answers, summary } = {}) => {
     const messageId =
       answers && typeof summary === "string" && summary && typeof chatId === "string" && scopeStates.has(projectOfKey(chatId))
-        ? await chats.recordAnswers(chatId, summary)
+        ? await chats.recordAnswers(chatId, summary, { requestId, answers })
         : null;
     try {
       const accepted = await agents.answerQuestion(chatId, requestId, answers);
@@ -1243,6 +1441,20 @@ function createRuntime(options) {
     if (!message) throw new Error("That message is no longer in this Project.");
     return withDetails(scopeStates.storageDirectory(scope), message);
   });
+  // A page of one Chat's messages, and search across a Project's Chats, for a client that doesn't hold every message.
+  const readScope = async (scope) => {
+    if (typeof scope !== "string" || (!isLinkScopeKey(scope) && !states.has(scope))) throw new Error("Open the Project before reading its messages.");
+    return scopeStates.get(scope);
+  };
+  commands.handle("chat:messages", async (_event, scope, chatId, options) => chatPage((await readScope(scope)).messages, chatId, options ?? {}));
+  commands.handle("chat:search", async (_event, scope, query, options) => chatSearch(await readScope(scope), query, options ?? {}));
+  // One subagent with its whole transcript, for a client that takes only each transcript's last entries (the panel that
+  // shows it). `chatId` is the Chat's number in the scope.
+  commands.handle("chat:subagent", async (_event, scope, chatId, agentId) => {
+    const agent = (await readScope(scope)).sessions?.[chatId]?.subagents?.find((item) => item.id === agentId);
+    if (!agent) throw new Error("That subagent is no longer in this Chat.");
+    return agent;
+  });
   // What the phone's media check needs, without the whole state.
   commands.handle("project:chat-image", (_event, projectPath, requested) => chats.images.resolve(projectPath, requested));
   commands.handle("project:worktree-paths", async (_event, projectPath) => {
@@ -1262,7 +1474,10 @@ function createRuntime(options) {
       await advisors.close();
       await advisorMcp.close();
       await advisorStore.close();
-      await Promise.all([simulators.close(), browsers.close(), artifacts.close()]);
+      // Ending the Terminals first also answers their pending reads, which the wait for accepted commands includes.
+      await Promise.all([simulators.close(), browsers.close(), artifacts.close(), terminals.dispose()]);
+      // A waiting Linear sign-in is an accepted command too: end it, or the wait below lasts until its timeout.
+      await linear.dispose();
       await Promise.allSettled([...active]);
       accounts.close();
       keepAwake.quit();
@@ -1322,6 +1537,8 @@ function createRuntime(options) {
         return readOpenChat(view ? view.chatId : chats.openChat);
       }),
     flush: async () => {
+      // A waiting Linear sign-in is an accepted command, but its window is gone when this runs on quit: end it.
+      await linear.dispose();
       await Promise.allSettled([...active]);
       await scopeStates.flush();
       await usageStore.idle();

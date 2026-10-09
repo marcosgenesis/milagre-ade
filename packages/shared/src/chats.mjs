@@ -53,7 +53,7 @@ export function pinOrderAt(orders, index) {
 let nextPreviewId = -2;
 
 /** A local message preview. It is never written into the Project's persisted state. */
-export function createPendingChat({ state, worktreeId, sessionId = null, body, images = [], files = [], model, provider }) {
+export function createPendingChat({ state, worktreeId, sessionId = null, body, images = [], files = [], model, provider, context = null }) {
   const id = nextPreviewId--;
   const session = state.sessions[sessionId] ?? {
     id,
@@ -67,7 +67,7 @@ export function createPendingChat({ state, worktreeId, sessionId = null, body, i
     session_id: session.id,
     body,
     role: "user",
-    context: null,
+    context,
     images,
     files,
     model,
@@ -88,6 +88,9 @@ export function pendingChatSessionId(state, pending) {
   if (!pending) return null;
   const canonical = state.messages.find((message) => message.clientMessageId === pending.message.clientMessageId);
   if (canonical) return canonical.session_id;
+  // A window that holds no messages (chat-pages-v1) has each Chat's last sends in its summary.
+  const summarized = Object.values(state.sessions).find((session) => session.summary?.clientMessageIds?.includes(pending.message.clientMessageId));
+  if (summarized) return summarized.id;
   // Older hosts omit clientMessageId. Only use their persisted input after the send response
   // confirms its target; existing inputs and messages tagged by another client cannot match.
   if (pending.acceptedSessionId == null) return null;

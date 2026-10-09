@@ -1,4 +1,5 @@
 const { isTurnEnd: isTerminal } = require("@milagre/shared/agent-runs");
+const { computerOfKey } = require("@milagre/shared/chat-scopes");
 
 const MAX_TITLE = 120;
 const MAX_BODY = 240;
@@ -13,6 +14,12 @@ const keyOf = (chatId, requestId) => `${chatId}\n${requestId}`;
 // System notifications for chats that wait on the user: an approval or a question. Every agent event
 // is observed, so the notifier knows which requests are still open, and notify names the chat. One shows only while no Milagre window has focus, once per
 // request, and closes when its request is answered or its turn ends. Clicking it opens the chat.
+/** A remote chat's subtitle, its computer first (spec "Routing": notifications labeled with the computer). */
+function labelFor(subtitle, computerName) {
+  if (!computerName) return subtitle;
+  return subtitle ? `${computerName} · ${subtitle}` : computerName;
+}
+
 class AttentionNotifier {
   /** @param {{ createNotification: (notice: {title: string; subtitle: string; body: string}) => Electron.Notification; isAppFocused: () => boolean; openChat: (chatId: string) => void; openPhoneSettings?: () => void; setBadge?: (badge: string) => void }} options */
   constructor({ createNotification, isAppFocused, openChat, openPhoneSettings = () => {}, setBadge = () => {} }) {
@@ -23,6 +30,10 @@ class AttentionNotifier {
     this.setBadge = setBadge;
     /** @type {Electron.Notification | null} */
     this.phonePaired = null;
+    /** @type {Electron.Notification | null} */
+    this.computerWaiting = null;
+    // Keys of the computers waiting for Allow that were already announced.
+    this.computersAnnounced = new Set();
     this.previews = new Map();
     this.completed = new Map();
     this.completionNotifications = new Map();
@@ -122,16 +133,46 @@ class AttentionNotifier {
     return true;
   }
 
-  // A phone paired with this Mac for the first time. Shown even while Milagre has focus: it is about who can reach
-  // the agents, and the pairing window opens just by looking at Settings → Phone. Clicking it opens that page.
-  notifyPhonePaired() {
+  // A device paired with this Mac for the first time: a phone, or ("computer") another Mac that can now drive this one.
+  // Shown even while Milagre has focus: it is about who can reach the agents, and the pairing window opens just by
+  // looking at Settings → Devices. Clicking it opens that page.
+  notifyDevicePaired(kind = "phone") {
+    const computer = kind === "computer";
     const notification = this.createNotification({
-      title: "New phone paired",
+      title: computer ? "New computer paired" : "New phone paired",
       subtitle: "",
-      body: "A phone can now reach your agents on this Mac. If it wasn't you, reset access in Settings → Phone.",
+      body: computer
+        ? "Another Mac can now drive your agents on this Mac. If it wasn't you, remove it in Settings → Devices."
+        : "A phone can now reach your agents on this Mac. If it wasn't you, remove it in Settings → Devices.",
     });
     this.phonePaired?.close();
     this.phonePaired = notification;
+    notification.on("click", () => this.openPhoneSettings());
+    notification.show();
+    return true;
+  }
+
+  /**
+   * Computers waiting for Allow (devices:pending): a new one is announced once, while no Milagre window has focus (the
+   * prompt is on screen otherwise). The notice closes when nothing waits any more; its click brings the window back.
+   * @param {Array<{ key?: unknown; name?: unknown }>} [requests]
+   */
+  notifyComputerWaiting(requests = []) {
+    const waiting = (Array.isArray(requests) ? requests : []).filter((request) => typeof request?.key === "string");
+    const keys = new Set(waiting.map((request) => /** @type {string} */ (request.key)));
+    for (const key of this.computersAnnounced) if (!keys.has(key)) this.computersAnnounced.delete(key);
+    if (!keys.size) {
+      this.computerWaiting?.close();
+      this.computerWaiting = null;
+      return false;
+    }
+    const fresh = waiting.find((request) => !this.computersAnnounced.has(/** @type {string} */ (request.key)));
+    for (const key of keys) this.computersAnnounced.add(key);
+    if (!fresh || this.isAppFocused()) return false;
+    const name = capped(fresh.name, MAX_TITLE) || "A computer";
+    const notification = this.createNotification({ title: `${name} wants to drive this Mac's chats`, subtitle: "", body: "Open Milagre to allow or deny it." });
+    this.computerWaiting?.close();
+    this.computerWaiting = notification;
     notification.on("click", () => this.openPhoneSettings());
     notification.show();
     return true;
@@ -143,14 +184,30 @@ class AttentionNotifier {
     notification?.close();
   }
 
+  /** A computer was removed or switched off: what it waited on, and its unread chats, leave the badge. */
+  forgetComputer(computerId) {
+    const mine = (chatId) => computerOfKey(chatId) === computerId;
+    for (const key of [...this.open.keys()]) if (mine(key.slice(0, key.lastIndexOf("\n")))) this.close(key);
+    for (const chatId of [...this.unread]) if (mine(chatId)) this.unread.delete(chatId);
+    for (const [chatId, notification] of [...this.completionNotifications]) {
+      if (!mine(chatId)) continue;
+      notification.close();
+      this.completionNotifications.delete(chatId);
+    }
+    for (const map of [this.completed, this.previews]) for (const chatId of [...map.keys()]) if (mine(chatId)) map.delete(chatId);
+    this.updateBadge();
+  }
+
   closeAll() {
     for (const key of [...this.open.keys()]) this.close(key);
     for (const notification of this.completionNotifications.values()) notification.close();
     this.completionNotifications.clear();
+    this.computerWaiting?.close();
+    this.computerWaiting = null;
     this.completed.clear();
     this.previews.clear();
     this.setBadge("");
   }
 }
 
-module.exports = { AttentionNotifier };
+module.exports = { AttentionNotifier, labelFor };

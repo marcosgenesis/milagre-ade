@@ -30,6 +30,8 @@ export type RelayTransportOptions = {
   key: string;
   token: string;
   identity: KeyPair;
+  /** What this phone calls itself; the Mac shows it in Settings › Devices. */
+  name?: string | null;
   create?: (url: string) => RelaySocket;
   random?: (n: number) => Uint8Array;
   timers?: RelayTimers;
@@ -49,11 +51,11 @@ export class RelayTransportError extends Error {
   }
 }
 const COPY: Record<RelayErrorCode, string> = {
-  "host-offline": "Your Mac isn't reachable. Open Milagre on it and check Settings → Phone.",
-  "bad-token": "This phone was paired with an older code. Scan the new one in Settings → Phone.",
-  "host-reset": "This Mac was reset. Scan its new pairing code in Settings → Phone.",
-  "unknown-phone": "Pairing is closed on your Mac. Open Settings → Phone on it and scan the code again.",
-  "bad-host": "This isn't the Mac this phone was paired with. Scan the code again in Settings → Phone.",
+  "host-offline": "Your Mac isn't reachable. Open Milagre on it and check Settings → Devices.",
+  "bad-token": "This phone was paired with an older code. Scan the new one in Settings → Devices.",
+  "host-reset": "This Mac was reset. Scan its new pairing code in Settings → Devices.",
+  "unknown-phone": "Pairing is closed on your Mac. Open Settings → Devices on it and scan the code again.",
+  "bad-host": "This isn't the Mac this phone was paired with. Scan the code again in Settings → Devices.",
   lost: "Connection lost. Reconnect to your computer. Check the Chat before sending again.",
 };
 const fail = (code: RelayErrorCode) => new RelayTransportError(code, COPY[code]);
@@ -192,7 +194,7 @@ export function createRelayTransport(options: RelayTransportOptions): RelayTrans
       try {
         socket = create(url);
         socket.binaryType = "arraybuffer";
-        hello = phoneHello({ phone: identity, host, token, random });
+        hello = phoneHello({ phone: identity, host, token, random, name: options.name ?? undefined });
       } catch {
         return reject(fail("lost"));
       }

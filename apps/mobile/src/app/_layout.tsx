@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Stack, router } from "expo-router";
-import { useColorScheme } from "react-native";
 import { ThemeProvider, DarkTheme, DefaultTheme } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -8,7 +7,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SessionProvider, useSession } from "../session";
 import { PushProvider } from "../push";
 import { StartupSplash } from "../startup-splash";
-import { hex } from "../theme";
+import { useTheme } from "../theme";
 import { UpdateShell } from "../update-sheet";
 import { SidePanelsHost, SidePanelsProvider } from "../side-panels";
 import { setConfirmPresenter } from "../confirm-store";
@@ -19,8 +18,7 @@ setConfirmPresenter(() => router.push("/confirm-sheet"));
 setChoicePresenter(() => router.push("/choice-sheet"));
 
 export default function Layout() {
-  const scheme = useColorScheme();
-  const palette = hex(scheme);
+  const { colors: palette, scheme } = useTheme();
   const base = scheme === "dark" ? DarkTheme : DefaultTheme;
   const theme = {
     ...base,
@@ -70,16 +68,20 @@ export default function Layout() {
                     <Stack.Screen name="notifications" options={{ title: "Notifications" }} />
                     <Stack.Screen name="usage" options={{ title: "Plan usage" }} />
                     <Stack.Screen name="skills" options={{ title: "Skills" }} />
+                    <Stack.Screen name="appearance" options={{ title: "Appearance" }} />
+                    <Stack.Screen name="experimental" options={{ title: "Experimental" }} />
                     <Stack.Screen name="skill" options={{ title: "Skill" }} />
                     <Stack.Screen name="add-computer" options={{ ...sheet, sheetAllowedDetents: [1] }} />
                     <Stack.Screen name="pair" options={{ title: "Pairing" }} />
                     <Stack.Screen name="projects" options={{ title: "Projects" }} />
                     <Stack.Screen name="project-settings" options={{ title: "Project" }} />
                     <Stack.Screen name="link-projects" options={{ ...sheet, sheetAllowedDetents: [1] }} />
+                    <Stack.Screen name="choose-projects" options={{ ...sheet, sheetAllowedDetents: [0.6, 1], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="chat" options={{ title: "Chat" }} />
                     <Stack.Screen name="context-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                     <Stack.Screen name="permission-sheet" options={{ ...sheet, sheetAllowedDetents: [0.42, 0.6], sheetInitialDetentIndex: 0 }} />
-                    <Stack.Screen name="model-sheet" options={{ ...sheet, sheetAllowedDetents: [0.55, 1], sheetInitialDetentIndex: 0 }} />
+                    {/* Full height: the effort, Fast and Ultracode panel pinned at the bottom leaves a half-height sheet room for one model. */}
+                    <Stack.Screen name="model-sheet" options={{ ...sheet, sheetAllowedDetents: [1] }} />
                     <Stack.Screen name="agents" options={{ ...sheet, sheetAllowedDetents: [0.5, 1], sheetInitialDetentIndex: 0 }} />
                     <Stack.Screen name="ports-sheet" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
                     {/* A full-screen page, not a sheet: a downward drag on the simulator must reach the device, not dismiss the viewer. */}
@@ -88,6 +90,11 @@ export default function Layout() {
                       options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
                     />
                     <Stack.Screen name="browser-sheet" options={{ ...sheet, sheetAllowedDetents: [1] }} />
+                    {/* Full screen too: a downward drag scrolls the Terminal's output instead of dismissing it. */}
+                    <Stack.Screen
+                      name="terminal-sheet"
+                      options={{ presentation: "fullScreenModal", headerShown: false, contentStyle: { backgroundColor: palette.page } }}
+                    />
                     {/* Full screen too: a design scrolls and takes taps of its own. */}
                     <Stack.Screen
                       name="artifact-sheet"

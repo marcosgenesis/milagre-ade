@@ -30,7 +30,7 @@ const { antigravityAcp, makeTempDir } = require("./antigravity-acp.cjs");
 // session/prompt request: its updates stream as session/update notifications and its response carries
 // the stopReason that ends the turn. ACP has no system prompt, so Milagre's instructions go first in the
 // first prompt each process sends. ACP can't steer a running turn: a message sent while one runs waits
-// and starts the next turn. Stop sends session/cancel; an agent that doesn't end the turn within the
+// and starts the next turn, unless Stop ends that turn first. Stop sends session/cancel; an agent that doesn't end the turn within the
 // grace period is killed, and the next turn resumes the session in a new process.
 
 const INITIALIZE_TIMEOUT_MS = 120_000;
@@ -143,6 +143,8 @@ class AcpSession {
     this.closed = false;
     this.turnActive = false;
     this.cancelRequested = false;
+    // Counts Stops, so a message waiting for a turn knows whether Stop ended it.
+    this.stops = 0;
     // Milagre's instructions travel with the first prompt each agent process gets.
     this.instructionsSent = false;
     this.replaying = false;
@@ -200,10 +202,13 @@ class AcpSession {
   }
 
   // ACP can't steer: the message waits for the running turn to end and starts the next one. An open
-  // question is dismissed, since the message is the user's reply to it.
+  // question is dismissed, since the message is the user's reply to it. Stop drops the messages sent
+  // before it, as it stops a steered message on Claude and Codex; one sent after Stop starts the next turn.
   async queue(request) {
     this.questions.dismissAll();
+    const stops = this.stops;
     await this.turnEnded;
+    if (this.stops !== stops) return { turnId: null, steered: false, cancelled: true };
     if (this.closed) throw sessionClosedError();
     return this.startTurn(request);
   }
@@ -524,6 +529,7 @@ class AcpSession {
 
   async interrupt() {
     if (!this.turnActive) return;
+    if (!this.cancelRequested) this.stops += 1;
     this.cancelRequested = true;
     clearTimeout(this.interruptTimer);
     this.interruptTimer = setTimeout(() => void this.stopNow(), this.interruptGraceMs);
@@ -538,26 +544,29 @@ class AcpSession {
     this.questions.cancelAll();
   }
 
-  // Fallback for a cancel the agent doesn't honour: kill the process and end the turn ourselves. The
-  // next turn resumes the session in a new process.
+  // Fallback for a cancel the agent doesn't honour: kill the process and the commands it started, then
+  // end the turn ourselves. Antigravity holds a cancel until its background commands finish, and runs
+  // them outside its process group. The next turn resumes the session in a new process.
   async stopNow() {
-    await this.close();
+    await this.close({ descendants: true });
     await this.finishTurn([{ type: "turn-cancelled" }]);
   }
 
-  async removeTemp() {
+  // An exit starts the removal without waiting; close() then waits for that same removal instead of finding nothing to do.
+  removeTemp() {
     const directory = this.tmpdir;
     this.tmpdir = null;
-    if (directory) await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+    if (directory) this.removing = fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+    return this.removing ?? Promise.resolve();
   }
 
-  async close() {
+  async close({ descendants = false } = {}) {
     this.subagents?.close("cancelled");
     this.permissions.cancelAll();
     this.questions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;
     this.closed = true;
-    await this.rpc?.close();
+    await this.rpc?.close({ descendants });
     await this.removeTemp();
   }
 }

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Image, Pressable, Text, View, useColorScheme, type ImageSourcePropType } from "react-native";
+import { Image, Pressable, Text, View, type ImageSourcePropType } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { router } from "expo-router";
 import { Alert02Icon, ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon, Maximize01Icon } from "@hugeicons/core-free-icons";
@@ -14,9 +14,13 @@ import { ToolRow } from "./tool-row";
 import { ArtifactCards, DesignFeedbackCard } from "./artifact";
 import { advisorResultLabel } from "@milagre/shared/advisor-result";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
-import { hex } from "./theme";
+import { AnswerCard } from "./answer-card";
+import { useMuriloMode } from "./murilo-mode";
+import { PullRequestActionCard } from "./pr-action-card";
+import { isPullRequestAction } from "@milagre/shared/pr-action";
+import { useTheme } from "./theme";
+import { useStyles } from "./ui";
 import { showImages, type MediaValue, type ViewerImage } from "./viewer-store";
-import { colors, styles } from "./ui";
 
 /** Resolves a saved file on the computer to an authenticated image source, or a cached file once it is fetched. */
 export type MediaSource = (path: string) => MediaValue;
@@ -92,12 +96,14 @@ function Photos({ message, media }: { message: ChatMessage; media: MediaSource }
 }
 /** One photo tile; a relay image shows the empty tile until its file is ready. */
 function Thumbnail({ source, size }: { source: MediaValue; size: number }) {
+  const { colors } = useTheme();
   const ready = useMedia(source);
   const style = { width: size, height: size, borderRadius: 14, backgroundColor: colors.canvas };
   return ready ? <Image source={ready} resizeMode="cover" style={style} /> : <View style={style} />;
 }
 /** An image the agent generated, under its step, at most 240 wide; tap or expand for full screen. */
 function GeneratedImage({ step, media }: { step: ChatStep; media: MediaSource }) {
+  const { colors } = useTheme();
   const [ratio, setRatio] = useState(4 / 5);
   const thumb = useRef<View>(null);
   const shown = !!step.file && step.status === "done";
@@ -146,7 +152,7 @@ function GeneratedImage({ step, media }: { step: ChatStep; media: MediaSource })
 const SPARKLE = "M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z";
 /** Desktop's ActivityBlock header: a sparkle, the running step's shimmering title or the summary, and failures. */
 function ActivityRow({ steps, live, waiting, onPress }: { steps: ChatStep[]; live: boolean; waiting: boolean; onPress: () => void }) {
-  const palette = hex(useColorScheme());
+  const { colors } = useTheme();
   const current = live ? [...steps].reverse().find((step) => step.status === "running") : undefined;
   const summary = activitySummary(steps);
   const label = current ? current.title : summary.text || "Activity";
@@ -158,7 +164,7 @@ function ActivityRow({ steps, live, waiting, onPress }: { steps: ChatStep[]; liv
       style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 36, opacity: pressed ? 0.5 : 1 })}
     >
       <Svg width={16} height={16} viewBox="0 0 24 24">
-        <Path d={SPARKLE} fill={current ? palette.ink2 : palette.ink3} />
+        <Path d={SPARKLE} fill={current ? colors.ink2 : colors.ink3} />
       </Svg>
       <View style={{ flexShrink: 1 }}>
         {current ? (
@@ -203,6 +209,9 @@ export const ChatReply = memo(function ChatReply({
   /** How far the Chat has come (its message count), to read the agent's resolutions of comments again. */
   designsMoved?: number;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const [muriloMode] = useMuriloMode();
   const savedMedia = useCallback((path: string) => media(message?.images?.find((image) => image.sourcePath === path)?.path || path), [media, message?.images]);
   const openActivity = () => onActivity(message ? String(message.id) : "run");
   const text = run?.text ?? message?.body ?? "";
@@ -211,6 +220,8 @@ export const ChatReply = memo(function ChatReply({
   const waiting = !!(run?.approvals.length || run?.questions.length);
   // Feedback sent from the design sheet or canvas shows as a card, not as the text the agent reads.
   const feedback = message?.role === "user" ? parseDesignFeedback(text) : null;
+  // So does a PR-blocker pill's action, instead of the skill prompt the agent read.
+  const prAction = message?.role === "user" && isPullRequestAction(message.context) ? message.context : null;
   // What the agent concluded only in thinking, once the turn ends or stops on a question.
   const thought = !run || run.questions.length ? unspokenThought(text, steps) : "";
   const advisor = typeof message?.context === "object" && message.context?.kind === "advisor-result" ? message.context : null;
@@ -230,8 +241,12 @@ export const ChatReply = memo(function ChatReply({
           .map((file) => (
             <FileChip key={file} path={file} />
           ))}
-        {feedback ? (
+        {prAction ? (
+          <PullRequestActionCard action={prAction} />
+        ) : feedback ? (
           <DesignFeedbackCard feedback={feedback} chatId={chatId} moved={designsMoved} />
+        ) : message.answered?.length ? (
+          <AnswerCard answered={message.answered} />
         ) : (
           !!text && (
             <View style={{ backgroundColor: colors.canvas, borderRadius: 18, borderCurve: "continuous", paddingVertical: 10, paddingHorizontal: 14 }}>
@@ -248,7 +263,16 @@ export const ChatReply = memo(function ChatReply({
       {reply.setup.map((step) => (
         <ToolRow key={step.id} step={step} live={!!run} waiting={waiting} onPress={openActivity} />
       ))}
-      {reply.activity.length === 1 && reply.activity[0].type === "step" ? (
+      {/* Murilo mode (Settings > Experimental): every tool call is its own row, with the notes between them. */}
+      {muriloMode ? (
+        reply.activity.map((entry, index) =>
+          entry.type === "step" ? (
+            <ToolRow key={entry.step.id} step={entry.step} live={!!run} waiting={waiting} onPress={openActivity} />
+          ) : (
+            <Markdown key={`text-${index}`} text={entry.text} media={savedMedia} basePath={basePath} />
+          ),
+        )
+      ) : reply.activity.length === 1 && reply.activity[0].type === "step" ? (
         <ToolRow step={reply.activity[0].step} live={!!run} waiting={waiting} onPress={openActivity} />
       ) : (
         reply.activity.length > 0 && (

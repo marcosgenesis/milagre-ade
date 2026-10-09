@@ -14,16 +14,29 @@ function validProjectGroup(group) {
   );
 }
 
-function createProjectGroup(groups, projects, request, now = () => new Date()) {
+/** Checks a requested name and membership. Members already in `previous` may stay even while their folder is unavailable. */
+function membership(groups, projects, request, previous) {
   const name = typeof request?.name === "string" ? request.name.trim() : "";
   // oxlint-disable-next-line no-control-regex -- rejects control characters in a Link name
   if (!name || name.length > 100 || /[\x00-\x1f]/.test(name)) throw new Error("Give the Link a name of 1 to 100 characters.");
   const ids = request?.projectIds;
   if (!Array.isArray(ids) || ids.length < 2 || new Set(ids).size !== ids.length) throw new Error("Choose at least two distinct Projects.");
-  if (ids.some((id) => typeof id !== "string" || !projects.some((project) => project.id === id))) throw new Error("Open each member Project in Milagre first.");
-  if (groups.some((group) => group.projectIds.length === ids.length && ids.every((id) => group.projectIds.includes(id))))
+  if (ids.some((id) => typeof id !== "string" || !(projects.some((project) => project.id === id) || previous?.projectIds.includes(id))))
+    throw new Error("Open each member Project in Milagre first.");
+  if (groups.some((group) => group !== previous && group.projectIds.length === ids.length && ids.every((id) => group.projectIds.includes(id))))
     throw new Error("A Link with these Projects already exists.");
-  return { id: randomUUID(), name, projectIds: [...ids], createdAt: now().toISOString() };
+  return { name, projectIds: [...ids] };
 }
 
-module.exports = { validProjectGroup, createProjectGroup };
+function createProjectGroup(groups, projects, request, now = () => new Date()) {
+  return { id: randomUUID(), ...membership(groups, projects, request), createdAt: now().toISOString() };
+}
+
+/** Renames a Link or changes its member Projects. Chats that already started keep the Worktrees they own. */
+function updateProjectGroup(groups, projects, request) {
+  const previous = groups.find((group) => group.id === request?.id);
+  if (!previous) throw new Error("Link no longer exists");
+  return { ...previous, ...membership(groups, projects, request, previous) };
+}
+
+module.exports = { validProjectGroup, createProjectGroup, updateProjectGroup };

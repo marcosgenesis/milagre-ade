@@ -13,6 +13,7 @@ import { viewerTheme } from "./viewerTheme";
 import { dockLayer, useCloseWhenDesignsExpand, useDockArea, useSidePanelRoom } from "./dock-area";
 import { useSidePanel } from "./PanelToggles";
 import { DockSlide } from "./DockSlide";
+import { useBridge } from "../../lib/computer-bridge";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --simulator-dock.
 const DOCK_WIDTH = 400;
@@ -20,7 +21,8 @@ const DOCK_WIDTH = 400;
 /** The host owns persistent associations; discovery never attaches a device. */
 export function SimulatorTrack({ chatId }: { chatId: string }) {
   // Read once: the polling effect depends on it, and a bridge that hands out a new object per read would restart it every render.
-  const [api] = useState(() => window.milagre?.simulators);
+  const bridge = useBridge();
+  const [api] = useState(() => bridge?.simulators);
   const trigger = useRef<HTMLButtonElement>(null),
     panel = useRef<HTMLDivElement>(null);
   const panelId = useId();

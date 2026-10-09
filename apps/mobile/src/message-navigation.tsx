@@ -1,7 +1,7 @@
 import { Pressable, View } from "react-native";
 import Reanimated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
-import { colors } from "./theme";
+import { useTheme } from "./theme";
 
 export function MessageNavigation({
   items,
@@ -16,6 +16,7 @@ export function MessageNavigation({
   bottom: number;
   keyboardOffset: number;
 }) {
+  const { colors } = useTheme();
   const { height, progress } = useReanimatedKeyboardAnimation();
   const keyboardStyle = useAnimatedStyle(() => ({ bottom: bottom - height.value - keyboardOffset * progress.value }), [bottom, keyboardOffset]);
   if (items.length < 2) return null;

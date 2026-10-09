@@ -2,219 +2,345 @@
 /** @typedef {typeof import("../app/src/electron.d.ts")} BridgeTypes */
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
+// What only this Mac's own window does: its editors and Finder, the folder dialog, the clipboard and image menus,
+// notifications, updates, its own host, devices and accounts. A paired computer's bridge refuses them before any IPC,
+// and main refuses them again (computer-routing.cjs keeps the same lists; computer-routing.test.cjs compares them).
+const NOT_REMOTE = "Not available on a remote computer";
+const LOCAL_ONLY = [
+  "project:open",
+  "project:reveal",
+  "skills:open",
+  "skills:reveal",
+  "runtime:connection",
+  "runtime:restart-host",
+  "accounts:list",
+  "accounts:add",
+  "accounts:select",
+  "accounts:login",
+  "accounts:cancel",
+  "accounts:remove",
+  "agent:update-cli",
+  "linear:connect",
+  "linear:disconnect",
+];
+const LOCAL_ONLY_PREFIXES = [
+  "app:",
+  "canvas:",
+  "computers:",
+  "devices:",
+  "editor:",
+  "image:",
+  "linked:",
+  "notification:",
+  "phone:",
+  "settings:",
+  "update:",
+  "usage:",
+];
+/** @param {string} channel */
+const isLocalOnly = (channel) => LOCAL_ONLY.includes(channel) || LOCAL_ONLY_PREFIXES.some((prefix) => channel.startsWith(prefix));
+
+/**
+ * Every call and event the window has, over whatever carries them: this Mac's IPC, or a paired computer's through main.
+ * @param {(channel: string, ...args: any[]) => Promise<any>} invoke
+ * @param {(channel: string, callback: (payload: any) => void) => () => void} listen
+ * @param {(channel: string, ...args: any[]) => void} send
+ * @returns {import("../app/src/electron.d.ts").MilagreBridge}
+ */
+function makeBridge(invoke, listen, send) {
+  return {
+    simulators: {
+      list: (request) => invoke("simulator:list", request),
+      attach: (request) => invoke("simulator:attach", request),
+      detach: (request) => invoke("simulator:detach", request),
+      open: (request) => invoke("simulator:open", request),
+      offer: (request) => invoke("simulator:offer", request),
+      status: (request) => invoke("simulator:status", request),
+      control: (request) => invoke("simulator:control", request),
+      input: (request) => invoke("simulator:input", request),
+      close: (request) => invoke("simulator:close", request),
+    },
+    browsers: {
+      list: (request) => invoke("browser:list", request),
+      attach: (request) => invoke("browser:attach", request),
+      open: (request) => invoke("browser:open", request),
+      frame: (request) => invoke("browser:frame", request),
+      status: (request) => invoke("browser:status", request),
+      control: (request) => invoke("browser:control", request),
+      input: (request) => invoke("browser:input", request),
+      close: (request) => invoke("browser:close", request),
+    },
+    terminals: {
+      list: (request) => invoke("terminal:list", request),
+      open: (request) => invoke("terminal:open", request),
+      read: (request) => invoke("terminal:read", request),
+      input: (request) => invoke("terminal:input", request),
+      resize: (request) => invoke("terminal:resize", request),
+      close: (request) => invoke("terminal:close", request),
+    },
+    onTerminalsChanged: (callback) => listen("terminal:changed", callback),
+    // ⌘W closes the focused Terminal instead of the window; the main process needs to know where focus is to decide.
+    setTerminalFocused: (focused) => send("app:terminal-focused", focused === true),
+    onCloseFocusedTerminal: (callback) => listen("app:close-focused-terminal", () => callback()),
+    artifacts: {
+      get: (request) => invoke("artifact:get", request),
+      list: (request) => invoke("artifact:list", request),
+      addComments: (request) => invoke("artifact:add-comments", request),
+      comments: (request) => invoke("artifact:comments", request),
+    },
+    getRuntimeConnection: () => invoke("runtime:connection"),
+    restartHost: () => invoke("runtime:restart-host"),
+    onRuntimeConnection: (callback) => listen("runtime:connection", callback),
+    onRuntimeSnapshot: (callback) => listen("runtime:snapshot", callback),
+    getPathForFile: (file) => webUtils.getPathForFile(file),
+    readAttachment: (file) => invoke("attachment:preview", file),
+    searchProjectFiles: (root, query) => invoke("project:files", root, query),
+    listSkills: (projectPath) => invoke("skills:list", projectPath),
+    readSkill: (projectPath, file) => invoke("skills:read", projectPath, file),
+    openSkill: (request) => invoke("skills:open", request),
+    revealSkill: (projectPath, file) => invoke("skills:reveal", projectPath, file),
+    listBranches: (projectPath) => invoke("project:branches", projectPath),
+    getProjectImage: (projectPath) => invoke("project:image", projectPath),
+    setProjectIcon: (projectPath, icon) => invoke("project:set-icon", projectPath, icon),
+    getAppVersion: () => invoke("app:version"),
+    createWorktree: (request) => invoke("worktree:create", request),
+    linkWorktreeIssue: (request) => invoke("worktree:link-issue", request),
+    unlinkWorktreeIssue: (request) => invoke("worktree:unlink-issue", request),
+    getWorktreeRoots: () => invoke("worktree:roots"),
+    getWorktreeStatus: (worktreePath, base) => invoke("worktree:status", worktreePath, base),
+    removeWorktree: (worktreePath, options) => invoke("worktree:remove", worktreePath, options),
+    readFilesToCopy: (projectPath) => invoke("files-to-copy:read", projectPath),
+    previewFilesToCopy: (projectPath, patterns) => invoke("files-to-copy:preview", projectPath, patterns),
+    saveFilesToCopy: (projectPath, patterns) => invoke("files-to-copy:save", projectPath, patterns),
+    readWorktreeSetup: (projectPath) => invoke("worktree-setup:read", projectPath),
+    saveWorktreeSetup: (projectPath, command) => invoke("worktree-setup:save", projectPath, command),
+    readMainSync: (projectPath) => invoke("main-sync:read", projectPath),
+    saveMainSync: (projectPath, override) => invoke("main-sync:save", projectPath, override),
+    readMainSyncDefault: () => invoke("main-sync:default:read"),
+    saveMainSyncDefault: (value) => invoke("main-sync:default:save", value),
+    onMainSyncStatus: (callback) => listen("main-sync:status", callback),
+    readLinearStatus: () => invoke("linear:status"),
+    connectLinear: () => invoke("linear:connect"),
+    disconnectLinear: () => invoke("linear:disconnect"),
+    readLinearEnabled: () => invoke("linear:enabled:read"),
+    saveLinearEnabled: (value) => invoke("linear:enabled:save", value),
+    onLinearStatusChanged: (callback) => listen("linear:status-changed", callback),
+    onLinearEnabledChanged: (callback) => listen("linear:enabled-changed", callback),
+    listLinearIssues: (query) => invoke("linear:issues", { query }),
+    readWorktreeLinearIssues: (projectPath) => invoke("linear:worktree-issues", projectPath),
+    onWorktreeRenamed: (callback) => listen("worktree:renamed", callback),
+    refreshDiffs: (projectPath, worktreeIds) => invoke("worktree:refresh-diffs", projectPath, worktreeIds),
+    readPullRequest: (worktreePath) => invoke("worktree:pull-request", worktreePath),
+    readPullRequests: (worktreePath, refs) => invoke("worktree:pull-requests", worktreePath, refs),
+    revealInFolder: (folder) => invoke("project:reveal", folder),
+    copyImage: (file) => invoke("image:copy", file),
+    saveImage: (file, name) => invoke("image:save", file, name),
+    showImageMenu: (file, name) => invoke("image:menu", file, name),
+    git: {
+      changes: (request) => invoke("git:changes", request),
+      diffFiles: (request) => invoke("git:diff-files", request),
+      diffFile: (request) => invoke("git:diff-file", request),
+      generate: (request) => invoke("git:generate", request),
+      commit: (request) => invoke("git:commit", request),
+      push: (request) => invoke("git:push", request),
+      openPr: (request) => invoke("git:open-pr", request),
+    },
+    listEditors: () => invoke("editor:list"),
+    openInEditor: (request) => invoke("editor:open", request),
+    getCurrentProject: () => invoke("project:current"),
+    openProject: () => invoke("project:open"),
+    /** A folder on this computer, opened as a Project without the folder dialog (the remote folder picker). */
+    openProjectAt: (folder) => invoke("project:open-at", folder, { takeNotice: true }),
+    listDirs: (request) => invoke("fs:list-dirs", request),
+    readMedia: (request) => invoke("media:read", request),
+    listRecentProjects: () => invoke("project:recent"),
+    setProjectHidden: (projectPath, hidden) => invoke("project:set-hidden", projectPath, hidden),
+    readProject: (projectPath) => invoke("project:read", projectPath),
+    listNamedLinks: () => invoke("link:list"),
+    createNamedLink: (request) => invoke("link:create", request),
+    updateNamedLink: (request) => invoke("link:update", request),
+    openNamedLink: (id) => invoke("link:open", id),
+    readLink: (id) => invoke("link:snapshot", id),
+    sendLinkMessage: (request) => invoke("link:send", request),
+    onLinkState: (callback) => listen("link:state", callback),
+    listProjects: () => invoke("project:registry"),
+    setProjectPosition: (id, position) => invoke("project:position", id, position),
+    getCanvas: () => invoke("canvas:snapshot"),
+    addLink: (a, b) => invoke("canvas:link-add", a, b),
+    removeLink: (id) => invoke("canvas:link-remove", id),
+    setWorktreePosition: (id, worktreePath, position) => invoke("canvas:worktree-position", id, worktreePath, position),
+    openCanvasProject: (projectPath) => invoke("canvas:open-project", projectPath),
+    getLinkedWork: () => invoke("linked:snapshot"),
+    stopNegotiation: (id) => invoke("linked:stop-negotiation", id),
+    onAppShortcut: (callback) => listen("app:shortcut", callback),
+    onLinkedWork: (callback) => listen("linked:changed", callback),
+    switchProject: (projectPath) => invoke("project:switch", projectPath),
+    forgetProject: (projectPath) => invoke("project:forget", projectPath),
+    retryQuit: () => invoke("app:retry-quit"),
+    onQuitFailed: (callback) => listen("app:quit-failed", callback),
+    onProjectState: (callback) => listen("project:state", callback),
+    sendMessage: (request) => invoke("chat:send", request),
+    resumeChat: (projectPath, sessionId) => invoke("chat:resume", projectPath, sessionId),
+    patchChat: (projectPath, sessionId, patch) => invoke("chat:patch", projectPath, sessionId, patch),
+    archiveSubagent: (projectPath, sessionId, id, archived) => invoke("chat:archive-subagent", projectPath, sessionId, id, archived),
+    archiveFinishedSubagents: (projectPath, sessionId) => invoke("chat:archive-finished-subagents", projectPath, sessionId),
+    addGitNote: (chatId, body) => invoke("chat:git-note", chatId, body),
+    setOpenChat: (chatId) => invoke("chat:set-open", chatId),
+    getRuns: () => invoke("chat:runs"),
+    getMessage: (scope, id) => invoke("chat:message", scope, id),
+    readState: (scope) => invoke("state:read", scope),
+    readChatMessages: (scope, chatId, options) => invoke("chat:messages", scope, chatId, options),
+    searchChats: (scope, query, options) => invoke("chat:search", scope, query, options),
+    readSubagent: (scope, chatId, agentId) => invoke("chat:subagent", scope, chatId, agentId),
+    listAccountScopes: () => invoke("accounts:scopes"),
+    getProjectAccounts: (scopeKey, refresh) => invoke("accounts:scope", scopeKey, refresh),
+    assignProjectAccount: (scopeKey, provider, accountId) => invoke("accounts:assign", scopeKey, provider, accountId),
+    getModels: (scopeKey) => invoke("agent:models", scopeKey),
+    getCliStatus: (scopeKey) => invoke("agent:cli-status", scopeKey),
+    updateCli: (provider) => invoke("agent:update-cli", provider),
+    stopAdvisor: (chatId, id) => invoke("advisor:stop", chatId, id),
+    retryAdvisor: (chatId, id) => invoke("advisor:retry", chatId, id),
+    onCliProgress: (callback) => listen("agent:cli-progress", callback),
+    interruptAgent: (chatId) => invoke("agent:interrupt", chatId),
+    respondToPermission: (chatId, requestId, decision) => invoke("agent:respond-permission", { chatId, requestId, decision }),
+    answerQuestion: (chatId, requestId, answers, summary) => invoke("agent:answer-question", { chatId, requestId, answers, summary }),
+    setAgentPermissionMode: (chatId, mode) => invoke("agent:set-permission-mode", { chatId, mode }),
+    onAgentEvent: (callback) => listen("agent:event", callback),
+    getAgentPorts: () => invoke("agent:ports"),
+    stopAgentPort: (chatId, pid) => invoke("agent:stop-port", chatId, pid),
+    onAgentPorts: (callback) => listen("agent:ports", callback),
+    getUpdateState: () => invoke("update:state"),
+    checkForUpdates: () => invoke("update:check"),
+    getReleaseChannel: () => invoke("update:channel"),
+    setReleaseChannel: (channel) => invoke("update:set-channel", channel),
+    installUpdate: () => invoke("update:install"),
+    onUpdateState: (callback) => listen("update:state", callback),
+    getPhoneStatus: () => invoke("phone:status"),
+    setPhoneEnabled: (enabled) => invoke("phone:set-enabled", enabled),
+    setPhoneLan: (enabled) => invoke("phone:set-lan", enabled),
+    resetPhoneAccess: () => invoke("phone:reset"),
+    openPhonePairing: () => invoke("phone:open-pairing"),
+    listDevices: () => invoke("devices:list"),
+    removeDevice: (key) => invoke("devices:remove", key),
+    listPendingDevices: () => invoke("devices:pending"),
+    allowDevice: (key) => invoke("devices:allow", key),
+    denyDevice: (key) => invoke("devices:deny", key),
+    onDevicesPending: (callback) => listen("devices:pending", callback),
+    onPhoneStatus: (callback) => listen("phone:status", callback),
+    listAccounts: (refresh = false) => invoke("accounts:list", refresh),
+    accountAction: (action, provider, value) => invoke(`accounts:${action}`, provider, value),
+    onAccountsChanged: (callback) => listen("accounts:changed", () => callback()),
+    readUsage: (scopeKey) => invoke("usage:read", scopeKey),
+    setKeepAwake: (enabled) => invoke("app:set-keep-awake", enabled),
+    getCachedUsage: (scopeKey) => invoke("usage:cached", scopeKey),
+    setNotifyWhenWaiting: (on) => invoke("settings:notify-when-waiting", on),
+    setWindowTranslucent: (on, theme, background) => invoke("settings:window-translucent", { on, theme, background }),
+    syncNotifications: (state) => invoke("notification:state", state),
+    notifyCompletion: (notice) => invoke("notification:completed", notice),
+    onOpenChat: (callback) => listen("notification:open-chat", callback),
+    onOpenPhoneSettings: (callback) => listen("notification:open-phone-settings", () => callback()),
+  };
+}
+
+/** @param {string} channel @param {(payload: any) => void} callback */
+function listenHere(channel, callback) {
+  /** @param {unknown} _event @param {any} payload */
+  const listener = (_event, payload) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
+/** @type {Map<string, Set<(payload: any) => void>>} */
+const computerSubscribers = new Map();
+/** @type {Set<(event: any) => void>} */
+const anyComputerSubscribers = new Set();
+/** @param {unknown} _event @param {any} event */
+function dispatchComputerEvent(_event, event) {
+  for (const callback of [...anyComputerSubscribers]) callback(event);
+  const set = computerSubscribers.get(`${event?.computerId}|${event?.channel}`);
+  if (set) for (const callback of [...set]) callback(event.payload);
+}
+/** One ipcRenderer listener serves every computer subscription (many would pass EventEmitter's MaxListeners). */
+function syncComputerListener() {
+  const wanted = computerSubscribers.size > 0 || anyComputerSubscribers.size > 0;
+  ipcRenderer.removeListener("computers:event", dispatchComputerEvent);
+  if (wanted) ipcRenderer.on("computers:event", dispatchComputerEvent);
+}
+/** @param {string} id @param {string} channel @param {(payload: any) => void} callback */
+function listenComputer(id, channel, callback) {
+  const key = `${id}|${channel}`;
+  let set = computerSubscribers.get(key);
+  if (!set) computerSubscribers.set(key, (set = new Set()));
+  set.add(callback);
+  syncComputerListener();
+  return () => {
+    set.delete(callback);
+    if (!set.size && computerSubscribers.get(key) === set) computerSubscribers.delete(key);
+    syncComputerListener();
+  };
+}
+/** @param {(event: any) => void} callback */
+function listenAnyComputer(callback) {
+  anyComputerSubscribers.add(callback);
+  syncComputerListener();
+  return () => {
+    anyComputerSubscribers.delete(callback);
+    syncComputerListener();
+  };
+}
+
+/** This Mac's own IPC. */
+const local = makeBridge(
+  (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+  listenHere,
+  (channel, ...args) => ipcRenderer.send(channel, ...args),
+);
+
+/** @type {Map<string, import("../app/src/electron.d.ts").MilagreBridge>} */
+const remotes = new Map();
+/**
+ * A paired computer's bridge (spec "Routing"): the same calls, carried by main to that computer (computers-ipc.cjs), and
+ * its events, tagged with it. This Mac's own actions refuse with NOT_REMOTE.
+ * @param {string} computerId
+ */
+function remote(computerId) {
+  const id = String(computerId);
+  if (id === "local") return local;
+  let bridge = remotes.get(id);
+  if (!bridge) {
+    bridge = makeBridge(
+      (channel, ...args) => (isLocalOnly(channel) ? Promise.reject(new Error(NOT_REMOTE)) : ipcRenderer.invoke("computers:invoke", id, channel, args)),
+      (channel, callback) => listenComputer(id, channel, callback),
+      () => {},
+    );
+    remotes.set(id, bridge);
+  }
+  return bridge;
+}
+
+// A forgotten computer's bridge goes with it, so pairing it again starts clean.
+ipcRenderer.on("computers:changed", (_event, snapshot) => {
+  const known = new Set((snapshot?.computers ?? []).map((/** @type {{ id: string }} */ computer) => computer.id));
+  for (const id of [...remotes.keys()]) if (!known.has(id)) remotes.delete(id);
+});
+
 /** @type {Window["milagre"]} */
 const bridge = {
-  simulators: {
-    list: (request) => ipcRenderer.invoke("simulator:list", request),
-    attach: (request) => ipcRenderer.invoke("simulator:attach", request),
-    detach: (request) => ipcRenderer.invoke("simulator:detach", request),
-    open: (request) => ipcRenderer.invoke("simulator:open", request),
-    offer: (request) => ipcRenderer.invoke("simulator:offer", request),
-    status: (request) => ipcRenderer.invoke("simulator:status", request),
-    control: (request) => ipcRenderer.invoke("simulator:control", request),
-    input: (request) => ipcRenderer.invoke("simulator:input", request),
-    close: (request) => ipcRenderer.invoke("simulator:close", request),
+  ...local,
+  on: remote,
+  computers: {
+    list: () => ipcRenderer.invoke("computers:list"),
+    preview: (link) => ipcRenderer.invoke("computers:preview", link),
+    add: (link, options) => ipcRenderer.invoke("computers:add", link, options),
+    cancelAdd: () => ipcRenderer.invoke("computers:cancel-add"),
+    rename: (id, name) => ipcRenderer.invoke("computers:rename", id, name),
+    remove: (id) => ipcRenderer.invoke("computers:remove", id),
+    setEnabled: (on) => ipcRenderer.invoke("computers:set-enabled", on),
+    invoke: (id, method, args) => ipcRenderer.invoke("computers:invoke", id, method, args),
+    remember: (id, entry) => ipcRenderer.invoke("computers:remember", id, entry),
   },
-  browsers: {
-    list: (request) => ipcRenderer.invoke("browser:list", request),
-    attach: (request) => ipcRenderer.invoke("browser:attach", request),
-    open: (request) => ipcRenderer.invoke("browser:open", request),
-    frame: (request) => ipcRenderer.invoke("browser:frame", request),
-    status: (request) => ipcRenderer.invoke("browser:status", request),
-    control: (request) => ipcRenderer.invoke("browser:control", request),
-    input: (request) => ipcRenderer.invoke("browser:input", request),
-    close: (request) => ipcRenderer.invoke("browser:close", request),
-  },
-  artifacts: {
-    get: (request) => ipcRenderer.invoke("artifact:get", request),
-    list: (request) => ipcRenderer.invoke("artifact:list", request),
-    addComments: (request) => ipcRenderer.invoke("artifact:add-comments", request),
-    comments: (request) => ipcRenderer.invoke("artifact:comments", request),
-  },
-  getRuntimeConnection: () => ipcRenderer.invoke("runtime:connection"),
-  restartHost: () => ipcRenderer.invoke("runtime:restart-host"),
-  onRuntimeConnection: (callback) => {
-    const listener = (_event, state) => callback(state);
-    ipcRenderer.on("runtime:connection", listener);
-    return () => ipcRenderer.removeListener("runtime:connection", listener);
-  },
-  onRuntimeSnapshot: (callback) => {
-    const listener = (_event, snapshot) => callback(snapshot);
-    ipcRenderer.on("runtime:snapshot", listener);
-    return () => ipcRenderer.removeListener("runtime:snapshot", listener);
-  },
-  getPathForFile: (file) => webUtils.getPathForFile(file),
-  readAttachment: (file) => ipcRenderer.invoke("attachment:preview", file),
-  searchProjectFiles: (root, query) => ipcRenderer.invoke("project:files", root, query),
-  listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),
-  readSkill: (projectPath, file) => ipcRenderer.invoke("skills:read", projectPath, file),
-  openSkill: (request) => ipcRenderer.invoke("skills:open", request),
-  revealSkill: (projectPath, file) => ipcRenderer.invoke("skills:reveal", projectPath, file),
-  listBranches: (projectPath) => ipcRenderer.invoke("project:branches", projectPath),
-  getProjectImage: (projectPath) => ipcRenderer.invoke("project:image", projectPath),
-  setProjectIcon: (projectPath, icon) => ipcRenderer.invoke("project:set-icon", projectPath, icon),
-  getAppVersion: () => ipcRenderer.invoke("app:version"),
-  createWorktree: (request) => ipcRenderer.invoke("worktree:create", request),
-  getWorktreeRoots: () => ipcRenderer.invoke("worktree:roots"),
-  getWorktreeStatus: (worktreePath, base) => ipcRenderer.invoke("worktree:status", worktreePath, base),
-  removeWorktree: (worktreePath, options) => ipcRenderer.invoke("worktree:remove", worktreePath, options),
-  readFilesToCopy: (projectPath) => ipcRenderer.invoke("files-to-copy:read", projectPath),
-  previewFilesToCopy: (projectPath, patterns) => ipcRenderer.invoke("files-to-copy:preview", projectPath, patterns),
-  saveFilesToCopy: (projectPath, patterns) => ipcRenderer.invoke("files-to-copy:save", projectPath, patterns),
-  readWorktreeSetup: (projectPath) => ipcRenderer.invoke("worktree-setup:read", projectPath),
-  saveWorktreeSetup: (projectPath, command) => ipcRenderer.invoke("worktree-setup:save", projectPath, command),
-  onWorktreeRenamed: (callback) => {
-    const listener = (_event, rename) => callback(rename);
-    ipcRenderer.on("worktree:renamed", listener);
-    return () => ipcRenderer.removeListener("worktree:renamed", listener);
-  },
-  refreshDiffs: (projectPath, worktreeIds) => ipcRenderer.invoke("worktree:refresh-diffs", projectPath, worktreeIds),
-  readPullRequest: (worktreePath) => ipcRenderer.invoke("worktree:pull-request", worktreePath),
-  readPullRequests: (worktreePath, refs) => ipcRenderer.invoke("worktree:pull-requests", worktreePath, refs),
-  revealInFolder: (folder) => ipcRenderer.invoke("project:reveal", folder),
-  copyImage: (file) => ipcRenderer.invoke("image:copy", file),
-  saveImage: (file, name) => ipcRenderer.invoke("image:save", file, name),
-  showImageMenu: (file, name) => ipcRenderer.invoke("image:menu", file, name),
-  git: {
-    changes: (request) => ipcRenderer.invoke("git:changes", request),
-    diffFiles: (request) => ipcRenderer.invoke("git:diff-files", request),
-    diffFile: (request) => ipcRenderer.invoke("git:diff-file", request),
-    generate: (request) => ipcRenderer.invoke("git:generate", request),
-    commit: (request) => ipcRenderer.invoke("git:commit", request),
-    push: (request) => ipcRenderer.invoke("git:push", request),
-    openPr: (request) => ipcRenderer.invoke("git:open-pr", request),
-  },
-  listEditors: () => ipcRenderer.invoke("editor:list"),
-  openInEditor: (request) => ipcRenderer.invoke("editor:open", request),
-  getCurrentProject: () => ipcRenderer.invoke("project:current"),
-  openProject: () => ipcRenderer.invoke("project:open"),
-  listRecentProjects: () => ipcRenderer.invoke("project:recent"),
-  setProjectHidden: (projectPath, hidden) => ipcRenderer.invoke("project:set-hidden", projectPath, hidden),
-  readProject: (projectPath) => ipcRenderer.invoke("project:read", projectPath),
-  listNamedLinks: () => ipcRenderer.invoke("link:list"),
-  createNamedLink: (request) => ipcRenderer.invoke("link:create", request),
-  openNamedLink: (id) => ipcRenderer.invoke("link:open", id),
-  readLink: (id) => ipcRenderer.invoke("link:snapshot", id),
-  sendLinkMessage: (request) => ipcRenderer.invoke("link:send", request),
-  onLinkState: (callback) => {
-    const listener = (_event, update) => callback(update);
-    ipcRenderer.on("link:state", listener);
-    return () => ipcRenderer.removeListener("link:state", listener);
-  },
-  listProjects: () => ipcRenderer.invoke("project:registry"),
-  setProjectPosition: (id, position) => ipcRenderer.invoke("project:position", id, position),
-  getCanvas: () => ipcRenderer.invoke("canvas:snapshot"),
-  addLink: (a, b) => ipcRenderer.invoke("canvas:link-add", a, b),
-  removeLink: (id) => ipcRenderer.invoke("canvas:link-remove", id),
-  setWorktreePosition: (id, worktreePath, position) => ipcRenderer.invoke("canvas:worktree-position", id, worktreePath, position),
-  openCanvasProject: (projectPath) => ipcRenderer.invoke("canvas:open-project", projectPath),
-  getLinkedWork: () => ipcRenderer.invoke("linked:snapshot"),
-  stopNegotiation: (id) => ipcRenderer.invoke("linked:stop-negotiation", id),
-  onAppShortcut: (callback) => {
-    const listener = (_event, key) => callback(key);
-    ipcRenderer.on("app:shortcut", listener);
-    return () => ipcRenderer.removeListener("app:shortcut", listener);
-  },
-  onLinkedWork: (callback) => {
-    const listener = (_event, work) => callback(work);
-    ipcRenderer.on("linked:changed", listener);
-    return () => ipcRenderer.removeListener("linked:changed", listener);
-  },
-  switchProject: (projectPath) => ipcRenderer.invoke("project:switch", projectPath),
-  forgetProject: (projectPath) => ipcRenderer.invoke("project:forget", projectPath),
-  retryQuit: () => ipcRenderer.invoke("app:retry-quit"),
-  onQuitFailed: (callback) => {
-    const listener = (_event, message) => callback(message);
-    ipcRenderer.on("app:quit-failed", listener);
-    return () => ipcRenderer.removeListener("app:quit-failed", listener);
-  },
-  onProjectState: (callback) => {
-    const listener = (_event, update) => callback(update);
-    ipcRenderer.on("project:state", listener);
-    return () => ipcRenderer.removeListener("project:state", listener);
-  },
-  sendMessage: (request) => ipcRenderer.invoke("chat:send", request),
-  resumeChat: (projectPath, sessionId) => ipcRenderer.invoke("chat:resume", projectPath, sessionId),
-  patchChat: (projectPath, sessionId, patch) => ipcRenderer.invoke("chat:patch", projectPath, sessionId, patch),
-  archiveSubagent: (projectPath, sessionId, id, archived) => ipcRenderer.invoke("chat:archive-subagent", projectPath, sessionId, id, archived),
-  archiveFinishedSubagents: (projectPath, sessionId) => ipcRenderer.invoke("chat:archive-finished-subagents", projectPath, sessionId),
-  addGitNote: (chatId, body) => ipcRenderer.invoke("chat:git-note", chatId, body),
-  setOpenChat: (chatId) => ipcRenderer.invoke("chat:set-open", chatId),
-  getRuns: () => ipcRenderer.invoke("chat:runs"),
-  getMessage: (scope, id) => ipcRenderer.invoke("chat:message", scope, id),
-  readState: (scope) => ipcRenderer.invoke("state:read", scope),
-  listAccountScopes: () => ipcRenderer.invoke("accounts:scopes"),
-  getProjectAccounts: (scopeKey, refresh) => ipcRenderer.invoke("accounts:scope", scopeKey, refresh),
-  assignProjectAccount: (scopeKey, provider, accountId) => ipcRenderer.invoke("accounts:assign", scopeKey, provider, accountId),
-  getModels: (scopeKey) => ipcRenderer.invoke("agent:models", scopeKey),
-  getCliStatus: (scopeKey) => ipcRenderer.invoke("agent:cli-status", scopeKey),
-  updateCli: (provider) => ipcRenderer.invoke("agent:update-cli", provider),
-  stopAdvisor: (chatId, id) => ipcRenderer.invoke("advisor:stop", chatId, id),
-  retryAdvisor: (chatId, id) => ipcRenderer.invoke("advisor:retry", chatId, id),
-  onCliProgress: (callback) => {
-    const listener = (_event, progress) => callback(progress);
-    ipcRenderer.on("agent:cli-progress", listener);
-    return () => ipcRenderer.removeListener("agent:cli-progress", listener);
-  },
-  interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
-  respondToPermission: (chatId, requestId, decision) => ipcRenderer.invoke("agent:respond-permission", { chatId, requestId, decision }),
-  answerQuestion: (chatId, requestId, answers, summary) => ipcRenderer.invoke("agent:answer-question", { chatId, requestId, answers, summary }),
-  setAgentPermissionMode: (chatId, mode) => ipcRenderer.invoke("agent:set-permission-mode", { chatId, mode }),
-  onAgentEvent: (callback) => {
-    const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on("agent:event", listener);
-    return () => ipcRenderer.removeListener("agent:event", listener);
-  },
-  getAgentPorts: () => ipcRenderer.invoke("agent:ports"),
-  stopAgentPort: (chatId, pid) => ipcRenderer.invoke("agent:stop-port", chatId, pid),
-  onAgentPorts: (callback) => {
-    const listener = (_event, ports) => callback(ports);
-    ipcRenderer.on("agent:ports", listener);
-    return () => ipcRenderer.removeListener("agent:ports", listener);
-  },
-  getUpdateState: () => ipcRenderer.invoke("update:state"),
-  checkForUpdates: () => ipcRenderer.invoke("update:check"),
-  getReleaseChannel: () => ipcRenderer.invoke("update:channel"),
-  setReleaseChannel: (channel) => ipcRenderer.invoke("update:set-channel", channel),
-  installUpdate: () => ipcRenderer.invoke("update:install"),
-  onUpdateState: (callback) => {
-    const listener = (_event, state) => callback(state);
-    ipcRenderer.on("update:state", listener);
-    return () => ipcRenderer.removeListener("update:state", listener);
-  },
-  getPhoneStatus: () => ipcRenderer.invoke("phone:status"),
-  setPhoneEnabled: (enabled) => ipcRenderer.invoke("phone:set-enabled", enabled),
-  setPhoneLan: (enabled) => ipcRenderer.invoke("phone:set-lan", enabled),
-  resetPhoneAccess: () => ipcRenderer.invoke("phone:reset"),
-  openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
-  onPhoneStatus: (callback) => {
-    const listener = (_event, status) => callback(status);
-    ipcRenderer.on("phone:status", listener);
-    return () => ipcRenderer.removeListener("phone:status", listener);
-  },
-  listAccounts: (refresh = false) => ipcRenderer.invoke("accounts:list", refresh),
-  accountAction: (action, provider, value) => ipcRenderer.invoke(`accounts:${action}`, provider, value),
-  onAccountsChanged: (callback) => {
-    const listener = () => callback();
-    ipcRenderer.on("accounts:changed", listener);
-    return () => ipcRenderer.removeListener("accounts:changed", listener);
-  },
-  readUsage: (scopeKey) => ipcRenderer.invoke("usage:read", scopeKey),
-  setKeepAwake: (enabled) => ipcRenderer.invoke("app:set-keep-awake", enabled),
-  getCachedUsage: (scopeKey) => ipcRenderer.invoke("usage:cached", scopeKey),
-  setNotifyWhenWaiting: (on) => ipcRenderer.invoke("settings:notify-when-waiting", on),
-  setWindowTranslucent: (on, theme) => ipcRenderer.invoke("settings:window-translucent", { on, theme }),
-  syncNotifications: (state) => ipcRenderer.invoke("notification:state", state),
-  notifyCompletion: (notice) => ipcRenderer.invoke("notification:completed", notice),
-  onOpenChat: (callback) => {
-    const listener = (_event, chatId) => callback(chatId);
-    ipcRenderer.on("notification:open-chat", listener);
-    return () => ipcRenderer.removeListener("notification:open-chat", listener);
-  },
-  onOpenPhoneSettings: (callback) => {
-    const listener = () => callback();
-    ipcRenderer.on("notification:open-phone-settings", listener);
-    return () => ipcRenderer.removeListener("notification:open-phone-settings", listener);
-  },
+  onComputersChanged: (callback) => listenHere("computers:changed", callback),
+  onComputerAddPending: (callback) => listenHere("computers:pending", () => callback()),
+  onComputerEvent: (callback) => listenAnyComputer(callback),
 };
 contextBridge.exposeInMainWorld("milagre", bridge);

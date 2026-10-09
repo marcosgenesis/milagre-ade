@@ -1,23 +1,47 @@
-import { PERMISSION_MODES } from "@milagre/shared/model-copy";
+import { effortCopy, PERMISSION_MODES } from "@milagre/shared/model-copy";
+import { effortFor } from "@milagre/shared/model-options";
 import { Pressable, Text } from "react-native";
-import { ArrowDown01Icon, Shield01Icon, ShieldAlertIcon, SecurityCheckIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, FlashIcon, Shield01Icon, ShieldAlertIcon, SecurityCheckIcon } from "@hugeicons/core-free-icons";
 import type { PermissionMode } from "@milagre/shared/model";
 import type { MobileModel } from "./turn-options";
 import { Icon, ProviderLogo } from "./icons";
-import { colors } from "./ui";
+import { useTheme } from "./theme";
 
-/** The composer's model chip: provider logo, model name and a chevron. Effort and fast mode live in the model sheet. */
-export function AgentControls({ model, disabled, onToggle }: { model: MobileModel; disabled?: boolean; onToggle: () => void }) {
+/** The composer's model chip: provider logo, model name, the effort ("· Medium", or Ultra while Ultracode is on) and a bolt while fast
+ * mode is on. All of them change in the model sheet. */
+export function AgentControls({
+  model,
+  effort,
+  fastMode,
+  ultracode,
+  disabled,
+  onToggle,
+}: {
+  model: MobileModel;
+  /** The Chat's picks; each shows only when the model accepts it. */
+  effort?: string;
+  fastMode?: boolean;
+  ultracode?: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+}) {
+  const { colors } = useTheme();
+  const level = effortFor(model, effort ?? "");
+  const ultracodeOn = model.ultracode && !!ultracode;
+  const fast = model.fastMode && !!fastMode;
+  // Ultracode and the ultra level both hand work to parallel agents: they share Ultracode's purple.
+  const orchestrating = ultracodeOn || level === "ultra";
+  const label = ultracodeOn ? "Ultra" : level ? effortCopy(level).name : undefined;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Model, ${model.name}`}
+      accessibilityLabel={["Model", model.name, label, fast ? "fast mode" : ""].filter(Boolean).join(", ")}
       accessibilityHint="Opens model, effort and speed settings"
       disabled={disabled}
       onPress={onToggle}
       style={({ pressed }) => ({
         minHeight: 34,
-        maxWidth: 190,
+        maxWidth: 230,
         paddingHorizontal: 6,
         flexDirection: "row",
         alignItems: "center",
@@ -29,6 +53,13 @@ export function AgentControls({ model, disabled, onToggle }: { model: MobileMode
       <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 13, fontWeight: "500", flexShrink: 1 }}>
         {model.name}
       </Text>
+      {!!label && (
+        <Text numberOfLines={1} style={{ color: orchestrating ? colors.purpleInk : colors.ink2, fontSize: 13, flexShrink: 2 }}>
+          <Text style={{ color: colors.ink3 }}>· </Text>
+          {label}
+        </Text>
+      )}
+      {fast && <Icon icon={FlashIcon} tone="orange" size={13} />}
       <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
     </Pressable>
   );
@@ -37,6 +68,7 @@ export function AgentControls({ model, disabled, onToggle }: { model: MobileMode
 const SHORT: Record<PermissionMode, string> = { ask: "Ask", auto: "Auto", full: "Full" };
 /** The composer's permission chip; it opens the permission sheet. A plain button, so nothing React sits in a native menu. */
 export function PermissionChip({ mode, disabled, onPress }: { mode: PermissionMode; disabled?: boolean; onPress: () => void }) {
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"

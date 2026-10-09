@@ -28,6 +28,7 @@ import { DESIGNS_EXPANDED, dockLayer, useDockArea, useSidePanelRoom } from "./do
 import { useSidePanel } from "./PanelToggles";
 import { DockSlide } from "./DockSlide";
 import { ArtifactCanvas, ArtifactFrame, useArtifact, type CanvasHandle, type CanvasView, type DesignPin, type PinControls } from "./ArtifactCanvas";
+import { bridgeForKey } from "../../lib/computer-bridge";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --artifact-dock.
 const DOCK_WIDTH = 560;
@@ -76,7 +77,7 @@ const Artifacts = createContext<ArtifactsValue>({
 function useResolutions(chatId: string | null, moved: number) {
   const [resolutions, setResolutions] = useState<Map<string, string>>(() => new Map());
   useEffect(() => {
-    const comments = window.milagre?.artifacts?.comments;
+    const comments = chatId && window.milagre ? bridgeForKey(chatId).artifacts?.comments : undefined;
     if (!chatId || !comments) return;
     let live = true;
     comments({ chatId })
@@ -536,11 +537,18 @@ function ArtifactDock({
       // message went, so a send that fails records none.
       const comments: DesignComment[] = written.map(({ key, design, x, y, text }) => ({ id: key, design, x, y, text }));
       if (await onSend(designFeedbackMessage({ choice, comments }))) {
-        if (comments.length) void window.milagre.artifacts.addComments?.({ chatId, comments }).catch(() => {});
+        if (comments.length)
+          void bridgeForKey(chatId)
+            .artifacts.addComments?.({ chatId, comments })
+            .catch(() => {});
         setPins([]);
         setOpenPin(null);
         setChoice(null);
         setCommenting(false);
+        // The chat comes back into view to follow the reply: the canvas steps back beside it, or closes when the
+        // window is too narrow for both.
+        if (cramped) onClose();
+        else setExpanded(false);
       } else setError("The feedback didn't send. Try again.");
     } finally {
       setSending(false);
@@ -562,6 +570,7 @@ function ArtifactDock({
       setPins((current) => current.filter((pin) => pin.key !== key));
       setOpenPin((current) => (current === key ? null : current));
     },
+    onSend: () => void send(),
   };
   const icon = "rounded p-1 text-ink-2 hover:bg-hover disabled:opacity-40";
   return createPortal(

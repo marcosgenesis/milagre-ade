@@ -3,13 +3,15 @@ import { ProjectAccountsGroup, ProjectAccountsSettings } from "./ProjectAccounts
 import { AccountsSettings } from "./AccountsSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
+import { LINEAR_CONNECTING, LINEAR_HINT, LINEAR_TITLE, linearStatusLine, type LinearStatus } from "@milagre/shared/linear";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowLeft02Icon,
   InformationCircleIcon,
+  LaptopIcon,
   MagicWand01Icon,
   PaintBoardIcon,
   SecurityCheckIcon,
@@ -18,7 +20,8 @@ import {
   TestTube01Icon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
-import type { FilesToCopy as FilesToCopyResult, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
+import { DOT_COLOR, computerTone, routeLine, seenAgo, useComputers } from "../lib/computers";
+import type { FilesToCopy as FilesToCopyResult, PairedDevice, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
 import type { ModelOption, PermissionMode } from "../model";
@@ -26,18 +29,23 @@ import { providerForId, resolveModel } from "../lib/models";
 import { updateSettings, useSettings } from "../lib/settings";
 import { PANEL_TRANSLUCENCY_RANGE, WINDOW_TRANSLUCENCY_RANGE } from "../lib/settings";
 import { RangeSlider } from "./primitives/RangeSlider";
-import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
+import type { ClaudeReplies, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
-import { pairedPhonesLine, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
+import { bridgeForKey } from "../lib/computer-bridge";
+import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
+import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from "../lib/devices";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
+import { ModeControl, ThemePicker } from "./settings/ThemePicker";
 import { ProviderLogo } from "./ProviderLogo";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 import { RECENT_PROJECTS_CHANGED, projectInitial, projectRows } from "../lib/project-list";
 import type { RecentProject } from "../lib/project-list";
 import { setProjectImage, useProjectImages } from "../lib/project-images";
+import { MAIN_SYNC_HINT, MAIN_SYNC_TITLE, choiceOf, mainSyncChoices, mainSyncProjectTitle, mainSyncStatusLine, overrideOf } from "@milagre/shared/main-sync";
+import type { MainSyncChoice, MainSyncSettings } from "@milagre/shared/main-sync";
 
 type IconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
 
@@ -45,7 +53,17 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "phone" | "experimental" | "about" | "project";
+export type SettingsSection =
+  | "general"
+  | "project-accounts"
+  | "accounts"
+  | "appearance"
+  | "skills"
+  | "devices"
+  | "experimental"
+  | "about"
+  | "project"
+  | "computer";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
@@ -53,7 +71,7 @@ const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> =
   { key: "project-accounts", label: "Project Accounts", icon: UserMultipleIcon },
   { key: "appearance", label: "Appearance", icon: PaintBoardIcon },
   { key: "skills", label: "Skills", icon: MagicWand01Icon },
-  { key: "phone", label: "Phone", icon: SmartphoneIcon },
+  { key: "devices", label: "Devices", icon: SmartphoneIcon },
   { key: "experimental", label: "Experimental", icon: TestTube01Icon },
   { key: "about", label: "About", icon: InformationCircleIcon },
 ];
@@ -64,12 +82,16 @@ export function SettingsNav({
   section,
   project,
   current,
+  computerId,
   onSelect,
+  onSelectComputer,
   onSelectProject,
   onBack,
   showProjectSettings = true,
 }: {
   showProjectSettings?: boolean;
+  computerId?: string;
+  onSelectComputer?: (id: string) => void;
   section: SettingsSection;
   project?: SettingsProject;
   current?: SettingsProject;
@@ -78,6 +100,7 @@ export function SettingsNav({
   onBack: () => void;
 }) {
   const [recent, setRecent] = useState<RecentProject[]>([]);
+  const { thisMac, computers } = useComputers();
   useEffect(() => {
     window.milagre.listRecentProjects().then(
       (list) => setRecent(list ?? []),
@@ -99,6 +122,23 @@ export function SettingsNav({
           <RailButton key={item.key} icon={<Icon icon={item.icon} />} label={item.label} active={section === item.key} onClick={() => onSelect(item.key)} />
         ))}
       </GlideGroup>
+      {computers.length > 0 && (
+        <div data-settings-computers>
+          <div className="mx-2 mt-2 flex h-8 items-center px-2 text-[12.5px] font-medium text-ink-3">Computers</div>
+          <GlideGroup>
+            <RailButton icon={<ComputerDot tone="online" />} label={thisMac} active={false} onClick={() => onSelect("devices")} />
+            {computers.map((computer) => (
+              <RailButton
+                key={computer.id}
+                icon={<ComputerDot tone={computerTone(computer)} />}
+                label={computer.name}
+                active={section === "computer" && computerId === computer.id}
+                onClick={() => onSelectComputer?.(computer.id)}
+              />
+            ))}
+          </GlideGroup>
+        </div>
+      )}
       {showProjectSettings && (
         <>
           <div className="mx-2 mt-2 flex h-8 shrink-0 items-center px-2 text-[12.5px] font-medium text-ink-3">Projects</div>
@@ -122,6 +162,181 @@ export function SettingsNav({
         </>
       )}
     </aside>
+  );
+}
+
+function ComputerDot({ tone }: { tone: keyof typeof DOT_COLOR }) {
+  return <span aria-hidden className="mx-[5px] block size-2 rounded-full" style={{ background: DOT_COLOR[tone] }} />;
+}
+
+/** The pill beside a route: the one carrying the connection now, one that would, or one there is none of. */
+function RoutePill({ state }: { state: "In use" | "Ready" | "Not available" }) {
+  return (
+    <span
+      data-connection-state
+      className="rounded-full px-2 py-0.5 text-[11.5px]"
+      style={state === "In use" ? { background: "var(--green-tint)", color: "var(--green)" } : { background: "var(--hover)", color: "var(--ink-3)" }}
+    >
+      {state}
+    </span>
+  );
+}
+
+/**
+ * A paired computer's settings (design computer-settings v1): its name on this Mac, how it is reached, what lives there,
+ * and Remove. The gear in the computers popover opens it.
+ */
+function ComputerSettings({ id, onRemoved }: { id: string; onRemoved: () => void }) {
+  const { computers } = useComputers();
+  const computer = computers.find((item) => item.id === id);
+  const [name, setName] = useState(computer?.name ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // "seen 2h ago" keeps counting while the section stays open.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const [about, setAbout] = useState<{ version: string | null; projects: string[] } | null>(null);
+  useEffect(() => setName(computer?.name ?? ""), [computer?.name]);
+  useEffect(() => {
+    setConfirming(false);
+    setError(null);
+    setAbout(null);
+  }, [id]);
+  // What lives there: asked while it is online, kept while it is away.
+  useEffect(() => {
+    if (computer?.state !== "online") return;
+    let live = true;
+    void Promise.all([
+      window.milagre.computers.invoke(id, "daemon:status").catch(() => null),
+      window.milagre.computers.invoke(id, "project:recent").catch(() => []),
+    ]).then(([status, recent]) => {
+      if (!live) return;
+      const projects = (Array.isArray(recent) ? recent : []).filter((project) => !project?.hidden).map((project) => String(project.name));
+      setAbout({ version: typeof status?.version === "string" ? status.version : null, projects });
+    });
+    return () => {
+      live = false;
+    };
+  }, [id, computer?.state]);
+  if (!computer) return <p className="mt-6 text-[13px] text-ink-3">This computer was removed.</p>;
+
+  const paired = computer.addedAt ? `paired ${new Date(computer.addedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : null;
+  const status = [computer.state === "online" ? "Connected" : routeLine(computer, now), about?.version ? `Milagre ${about.version}` : null, paired]
+    .filter(Boolean)
+    .join(" · ");
+  const lanState = computer.state === "online" && computer.route === "lan" ? "In use" : computer.lanRoutes.length > 0 ? "Ready" : "Not available";
+  const relayState = computer.state === "online" && computer.route === "relay" ? "In use" : "Ready";
+  const rename = async () => {
+    const next = name.trim();
+    if (!next || next === computer.name) {
+      setName(computer.name);
+      return;
+    }
+    try {
+      await window.milagre.computers.rename(computer.id, next);
+      setError(null);
+    } catch (cause) {
+      setError(ipcErrorMessage(cause));
+      setName(computer.name);
+    }
+  };
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await window.milagre.computers.remove(computer.id);
+      onRemoved();
+    } catch (cause) {
+      setError(ipcErrorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div data-computer-settings>
+      <p data-computer-status className="mt-1 text-[13px] text-ink-3">
+        {status}
+      </p>
+      <Group title="General">
+        <Row label="Name" description="Shown on its chats in the sidebar. Only on this Mac.">
+          <input
+            aria-label="Name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={() => void rename()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className="h-[30px] w-[220px] rounded-[8px] bg-field px-2.5 text-[13px] text-ink outline-none ring-1 ring-line-strong focus-visible:ring-accent"
+          />
+        </Row>
+      </Group>
+      <Group title="Connection">
+        <div data-connection="lan">
+          <Row
+            label="Same network"
+            description={computer.lanRoutes[0] ? `${computer.lanRoutes[0]}, end-to-end encrypted` : "Not reached on a shared network yet"}
+          >
+            <RoutePill state={lanState} />
+          </Row>
+        </div>
+        <div data-connection="relay">
+          <Row label="Relay" description={`${computer.relayHost}, used away from that network`}>
+            <RoutePill state={relayState} />
+          </Row>
+        </div>
+      </Group>
+      <Group title={`On ${computer.name}`}>
+        <div data-computer-projects>
+          {computer.state === "online" ? (
+            <Row
+              label={about ? `${about.projects.length} ${about.projects.length === 1 ? "Project" : "Projects"}` : "Reading…"}
+              description={
+                about ? `${about.projects.length ? `${about.projects.join(", ")}. ` : ""}Accounts and simulators stay on ${computer.name}.` : undefined
+              }
+            >
+              {null}
+            </Row>
+          ) : (
+            <Row
+              label={`${computer.name} is offline`}
+              description={seenAgo(computer.lastSeen, now) ? `Last seen ${seenAgo(computer.lastSeen, now)}.` : undefined}
+            >
+              {null}
+            </Row>
+          )}
+        </div>
+      </Group>
+      {error && (
+        <p role="alert" className="mt-3 text-[13px] text-red">
+          {error}
+        </p>
+      )}
+      <Group title="Remove">
+        <Row
+          label={`Remove ${computer.name}`}
+          description={`Its chats leave this sidebar and this Mac forgets its keys. Nothing changes on ${computer.name}; pair again with a new link.`}
+        >
+          {confirming ? (
+            <span className="flex gap-2">
+              <button type="button" className={SECONDARY_BUTTON} disabled={busy} onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+              <button type="button" data-computer-remove-confirm className={DANGER_BUTTON} disabled={busy} onClick={() => void remove()}>
+                Remove {computer.name}
+              </button>
+            </span>
+          ) : (
+            <button type="button" data-computer-remove className={DANGER_BUTTON} onClick={() => setConfirming(true)}>
+              Remove
+            </button>
+          )}
+        </Row>
+      </Group>
+    </div>
   );
 }
 
@@ -185,18 +400,69 @@ function PercentSlider({
 function ExperimentalSettings() {
   const settings = useSettings();
   return (
-    <Group title="Beta">
-      <Row
-        label="Every project in the sidebar"
-        description="Lists each project and Link with its chats, so a chat in another project opens in place. Replaces the project menu at the top of the sidebar. Hide a project in its own settings."
-      >
-        <Switch
+    <>
+      <Group title="Beta">
+        <Row
           label="Every project in the sidebar"
-          checked={settings.sidebarAllProjects}
-          onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })}
-        />
-      </Row>
-    </Group>
+          description="Lists each project and Link with its chats, so a chat in another project opens in place. Replaces the project menu at the top of the sidebar. Choose which projects show with the checklist button at the bottom of the sidebar, or in each project's settings."
+        >
+          <Switch
+            label="Every project in the sidebar"
+            checked={settings.sidebarAllProjects}
+            onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })}
+          />
+        </Row>
+        <Row
+          label="Murilo mode"
+          description="Shows every tool call in the chat, one row each, with the agent's notes between them. Replies no longer fold their activity into one line."
+        >
+          <Switch label="Murilo mode" checked={settings.muriloMode} onChange={(muriloMode) => updateSettings({ muriloMode })} />
+        </Row>
+        <Row
+          label="Other computers"
+          description="Drive the chats of other Macs running Milagre from this window. Add one from the laptop button at the bottom of the sidebar; their Projects join the sidebar."
+        >
+          <Switch label="Other computers" checked={settings.otherComputers} onChange={(otherComputers) => updateSettings({ otherComputers })} />
+        </Row>
+        <Row
+          label="Ultracode Fatality"
+          description="Turning Ultracode on darkens the window, slams ULTRACODE across it Mortal Kombat style, and an announcer says it out loud."
+        >
+          <Switch label="Ultracode Fatality" checked={settings.ultracodeFatality} onChange={(ultracodeFatality) => updateSettings({ ultracodeFatality })} />
+        </Row>
+        <LinearSettings />
+      </Group>
+      {navigator.platform.startsWith("Mac") && (
+        <Group title="Window">
+          <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">
+            <Switch label="Translucent window" checked={settings.windowTranslucent} onChange={(windowTranslucent) => updateSettings({ windowTranslucent })} />
+          </Row>
+          {settings.windowTranslucent && (
+            <>
+              <Row label="Window" description="How much of the desktop shows through the window itself.">
+                <PercentSlider
+                  label="Window translucency"
+                  value={settings.windowTranslucency}
+                  range={WINDOW_TRANSLUCENCY_RANGE}
+                  onChange={(windowTranslucency) => updateSettings({ windowTranslucency })}
+                />
+              </Row>
+              <Row label="Panels" description="How much shows through the sidebar, panels and fields.">
+                <PercentSlider
+                  label="Panel translucency"
+                  value={settings.panelTranslucency}
+                  range={PANEL_TRANSLUCENCY_RANGE}
+                  onChange={(panelTranslucency) => updateSettings({ panelTranslucency })}
+                />
+              </Row>
+              <Row label="Dot grid" description="Keep the dots on the window background.">
+                <Switch label="Dot grid" checked={settings.translucentDots} onChange={(translucentDots) => updateSettings({ translucentDots })} />
+              </Row>
+            </>
+          )}
+        </Group>
+      )}
+    </>
   );
 }
 
@@ -310,6 +576,9 @@ function GeneralSettings({ models }: { models: ModelOption[] }) {
           )}
         </Row>
       </Group>
+      <Group title="Worktrees">
+        <MainSyncDefaultSetting />
+      </Group>
       <Group title="System">
         <Row label="Keep the Mac awake while agents work" description="The screen can still turn off.">
           <Switch label="Keep the Mac awake while agents work" checked={settings.keepAwake} onChange={(keepAwake) => updateSettings({ keepAwake })} />
@@ -343,59 +612,24 @@ function AppearanceSettings() {
   const settings = useSettings();
   return (
     <>
-      <Group title="Theme">
-        <Row label="Theme" description="System follows your macOS appearance. Press ⌘⇧T to switch between light and dark.">
-          <Select<ThemePreference>
-            label="Theme"
-            value={settings.theme}
-            onChange={(theme) => updateSettings({ theme })}
-            options={[
-              { value: "system", label: "System" },
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-            ]}
-          />
+      <Group title="Mode">
+        <Row label="Mode" description="System follows macOS. Every theme has a light and a dark version. ⌘⇧T switches.">
+          <ModeControl value={settings.theme} onChange={(theme) => updateSettings({ theme })} />
         </Row>
       </Group>
-      {navigator.platform.startsWith("Mac") && (
-        <Group title="Window">
-          <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">
-            <Switch label="Translucent window" checked={settings.windowTranslucent} onChange={(windowTranslucent) => updateSettings({ windowTranslucent })} />
-          </Row>
-          {settings.windowTranslucent && (
-            <>
-              <Row label="Window" description="How much of the desktop shows through the window itself.">
-                <PercentSlider
-                  label="Window translucency"
-                  value={settings.windowTranslucency}
-                  range={WINDOW_TRANSLUCENCY_RANGE}
-                  onChange={(windowTranslucency) => updateSettings({ windowTranslucency })}
-                />
-              </Row>
-              <Row label="Panels" description="How much shows through the sidebar, panels and fields.">
-                <PercentSlider
-                  label="Panel translucency"
-                  value={settings.panelTranslucency}
-                  range={PANEL_TRANSLUCENCY_RANGE}
-                  onChange={(panelTranslucency) => updateSettings({ panelTranslucency })}
-                />
-              </Row>
-              <Row label="Dot grid" description="Keep the dots on the window background.">
-                <Switch label="Dot grid" checked={settings.translucentDots} onChange={(translucentDots) => updateSettings({ translucentDots })} />
-              </Row>
-            </>
-          )}
-        </Group>
-      )}
+      <section className="mt-6">
+        <ThemePicker />
+      </section>
     </>
   );
 }
 
 /* ─────────────────────────────────────────────────────────
- * PHONE
+ * DEVICES
  * The host runs the bridge the Milagre phone app talks to.
  * Turning it on shows a QR code that carries the access token;
- * resetting makes a new token, so paired phones scan again.
+ * resetting makes a new token, so every paired device pairs again.
+ * Below it, the phones and computers paired to this Mac.
  * ───────────────────────────────────────────────────────── */
 function usePhoneStatus() {
   const [status, setStatus] = useState<PhoneStatus | null>(null);
@@ -414,7 +648,7 @@ function usePhoneStatus() {
         if (live && !pushed) setStatus(next);
       },
       (error) => {
-        if (live) setLoadError(`Couldn't read phone access: ${ipcErrorMessage(error)}`);
+        if (live) setLoadError(`Couldn't read device access: ${ipcErrorMessage(error)}`);
       },
     );
     return () => {
@@ -425,11 +659,147 @@ function usePhoneStatus() {
   return { status, setStatus, loadError };
 }
 
+/**
+ * The paired devices. A pairing, a removal or a reset arrives as a phone status, which reads the list again; a device
+ * connecting or leaving doesn't, so it is also read every 15 seconds while the section is open.
+ */
+function usePairedDevices() {
+  const [list, setList] = useState<PairedDevice[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  // A list the caller already has (a removal's answer): shown at once, and an earlier read error no longer applies.
+  const replace = useCallback((devices: PairedDevice[]) => {
+    setList(devices);
+    setError(null);
+    setNow(Date.now());
+  }, []);
+  useEffect(() => {
+    let live = true;
+    const read = () => {
+      window.milagre.listDevices().then(
+        (devices) => {
+          if (!live) return;
+          setList(devices);
+          setError(null);
+          setNow(Date.now());
+        },
+        (failure) => {
+          if (live) setError(`Couldn't read paired devices: ${ipcErrorMessage(failure)}`);
+        },
+      );
+    };
+    read();
+    const off = window.milagre.onPhoneStatus(read);
+    const timer = window.setInterval(read, 15_000);
+    return () => {
+      live = false;
+      off();
+      window.clearInterval(timer);
+    };
+  }, []);
+  return { list, replace, error, now };
+}
+
 const SECONDARY_BUTTON =
   "rounded-control border border-line bg-surface px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-hover disabled:cursor-default disabled:opacity-50";
+const DANGER_BUTTON =
+  "rounded-control border border-red/30 bg-red/5 px-3 py-1.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 disabled:cursor-default disabled:opacity-50";
 
-function PhoneSettings() {
+function DeviceGroup({
+  title,
+  devices,
+  now,
+  busy,
+  empty,
+  error,
+  footer,
+  onRemove,
+}: {
+  title: string;
+  devices: PairedDevice[];
+  now: number;
+  busy: boolean;
+  empty?: string;
+  error?: string | null;
+  footer?: string | null;
+  onRemove: (key: string) => void;
+}) {
+  const [confirming, setConfirming] = useState<string | null>(null);
+  return (
+    <Group title={title}>
+      {error ? (
+        <p data-devices-error className="break-words px-4 py-3 text-[12px] text-red">
+          {error}
+        </p>
+      ) : (
+        devices.length === 0 &&
+        empty && (
+          <p data-devices-empty className="px-4 py-3 text-[12px] text-ink-3">
+            {empty}
+          </p>
+        )
+      )}
+      {devices.map((device) => {
+        const asking = confirming === device.key;
+        return (
+          <div key={device.key} data-device-row={device.kind} className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="relative flex size-7 shrink-0 items-center justify-center rounded-[8px] bg-hover text-ink-2">
+              <Icon icon={device.kind === "computer" ? LaptopIcon : SmartphoneIcon} size={15} />
+              <span
+                aria-hidden
+                className={`absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-surface ${device.route ? "bg-green" : "bg-ink-3"}`}
+              />
+            </span>
+            <div className="grid min-w-0 flex-1 gap-0.5">
+              <span className="truncate text-[13.5px] font-medium text-ink">{deviceName(device)}</span>
+              <span data-device-line className="text-[12px] text-ink-3">
+                {asking ? removeDeviceQuestion(device) : deviceSeenLine(device, now)}
+              </span>
+            </div>
+            {asking ? (
+              <span className="flex shrink-0 items-center gap-2">
+                <button type="button" onClick={() => setConfirming(null)} className={SECONDARY_BUTTON}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  data-device-remove-confirm
+                  onClick={() => {
+                    setConfirming(null);
+                    onRemove(device.key);
+                  }}
+                  className={DANGER_BUTTON}
+                >
+                  Remove
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                data-device-remove
+                onClick={() => setConfirming(device.key)}
+                className="shrink-0 rounded-control px-2 py-1 text-[12.5px] text-red transition-colors hover:bg-red/5 disabled:cursor-default disabled:opacity-50"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {footer && (
+        <p data-devices-note className="px-4 py-3 text-[12px] text-ink-3">
+          {footer}
+        </p>
+      )}
+    </Group>
+  );
+}
+
+function DevicesSettings() {
   const { status, setStatus, loadError } = usePhoneStatus();
+  const paired = usePairedDevices();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -449,6 +819,14 @@ function PhoneSettings() {
       .then(setStatus, (failure) => setError(ipcErrorMessage(failure)))
       .finally(() => setBusy(false));
   };
+  const removeDevice = (key: string) => {
+    setBusy(true);
+    setError(null);
+    window.milagre
+      .removeDevice(key)
+      .then(paired.replace, (failure) => setError(ipcErrorMessage(failure)))
+      .finally(() => setBusy(false));
+  };
   const copyLink = () => {
     if (!status?.pairingLink) return;
     void navigator.clipboard.writeText(status.pairingLink).then(
@@ -462,7 +840,7 @@ function PhoneSettings() {
   };
 
   const on = status?.state === "on" && status.qrSvg && status.pairingLink;
-  // Showing the QR is what invites a new phone to pair, so it opens the window; a status that arrives later keeps the countdown honest.
+  // Showing the QR is what invites a new device to pair, so it opens the window; a status that arrives later keeps the countdown honest.
   const showingQr = Boolean(on) && status?.remote === "relay";
   useEffect(() => {
     if (!showingQr) return;
@@ -486,13 +864,14 @@ function PhoneSettings() {
     return () => window.clearInterval(timer);
   }, [showingQr, status?.pairingUntil]);
   const pairing = pairingWindow(status, now);
-  const paired = pairedPhonesLine(status);
+  const { computers, phones } = devicesByKind(paired.list ?? []);
   return (
     <>
-      <Group title="Phone access">
-        <Row label="Allow your phone to connect" description={loadError ?? phoneStatusLine(status)}>
+      <p className="mt-1 text-[13px] text-ink-2">Phones and other Macs that can see and drive this Mac's chats.</p>
+      <Group title="Access">
+        <Row label="Allow devices to connect" description={loadError ?? phoneStatusLine(status)}>
           <Switch
-            label="Allow your phone to connect"
+            label="Allow devices to connect"
             checked={status?.enabled === true}
             onChange={(enabled) => {
               if (!busy && status) run(() => window.milagre.setPhoneEnabled(enabled));
@@ -522,12 +901,12 @@ function PhoneSettings() {
         )}
         {error && (
           <p data-phone-action-error className="break-words px-4 py-3 text-[12px] text-red">
-            Couldn't change phone access: {error}
+            Couldn't change device access: {error}
           </p>
         )}
       </Group>
       {on && (
-        <Group title="Pair your phone">
+        <Group title="Pair a device">
           <div className="flex items-start gap-5 px-4 py-4">
             <img
               data-phone-qr
@@ -544,7 +923,7 @@ function PhoneSettings() {
               </div>
               <div>
                 <button type="button" onClick={copyLink} className={SECONDARY_BUTTON}>
-                  {copied ? "Copied" : "Copy pairing link"}
+                  {copied ? "Copied" : "Copy link"}
                 </button>
               </div>
               <p data-phone-warning className="text-[12px] text-ink-2">
@@ -554,8 +933,8 @@ function PhoneSettings() {
                 <div data-phone-pairing={pairing.open ? "open" : "closed"} className="flex flex-wrap items-center gap-3">
                   <span className="text-[12px] text-ink-3">
                     {pairing.open
-                      ? `New phones can pair for ${pairing.minutes} more ${pairing.minutes === 1 ? "minute" : "minutes"}`
-                      : "Pairing is closed to new phones."}
+                      ? `New devices can pair for ${pairing.minutes} more ${pairing.minutes === 1 ? "minute" : "minutes"}`
+                      : "Pairing is closed to new devices."}
                   </span>
                   {!pairing.open && (
                     <button
@@ -574,19 +953,25 @@ function PhoneSettings() {
           </div>
         </Group>
       )}
+      {computers.length > 0 && <DeviceGroup title="Computers" devices={computers} now={paired.now} busy={busy} onRemove={removeDevice} />}
+      <DeviceGroup
+        title="Phones"
+        devices={phones}
+        now={paired.now}
+        busy={busy}
+        empty={paired.list === null ? undefined : "No phones yet"}
+        error={paired.error}
+        footer={cloudflarePhonesNote(status)}
+        onRemove={removeDevice}
+      />
       {status?.enabled && (
-        <Group title="Access">
-          {paired && (
-            <Row label="Paired phones" description="Milagre tells you when a new phone pairs.">
-              <span data-phone-paired>{paired}</span>
-            </Row>
-          )}
+        <Group title="Reset">
           <Row
             label="Reset access"
             description={
               confirmReset
-                ? "Phones that already paired stop working and must scan again. This can't be undone."
-                : "Make a new code. Phones that already paired scan again."
+                ? "Devices that already paired stop working and must pair again. This can't be undone."
+                : "Make a new code. Devices that already paired pair again."
             }
           >
             {confirmReset ? (
@@ -602,7 +987,7 @@ function PhoneSettings() {
                     setConfirmReset(false);
                     run(() => window.milagre.resetPhoneAccess());
                   }}
-                  className="rounded-control border border-red/30 bg-red/5 px-3 py-1.5 text-[12px] font-medium text-red transition-colors hover:bg-red/10 disabled:cursor-default disabled:opacity-50"
+                  className={DANGER_BUTTON}
                 >
                   Reset and disconnect
                 </button>
@@ -720,22 +1105,26 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
     const next = pending.current;
     pending.current = null;
     if (next === null) return;
-    window.milagre.saveFilesToCopy(projectPath, parsePatterns(next)).then(
-      () => setSaveError(null),
-      (error) => setSaveError(ipcErrorMessage(error)),
-    );
+    bridgeForKey(projectPath)
+      .saveFilesToCopy(projectPath, parsePatterns(next))
+      .then(
+        () => setSaveError(null),
+        (error) => setSaveError(ipcErrorMessage(error)),
+      );
   };
 
   // The preview runs shortly after typing stops; only the latest answer is shown.
   const refreshPreview = () => {
     const seq = ++previewSeq.current;
-    void window.milagre.previewFilesToCopy(projectPath, parsePatterns(current.current)).then(
-      (next) => {
-        // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
-        if (seq === previewSeq.current) setFound(next);
-      },
-      () => {},
-    );
+    void bridgeForKey(projectPath)
+      .previewFilesToCopy(projectPath, parsePatterns(current.current))
+      .then(
+        (next) => {
+          // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
+          if (seq === previewSeq.current) setFound(next);
+        },
+        () => {},
+      );
   };
 
   // .worktreeinclude can change in an editor while Settings is open.
@@ -750,17 +1139,19 @@ function FilesToCopy({ projectPath }: { projectPath: string }) {
     setText(null);
     setFound(null);
     setLoadError(null);
-    window.milagre.readFilesToCopy(projectPath).then(
-      (saved) => {
-        if (cancelled) return;
-        current.current = saved.filesToCopy.join("\n");
-        setText(current.current);
-        setFound(saved);
-      },
-      (error) => {
-        if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
-      },
-    );
+    bridgeForKey(projectPath)
+      .readFilesToCopy(projectPath)
+      .then(
+        (saved) => {
+          if (cancelled) return;
+          current.current = saved.filesToCopy.join("\n");
+          setText(current.current);
+          setFound(saved);
+        },
+        (error) => {
+          if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
+        },
+      );
     // Leaving Settings saves what was typed last.
     return () => {
       cancelled = true;
@@ -842,18 +1233,23 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
     const next = pending.current;
     pending.current = null;
     if (next === null) return;
-    window.milagre.saveWorktreeSetup(projectPath, next).then(
-      (saved) => {
-        setResolved(saved);
-        setError(null);
-      },
-      (failure) => setError(`Couldn't save: ${ipcErrorMessage(failure)}`),
-    );
+    bridgeForKey(projectPath)
+      .saveWorktreeSetup(projectPath, next)
+      .then(
+        (saved) => {
+          setResolved(saved);
+          setError(null);
+        },
+        (failure) => setError(`Couldn't save: ${ipcErrorMessage(failure)}`),
+      );
   };
 
   // .milagre/worktree.json can change in an editor while Settings is open.
   useEffect(() => {
-    const onFocus = () => void window.milagre.readWorktreeSetup(projectPath).then(setResolved, () => {});
+    const onFocus = () =>
+      void bridgeForKey(projectPath)
+        .readWorktreeSetup(projectPath)
+        .then(setResolved, () => {});
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [projectPath]);
@@ -863,16 +1259,18 @@ function SetupCommand({ projectPath }: { projectPath: string }) {
     setText(null);
     setResolved(null);
     setError(null);
-    window.milagre.readWorktreeSetup(projectPath).then(
-      (saved) => {
-        if (cancelled) return;
-        setText(saved.setupCommand);
-        setResolved(saved);
-      },
-      (failure) => {
-        if (!cancelled) setError(`Couldn't read the setup command: ${ipcErrorMessage(failure)}`);
-      },
-    );
+    bridgeForKey(projectPath)
+      .readWorktreeSetup(projectPath)
+      .then(
+        (saved) => {
+          if (cancelled) return;
+          setText(saved.setupCommand);
+          setResolved(saved);
+        },
+        (failure) => {
+          if (!cancelled) setError(`Couldn't read the setup command: ${ipcErrorMessage(failure)}`);
+        },
+      );
     // Leaving Settings saves what was typed last.
     return () => {
       cancelled = true;
@@ -947,7 +1345,7 @@ function ProjectIconSetting({ project }: { project: SettingsProject }) {
     setBusy(true);
     setError(null);
     try {
-      setProjectImage(project.path, await window.milagre.setProjectIcon(project.path, await icon()));
+      setProjectImage(project.path, await bridgeForKey(project.path).setProjectIcon(project.path, await icon()));
     } catch (failure) {
       setError(failure instanceof DOMException ? "This file isn't an image Milagre can read." : ipcErrorMessage(failure));
     } finally {
@@ -1002,16 +1400,18 @@ function ShowInSidebarSetting({ project }: { project: SettingsProject }) {
   const [hidden, setHidden] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    window.milagre.listRecentProjects().then(
-      (list) => setHidden(Boolean(list.find((item) => item.path === project.path)?.hidden)),
-      () => setHidden(false),
-    );
+    bridgeForKey(project.path)
+      .listRecentProjects()
+      .then(
+        (list) => setHidden(Boolean(list.find((item) => item.path === project.path)?.hidden)),
+        () => setHidden(false),
+      );
   }, [project.path]);
   async function change(show: boolean) {
     setError(null);
     setHidden(!show);
     try {
-      const list = await window.milagre.setProjectHidden(project.path, !show);
+      const list = await bridgeForKey(project.path).setProjectHidden(project.path, !show);
       setHidden(Boolean(list.find((item) => item.path === project.path)?.hidden));
       window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
     } catch (failure) {
@@ -1029,6 +1429,182 @@ function ShowInSidebarSetting({ project }: { project: SettingsProject }) {
   );
 }
 
+// The global default for main branch sync; each Project can override it. Kept by the daemon, which runs the sync.
+export function MainSyncDefaultSetting() {
+  const [syncMain, setSyncMain] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    // Started inside a promise so a bridge without the command (an older host) reads as off instead of throwing.
+    Promise.resolve()
+      .then(() => window.milagre.readMainSyncDefault())
+      .then(
+        (value) => setSyncMain(value?.syncMain === true),
+        () => setSyncMain(false),
+      );
+  }, []);
+  async function change(next: boolean) {
+    setError(null);
+    setSyncMain(next);
+    try {
+      setSyncMain((await window.milagre.saveMainSyncDefault(next)).syncMain);
+    } catch (failure) {
+      setSyncMain(!next);
+      setError(ipcErrorMessage(failure));
+    }
+  }
+  return (
+    <div data-main-sync-default>
+      <Row label={MAIN_SYNC_TITLE} description={MAIN_SYNC_HINT}>
+        <Switch label={MAIN_SYNC_TITLE} checked={syncMain === true} onChange={(next) => void change(next)} />
+      </Row>
+      {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}
+    </div>
+  );
+}
+
+// Experimental > Linear: the daemon keeps the switch (phones share it) and the Mac's one connection.
+function LinearSettings() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<LinearStatus | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Connect again replaces a waiting sign-in; only the latest attempt may update the row.
+  const attempt = useRef(0);
+  useEffect(() => {
+    let live = true;
+    // Started inside a promise so a bridge without the command (an older host) reads as off instead of throwing.
+    Promise.resolve()
+      .then(() => window.milagre.readLinearEnabled())
+      .then(
+        (value) => live && setEnabled(value?.enabled === true),
+        () => live && setEnabled(false),
+      );
+    Promise.resolve()
+      .then(() => window.milagre.readLinearStatus())
+      .then(
+        (value) => live && setStatus(value),
+        () => live && setStatus({ connected: false }),
+      );
+    const stop = window.milagre.onLinearStatusChanged?.((next) => {
+      if (!live) return;
+      setStatus(next);
+      if (next.connected) {
+        // The sign-in finished: a connect still waiting is over, and a late failure of it must not show.
+        attempt.current++;
+        setConnecting(false);
+        setError(null);
+      }
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
+  async function changeEnabled(next: boolean) {
+    setError(null);
+    setEnabled(next);
+    try {
+      setEnabled((await window.milagre.saveLinearEnabled(next)).enabled);
+    } catch (failure) {
+      setEnabled(!next);
+      setError(ipcErrorMessage(failure));
+    }
+  }
+  async function connect() {
+    const id = ++attempt.current;
+    setError(null);
+    setConnecting(true);
+    try {
+      const next = await window.milagre.connectLinear();
+      if (id === attempt.current) setStatus(next);
+    } catch (failure) {
+      if (id === attempt.current) setError(ipcErrorMessage(failure));
+    } finally {
+      if (id === attempt.current) setConnecting(false);
+    }
+  }
+  async function disconnect() {
+    setError(null);
+    try {
+      setStatus(await window.milagre.disconnectLinear());
+    } catch (failure) {
+      setError(ipcErrorMessage(failure));
+    }
+  }
+  return (
+    <div data-linear-settings data-linear-connected={status?.connected ? "true" : "false"} className="divide-y divide-line">
+      <Row label={LINEAR_TITLE} description={LINEAR_HINT}>
+        <Switch label={LINEAR_TITLE} checked={enabled === true} onChange={(next) => void changeEnabled(next)} />
+      </Row>
+      {enabled && status && (
+        <Row label={linearStatusLine(status, "mac")} description={connecting ? LINEAR_CONNECTING : undefined}>
+          {status.connected ? (
+            <button type="button" className={SECONDARY_BUTTON} onClick={() => void disconnect()}>
+              Disconnect
+            </button>
+          ) : (
+            <button type="button" className={SECONDARY_BUTTON} onClick={() => void connect()}>
+              {connecting ? "Start again" : "Connect"}
+            </button>
+          )}
+        </Row>
+      )}
+      {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}
+    </div>
+  );
+}
+
+export function MainSyncSetting({ projectPath }: { projectPath: string }) {
+  const [sync, setSync] = useState<MainSyncSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    let live = true;
+    // Started inside a promise, like the default above, so a bridge without the command shows an error, not a crash.
+    Promise.resolve()
+      .then(() => bridgeForKey(projectPath).readMainSync(projectPath))
+      .then(
+        (value) => live && setSync(value ?? null),
+        (failure) => live && setError(ipcErrorMessage(failure)),
+      );
+    const stop = window.milagre.onMainSyncStatus?.((status) => {
+      if (status.projectPath !== projectPath) return;
+      setNow(Date.now());
+      setSync((current) => (current ? { ...current, last: status.last } : current));
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [projectPath]);
+  async function change(choice: MainSyncChoice) {
+    setError(null);
+    try {
+      setSync(await bridgeForKey(projectPath).saveMainSync(projectPath, overrideOf(choice)));
+    } catch (failure) {
+      setError(ipcErrorMessage(failure));
+    }
+  }
+  const title = mainSyncProjectTitle(sync?.branch ?? "main");
+  return (
+    <div data-main-sync>
+      <Row label={title} description={sync ? mainSyncStatusLine(sync.last, now) : undefined}>
+        <Select<MainSyncChoice>
+          label={title}
+          value={choiceOf(sync?.override ?? null)}
+          onChange={(choice) => void change(choice)}
+          options={mainSyncChoices(sync?.defaultValue ?? false).map((choice) => ({ value: choice.value, label: choice.title }))}
+        />
+      </Row>
+      {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}
+    </div>
+  );
+}
+
 function ProjectSettings({ project, onManageAccounts }: { project: SettingsProject; onManageAccounts: () => void }) {
   return (
     <>
@@ -1039,6 +1615,9 @@ function ProjectSettings({ project, onManageAccounts }: { project: SettingsProje
         <ShowInSidebarSetting project={project} />
       </Group>
       <ProjectAccountsGroup projectPath={project.path} onManageAccounts={onManageAccounts} />
+      <Group title="Main branch">
+        <MainSyncSetting projectPath={project.path} />
+      </Group>
       <Group title="New worktrees">
         <FilesToCopy projectPath={project.path} />
         <SetupCommand projectPath={project.path} />
@@ -1054,7 +1633,9 @@ export function SettingsPanel({
   update,
   onSectionChange,
   accountScope,
+  computerId,
 }: {
+  computerId?: string;
   onSectionChange?: (section: SettingsSection) => void;
   accountScope?: string;
   section: SettingsSection;
@@ -1062,7 +1643,13 @@ export function SettingsPanel({
   models: ModelOption[];
   update: UpdateState | null;
 }) {
-  const title = section === "project" ? project?.name : SECTIONS.find((item) => item.key === section)?.label;
+  const { computers } = useComputers();
+  const title =
+    section === "project"
+      ? project?.name
+      : section === "computer"
+        ? (computers.find((computer) => computer.id === computerId)?.name ?? "Computer")
+        : SECTIONS.find((item) => item.key === section)?.label;
   return (
     <ScrollArea className="h-full">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
@@ -1079,8 +1666,9 @@ export function SettingsPanel({
           ) : (
             <p className="mt-6 text-[13px] text-ink-3">Open a project to see its skills.</p>
           ))}
-        {section === "phone" && <PhoneSettings />}
+        {section === "devices" && <DevicesSettings />}
         {section === "experimental" && <ExperimentalSettings />}
+        {section === "computer" && computerId && <ComputerSettings key={computerId} id={computerId} onRemoved={() => onSectionChange?.("devices")} />}
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && project && <ProjectSettings key={project.path} project={project} onManageAccounts={() => onSectionChange?.("accounts")} />}
       </div>

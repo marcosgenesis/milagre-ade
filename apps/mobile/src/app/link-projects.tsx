@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { scopeKey } from "@milagre/shared/chat-scopes";
 import type { NamedProjectLink } from "@milagre/shared/model";
 import type { RegisteredProject } from "../client";
@@ -8,30 +8,53 @@ import { useSession } from "../session";
 import { usePanelNavigation } from "../side-panels";
 import { ProjectIcon } from "../project-icon";
 import { useRpc } from "../use-rpc";
-import { ErrorNotice, Field, PageScroll, colors, styles } from "../ui";
+import { ErrorNotice, Field, PageScroll, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
+/** Creates a Link, or with `linkId` edits that Link's name and member Projects. Chats already started keep their Worktrees. */
 export default function LinkProjects() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
+  const { linkId } = useLocalSearchParams<{ linkId?: string }>();
+  const editing = linkId ? session.recent.find((item) => item.link?.id === linkId) : undefined;
   const navigate = usePanelNavigation();
   const current = useRef(session.client);
   useEffect(() => {
     current.current = session.client;
   }, [session.client]);
   const { data, loading, error: loadError } = useRpc<RegisteredProject[]>(session.client, "project:registry", []);
-  const projects = data ?? [];
-  const [selected, setSelected] = useState<string[]>([]);
-  const [name, setName] = useState("");
+  // A member whose folder is gone is still listed, so it can be removed.
+  const projects = [
+    ...(data ?? []),
+    ...(data
+      ? (editing?.projects ?? []).filter((member) => !data.some((project) => project.id === member.id)).map((member) => ({ ...member, path: "Unavailable" }))
+      : []),
+  ];
+  const [selected, setSelected] = useState<string[]>(() => editing?.link?.projectIds ?? []);
+  const [name, setName] = useState(editing?.name ?? "");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const ready = !loading && !busy && name.trim() && selected.length >= 2 && selected.every((id) => projects.some((project) => project.id === id));
-  const failure = error || (/not available from mobile/i.test(loadError) ? "Update Milagre on your Mac to link Projects from your phone." : loadError);
+  const failure =
+    error ||
+    (linkId && !editing ? "This Link no longer exists." : "") ||
+    (/not available from mobile/i.test(loadError) ? "Update Milagre on your Mac to link Projects from your phone." : loadError);
   async function create() {
     const client = session.client;
     if (!client || !ready) return;
     setBusy(true);
     setError("");
     try {
+      if (linkId) {
+        await client.call<NamedProjectLink>("link:update", [{ id: linkId, name: name.trim(), projectIds: selected }]);
+        if (current.current !== client) return;
+        await session.reloadProjects();
+        await session.refresh().catch(() => {});
+        router.back();
+        return;
+      }
       const link = await client.call<NamedProjectLink>("link:create", [{ name: name.trim(), projectIds: selected }]);
       if (current.current !== client) {
         setError("The Link was created on the previous computer. Switch back to open it.");
@@ -53,19 +76,21 @@ export default function LinkProjects() {
           <Text style={[styles.text, { color: colors.ink2 }]}>Cancel</Text>
         </Pressable>
         <Text accessibilityRole="header" style={{ flex: 1, textAlign: "center", color: colors.ink, fontSize: 17, fontWeight: "600" }}>
-          Link projects
+          {linkId ? "Edit Link" : "Link projects"}
         </Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={busy ? "Creating Link" : "Create Link"}
+          accessibilityLabel={linkId ? (busy ? "Saving Link" : "Save Link") : busy ? "Creating Link" : "Create Link"}
           disabled={!ready}
           onPress={() => void create()}
           style={{ minHeight: 44, justifyContent: "center", opacity: ready ? 1 : 0.4 }}
         >
-          <Text style={[styles.text, { fontWeight: "600" }]}>{busy ? "Creating..." : "Create"}</Text>
+          <Text style={[styles.text, { fontWeight: "600" }]}>{linkId ? (busy ? "Saving..." : "Save") : busy ? "Creating..." : "Create"}</Text>
         </Pressable>
       </View>
-      <Text style={styles.muted}>One Chat, with a new Worktree in each Project.</Text>
+      <Text style={styles.muted}>
+        {linkId ? "New Chats get a Worktree in each Project. Chats already started keep theirs." : "One Chat, with a new Worktree in each Project."}
+      </Text>
       <Field label="Link name" value={name} onChangeText={setName} placeholder="e.g. RDFood" autoFocus editable={!busy} returnKeyType="next" />
       <Field
         label="Search projects"

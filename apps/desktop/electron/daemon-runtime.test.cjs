@@ -1,4 +1,5 @@
 const test = require("node:test");
+const { EventEmitter } = require("node:events");
 const { readProjectState: readSavedState } = require("@milagre/core/project-store");
 const { applyStatePatch } = require("@milagre/shared/state-patch");
 const assert = require("node:assert/strict");
@@ -182,7 +183,13 @@ test("desktop reconnect restores two large Projects without an oversized aggrega
     throw error;
   });
   assert.equal(restored.payload.projects.length, 2);
-  for (const opened of restored.payload.projects) assert.equal(opened.state.messages[0].body.length, 9 * 1024 * 1024);
+  // The snapshot leaves messages out (chat-pages-v1); each Chat's are read as a page.
+  for (const opened of restored.payload.projects) {
+    assert.deepEqual([opened.state.messages, opened.state.messagesInChats], [[], true]);
+    const session = Object.values(opened.state.sessions)[0];
+    const page = await desktop.invoke("chat:messages", [opened.path, session.id, { turns: 1 }]);
+    assert.equal(page.messages[0].body.length, 9 * 1024 * 1024);
+  }
   assert.equal((await desktop.invoke("project:current")).path, other);
 });
 
@@ -216,7 +223,7 @@ for (const stopHost of [false, true]) {
   });
 }
 
-test("a Project state over 16 MB opens in the desktop, and its changes reach the window whole", async (t) => {
+test("a Project with 18 MB of messages opens in the desktop without them, a page at a time, and its changes are patches", async (t) => {
   const { dataDir, project, desktop, events } = await fixture(t);
   const messages = [];
   for (let index = 0; index < 900; index++) {
@@ -242,12 +249,14 @@ test("a Project state over 16 MB opens in the desktop, and its changes reach the
       tasks: {},
     }),
   );
+  // The desktop takes states without messages (chat-pages-v1): opening sends the Chats, not 18 MB of replies.
   const opened = await desktop.openProject(project);
-  assert.ok(Buffer.byteLength(JSON.stringify(opened)) > 16 * 1024 * 1024);
-  assert.equal(opened.state.messages.length, 900);
-  // Read in pages once, then each change is a patch of a few bytes, never the 18 MB state again.
+  assert.ok(Buffer.byteLength(JSON.stringify(opened)) < 64 * 1024);
+  assert.equal(opened.state.sessions[2].summary.count, 900);
+  const page = await desktop.invoke("chat:messages", [project, 2, { turns: 10, limit: 20 }]);
+  assert.deepEqual([page.messages.length, page.hasMore, page.messages.at(-1).id], [20, true, 909]);
   const held = await desktop.invoke("state:read", [project]);
-  assert.equal(held.state.messages.length, 900);
+  assert.deepEqual(held.state.messages, []);
   const mobile = await connect({ dataDir });
   t.after(() => mobile.close());
   await mobile.call("chat:patch", [project, 2, { title: "From phone" }]);
@@ -678,4 +687,129 @@ test("a real host killed outright is started again over its locks and socket, wi
   assert.notEqual(restarted, pid);
   assert.equal((await desktop.invoke("project:current")).path, project);
   assert.equal(JSON.parse(await fs.readFile(path.join(project, ".milagre/runtime.lock/owner.json"), "utf8")).pid, restarted, "the Project lock was taken over");
+});
+
+test("a runtime given `connect` reconnects through it alone, and never starts, flushes, stops or restarts that host", async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-remote-runtime-")));
+  const project = path.join(root, "project");
+  await fs.mkdir(project);
+  execFileSync("git", ["init", "-b", "main", project], { stdio: "ignore" });
+  const dataDir = path.join(root, "profile");
+  const daemon = await startDaemon({ dataDir, version: "test", runtimeOptions: { cwd: project, environmentReady: Promise.resolve(), titleModels: {} } });
+  let remote;
+  t.after(async () => {
+    await remote?.close().catch(() => {});
+    await daemon.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const connections = [];
+  const calls = [];
+  const connectToHost = async () => {
+    const client = await compatibleClient(dataDir);
+    const call = client.call.bind(client);
+    client.call = (method, args) => {
+      calls.push(method);
+      return call(method, args);
+    };
+    connections.push(client);
+    return client;
+  };
+  const events = [];
+  remote = await connectDesktopRuntime({
+    dataDir: path.join(root, "not-this-macs-host"),
+    connect: connectToHost,
+    reconnectMs: 20,
+    startHost: async () => {
+      throw new Error("must not start a host");
+    },
+    emit: (channel, payload) => events.push({ channel, payload }),
+  });
+  assert.equal(connections.length, 1);
+  assert.ok(remote.methods.includes("chat:send"));
+  connections[0].close();
+  await waitFor(() => events.some((event) => event.channel === "runtime:connection" && event.payload.connected));
+  assert.equal(connections.length, 2, "reconnected through connect");
+  assert.ok(
+    events.some((event) => event.channel === "runtime:snapshot"),
+    "and read the state again",
+  );
+  await assert.rejects(remote.restartHost(), /Only this Mac's own host/);
+  await assert.rejects(remote.close({ stopHost: true }), /Only this Mac's own host/);
+  await remote.close();
+  assert.equal(calls.includes("daemon:flush"), false);
+  assert.equal(calls.includes("daemon:stop"), false);
+  const check = await compatibleClient(dataDir);
+  check.close();
+  assert.ok(check.status.capabilities.includes("desktop-v1"), "the host still runs");
+});
+
+// ---- a paired computer's host that answers as a test says ---------------------------------------------------------------
+
+/** A connection as peer-client.cjs gives one: calls answered from `answers`, "close" when it is closed. */
+function fakeConnection(answers, calls = []) {
+  const connection = new EventEmitter();
+  connection.closed = false;
+  connection.status = { version: "1", methods: ["chat:send"], capabilities: ["desktop-v1", "result-pages-v1", "state-patches-v1"] };
+  connection.call = async (method, args) => {
+    calls.push(method);
+    const answer = answers[method];
+    if (answer instanceof Error) throw answer;
+    return typeof answer === "function" ? answer(args) : (answer ?? null);
+  };
+  connection.close = () => {
+    if (connection.closed) return;
+    connection.closed = true;
+    connection.emit("close");
+  };
+  return connection;
+}
+
+test("a computer whose first call fails leaves no channel open, and retrying does not pile them up", async () => {
+  const opened = [];
+  const connect = async () => {
+    const connection = fakeConnection({ "daemon:state-patches": new Error("refused") });
+    opened.push(connection);
+    return connection;
+  };
+  for (let attempt = 0; attempt < 3; attempt++) await assert.rejects(connectDesktopRuntime({ dataDir: "/unused", connect }), /refused/);
+  assert.equal(opened.length, 3);
+  assert.deepEqual(
+    opened.map((connection) => connection.closed),
+    [true, true, true],
+  );
+});
+
+test("a computer's snapshot must be a handful of pages of text, or its reconnect fails and the pages are not read", async () => {
+  for (const [pageCount, page, maxPagedChars, reason] of [
+    [10 ** 9, "{}", undefined, /invalid snapshot/],
+    [1025, "{}", undefined, /invalid snapshot/],
+    [0, "{}", undefined, /invalid snapshot/],
+    [1.5, "{}", undefined, /invalid snapshot/],
+    [2, { not: "text" }, undefined, /invalid snapshot/],
+    [3, "x".repeat(10), 25, /too large/],
+  ]) {
+    const calls = [];
+    const connections = [];
+    const events = [];
+    const connect = async () => {
+      const connection = fakeConnection({ "daemon:snapshot": { snapshotId: "s", pageCount }, "daemon:snapshot-page": () => page }, calls);
+      connections.push(connection);
+      return connection;
+    };
+    const runtime = await connectDesktopRuntime({
+      dataDir: "/unused",
+      connect,
+      reconnectMs: 20,
+      maxPagedChars,
+      emit: (channel, payload) => events.push({ channel, payload }),
+    });
+    connections[0].close();
+    await waitFor(() => connections.length >= 2 && connections[1].closed);
+    await waitFor(() => events.some((event) => event.channel === "runtime:connection" && reason.test(event.payload.message ?? "")));
+    assert.equal(events.filter((event) => event.channel === "runtime:snapshot").length, 0, `${pageCount}: no snapshot is passed on`);
+    if (reason.source === "invalid snapshot" && typeof page === "string") {
+      assert.equal(calls.filter((method) => method === "daemon:snapshot-page").length, 0, `${pageCount}: no page is read`);
+    }
+    await runtime.close();
+  }
 });

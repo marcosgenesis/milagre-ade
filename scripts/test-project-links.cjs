@@ -103,7 +103,9 @@ async function main() {
     const rendererUrl = process.env.MILAGRE_TEST_DEV_SERVER_URL || pathToFileURL(path.join(root, "apps/desktop/dist/index.html")).href;
     const env = { ...process.env, MILAGRE_DEV_SERVER_URL: rendererUrl, MILAGRE_WORKTREE_ROOT: worktreeRoot };
     delete env.ELECTRON_RUN_AS_NODE;
-    child = spawn(require("electron"), [path.join(root, "apps/desktop"), `--user-data-dir=${profile}`, "--remote-debugging-port=0"], {
+    // Other windows on a busy machine cover this one; macOS then pauses its animation frames and the canvas and panels never finish.
+    const unthrottled = ["--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--disable-features=CalculateNativeWinOcclusion"];
+    child = spawn(require("electron"), [path.join(root, "apps/desktop"), `--user-data-dir=${profile}`, "--remote-debugging-port=0", ...unthrottled], {
       cwd: projects[0],
       env,
       stdio: ["ignore", "pipe", "pipe"],

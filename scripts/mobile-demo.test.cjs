@@ -22,6 +22,8 @@ test("demo sends, approves, answers, stops and reconnects through the real HTTP/
   async function wait(predicate) {
     for (let i = 0; i < 150; i++) {
       const state = await client.snapshot(demo.project);
+      // The snapshot leaves messages out (the app reads them as pages): read the Chat's into it as the screen does.
+      if (state.project.state.messagesInChats) state.project.state.messages = (await client.chatMessages(demo.project, chat.id, { turns: 100 })).messages;
       if (predicate(state)) return state;
       await delay(20);
     }
@@ -46,7 +48,14 @@ test("demo sends, approves, answers, stops and reconnects through the real HTTP/
     ]),
     true,
   );
-  await wait((state) => !state.runs.runs[chatId]);
+  const answeredState = await wait((state) => !state.runs.runs[chatId]);
+  // The answers reach the phone as the user's message, with each question for the answer card.
+  const answers = answeredState.project.state.messages.find((message) => message.role === "user" && message.answered);
+  assert.equal(answers.body, "Read a Chat");
+  assert.deepEqual(
+    answers.answered.map((item) => item.answers),
+    [["Read a Chat"]],
+  );
   await send("slow");
   await wait((state) => !!state.runs.runs[chatId]);
   await client.call("agent:interrupt", [chatId]);

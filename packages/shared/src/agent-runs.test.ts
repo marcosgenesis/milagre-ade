@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentEvent, ChatStep, CoordinatorState, PermissionRequest, QuestionRequest } from "./model.ts";
-import { applyAgentEvent, capOutput, chatInProject, chatKey, recordAnswers, sessionIdFromKey, splitRunForSteer, startRun } from "./agent-runs.mjs";
+import {
+  answeredQuestions,
+  applyAgentEvent,
+  capOutput,
+  chatInProject,
+  chatKey,
+  computerOfKey,
+  projectOfKey,
+  recordAnswers,
+  sessionIdFromKey,
+  splitRunForSteer,
+  startRun,
+} from "./agent-runs.mjs";
 import type { AgentRuns } from "./agent-runs.mjs";
 
 const PROJECT = "/work/app";
@@ -601,4 +613,33 @@ test("tasks survive a steering split and go with the run when the turn ends", ()
   assert.deepEqual(split.runs[key(1)].tasks, tasks);
   const ended = applyAgentEvent(split.state, split.runs, PROJECT, key(1), { type: "turn-completed" });
   assert.equal(ended.runs[key(1)], undefined);
+});
+
+test("answers keep each question with what was picked or typed, in the request's order, with typed secrets masked", () => {
+  const request: QuestionRequest = {
+    requestId: "q",
+    questions: [
+      { id: "a", header: "Color", question: "Which color?", options: [{ label: "Red", description: "" }], multiSelect: false, allowOther: true, secret: false },
+      { id: "b", header: "Token", question: "Your token?", options: [{ label: "Skip", description: "" }], multiSelect: false, allowOther: true, secret: true },
+    ],
+  };
+  assert.deepEqual(answeredQuestions(request, { b: ["abc123"], a: ["Red", "teal"] }), [
+    { header: "Color", question: "Which color?", answers: ["Red", "teal"] },
+    { header: "Token", question: "Your token?", answers: ["••••••"] },
+  ]);
+  assert.deepEqual(answeredQuestions(request, { b: ["Skip"] }), [{ header: "Token", question: "Your token?", answers: ["Skip"] }]);
+  assert.equal(answeredQuestions(request, null), null);
+  assert.equal(answeredQuestions(undefined, { a: ["Red"] }), null);
+});
+
+test("a chat key names its computer when it is another Mac's", () => {
+  const id = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+  assert.equal(chatKey("/p", 3), "/p#3");
+  assert.equal(chatKey("/p", 3, "local"), "/p#3");
+  const remote = chatKey("/p", 3, id);
+  assert.equal(remote, `${id}|/p#3`);
+  assert.equal(projectOfKey(remote), `${id}|/p`);
+  assert.equal(computerOfKey(remote), id);
+  assert.equal(chatInProject(`${id}|/p`, remote), true);
+  assert.equal(chatInProject("/p", remote), false, "this Mac's /p is another Project");
 });

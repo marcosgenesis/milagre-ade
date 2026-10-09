@@ -11,7 +11,7 @@ import { ProjectNavigation } from "./project-navigation";
 import { ChangesView } from "./app/changes";
 import { DiffView, type DiffTarget } from "./app/diff";
 import { IconButton } from "./ui";
-import { colors } from "./theme";
+import { useTheme } from "./theme";
 import { dragTo, settle } from "./panel-motion";
 
 type Side = "left" | "right";
@@ -224,6 +224,7 @@ function swipe({
 
 /** Draws the panels over everything, the native header included; rendered once, after the navigator. */
 export function SidePanelsHost() {
+  const { colors } = useTheme();
   const session = useSession();
   const { screen, open, mounted, progress, from, show, settled, navigate } = usePanels();
   const { width } = useWindowDimensions();
@@ -270,6 +271,7 @@ export function SidePanelsHost() {
 
 /** Changes, and a file's diff in place of the list, so reading one never leaves the panel. */
 function ChangesPanel({ worktreeId, onClose }: { worktreeId: number; onClose: () => void }) {
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [file, setFile] = useState<DiffTarget | null>(null);
   const name = file ? file.path.split("/").pop() || file.path : "Changes";

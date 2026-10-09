@@ -24,12 +24,13 @@
     }
   },
   "scripts": {
-    "test": "node --test src/*.test.cjs src/agents/*.test.cjs"
+    "test": "node --test src/*.test.cjs src/agents/*.test.cjs src/linear/*.test.cjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.288",
     "@milagre/shared": "0.1.0",
     "markdown-it": "^15.0.2",
+    "node-pty": "1.1.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },

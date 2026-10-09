@@ -1,5 +1,5 @@
 // Browser check: with the Experimental "Every project in the sidebar" on, the sidebar lists each recent Project and
-// Link with its chats, leaves out a hidden Project, marks exactly one open scope, shows each scope's ⋯ menu and New chat
+// Link with its chats, leaves out a hidden Project, shows and hides Projects from the chooser's checkboxes, marks exactly one open scope, shows each scope's ⋯ menu and New chat
 // label, pins and folds groups, opens another Project's chat and follows its live updates. Off, the project menu is
 // back on top. No agent calls.
 const assert = require("node:assert/strict");
@@ -19,12 +19,18 @@ const chat = (id, body) => ({
   messages: [{ id, session_id: id, role: "user", body }],
 });
 const listeners = [];
+let recent = [
+  { path: "/work/arketa", name: "arketa" },
+  { path: "/work/shop", name: "shop" },
+  { path: "/work/api", name: "api", hidden: true },
+];
 window.milagre = {
-  listRecentProjects: async () => [
-    { path: "/work/arketa", name: "arketa" },
-    { path: "/work/shop", name: "shop" },
-    { path: "/work/api", name: "api", hidden: true },
-  ],
+  listRecentProjects: async () => recent,
+  setProjectHidden: async (path, hidden) => {
+    window.hiddenCalls = [...(window.hiddenCalls ?? []), [path, hidden]];
+    recent = recent.map((project) => (project.path === path ? { ...project, hidden } : project));
+    return recent;
+  },
   listProjects: async () => [{ id: "p-shop", path: "/work/shop", name: "shop" }, { id: "p-api", path: "/work/api", name: "api" }],
   listNamedLinks: async () => [{ id: "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7", name: "Checkout", projectIds: ["p-shop", "p-api"] }],
   getProjectImage: async () => null,
@@ -53,7 +59,7 @@ updateSettings({ sidebarAllProjects: true });
 createRoot(document.getElementById("root")).render(
   <div style={{ display: "flex", height: "100vh", padding: "60px 12px 12px" }}>
     <SidebarNav fill workspaceName="arketa" projectPath="/work/arketa" recents={[{ id: "1", label: "Fix the login flow" }]} activeId="1"
-      runningKeys={"/work/shop#7\\nmilagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7#3"} waitingKeys="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7#3" onOpenScopeChat={(key, id) => { window.opened = key + "#" + id; }} />
+      runningKeys={"/work/shop#7\\nmilagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7#3"} waitingKeys="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7#3" attentionPaths={["/work/shop"]} onOpenScopeChat={(key, id) => { window.opened = key + "#" + id; }} />
   </div>,
 );
 `;
@@ -91,7 +97,11 @@ async function browserChecks() {
   // Other checks share this storage: leave the sidebar as they expect it.
   const reset = () => evaluate(`window.showAll?.(false); localStorage.removeItem("milagre.sidebarClosedScopes")`).catch(() => {});
   const scopes = () => evaluate(`[...document.querySelectorAll("[data-sidebar-scope]")].map((node) => node.dataset.sidebarScope)`);
-  const chats = (scope) => evaluate(`[...document.querySelectorAll('[data-sidebar-scope="${scope}"] [data-chat-id]')].map((node) => node.textContent.trim())`);
+  // A folded group keeps its rows mounted (inert, zero height) so it can animate shut; they don't count as shown.
+  const chats = (scope) =>
+    evaluate(
+      `[...document.querySelectorAll('[data-sidebar-scope="${scope}"] [data-chat-id]')].filter((node) => !node.closest("[inert]")).map((node) => node.textContent.trim())`,
+    );
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`!!document.querySelector('[data-sidebar-scope="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7"] [data-chat-id]')`);
@@ -124,7 +134,36 @@ async function browserChecks() {
       "A Link chat waiting on the user shows the mark",
     );
     assert.match((await chats("milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7"))[0], /Shared checkout chat/);
+    assert.equal(
+      await evaluate(`(() => {
+        const header = document.querySelector('[data-sidebar-scope="milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7"] [data-scope-toggle]');
+        const avatars = [...header.querySelectorAll('[aria-hidden] > span')].map((node) => node.getBoundingClientRect());
+        const project = document.querySelector('[data-sidebar-scope="/work/shop"] [data-scope-toggle] span span').getBoundingClientRect();
+        return avatars.length === 2 && Math.abs(Math.min(...avatars.map((rect) => rect.left)) - project.left) < 0.5 &&
+          Math.max(...avatars.map((rect) => rect.right)) <= header.querySelector('[data-scope-name]').getBoundingClientRect().left;
+      })()`),
+      true,
+      "A Link's stacked avatars start on the Projects' icon line and end before its name",
+    );
     await screenshot("all-projects");
+
+    // A waiting group's dot rests at the row's right edge and slides left of the actions that hover reveals.
+    const dot = `document.querySelector('[data-sidebar-scope="/work/shop"] [aria-label="Needs attention"]')`;
+    const dotGap = () =>
+      evaluate(`(() => {
+        const row = ${dot}.parentElement.getBoundingClientRect();
+        return Math.round(row.right - ${dot}.getBoundingClientRect().right);
+      })()`);
+    assert.equal(await dotGap(), 12, "At rest the dot sits at the row's right edge");
+    const toggle = await evaluate(
+      `(() => { const r = document.querySelector('[data-sidebar-scope="/work/shop"] [data-scope-toggle]').getBoundingClientRect(); return { x: Math.round(r.x + 40), y: Math.round(r.y + r.height / 2) }; })()`,
+    );
+    window.webContents.sendInputEvent({ type: "mouseMove", ...toggle });
+    await delay(300);
+    assert.equal(await dotGap(), 64, "On hover it moves left of the menu and New chat buttons");
+    await screenshot("attention-hover");
+    window.webContents.sendInputEvent({ type: "mouseMove", x: 900, y: 400 });
+    await delay(300);
 
     // One open scope; the others offer New chat in <name>; only a Project's ⋯ menu on a non-current scope has Remove.
     assert.equal(await evaluate(`document.querySelectorAll("[data-sidebar-scope][data-current]").length`), 1, "Exactly one scope is open");
@@ -155,6 +194,36 @@ async function browserChecks() {
     );
     await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
     await waitFor(`!document.querySelector("[data-scope-menu-panel]")`);
+
+    // The project chooser lists every Project, the hidden one unchecked; checking it brings its group back, unchecking hides it again.
+    await evaluate(`document.querySelector("[data-project-picker]").click()`);
+    await waitFor(`!!document.querySelector("[data-project-picker-panel]")`);
+    assert.deepEqual(
+      await evaluate(`[...document.querySelectorAll("[data-project-choice]")].map((row) => [row.dataset.projectChoice, row.getAttribute("aria-checked")])`),
+      [
+        ["/work/api", "false"],
+        ["/work/arketa", "true"],
+        ["/work/shop", "true"],
+      ],
+      "Every Project by name, the hidden one unchecked",
+    );
+    await screenshot("project-chooser");
+    await evaluate(`document.querySelector('[data-project-choice="/work/api"]').click()`);
+    await waitFor(`!!document.querySelector('[data-sidebar-scope="/work/api"]')`);
+    assert.equal(await evaluate(`document.querySelector('[data-project-choice="/work/api"]').getAttribute("aria-checked")`), "true", "The panel stays open");
+    await screenshot("project-chooser-checked");
+    await evaluate(`document.querySelector('[data-project-choice="/work/shop"]').click()`);
+    await waitFor(`!document.querySelector('[data-sidebar-scope="/work/shop"]')`);
+    assert.deepEqual(await evaluate("window.hiddenCalls"), [
+      ["/work/api", false],
+      ["/work/shop", true],
+    ]);
+    await evaluate(`document.querySelector('[data-project-choice="/work/shop"]').click()`);
+    await waitFor(`!!document.querySelector('[data-sidebar-scope="/work/shop"]')`);
+    await evaluate(`document.querySelector('[data-project-choice="/work/api"]').click()`);
+    await waitFor(`!document.querySelector('[data-sidebar-scope="/work/api"]')`);
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await waitFor(`!document.querySelector("[data-project-picker-panel]")`);
 
     await click('[data-sidebar-scope="/work/shop"] [data-chat-id] [data-row]');
     assert.equal(await evaluate("window.opened"), "/work/shop#7", "Another Project's chat opens through onOpenScopeChat");
@@ -192,10 +261,11 @@ async function browserChecks() {
     assert.match(await evaluate(`document.querySelector("[data-chat-id]").textContent`), /Fix the login flow/, "Off, only the open Project's chats");
     assert.equal(await evaluate(`!!document.querySelector("[data-workspace-trigger]")`), true, "Off, the project menu is back on top");
     assert.equal(await evaluate(`!!document.querySelector("[data-link-projects]")`), false, "Off, Link projects stays in that menu");
+    assert.equal(await evaluate(`!!document.querySelector("[data-project-picker]")`), false, "Off, no project chooser");
     assert.deepEqual(errors, []);
     await reset();
     console.log(
-      "PASS: with the Experimental setting on, the sidebar lists each Project and Link with its chats, skips a hidden Project, marks one open scope, offers New chat per scope and Remove only on other Projects, pins chats to one Pinned section on top, opens them, marks Link chats waiting on the user, follows live changes, and folds groups; off, the old project menu returns",
+      "PASS: with the Experimental setting on, the sidebar lists each Project and Link with its chats, skips a hidden Project, chooses Projects with checkboxes, marks one open scope, offers New chat per scope and Remove only on other Projects, pins chats to one Pinned section on top, opens them, marks Link chats waiting on the user, follows live changes, and folds groups; off, the old project menu returns",
     );
     app.exit(0);
   } catch (error) {

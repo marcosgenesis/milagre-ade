@@ -9,6 +9,7 @@
     "src/git-diff.ts",
     "src/model-options.ts",
     "src/model-copy.ts",
+    "src/provider-logos.ts",
     "src/reply-parts.ts",
     "src/streaming-markdown.ts",
     "src/pr-blockers.ts",
@@ -16,21 +17,35 @@
     "src/diff-tree.ts",
     "src/diff-layout.ts",
     "src/usage.ts",
+    "src/main-sync.ts",
+    "src/linear.ts",
     "src/simulator.ts",
     "src/browser.ts",
+    "src/terminal.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
-    "src/message-search.ts",
+    "src/message-search.mjs",
+    "src/message-search.d.mts",
     "src/agent-activity.ts",
-    "src/advisor-result.ts"
+    "src/advisor-result.ts",
+    "src/themes/*.ts",
+    "src/themes/palettes/*.ts"
   ],
   "type": "module",
   "exports": {
+    "./pr-action": {
+      "types": "./src/pr-action.d.mts",
+      "default": "./src/pr-action.mjs"
+    },
     "./prompt-skills": {
       "types": "./src/prompt-skills.d.mts",
       "default": "./src/prompt-skills.mjs"
     },
     "./model": "./src/model.ts",
+    "./subagent-transcript": {
+      "types": "./src/subagent-transcript.d.mts",
+      "default": "./src/subagent-transcript.mjs"
+    },
     "./chat-summary": {
       "types": "./src/chat-summary.d.mts",
       "default": "./src/chat-summary.mjs"
@@ -96,8 +111,21 @@
       "types": "./src/relay-rpc.d.mts",
       "default": "./src/relay-rpc.mjs"
     },
+    "./peer-frames": {
+      "types": "./src/peer-frames.d.mts",
+      "default": "./src/peer-frames.mjs"
+    },
+    "./pairing-link": {
+      "types": "./src/pairing-link.d.mts",
+      "default": "./src/pairing-link.mjs"
+    },
+    "./route-supervisor": {
+      "types": "./src/route-supervisor.d.mts",
+      "default": "./src/route-supervisor.mjs"
+    },
     "./model-options": "./src/model-options.ts",
     "./model-copy": "./src/model-copy.ts",
+    "./provider-logos": "./src/provider-logos.ts",
     "./reconcile": {
       "types": "./src/reconcile.d.mts",
       "default": "./src/reconcile.mjs"
@@ -109,6 +137,8 @@
     "./diff-tree": "./src/diff-tree.ts",
     "./diff-layout": "./src/diff-layout.ts",
     "./usage": "./src/usage.ts",
+    "./main-sync": "./src/main-sync.ts",
+    "./linear": "./src/linear.ts",
     "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
     "./artifact": "./src/artifact.ts",
@@ -117,18 +147,27 @@
       "default": "./src/simulator-receiver.mjs"
     },
     "./browser": "./src/browser.ts",
+    "./terminal": "./src/terminal.ts",
+    "./terminal-client": {
+      "types": "./src/terminal-client.d.mts",
+      "default": "./src/terminal-client.mjs"
+    },
     "./browser-receiver": {
       "types": "./src/browser-receiver.d.mts",
       "default": "./src/browser-receiver.mjs"
     },
     "./message-navigation": "./src/message-navigation.ts",
-    "./message-search": "./src/message-search.ts",
+    "./message-search": {
+      "types": "./src/message-search.d.mts",
+      "default": "./src/message-search.mjs"
+    },
     "./file-syntax": {
       "types": "./src/file-syntax.d.mts",
       "default": "./src/file-syntax.mjs"
     },
     "./agent-activity": "./src/agent-activity.ts",
-    "./advisor-result": "./src/advisor-result.ts"
+    "./advisor-result": "./src/advisor-result.ts",
+    "./themes": "./src/themes/index.ts"
   },
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",

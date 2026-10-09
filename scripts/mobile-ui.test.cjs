@@ -89,6 +89,15 @@ function hookHost({ effects = false } = {}) {
     },
   };
 }
+// Every palette key reads back as its own name, so a test can tell which color a component picked.
+const fakePalette = new Proxy({}, { get: (_target, key) => (typeof key === "string" ? key : undefined) });
+const fakeStyles = new Proxy({}, { get: () => ({}) });
+const themeHooks = {
+  useTheme: () => ({ colors: fakePalette, scheme: "light", settings: {}, set() {} }),
+  createStylesHook: (make) => () => make(fakePalette),
+  fonts: { mono: "mono" },
+};
+const uiHooks = { useStyles: () => fakeStyles, makeStyles: () => fakeStyles };
 function load(file, modules, extra = "") {
   const source = fs.readFileSync(path.join(__dirname, "..", "apps/mobile/src", file), "utf8") + extra;
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
@@ -96,10 +105,20 @@ function load(file, modules, extra = "") {
   vm.runInNewContext(compiled, {
     exports,
     require: (id) => {
+      // Image assets are opaque sources; any value stands in.
+      if (id.endsWith(".png") && !(id in modules)) return { uri: id };
+      const base = id.replace(/^\.\.?\//, "");
+      if (base === "theme" || base === "ui") {
+        // Themed code reads colors through hooks; a test's own fake wins over these defaults.
+        const own = modules[id] ?? {};
+        return { ...(base === "theme" ? themeHooks : uiHooks), ...own };
+      }
       assert.ok(id in modules, `Unexpected import: ${id}`);
       return modules[id];
     },
     process: { env: {} },
+    // The host's Error, so `failure instanceof Error` holds for errors a test's fake client throws.
+    Error,
     URL,
     TextDecoder,
     setTimeout,
@@ -110,11 +129,15 @@ function load(file, modules, extra = "") {
   return exports;
 }
 const jsx = (type, props, key) => ({ type, props, key });
+const { resolvePalette } = require("../packages/shared/src/themes/index.ts");
+const archiveStore = require("../apps/mobile/src/archive.ts");
 const archiveProgress = load("archive-progress.tsx", {
+  react: { useSyncExternalStore: (_subscribe, read) => read() },
   "react/jsx-runtime": { jsx, jsxs: jsx },
-  "react-native": { Text: "Text", View: "View" },
-  "./loading-logo": { LoadingLogo: "LoadingLogo" },
-  "./ui": { styles: {} },
+  "react-native": { Text: "Text", View: "View", StyleSheet: { absoluteFill: {}, create: (styles) => styles } },
+  "./archive": archiveStore,
+  "./icons": { SpinnerRing: "SpinnerRing" },
+  "./ui": { styles: {}, colors: {} },
 });
 const enterAnimation = {
   duration() {
@@ -185,7 +208,7 @@ test("mobile slash suggestions filter skills and insert at the caret while prese
     undefined,
     "choosing a skill closes suggestions",
   );
-  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accent"));
+  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accentInk"));
   for (const punctuation of [".", ",", ":"]) {
     draft = `Please /tl${punctuation} afterwards`;
     field().props.onSelectionChange({ nativeEvent: { selection: { start: 10, end: 10 } } });
@@ -253,7 +276,7 @@ test("mobile skill input preserves edits and clears its description when the car
         (node.type === "ListRow" && node.props.subtitle === "Rewrite for a skimming reader."),
     );
   assert.equal("value" in field().props, false, "native attributed children must not be combined with value");
-  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accent"));
+  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accentInk"));
   field().props.onFocus();
   field().props.onSelectionChange({ nativeEvent: { selection: { start: 7, end: 7 } } });
   assert.ok(description());
@@ -663,9 +686,10 @@ function find(node, predicate) {
     if (found) return found;
   }
 }
-function chatHost({ pickAttachments = async () => [], call, effects = false, alert = () => {} } = {}) {
+function chatHost({ pickAttachments = async () => [], call, effects = false, alert = () => {}, linear = { active: false } } = {}) {
   const sending = deferred();
   const calls = [];
+  const choices = [];
   const params = { worktreeId: "1" };
   const session = {
     client: {
@@ -707,6 +731,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     refresh: async () => {
       session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex" };
     },
+    previewProject: async () => session.snapshot,
     expectActivity() {},
     rememberChat() {},
     isSelected: () => true,
@@ -740,6 +765,10 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     },
   };
   const { default: ChatScreen } = load("app/chat.tsx", {
+    // A test can stand in for a host that keeps messages by Chat with globalThis.chatPage.
+    "../chat-pages": {
+      useChatPage: (...args) => globalThis.chatPage?.(...args) ?? { messages: [], hasMore: false, total: 0, loading: false, loadEarlier: async () => {} },
+    },
     "@sbaiahmed1/react-native-blur": { LiquidGlassView: "LiquidGlassView" },
     "expo-crypto": { randomUUID: require("node:crypto").randomUUID },
     "../archive-progress": archiveProgress,
@@ -760,6 +789,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../simulator": { SimulatorChip: "SimulatorChip" },
     "../browser": { BrowserChip: "BrowserChip" },
     "../ports": { PortsChip: "PortsChip" },
+    "../terminal": { TerminalChip: "TerminalChip", terminalPlaces: () => undefined },
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": native,
@@ -773,6 +803,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     },
     "@hugeicons/core-free-icons": icons,
     "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
     "../indicators": require("../apps/mobile/src/indicators.ts"),
     "../icons": { Icon: "Icon" },
     "../bottom-fade": { BottomFade: "BottomFade", EdgeFade: "EdgeFade" },
@@ -791,16 +822,23 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "@milagre/shared/agent-runs": { lastUserModel: () => "" },
     "@milagre/shared/chats": require("@milagre/shared/chats"),
     "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
+    "@milagre/shared/linear": require("@milagre/shared/linear"),
+    "@milagre/shared/archive": require("@milagre/shared/archive"),
+    "../use-linear": { useLinear: () => linear },
+    "../use-worktree-linear-issues": { useWorktreeLinearIssues: () => ({}) },
+    "../choice-store": { showChoiceSheet: (request) => choices.push(request) },
     "../session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
     "../attachment-picker": { pickAttachments },
     "../attachments": require("../apps/mobile/src/attachments.ts"),
-    "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => null },
+    // A test can show the Chat's open PR with globalThis.chatPullRequest.
+    "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => globalThis.chatPullRequest ?? null },
     "../questions": { Approval: "Approval", Questions: "Questions" },
     "../chat-reply": { ChatReply: "ChatReply" },
     "../design-outbox": require("../apps/mobile/src/design-outbox.ts"),
     "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "../ui": ui,
     "../agent-controls": { AgentControls: "AgentControls", PermissionChip: "PermissionChip" },
+    "../ultracode-glow": { UltracodeGlow: () => null },
     "../turn-options": require("../apps/mobile/src/turn-options.ts"),
     "../handoff-sides": require("../apps/mobile/src/handoff-sides.ts"),
     "../handoff-divider": { HandoffDivider: "HandoffDivider" },
@@ -820,7 +858,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     return { ...props, value: props.draft };
   };
   const send = () => find(render(), (node) => node.type === "IconButton" && ["Send message", "Send follow-up"].includes(node.props.label)).props.onPress();
-  return { session, sending, params, field, send, render, router, calls };
+  return { session, sending, params, field, send, render, router, calls, choices };
 }
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -1107,8 +1145,8 @@ test("launch restoration shows the splash animation while the saved Chat opens",
   assert.ok(find(tree, (node) => node.props.accessibilityRole === "progressbar" && node.props.accessibilityLabel === "Reopening your Chat..."));
 });
 
-function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId } = {}) {
-  const react = hookHost();
+function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId, effects = false } = {}) {
+  const react = hookHost({ effects });
   const routes = [];
   const secondaryRoutes = [];
   const opened = [];
@@ -1134,6 +1172,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
       calls.push(["reload"]);
     },
     cachedProject: () => undefined,
+    previewProject: async () => state,
     ...extra,
   };
   const native = { Alert: { alert, prompt() {} } };
@@ -1146,6 +1185,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "@milagre/shared/chats": require("@milagre/shared/chats"),
     "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
     "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "@milagre/shared/linear": require("@milagre/shared/linear"),
     "./icons": { Icon: "Icon" },
     "./ui": { PullDown: "PullDown", colors: { ink2: "ink2", green: "green", purple: "purple", red: "red", orange: "orange" } },
   });
@@ -1178,6 +1218,8 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "./indicators": require("../apps/mobile/src/indicators.ts"),
     "./status-indicators": { ChatMarkIcon: "ChatMarkIcon" },
     "./use-chat-pull-requests": { useChatPullRequests: () => ({}) },
+    "./use-linear": { useLinear: () => ({ active: false }) },
+    "./use-worktree-linear-issues": { useWorktreeLinearIssues: () => ({}) },
     "./chat-pull-request-chips": { ChatPullRequestChips },
     "./icons": { Icon: "Icon", SpinnerRing: "SpinnerRing" },
     "./loading-logo": { LoadingLogo: "LoadingLogo" },
@@ -1187,6 +1229,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
       styles: {},
     },
     "./archive-progress": archiveProgress,
+    "./archive": archiveStore,
     "./attention": { AttentionDot: "AttentionDot", useAttention: () => [] },
     "@milagre/shared/agent-runs": { projectOfKey: (key) => key.slice(0, key.lastIndexOf("#")) },
     "./chat-actions": load("chat-actions.ts", {
@@ -1227,6 +1270,44 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const filter = () => find(render(), (node) => node.type === "PullDown" && node.props.label === "Filter Chats");
   return { state, session, routes, secondaryRoutes, opened, calls, external, render, rows, row, open, more, filter };
 }
+
+test("mobile chat titles use summaries before transcripts load and switch to generated or renamed titles", () => {
+  const nav = navigationHost(Promise.resolve());
+  const chat = { id: 3, agent_name: "main", summary: { count: 2, titleLine: "Fix the login redirect" } };
+  nav.state.project.state.sessions[3] = chat;
+  nav.state.project.state.messages = [];
+  const title = () => find(nav.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.children;
+  assert.equal(title(), "Fix the login redirect");
+  const search = () => find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats");
+  search().props.onChangeText("login redirect");
+  assert.equal(nav.rows().props.data.filter((item) => item.kind === "chat").length, 1, "the summary title is searchable without message bodies");
+  search().props.onChangeText("");
+  nav.state.project.state.sessions = { 3: { ...chat, generatedTitle: "Repair login navigation" } };
+  nav.session.snapshot = { ...nav.state };
+  assert.equal(title(), "Repair login navigation");
+  nav.state.project.state.sessions = { 3: { ...chat, generatedTitle: "Repair login navigation", title: "  My login fix  " } };
+  nav.session.snapshot = { ...nav.state };
+  assert.equal(title(), "My login fix");
+
+  const host = chatHost();
+  host.params.id = "3";
+  host.session.snapshot.project.state.sessions[3] = chat;
+  const screen = find(host.render(), (node) => node.type === "Screen");
+  assert.equal(screen.props.options.title, "Fix the login redirect", "the Chat header uses the summary while the transcript is loading");
+});
+
+test("mobile chat titles fall back to messages from an older host, including message search results", () => {
+  const nav = navigationHost(Promise.resolve());
+  nav.state.project.state.sessions[3] = { id: 3, agent_name: "main" };
+  nav.state.project.state.messages = [
+    { id: 6, session_id: 99, role: "user", body: "Another Chat's title" },
+    { id: 7, session_id: 3, role: "user", body: "Fix login\nCheck the callback URL" },
+    { id: 8, session_id: 3, role: "assistant", body: "Check the wrangler configuration" },
+  ];
+  assert.equal(find(nav.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.children, "Fix login");
+  find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats").props.onChangeText("wrangler");
+  assert.equal(nav.row("message").props.accessibilityLabel, "Check the wrangler configuration, in Fix login");
+});
 
 test("mobile chat rows keep unread emphasis during a running turn and match desktop read title contrast", () => {
   const nav = navigationHost(Promise.resolve());
@@ -1457,6 +1538,37 @@ test("a chat search with no matching title lists matching messages, and a tap op
     false,
     "a Chat title match keeps messages out",
   );
+});
+
+test("a drawer search over Projects held without messages asks the host, which finds what was said", async () => {
+  const asked = [];
+  const preview = {
+    previewOnly: true,
+    project: { path: "/last", name: "last", state: { sessions: { 3: { id: 3, title: "Relay work" } }, messages: [], worktrees: {}, messagesInChats: true } },
+    runs: { runs: {} },
+  };
+  const nav = navigationHost(deferred().promise, {
+    effects: true,
+    session: {
+      cachedProject: () => preview,
+      client: {
+        url: "mac",
+        call: async () => {},
+        searchChats: async (path, query) => {
+          asked.push([path, query]);
+          return [{ message: { id: 7, session_id: 3 }, score: 9, snippet: "Deploy the relay with wrangler", highlight: [21, 29], term: "wrangler" }];
+        },
+      },
+    },
+  });
+  const search = () => find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats");
+  search().props.onChangeText("wranglr");
+  nav.render();
+  // The host is asked after a short pause while typing.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await settleAll();
+  assert.deepEqual(asked, [["/last", "wranglr"]]);
+  assert.match(nav.row("message").props.accessibilityLabel, /^Deploy the relay with wrangler, in /);
 });
 
 test("a sidebar Project can be removed from the list after confirming", async () => {
@@ -1826,7 +1938,7 @@ test("a sidebar Chat Archive asks with the worktree choice, then stops, hides an
   ]);
   assert.deepEqual(
     project.calls.map(([method]) => method),
-    ["worktree:roots", "worktree:status", "agent:interrupt", "chat:patch", "worktree:remove", "refresh"],
+    ["worktree:roots", "worktree:status", "terminal:list", "agent:interrupt", "chat:patch", "worktree:remove", "refresh"],
   );
   assert.deepEqual(project.calls.find(([method]) => method === "worktree:remove").slice(1), [
     "/wt/p/fix",
@@ -2026,6 +2138,42 @@ test("text typed during the first send follows the created Chat into its compose
   assert.equal(screen.params.id, "42");
   assert.equal(screen.field().value, "next message typed during send");
   assert.equal(screen.session.drafts["/p#new:1"], undefined);
+});
+
+test("the PR pill sends a PR action whose preview is already a card", async () => {
+  const url = "https://github.com/o/r/pull/77";
+  globalThis.chatPullRequest = { number: 77, url, state: "OPEN", checks: "failed" };
+  try {
+    const screen = chatHost();
+    screen.params.id = "42";
+    screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex", worktree_id: 1 };
+    find(screen.render(), (node) => node.type === "PullRequestAction").props.onRun();
+    await settle();
+    const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
+    assert.equal(sent.body, "Fix CI on pull request #77");
+    // An older Mac ignores prAction: the prompt still carries the URL and the skill token.
+    assert.equal(sent.prompt, `Fix CI on pull request #77 (${url}). /milagre-fix-ci`);
+    assert.equal(JSON.stringify(sent.prAction), JSON.stringify({ action: "checks-failed", pr: 77, url }));
+    const [pending] = Object.values(screen.session.pendingChats);
+    assert.equal(JSON.stringify(pending.preview.message.context), JSON.stringify({ kind: "pr-action", action: "checks-failed", pr: 77, url }));
+  } finally {
+    delete globalThis.chatPullRequest;
+  }
+});
+
+test("a PR without a number yet shows no PR pill", () => {
+  globalThis.chatPullRequest = { url: "https://github.com/o/r/pull/77", state: "OPEN", checks: "failed" };
+  try {
+    const screen = chatHost();
+    screen.params.id = "42";
+    screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex", worktree_id: 1 };
+    assert.equal(
+      find(screen.render(), (node) => node.type === "PullRequestAction"),
+      undefined,
+    );
+  } finally {
+    delete globalThis.chatPullRequest;
+  }
 });
 
 test("a successful first send clears the sent draft", async () => {
@@ -3039,6 +3187,7 @@ test("relay transports: one per Mac, replaced by a new code, closed in the backg
       },
     },
     "./phone-identity": { phoneIdentity: async () => identity, phoneRandom },
+    "./phone-name-native": { phoneName: "Victor's iPhone" },
     "./routes-native": routesNative(),
   });
   const link = (hostId, key = "K".repeat(43)) => ({ url: "wss://relay.milagre.cloud", hostId, key });
@@ -3046,6 +3195,7 @@ test("relay transports: one per Mac, replaced by a new code, closed in the backg
   assert.equal(await relayRuntime.transport({ relay: link("A".repeat(22)), token: "a".repeat(64) }), a, "one transport per Mac");
   assert.equal(a.options.identity, identity);
   assert.equal(a.options.random, phoneRandom);
+  assert.equal(a.options.name, "Victor's iPhone");
   assert.equal(a.options.hostId, "A".repeat(22));
   const b = await relayRuntime.transport({ relay: link("B".repeat(22)), token: "a".repeat(64) });
   assert.notEqual(b, a);
@@ -3839,6 +3989,36 @@ test("mobile opens a long Chat with its newest 40 messages and loads another pag
   assert.equal(transcriptMessages(screen).at(-1).id, 1000);
 });
 
+test("with a host that keeps messages by Chat, the screen shows its Chat's page and reads the next one on request", async (t) => {
+  const screen = ongoingChatHost();
+  const state = screen.session.snapshot.project.state;
+  state.messages = [];
+  state.messagesInChats = true;
+  const message = (id) => ({ id, session_id: 7, role: id % 2 ? "assistant" : "user", body: "Message " + id, context: null });
+  let held = Array.from({ length: 40 }, (_, index) => message(961 + index));
+  const asked = [];
+  globalThis.chatPage = (client, projectPath, chatId) =>
+    chatId === 7 && client
+      ? {
+          messages: held,
+          hasMore: true,
+          total: 1000,
+          loading: false,
+          loadEarlier: async () => {
+            asked.push(projectPath);
+            held = [...Array.from({ length: 40 }, (_, index) => message(921 + index)), ...held];
+          },
+        }
+      : undefined;
+  t.after(() => delete globalThis.chatPage);
+  assert.deepEqual([transcriptMessages(screen).length, transcriptMessages(screen)[0].id], [40, 961]);
+  const earlier = () => find(screen.render(), (node) => node.type === "PillButton" && node.props.title?.startsWith("Show earlier messages"));
+  assert.equal(earlier().props.title, "Show earlier messages (960)");
+  await earlier().props.onPress();
+  assert.deepEqual(asked, ["/p"]);
+  assert.deepEqual([transcriptMessages(screen).length, transcriptMessages(screen)[0].id], [80, 921]);
+});
+
 test("legacy mobile follow-up retires after acceptance and an untagged saved input", async () => {
   const screen = ongoingChatHost();
   screen.session.snapshot.project.state.next_id = 4;
@@ -3988,8 +4168,7 @@ test("mobile TSX preview colors native text in both themes and preserves selecti
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": { Text: "Text", useColorScheme: () => scheme },
     "@milagre/shared/file-syntax": require("@milagre/shared/file-syntax"),
-    "./theme": { fonts: { mono: "Menlo" } },
-    "./ui": { colors: {}, styles: {} },
+    "./theme": { fonts: { mono: "Menlo" }, useTheme: () => ({ colors: resolvePalette("milagre-blue", scheme), scheme }) },
   });
   const text = 'export const Card = () => (\r\n  <section title="hello">Welcome</section>\r\n);\r\n';
   const render = () => {
@@ -4184,17 +4363,20 @@ test("mobile provider discovery uses the selected scope and ignores late respons
 test("mobile Project Accounts opens from Settings as a native stack screen", () => {
   const opened = [];
   const { SettingsView } = load("app/settings.tsx", {
+    react: { useState: (value) => [value, () => {}], useCallback: (fn) => fn },
     "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
     "react-native": { View: "View" },
-    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} } },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect() {} },
     "@hugeicons/core-free-icons": {},
     "../session": { useSession: () => ({ recent: [], client: null }) },
     "../project-icon": { ProjectIcon: "ProjectIcon" },
     "../push": { usePush: () => ({}) },
     "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
     "../icons": { Icon: "Icon" },
-    "../ui": { ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
     "../attention": { useAttentionButton: () => [true, () => {}] },
+    "../murilo-mode": { useMuriloMode: () => [false, () => {}] },
   });
   find(SettingsView({ onOpen: (page) => opened.push(page) }), (n) => n.props.title === "Project Accounts").props.onPress();
   assert.deepEqual(opened, ["project-accounts"]);
@@ -4221,6 +4403,12 @@ test("new mobile Chat has no simulator pill; an existing Chat carries its identi
     undefined,
   );
   assert.equal(find(existing.render(), (n) => n.type === "PortsChip").props.chatId, "/p#7");
+  // A Terminal opens in a sent Chat's Worktree, so a new Chat has no Terminal pill either.
+  assert.equal(
+    find(fresh.render(), (n) => n.type === "TerminalChip"),
+    undefined,
+  );
+  assert.equal(find(existing.render(), (n) => n.type === "TerminalChip").props.chatId, "/p#7");
 });
 
 test("mobile simulator pill stays hidden until this Chat has attachments, including stopped devices", async (t) => {
@@ -4296,12 +4484,13 @@ test("mobile picker exposes other devices only in Attach and detach updates this
   h.cleanup();
 });
 
+// The progress drawn over an archiving Chat's row.
 function archiveIndicator(tree) {
-  const component = find(tree, (node) => node.type === archiveProgress.ArchiveProgress);
+  const component = find(tree, (node) => node.type === archiveProgress.ArchivingOverlay);
   return component && find(component.type(component.props), (node) => node.props.accessibilityRole === "progressbar");
 }
 
-test("sidebar archive shows progress during a delayed request and clears it on failure", async () => {
+test("sidebar archive shows progress over the Chat's row and clears it on failure", async () => {
   const project = archiveProject();
   const patch = deferred();
   const nav = navigationHost(deferred().promise, {
@@ -4316,16 +4505,53 @@ test("sidebar archive shows progress during a delayed request and clears it on f
   });
   nav.more(nav.row("chat")).props.onSelect("archive");
   await settleAll();
-  assert.ok(archiveIndicator(nav.render()), "archive feedback must survive closing the action sheet");
-  nav.more(nav.row("chat")).props.onSelect("archive");
-  assert.equal(project.calls.filter(([method]) => method === "worktree:roots").length, 1);
+  assert.equal(
+    find(nav.render(), (node) => node.props?.accessibilityRole === "progressbar" && node.props.accessibilityLabel === "Archiving Chat"),
+    undefined,
+  );
+  const row = nav.row("chat");
+  assert.equal(archiveIndicator(row).props.accessibilityLabel, "Archiving Fix", "archive feedback sits on the row and survives closing the action sheet");
+  assert.ok(
+    find(archiveIndicator(row), (node) => node.type === "SpinnerRing"),
+    "the row's pill spins desktop's ring",
+  );
+  assert.equal(nav.more(row), undefined, "an archiving row offers no menu");
+  assert.equal(row.props.pointerEvents, "none");
+  // Hidden on the Mac while the worktree is still going: the row stays, under the progress.
+  project.snapshot.project.state.sessions[5].archived = true;
+  assert.ok(archiveIndicator(nav.row("chat")));
+  project.snapshot.project.state.sessions[5].archived = false;
   patch.reject(new Error("disk full"));
   await settleAll();
-  assert.equal(archiveIndicator(nav.render()), undefined);
-  assert.equal(find(nav.render(), (node) => node.type === "ErrorNotice").props.message, "disk full");
+  assert.equal(archiveIndicator(nav.row("chat")), undefined);
+  assert.equal(project.calls.filter(([method]) => method === "worktree:roots").length, 1);
+  assert.equal(find(nav.render(), (node) => node.type === "ErrorNotice").props.message, "Could not archive Chat: disk full");
+  archiveStore.clearArchiveNotice();
 });
 
-test("Chat header shows archive progress until the delayed request completes", async () => {
+test("archiving the open Chat from the sidebar leaves it on confirm and never navigates when it ends", async () => {
+  const project = archiveProject();
+  const patch = deferred();
+  const nav = navigationHost(deferred().promise, {
+    alert: pressDanger([]),
+    activeChatId: 5,
+    session: {
+      client: { ...project.client, url: "mac", call: (method, args) => (method === "chat:patch" ? patch.promise : project.call(method, args)) },
+      recent: [{ path: "/p" }],
+      snapshot: project.snapshot,
+      expectActivity() {},
+      refresh: async () => {},
+    },
+  });
+  nav.more(nav.row("chat")).props.onSelect("archive");
+  await settleAll();
+  assert.deepEqual(nav.routes, ["/projects"], "the Chat is left as soon as the archive is confirmed");
+  patch.resolve();
+  await settleAll();
+  assert.deepEqual(nav.routes, ["/projects"]);
+});
+
+test("the Chat screen leaves for the list on confirm; the archive ends without moving the phone again", async () => {
   const project = archiveProject();
   const patch = deferred();
   const screen = chatHost({ alert: pressDanger([]), call: (method, args) => (method === "chat:patch" ? patch.promise : project.call(method, args)) });
@@ -4336,13 +4562,14 @@ test("Chat header shows archive progress until the delayed request completes", a
   const menuAction = () => find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === "Archive");
   menuAction().props.onPress();
   await settleAll();
-  const header = () => find(screen.render(), (node) => node.type === "Screen").props.options.headerTitle();
-  assert.ok(archiveIndicator(header()));
-  assert.equal(menuAction().props.disabled, true);
+  assert.equal(screen.router.replaced, "/projects", "leaves before the archive ends");
+  assert.ok(archiveStore.archiveActivity().chats.has("/p#5"), "the list shows the archive on the Chat's row");
+  // The phone moves on to another Chat while the archive runs.
+  screen.router.replaced = "/chat?id=9";
   patch.resolve();
   await settleAll();
-  assert.equal(archiveIndicator(header()), undefined);
-  assert.equal(screen.router.replaced, "/projects");
+  assert.equal(screen.router.replaced, "/chat?id=9", "the end of the archive does not pull the phone back to the list");
+  assert.equal(archiveStore.archiveActivity().chats.has("/p#5"), false);
 });
 
 test("mobile Ports pill requests only its Chat and hides empty or mismatched responses", async (t) => {
@@ -4591,11 +4818,39 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     "./activity-item": { ActivityTitle: "ActivityTitle" },
     "./tool-row": { ToolRow: "ToolRow" },
     "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
+    "./answer-card": { AnswerCard: "AnswerCard" },
+    "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
+    "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
+    "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
     "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "./theme": { hex: () => "#000" },
     "./viewer-store": { showImages() {} },
     "./ui": { colors: {}, styles: { card: {}, row: {}, muted: {} } },
   });
+  // Answers to the agent's questions show as a card, not as the summary text.
+  const answered = [{ header: "Color", question: "Which color?", answers: ["Red"] }];
+  const answerTree = ChatReply({
+    message: { id: 1, session_id: 1, body: "Red", context: null, role: "user", answered },
+    onActivity() {},
+    media: (path) => path,
+  });
+  const findType = (node, type) =>
+    Array.isArray(node) ? node.some((child) => findType(child, type)) : !!node?.props && (node.type === type || findType(node.props.children, type));
+  assert.ok(findType(answerTree, "AnswerCard"));
+  // So does a PR-blocker pill's action, instead of its body text.
+  const prTree = ChatReply({
+    message: {
+      id: 2,
+      session_id: 1,
+      body: "Fix CI on pull request #77",
+      context: { kind: "pr-action", action: "checks-failed", pr: 77, url: "https://github.com/o/r/pull/77" },
+      role: "user",
+    },
+    onActivity() {},
+    media: (path) => path,
+  });
+  assert.ok(findType(prTree, "PullRequestActionCard"));
+  assert.ok(!findType(prTree, "Text"), "no bubble with the body text");
   const conclusion = "T3 Code tries every route in parallel.";
   const steps = [
     { id: "t1", kind: "thinking", title: "Thought", status: "done", detail: "Looking.", offset: 9 },
@@ -4624,6 +4879,61 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
   assert.deepEqual(
     markdown(ChatReply({ ...props, message: { id: 1, session_id: 1, role: "assistant", body: "Checking. Done.", steps: [{ ...steps[2], offset: 0 }] } })),
     ["Checking. Done."],
+  );
+});
+
+test("mobile Murilo mode shows each tool call and the notes between them in the Chat, with no activity fold", () => {
+  const react = { memo: (fn) => fn, useCallback: (fn) => fn, useEffect() {}, useRef: () => ({}), useState: (value) => [value, () => {}] };
+  const reply = (murilo) =>
+    load("chat-reply.tsx", {
+      "@milagre/shared/advisor-result": require("@milagre/shared/advisor-result"),
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
+      "react-native": { Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", useColorScheme: () => "dark" },
+      "react-native-svg": { default: "Svg", Path: "Path" },
+      "expo-router": { router: {} },
+      "@hugeicons/core-free-icons": new Proxy({}, { get: (_, key) => key }),
+      "@milagre/shared/reply-parts": require("@milagre/shared/reply-parts"),
+      "./file-chip": { FileChip: "FileChip" },
+      "./markdown": { Markdown: "Markdown" },
+      "./icons": { Icon: "Icon" },
+      "./activity-item": { ActivityTitle: "ActivityTitle" },
+      "./tool-row": { ToolRow: "ToolRow" },
+      "./artifact": { ArtifactCards: "ArtifactCards", DesignFeedbackCard: "DesignFeedbackCard" },
+      "./answer-card": { AnswerCard: "AnswerCard" },
+      "./murilo-mode": { useMuriloMode: () => [murilo, () => {}] },
+      "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
+      "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
+      "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
+      "./theme": { hex: () => "#000" },
+      "./viewer-store": { showImages() {} },
+      "./ui": { colors: {}, styles: { card: {}, row: {}, muted: {} } },
+    }).ChatReply;
+  const body = "Running the tests.Tests pass, reading the config.Done.";
+  const steps = [
+    { id: "a", kind: "shell", title: "Ran `npm test`", status: "done", offset: 18 },
+    { id: "b", kind: "read", title: "Read `package.json`", status: "done", offset: 49 },
+    { id: "c", kind: "search", title: "Searched for `muriloMode`", status: "done", offset: 49 },
+  ];
+  const props = { media: () => null, onActivity() {}, message: { id: 1, session_id: 1, role: "assistant", body, steps } };
+  const shown = (tree) => {
+    const rows = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node.type === "ToolRow") rows.push(node.props.step.id);
+      else if (node.type === "Markdown") rows.push(node.props.text);
+      else if (typeof node.type === "function" && node.type.name === "ActivityRow") rows.push("fold");
+      walk(node.props?.children);
+    };
+    walk(tree);
+    return rows;
+  };
+  assert.deepEqual(shown(reply(false)(props)), ["fold", "Done."], "off: the activity folds into one row");
+  assert.deepEqual(
+    shown(reply(true)(props)),
+    ["Running the tests.", "a", "Tests pass, reading the config.", "b", "c", "Done."],
+    "on: every step and note, in order",
   );
 });
 
@@ -4678,6 +4988,158 @@ test("mobile subagent rows show current activity and preserve terminal states", 
   assert.equal(failed.props.state, "failed");
 });
 
+test("mobile main sync switch re-reads the Mac's default on focus and shows a refused save", async () => {
+  const react = hookHost();
+  const focused = [];
+  let saved = false;
+  const client = {
+    async call(method) {
+      if (method === "main-sync:default:read") return { syncMain: saved };
+      throw new Error("This demo computer only opens its demo project.");
+    },
+  };
+  const { SettingsView } = load("app/settings.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect: (fn) => focused.push(fn) },
+    "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../push": { usePush: () => ({}) },
+    "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
+    "../icons": { Icon: "Icon" },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../attention": { useAttentionButton: () => [true, () => {}] },
+    "../murilo-mode": { useMuriloMode: () => [false, () => {}] },
+  });
+  const render = () => {
+    react.begin();
+    return SettingsView({ onOpen() {} });
+  };
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const toggle = () => find(render(), (n) => n.props?.title === "Sync main branch before new Worktrees");
+  render();
+  focused.at(-1)();
+  await settle();
+  assert.equal(toggle().props.selected, false);
+  // Turned on from the Mac while the phone was elsewhere: coming back to the screen shows it.
+  saved = true;
+  focused.at(-1)();
+  await settle();
+  assert.equal(toggle().props.selected, true);
+  toggle().props.onPress();
+  await settle();
+  assert.equal(toggle().props.selected, true, "a refused save puts the switch back");
+  assert.equal(find(render(), (n) => n.type === "ErrorNotice").props.message, "This demo computer only opens its demo project.");
+});
+
+test("mobile Settings opens Experimental as its own page, like desktop's section", () => {
+  const opened = [];
+  const { SettingsView } = load("app/settings.tsx", {
+    react: { useState: (value) => [value, () => {}], useCallback: (fn) => fn },
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/main-sync": { MAIN_SYNC_TITLE: "Sync main branch before new Worktrees", MAIN_SYNC_HINT: "" },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { Stack: { Screen: "Screen" }, router: { push() {} }, useFocusEffect() {} },
+    "@hugeicons/core-free-icons": {},
+    "../session": { useSession: () => ({ recent: [], client: null }) },
+    "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../push": { usePush: () => ({}) },
+    "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
+    "../icons": { Icon: "Icon" },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", Toggle: "Toggle", styles: {} },
+    "../attention": { useAttentionButton: () => [true, () => {}] },
+  });
+  const tree = SettingsView({ onOpen: (page) => opened.push(page) });
+  assert.equal(
+    find(tree, (n) => n.props?.title === "Linear"),
+    undefined,
+    "the Linear switch lives on the Experimental page",
+  );
+  find(tree, (n) => n.type === "ListRow" && n.props.title === "Experimental").props.onPress();
+  assert.deepEqual(opened, ["experimental"]);
+  const { default: Screen } = load("app/experimental.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "expo-router": { Stack: { Screen: "Screen" } },
+    "../ui": { PageScroll: "PageScroll" },
+    "../experimental-section": { ExperimentalSection: "ExperimentalSection" },
+  });
+  const page = Screen();
+  assert.equal(find(page, (n) => n.type === "Screen").props.options.title, "Experimental");
+  assert.ok(find(page, (n) => n.type === "ExperimentalSection"));
+});
+
+test("mobile Experimental page shows the Mac's Linear switch and status, re-read on focus", async () => {
+  const react = hookHost();
+  const focused = [];
+  let status = { connected: false };
+  const saves = [];
+  const client = {
+    async call(method, args) {
+      if (method === "linear:enabled:read") return { enabled: true };
+      if (method === "linear:status") return status;
+      if (method === "linear:enabled:save") {
+        saves.push(args[0]);
+        return { enabled: args[0] };
+      }
+      throw new Error(`unexpected ${method}`);
+    },
+  };
+  const modules = (session) => ({
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/linear": {
+      LINEAR_TITLE: "Linear",
+      LINEAR_HINT: "hint",
+      linearStatusLine: (value, where) => (value.connected ? "Connected as Victor to Acme" : `not connected on ${where}`),
+    },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { useFocusEffect: (fn) => focused.push(fn) },
+    "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
+    "./ultracode-fatality-setting": { useUltracodeFatality: () => [false, () => {}] },
+    "./session": { useSession: () => session },
+    "./ui": { ErrorNotice: "ErrorNotice", Toggle: "Toggle", styles: {} },
+  });
+  const { ExperimentalSection } = load("experimental-section.tsx", modules({ client }));
+  const render = () => {
+    react.begin();
+    return ExperimentalSection();
+  };
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const text = (tree, value) => find(tree, (n) => n.type === "Text" && n.props.children === value);
+  render();
+  focused.at(-1)();
+  await settle();
+  let tree = render();
+  assert.equal(find(tree, (n) => n.props?.title === "Linear").props.selected, true);
+  assert.ok(text(tree, "not connected on phone"));
+  // Connected on the Mac while the phone was elsewhere: coming back to the page shows it.
+  status = { connected: true };
+  focused.at(-1)();
+  await settle();
+  tree = render();
+  assert.ok(text(tree, "Connected as Victor to Acme"));
+  find(tree, (n) => n.props?.title === "Linear").props.onPress();
+  await settle();
+  assert.deepEqual(saves, [false]);
+  assert.equal(text(render(), "Connected as Victor to Acme"), undefined, "the status hides while the switch is off");
+
+  const offline = load("experimental-section.tsx", modules({ client: null })).ExperimentalSection;
+  react.begin();
+  const empty = offline();
+  assert.ok(text(empty, "Connect to a Mac to change its experimental features."));
+  assert.ok(
+    find(empty, (n) => n.props?.title === "Murilo mode"),
+    "Murilo mode is this phone's own switch and shows without a Mac",
+  );
+  assert.equal(
+    find(empty, (n) => n.props?.title === "Linear"),
+    undefined,
+  );
+});
+
 test("mobile advisor Stop and Retry call the owning Chat and show failures without hiding records", async () => {
   const host = subagentsHost({
     call: async () => {
@@ -4694,4 +5156,162 @@ test("mobile advisor Stop and Retry call the owning Chat and show failures witho
   assert.equal(host.state.sessions[7].subagents.length, 2);
   await host.button("Retry Plan").props.onPress();
   assert.deepEqual(host.calls[1], { method: "advisor:retry", args: ["/project#7", "advisor:failed"] });
+});
+
+const linearIssue = {
+  key: "ENG-12",
+  title: "Fix login",
+  url: "https://linear.app/acme/issue/ENG-12",
+  branchName: "eng-12-fix-login",
+  state: { name: "In Progress", type: "started", color: "#f2c94c" },
+};
+
+test("a new Chat offers a Linear issue chip only while Linear is on and connected", () => {
+  const chip = (screen) => find(screen.render(), (node) => node.props?.accessibilityLabel === "Start from a Linear issue");
+  assert.ok(!chip(chatHost({ linear: { active: false } })), "off hides the chip");
+  assert.ok(chip(chatHost({ linear: { active: true } })), "on and connected shows it after the branch picker");
+});
+
+test("picking a Linear issue starts a Chat in its own worktree with the issue as the first message", async () => {
+  const { issueFirstMessage } = require("@milagre/shared/linear");
+  const screen = chatHost({
+    effects: true,
+    linear: { active: true },
+    call: async (method) => {
+      if (method === "project:branches") return ["main"];
+      if (method === "linear:issues") return { issues: [linearIssue] };
+      if (method === "worktree:create") return { worktreeId: 9, project: { state: { sessions: { 7: { id: 7, worktree_id: 9 } } } } };
+      return { sessionId: 7 };
+    },
+  });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: "main" } };
+  find(screen.render(), (node) => node.props?.accessibilityLabel === "Start from a Linear issue").props.onPress();
+  await settle();
+  // Objects built inside the Chat's vm realm: compare as JSON, not by prototype.
+  assert.equal(JSON.stringify(screen.calls.find((call) => call.method === "linear:issues").args), "[{}]");
+  const request = screen.choices.at(-1);
+  assert.equal(request.title, "Start from a Linear issue");
+  assert.equal(JSON.stringify(request.items), JSON.stringify([{ id: "ENG-12", title: "ENG-12 Fix login", subtitle: "In Progress" }]));
+  // The branch list lands after the sheet opened; the screen re-renders with it before the pick.
+  screen.render();
+  request.onSelect("ENG-12");
+  await settle();
+  const created = screen.calls.find((call) => call.method === "worktree:create").args[0];
+  assert.equal(created.issueKey, "ENG-12");
+  assert.equal(created.baseBranch, "main");
+  const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
+  assert.equal(sent.body, issueFirstMessage(linearIssue, "first message"));
+  assert.equal(screen.params.id, "7");
+});
+
+test("a Chat row shows its Worktree's Linear issue even without pull requests", () => {
+  const external = [];
+  const { ChatPullRequestChips } = load("chat-pull-request-chips.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Pressable: "Pressable", Text: "Text", View: "View" },
+    "expo-linking": { openURL: async (url) => external.push(url) },
+    "@hugeicons/core-free-icons": {},
+    "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
+    "@milagre/shared/linear": require("@milagre/shared/linear"),
+    "./icons": { Icon: "Icon" },
+    "./ui": { PullDown: "PullDown", colors: { ink2: "ink2", green: "green", purple: "purple", red: "red", orange: "orange" } },
+  });
+  const tree = ChatPullRequestChips({ pullRequests: [], linearIssue });
+  const link = find(tree, (node) => node.props?.accessibilityLabel === "Open Linear issue ENG-12");
+  assert.ok(find(link, (node) => node.type === "Text" && node.props.children === "ENG-12 · In Progress"));
+  link.props.onPress({ stopPropagation() {} });
+  assert.deepEqual(external, [linearIssue.url]);
+  assert.equal(ChatPullRequestChips({ pullRequests: [] }), null, "no pull requests and no issue renders nothing");
+});
+
+/** A Chat on its own Worktree (path /p/wt), with the Linear issue picker answering with ENG-12. */
+function linkableChat({ linear = { active: true }, worktree = { path: "/p/wt", name: "feature" }, call, alert } = {}) {
+  const screen = chatHost({
+    effects: true,
+    linear,
+    alert,
+    call:
+      call ??
+      (async (method) => {
+        if (method === "project:branches") return ["main"];
+        if (method === "linear:issues") return { issues: [linearIssue] };
+        if (method === "worktree:link-issue") return { project: { state: {} }, mode: "stored", branch: worktree.name };
+        if (method === "worktree:unlink-issue") return { project: { state: {} } };
+        return {};
+      }),
+  });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, project_id: 1, ...worktree } };
+  screen.session.snapshot.project.state.sessions = { 7: { id: 7, worktree_id: 1, title: "Chat", archived: false, subagents: [] } };
+  screen.params.id = "7";
+  delete screen.params.worktreeId;
+  return screen;
+}
+const menuEntry = (screen, label) => find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === label);
+
+test("a Chat's own Worktree offers Link issue only while Linear is on", () => {
+  assert.ok(menuEntry(linkableChat({ linear: { active: true } }), "Link issue…"), "on shows Link");
+  assert.ok(!menuEntry(linkableChat({ linear: { active: false } }), "Link issue…"), "off hides Link");
+  assert.ok(!menuEntry(linkableChat({ worktree: { path: "/p", name: "main" } }), "Link issue…"), "the main checkout offers no Link");
+});
+
+test("picking a Linear issue links it to the Chat's Worktree and toasts the PR hint when stored", async () => {
+  const { LINK_PR_HINT } = require("@milagre/shared/linear");
+  const alerts = [];
+  const shown = [];
+  const screen = linkableChat({ alert: (...args) => shown.push(args) });
+  const originalCall = screen.session.client.call;
+  screen.session.client.call = (method, args) => {
+    if (method === "worktree:link-issue") alerts.push(["link", args]);
+    return originalCall(method, args);
+  };
+  menuEntry(screen, "Link issue…").props.onPress();
+  await settle();
+  const request = screen.choices.at(-1);
+  assert.equal(request.title, "Link a Linear issue");
+  request.onSelect("ENG-12");
+  await settle();
+  // Objects built inside the Chat's vm realm: compare as JSON, not by prototype.
+  assert.equal(JSON.stringify(alerts[0]), JSON.stringify(["link", [{ projectPath: "/p", worktreeId: 1, key: "ENG-12" }]]));
+  assert.equal(screen.calls.at(-1).method, "worktree:link-issue");
+  // The stored result toasts the PR hint, which names the key the branch doesn't; no alert to dismiss.
+  assert.equal(shown.length, 0, "no alert");
+  assert.ok(
+    find(screen.render(), (n) => n.type === "Text" && n.props.children === `Issue linked. ${LINK_PR_HINT("ENG-12")}`),
+    "the toast shows the hint",
+  );
+});
+
+test("a stored Linear issue is hidden everywhere while Linear is off", () => {
+  const { LINK_PR_HINT } = require("@milagre/shared/linear");
+  const screen = linkableChat({ linear: { active: false }, worktree: { path: "/p/wt", name: "feature", linearIssue: "ENG-12" } });
+  assert.ok(!menuEntry(screen, "Unlink issue"), "no Unlink");
+  assert.ok(!menuEntry(screen, LINK_PR_HINT("ENG-12")), "no hint");
+});
+
+test("a Worktree another Chat shares offers no Link, and Unlink uses the minus.circle symbol", () => {
+  const shared = linkableChat();
+  shared.session.snapshot.project.state.sessions[8] = { id: 8, worktree_id: 1, title: "Other", archived: false, subagents: [] };
+  assert.ok(!menuEntry(shared, "Link issue…"), "a shared Worktree offers no Link");
+  const stored = linkableChat({ worktree: { path: "/p/wt", name: "feature", linearIssue: "ENG-12" } });
+  assert.equal(menuEntry(stored, "Unlink issue").props.iconRenderingMode, "template", "Unlink shows Linear's mark, tinted like the SF Symbols");
+});
+
+test("a stored Linear issue shows Unlink, which calls worktree:unlink-issue, and the hint while the branch lacks the key", async () => {
+  const { LINK_PR_HINT } = require("@milagre/shared/linear");
+  const screen = linkableChat({ worktree: { path: "/p/wt", name: "feature", linearIssue: "ENG-12" } });
+  assert.ok(!menuEntry(screen, "Link issue…"), "a stored issue hides Link");
+  assert.ok(
+    find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === LINK_PR_HINT("ENG-12")),
+    "hint shows",
+  );
+  menuEntry(screen, "Unlink issue").props.onPress();
+  await settle();
+  const unlink = screen.calls.find((call) => call.method === "worktree:unlink-issue");
+  assert.equal(JSON.stringify(unlink.args), JSON.stringify([{ projectPath: "/p", worktreeId: 1 }]));
+});
+
+test("no PR hint when the branch already names the stored issue", () => {
+  const { LINK_PR_HINT } = require("@milagre/shared/linear");
+  const screen = linkableChat({ worktree: { path: "/p/wt", name: "eng-12-fix-login", linearIssue: "ENG-12" } });
+  assert.ok(!find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === LINK_PR_HINT("ENG-12")));
 });

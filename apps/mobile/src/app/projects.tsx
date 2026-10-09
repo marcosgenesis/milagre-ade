@@ -3,10 +3,11 @@ import { Text, View } from "react-native";
 import { Redirect, Stack, router, useLocalSearchParams } from "expo-router";
 import { useSession } from "../session";
 import { ProjectNavigation } from "../project-navigation";
-import { ErrorNotice, styles } from "../ui";
+import { ErrorNotice, useStyles } from "../ui";
 import { LoadingLogo } from "../loading-logo";
 
 export default function ProjectsScreen() {
+  const styles = useStyles();
   const session = useSession();
   const { resume } = useLocalSearchParams<{ resume?: string }>();
   const attempted = useRef(false);

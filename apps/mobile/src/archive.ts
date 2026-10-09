@@ -1,4 +1,5 @@
 import type { AgentSession, CoordinatorState } from "@milagre/shared/model";
+import type { TerminalList } from "@milagre/shared/terminal";
 import {
   archiveChat,
   archiveChoices,
@@ -32,10 +33,27 @@ const fromOldDaemon = (error: unknown) => OLD_DAEMON.test((error as Error)?.mess
 
 /**
  * What the confirm step offers for one Chat, as desktop's menu works it out: whether Milagre made its worktree, whether
- * another Chat uses it, and what removing it would lose. `null` when the Mac's daemon has no such check yet, so the
- * phone archives as it did before: hide only.
+ * another Chat uses it, what removing it would lose, and what its Terminals run that archiving would end. `null` when the
+ * Mac's daemon has no such check yet, so the phone archives as it did before: hide only.
  */
-export async function checkArchive(client: ArchiveClient, state: CoordinatorState, sessionId: number): Promise<ArchivePlan | null> {
+export async function checkArchive(client: ArchiveClient, state: CoordinatorState, sessionId: number, chatId?: string): Promise<ArchivePlan | null> {
+  const plan = await worktreePlan(client, state, sessionId);
+  if (!plan || !chatId) return plan;
+  const terminals = await busyTerminals(client, chatId);
+  return terminals.length ? { ...plan, terminals } : plan;
+}
+
+/** What the Chat's Terminals run, when it isn't the shell's prompt; none from a Mac without Terminals. */
+async function busyTerminals(client: ArchiveClient, chatId: string): Promise<string[]> {
+  try {
+    const { terminals } = await client.call<TerminalList>("terminal:list", [{ chatId }]);
+    return terminals.filter((terminal) => terminal.busy).map((terminal) => terminal.title);
+  } catch {
+    return [];
+  }
+}
+
+async function worktreePlan(client: ArchiveClient, state: CoordinatorState, sessionId: number): Promise<ArchivePlan | null> {
   const worktree = state.worktrees[state.sessions[sessionId]?.worktree_id ?? -1];
   let roots: unknown;
   try {
@@ -98,6 +116,43 @@ export type ArchiveRequest = {
 const archiving = new Set<string>();
 
 /**
+ * Chats whose archive was confirmed and is still running, by `projectPath#id`, and the last notice an archive left. An
+ * archive outlives the screen it started on, so the Chat list reads both here: the Chat's row shows the progress
+ * wherever it is listed, and the notice shows once the phone has moved on.
+ */
+export type ArchiveActivity = { chats: ReadonlySet<string>; notice: string };
+let activity: ArchiveActivity = { chats: new Set(), notice: "" };
+const listeners = new Set<() => void>();
+function setActivity(next: Partial<ArchiveActivity>) {
+  activity = { ...activity, ...next };
+  for (const listener of listeners) listener();
+}
+export function archiveActivity() {
+  return activity;
+}
+export function subscribeArchiveActivity(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+/** Marks a confirmed Chat as archiving; the returned function marks it done. A new archive clears an old notice. */
+export function startArchiving(chatId: string) {
+  setActivity({ chats: new Set(activity.chats).add(chatId), notice: "" });
+  return () => {
+    const chats = new Set(activity.chats);
+    chats.delete(chatId);
+    setActivity({ chats });
+  };
+}
+export function showArchiveNotice(notice: string) {
+  setActivity({ notice });
+}
+export function clearArchiveNotice() {
+  if (activity.notice) setActivity({ notice: "" });
+}
+
+/**
  * Archive from the phone: check the worktree, confirm natively, then desktop's archive steps with the phone's means:
  * stop the turn if one runs now, hide the Chat, remove the worktree when the choice asks (the daemon closes the agent
  * and checks again), bring the Chat back with a notice when it stays, and read the Project again. A removed worktree's
@@ -108,10 +163,12 @@ export async function archiveFromPhone(request: ArchiveRequest): Promise<"busy" 
   const chatId = `${projectPath}#${chat.id}`;
   if (archiving.has(chatId)) return "busy";
   archiving.add(chatId);
+  let done = () => {};
   try {
-    const plan = await checkArchive(client, request.state, chat.id);
+    const plan = await checkArchive(client, request.state, chat.id, chatId);
     const mode = await confirmArchive(request.alert, archiveDialog(plan, request.running));
     if (!mode) return "cancelled";
+    done = startArchiving(chatId);
     request.onConfirm?.();
     // The Project as it is now: whether a turn runs in the Chat, read when the archive runs as desktop does, and
     // whether another Chat took up the worktree since the check.
@@ -143,6 +200,7 @@ export async function archiveFromPhone(request: ArchiveRequest): Promise<"busy" 
     }
   } finally {
     archiving.delete(chatId);
+    done();
   }
 }
 

@@ -5,3 +5,7 @@ export function scopeKey(scope: ChatScope): string;
 export function scopeFromKey(key: string): ChatScope;
 export function chatKeyForScope(scope: ChatScope, sessionId: number): string;
 export function scopeFromChatKey(key: string): ChatScope;
+export const LOCAL_COMPUTER: "local";
+export function computerOfKey(key: unknown): string;
+export function unqualifyKey<T>(key: T): T;
+export function qualifyKey<T>(computerId: string | null | undefined, key: T): T;

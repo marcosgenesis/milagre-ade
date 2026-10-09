@@ -27,6 +27,7 @@ import {
   type GitStep,
 } from "../lib/git-dialog";
 import { ScrollArea } from "./primitives/ScrollArea";
+import { useBridge } from "../lib/computer-bridge";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -229,6 +230,7 @@ export function GitActionsDialog({
   /** Steps ran: the note to save in the chat. */
   onRan: (note: string) => void;
 }) {
+  const bridge = useBridge();
   const panelRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
   const started = useRef(false);
@@ -282,7 +284,7 @@ export function GitActionsDialog({
 
   const load = useCallback(async () => {
     try {
-      const next = await window.milagre.git.changes({ cwd, base });
+      const next = await bridge.git.changes({ cwd, base });
       if (mounted.current) setChanges(next);
       return next;
     } catch (error) {
@@ -304,7 +306,7 @@ export function GitActionsDialog({
         // Mid-merge (or rebase…) nothing can be committed yet, and the diff holds conflict markers.
         if (next.commitBlocked || (!initial.showCommit && !initial.showPrFields)) return;
         setGenerating(true);
-        const text = await window.milagre.git.generate({ cwd, base, provider, chat }).catch(() => ({ ok: false as const, message: GENERATION_FAILED }));
+        const text = await bridge.git.generate({ cwd, base, provider, chat }).catch(() => ({ ok: false as const, message: GENERATION_FAILED }));
         if (!mounted.current) return;
         setGenerating(false);
         if (!text.ok) {
@@ -379,7 +381,7 @@ export function GitActionsDialog({
       update(step, "running");
       try {
         if (step === "commit") {
-          const committed = await window.milagre.git.commit({ cwd, message: commitMessage });
+          const committed = await bridge.git.commit({ cwd, message: commitMessage });
           if (!committed.ok) {
             failed = true;
             // Only a hook's complaint is something the agent can fix; a signing key isn't.
@@ -393,7 +395,7 @@ export function GitActionsDialog({
             update(step, "done", `Committed ${committed.shortSha}`);
           }
         } else if (step === "push") {
-          const pushed = await window.milagre.git.push({ cwd });
+          const pushed = await bridge.git.push({ cwd });
           if (!pushed.ok) {
             failed = true;
             setFailure({ message: pushed.code ? gitMessage(pushed.code) : pushed.message, hint: pushed.hint });
@@ -402,7 +404,7 @@ export function GitActionsDialog({
             update(step, "done", `Pushed to ${pushed.remote}/${pushed.branch}`);
           }
         } else {
-          const opened = await window.milagre.git.openPr({ cwd, base, title: prTitle, body: prBody });
+          const opened = await bridge.git.openPr({ cwd, base, title: prTitle, body: prBody });
           if (!opened.ok) {
             failed = true;
             setFailure({ message: opened.code ? gitMessage(opened.code) : opened.message });

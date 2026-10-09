@@ -1,7 +1,10 @@
-import { useEffect, useSyncExternalStore } from "react";
-import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { MODEL_CATALOG, PERMISSION_MODES } from "../model.ts";
 import type { PermissionMode } from "../model";
+import { DEFAULT_THEME_ID, isHex, resolvePalette, resolveThemeSettings } from "@milagre/shared/themes";
+import type { CustomTheme, ThemeChoice } from "@milagre/shared/themes";
 import type { ChatOrder } from "./chat-list";
+import { THEME_EVENT, applyPalette } from "./theme-sheet.ts";
 
 export type ThemePreference = "system" | "light" | "dark";
 /** Whether plan usage reads as the share used or the share left. */
@@ -11,6 +14,12 @@ export type ClaudeReplies = "concise" | "normal";
 
 export interface AppSettings {
   theme: ThemePreference;
+  /** The color theme; each has a light and a dark palette, and `theme` (Mode) picks which. */
+  colorTheme: ThemeChoice;
+  /** Experimental: the Custom theme tile and editor. */
+  customThemeEnabled: boolean;
+  /** Seeds for the Custom theme, kept when the switch is turned off. */
+  customTheme: CustomTheme | null;
   defaultModelId: string;
   defaultPermissionMode: PermissionMode;
   usageDisplay: UsageDisplay;
@@ -33,6 +42,12 @@ export interface AppSettings {
   chatOrder: ChatOrder;
   /** Experimental: the sidebar lists every recent Project and Link with its chats, not only the open one's. */
   sidebarAllProjects: boolean;
+  /** Experimental: a reply's tool calls and the text between them show in the chat, one row each, instead of folding into one line. */
+  muriloMode: boolean;
+  /** Experimental: drive the chats of other Macs running Milagre from this window (Add computer, the computers popover). */
+  otherComputers: boolean;
+  /** Experimental: turning Ultracode on plays the Mortal Kombat Fatality overlay and the announcer's voice. */
+  ultracodeFatality: boolean;
   /** Let the blurred desktop show through the window (macOS). */
   windowTranslucent: boolean;
   /** How much of the desktop shows through the window's own background, 10 to 100. */
@@ -54,7 +69,10 @@ export const PANEL_TRANSLUCENCY_RANGE = { min: 10, max: 90, step: 5 };
 const clampTo = (value: unknown, range: { min: number; max: number }, fallback: number) =>
   typeof value === "number" && Number.isFinite(value) ? Math.min(range.max, Math.max(range.min, value)) : fallback;
 const DEFAULTS: AppSettings = {
-  theme: "light",
+  theme: "system",
+  colorTheme: DEFAULT_THEME_ID,
+  customThemeEnabled: false,
+  customTheme: null,
   defaultModelId: MODEL_CATALOG[0].id,
   defaultPermissionMode: "ask",
   usageDisplay: "used",
@@ -69,11 +87,23 @@ const DEFAULTS: AppSettings = {
   tldrEnabled: true,
   chatOrder: "created",
   sidebarAllProjects: false,
+  muriloMode: false,
+  otherComputers: false,
+  ultracodeFatality: false,
   windowTranslucent: false,
   windowTranslucency: 80,
   panelTranslucency: 40,
   translucentDots: true,
 };
+
+function isCustomTheme(value: unknown): value is CustomTheme {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return ["light", "dark"].every((scheme) => {
+    const seeds = record[scheme] as Record<string, unknown> | undefined;
+    return !!seeds && ["background", "text", "accent"].every((key) => typeof seeds[key] === "string" && isHex(seeds[key]));
+  });
+}
 
 function load(): AppSettings {
   try {
@@ -84,6 +114,9 @@ function load(): AppSettings {
       theme: THEMES.includes(theme as ThemePreference) ? (theme as ThemePreference) : DEFAULTS.theme,
       // Any saved id is kept: the agents report models the maintained list lacks, and App falls back
       // to a provider's recommended model when the saved one isn't offered.
+      customThemeEnabled: typeof saved.customThemeEnabled === "boolean" ? saved.customThemeEnabled : DEFAULTS.customThemeEnabled,
+      customTheme: isCustomTheme(saved.customTheme) ? saved.customTheme : null,
+      colorTheme: resolveThemeSettings(saved),
       defaultModelId: typeof saved.defaultModelId === "string" && saved.defaultModelId ? saved.defaultModelId : DEFAULTS.defaultModelId,
       defaultPermissionMode: PERMISSION_MODES.some((mode) => mode.id === saved.defaultPermissionMode)
         ? saved.defaultPermissionMode!
@@ -100,6 +133,9 @@ function load(): AppSettings {
       claudeReplies: CLAUDE_REPLIES.includes(saved.claudeReplies as ClaudeReplies) ? saved.claudeReplies! : DEFAULTS.claudeReplies,
       chatOrder: CHAT_ORDERS.includes(saved.chatOrder as ChatOrder) ? saved.chatOrder! : DEFAULTS.chatOrder,
       sidebarAllProjects: typeof saved.sidebarAllProjects === "boolean" ? saved.sidebarAllProjects : DEFAULTS.sidebarAllProjects,
+      muriloMode: typeof saved.muriloMode === "boolean" ? saved.muriloMode : DEFAULTS.muriloMode,
+      otherComputers: typeof saved.otherComputers === "boolean" ? saved.otherComputers : DEFAULTS.otherComputers,
+      ultracodeFatality: typeof saved.ultracodeFatality === "boolean" ? saved.ultracodeFatality : DEFAULTS.ultracodeFatality,
       windowTranslucent: typeof saved.windowTranslucent === "boolean" ? saved.windowTranslucent : DEFAULTS.windowTranslucent,
       windowTranslucency: clampTo(saved.windowTranslucency, WINDOW_TRANSLUCENCY_RANGE, DEFAULTS.windowTranslucency),
       panelTranslucency: clampTo(saved.panelTranslucency, PANEL_TRANSLUCENCY_RANGE, DEFAULTS.panelTranslucency),
@@ -143,7 +179,7 @@ function subscribeSystemTheme(listener: () => void) {
   return () => darkQuery.removeEventListener("change", listener);
 }
 
-function useResolvedTheme(): "light" | "dark" {
+function useResolvedScheme(): "light" | "dark" {
   const { theme } = useSettings();
   const systemDark = useSyncExternalStore(subscribeSystemTheme, () => darkQuery.matches);
   return theme === "system" ? (systemDark ? "dark" : "light") : theme;
@@ -156,23 +192,40 @@ export function toggleTheme() {
   updateSettings({ theme: dark ? "light" : "dark" });
 }
 
+function currentScheme(): "light" | "dark" {
+  const { theme } = getSettings();
+  return theme === "system" ? (darkQuery.matches ? "dark" : "light") : theme;
+}
+
+/** Paints the saved theme before React's first render, so a non-default theme never flashes Milagre Blue. */
+export function applyThemeNow() {
+  const { colorTheme, customTheme } = getSettings();
+  const scheme = currentScheme();
+  document.documentElement.classList.toggle("dark", scheme === "dark");
+  applyPalette(resolvePalette(colorTheme, scheme, customTheme), scheme);
+}
+
 export function useApplyTheme() {
-  const theme = useResolvedTheme();
-  const { windowTranslucent, windowTranslucency, panelTranslucency } = useSettings();
+  const scheme = useResolvedScheme();
+  const { colorTheme, customTheme, windowTranslucent, windowTranslucency, panelTranslucency } = useSettings();
+  const palette = useMemo(() => resolvePalette(colorTheme, scheme, customTheme), [colorTheme, scheme, customTheme]);
   useEffect(() => {
     const root = document.documentElement;
     root.classList.add("theme-switching");
-    root.classList.toggle("dark", theme === "dark");
+    root.classList.toggle("dark", scheme === "dark");
+    applyPalette(palette, scheme);
     const frame = window.requestAnimationFrame(() => root.classList.remove("theme-switching"));
     return () => window.cancelAnimationFrame(frame);
-  }, [theme]);
+  }, [palette, scheme]);
   // The window itself goes see-through in the main process; the renderer's backgrounds follow.
   useEffect(() => {
     document.documentElement.classList.toggle("translucent", windowTranslucent);
-    void window.milagre?.setWindowTranslucent(windowTranslucent, theme).catch(() => {});
-  }, [windowTranslucent, theme]);
+    window.dispatchEvent(new Event(THEME_EVENT));
+    void window.milagre?.setWindowTranslucent(windowTranslucent, scheme, palette.page).catch(() => {});
+  }, [windowTranslucent, scheme, palette.page]);
   useEffect(() => {
     document.documentElement.style.setProperty("--window-translucency", String(windowTranslucency / 100));
     document.documentElement.style.setProperty("--panel-translucency", String(panelTranslucency / 100));
+    window.dispatchEvent(new Event(THEME_EVENT));
   }, [windowTranslucency, panelTranslucency]);
 }

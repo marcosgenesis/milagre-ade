@@ -16,6 +16,8 @@ window.milagre = { listSkills: async () => ({ skills: [], warnings: [] }) };
 function Fixture() {
   const [draft, setDraft] = useState('');
   const [theme, setTheme] = useState('light');
+  const [cliStatus, setCliStatus] = useState({ codex: { state: 'outdated', message: 'Milagre needs Codex 0.99. Run codex update.' } });
+  window.setCliStatus = setCliStatus;
   const model = MODEL_CATALOG[0];
   return <div style={{ width: '100%', maxWidth: 720, margin: '0 auto', paddingTop: 20 }}>
     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -26,7 +28,7 @@ function Fixture() {
     <PromptComposer projectPath="/fixture" draft={draft} onDraftChange={setDraft}
       imageDraft={{ images: [], files: [], loading: false, error: '', onPaste: noop, remove: noop, removeFile: noop }}
       onSend={noop} sendBlocked={false} running
-      models={MODEL_CATALOG} cliStatus={{ codex: { state: 'outdated', message: 'Milagre needs Codex 0.99. Run codex update.' } }} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
+      models={MODEL_CATALOG} cliStatus={cliStatus} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={false} onFastModeChange={noop} permissionMode="auto" onPermissionModeChange={noop} />
   </div>;
@@ -72,7 +74,7 @@ async function browserChecks() {
   };
   const panels = () => evaluate(`document.querySelectorAll('[data-picker-panel]').length`);
   const model = "[data-promptbar] button[aria-expanded]:not([aria-label])";
-  const effort = '[data-promptbar] button[aria-label^="Thinking effort"]';
+  const permissions = '[data-promptbar] button[aria-label="Agent permissions"]';
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`!!document.querySelector('textarea')`);
@@ -85,6 +87,26 @@ async function browserChecks() {
       "false,false,false",
       "A provider tab stays clickable while its CLI needs an update",
     );
+    // Each provider's models, with its logo in color and each model's context window beside its name.
+    for (const index of [0, 1, 2]) {
+      await click(`[data-picker-panel] [data-provider-tabs] > button:nth-child(${index + 1})`);
+      assert.match(
+        await evaluate(`document.querySelector('[data-picker-panel] [data-picker-row] [data-picker-meta]')?.textContent ?? ""`),
+        /^\d+(k|M)$/,
+        "A model row shows its context window beside the name",
+      );
+      await screenshot(`model-picker-tab-${index + 1}`);
+    }
+    const tabs = `[...document.querySelectorAll('[data-picker-panel] [data-provider-tabs] > button')].map((tab) => tab.getAttribute('aria-label')).join()`;
+    await evaluate(`window.setCliStatus((current) => ({ ...current, antigravity: { state: 'missing', message: 'Antigravity is not installed.' } }))`);
+    // The open tab stays until the picker reopens; then a missing CLI has no tab.
+    await waitFor(`${tabs} === "Codex,Claude,Antigravity"`);
+    await click(model);
+    await click(model);
+    await waitFor(`${tabs} === "Codex,Claude"`);
+    await screenshot("model-picker-missing-hidden");
+    await evaluate(`window.setCliStatus((current) => ({ ...current, antigravity: { state: 'ready' } }))`);
+    await waitFor(`${tabs} === "Codex,Claude,Antigravity"`);
     await click("[data-picker-panel] input");
     assert.equal(await panels(), 1, "Pressing inside the picker keeps it open");
     await click("textarea");
@@ -97,7 +119,7 @@ async function browserChecks() {
     await click(model);
     assert.equal(await panels(), 0, "The trigger still toggles the picker closed");
 
-    await click(effort);
+    await click(permissions);
     assert.equal(await panels(), 1);
     await click('[data-testid="stopper"]');
     assert.equal(await panels(), 0, "A surface that stops propagation still closes the picker");

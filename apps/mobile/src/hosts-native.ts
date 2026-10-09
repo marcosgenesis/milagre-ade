@@ -40,6 +40,54 @@ export async function saveAttentionButton(on: boolean) {
     /* best effort */
   }
 }
+const muriloModeKey = "milagre.murilo-mode.v1";
+/** Experimental: whether a reply's tool calls show in the Chat one row each instead of folding into one line; off unless turned on. */
+export async function readMuriloMode(): Promise<boolean> {
+  try {
+    return (await SecureStore.getItemAsync(muriloModeKey)) === "on";
+  } catch {
+    return false;
+  }
+}
+export async function saveMuriloMode(on: boolean) {
+  try {
+    await SecureStore.setItemAsync(muriloModeKey, on ? "on" : "off");
+  } catch {
+    /* best effort */
+  }
+}
+const ultracodeFatalityKey = "milagre.ultracode-fatality.v1";
+/** Experimental: whether turning Ultracode on plays the Fatality overlay; off unless turned on. */
+export async function readUltracodeFatality(): Promise<boolean> {
+  try {
+    return (await SecureStore.getItemAsync(ultracodeFatalityKey)) === "on";
+  } catch {
+    return false;
+  }
+}
+export async function saveUltracodeFatality(on: boolean) {
+  try {
+    await SecureStore.setItemAsync(ultracodeFatalityKey, on ? "on" : "off");
+  } catch {
+    /* best effort */
+  }
+}
+const themeKey = "milagre.theme.v1";
+/** The saved color theme settings as raw JSON, or null when nothing is saved yet. */
+export async function readThemeSettings(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(themeKey);
+  } catch {
+    return null;
+  }
+}
+export async function saveThemeSettings(raw: string) {
+  try {
+    await SecureStore.setItemAsync(themeKey, raw);
+  } catch {
+    /* best effort */
+  }
+}
 export async function savePermission(mode: string) {
   try {
     await SecureStore.setItemAsync(permissionKey, mode);

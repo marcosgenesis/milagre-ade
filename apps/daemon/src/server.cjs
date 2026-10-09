@@ -1,8 +1,10 @@
 const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { diffState } = require("@milagre/shared/state-patch");
+const { sessionWithTranscriptTails, withTranscriptTail } = require("@milagre/shared/subagent-transcript");
 const { preparePrivateDirectory } = require("@milagre/core/private-files");
 const { prepareToken, validToken, authenticationProof, authenticationNonce, validNonce } = require("./local-auth.cjs");
 const net = require("node:net");
+const os = require("node:os");
 const { randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
 const { once } = require("node:events");
@@ -12,15 +14,33 @@ const { VERSION, MAX_FRAME_BYTES, MAX_PENDING, pageSize, wire } = require("./pro
 const { createPhone } = require("./phone.cjs");
 const { createMobilePush } = require("./mobile-push.cjs");
 const { createExpoPush } = require("./expo-push.cjs");
+const { peerPolicy } = require("./peer-policy.cjs");
+const { listDirs } = require("./remote-files.cjs");
+const { readMedia, scopeRootsVia } = require("./media-access.cjs");
 const { attentionContext } = require("@milagre/shared/attention");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 
 // Handled here, never by core, and not in the mobile bridge's allow-list: a paired phone must not manage its own access.
 const PUSH_METHODS = Object.freeze(["push:register", "push:unregister", "push:focus"]);
 const PHONE_METHODS = Object.freeze(["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing", "phone:set-lan"]);
+// Paired phones and computers, listed and removed from this Mac's own window only (Settings > Devices), and the
+// computers waiting for its Allow.
+const DEVICE_METHODS = Object.freeze(["devices:list", "devices:remove", "devices:pending", "devices:allow", "devices:deny"]);
+// A paired desktop's own channel (peer-channel.cjs): rpc / evt / part messages over the relay or the LAN.
+const DESKTOP_PEER = "desktop-peer-v1";
+// Asked by a paired desktop, which has no phone:* methods: where it can reach this Mac (relay identity, LAN routes).
+const PEER_METHODS = Object.freeze(["peer:routes"]);
+// The remote folder picker and a remote chat's images (spec "Remote-only helpers"); paired desktops may call both.
+const REMOTE_FILES = "remote-files-v1";
+const FILE_METHODS = Object.freeze(["fs:list-dirs", "media:read"]);
 // A client that asks for them (daemon:state-patches) gets what changed in a state event, not the whole state; see
 // state-patch.mjs. state:read gives it a whole state and its version when it has none or missed one.
 const STATE_PATCHES = "state-patches-v1";
+// chat:messages, chat:search and daemon:state-patches({ messages: false }): a client can hold only the messages it shows.
+const CHAT_PAGES = "chat-pages-v1";
+// chat:subagent and daemon:state-patches({ transcripts: false }): a client can take each subagent with only the last
+// entries of its transcript, in states and in subagent updates, and read a whole one when it shows it.
+const SUBAGENT_TAILS = "subagent-tails-v1";
 const STATE_METHODS = Object.freeze(["state:read"]);
 
 const PAGES_TTL_MS = 30000;
@@ -106,6 +126,80 @@ function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = 
   };
 }
 
+// How a client takes states (daemon:state-patches): without messages (`messages: false`) when it reads them by Chat,
+// and with each subagent's transcript cut to its tail (`transcripts: false`) when it reads those on demand.
+const WHOLE = Object.freeze({ messages: true, transcripts: true });
+const formOf = (options) => ({ messages: options?.messages !== false, transcripts: options?.transcripts !== false });
+const formKey = (form) => `${form.messages ? "m" : "-"}${form.transcripts ? "t" : "-"}`;
+const NO_MESSAGES = Object.freeze([]);
+// Per form, the state as a client of that form gets it: the same object for the same state, so a patch between two of
+// them is found by identity like one between two whole states.
+const leanStates = new Map();
+const tailedSessions = new WeakMap();
+function withTranscriptTails(sessions) {
+  if (!sessions || typeof sessions !== "object") return sessions;
+  let tailed = tailedSessions.get(sessions);
+  if (!tailed) {
+    const entries = Object.entries(sessions).map(([id, session]) => [id, sessionWithTranscriptTails(session)]);
+    tailed = entries.some(([id, session]) => session !== sessions[id]) ? Object.fromEntries(entries) : sessions;
+    tailedSessions.set(sessions, tailed);
+  }
+  return tailed;
+}
+function leanState(state, form = WHOLE) {
+  if (!state || typeof state !== "object" || (form.messages && form.transcripts)) return state;
+  const key = formKey(form);
+  let cache = leanStates.get(key);
+  if (!cache) leanStates.set(key, (cache = new WeakMap()));
+  let lean = cache.get(state);
+  if (!lean) {
+    lean = { ...state };
+    // One empty array, so no patch ever touches it.
+    if (!form.messages) Object.assign(lean, { messages: NO_MESSAGES, messagesInChats: true });
+    if (!form.transcripts) lean.sessions = withTranscriptTails(state.sessions);
+    cache.set(state, lean);
+  }
+  return lean;
+}
+/** A reply as a client of `form` gets it: every state in it as leanState gives it. */
+function leanResult(result, form = WHOLE) {
+  if (!result || typeof result !== "object" || Array.isArray(result) || (form.messages && form.transcripts)) return result;
+  let lean = result;
+  if (result.state && typeof result.state === "object") lean = { ...lean, state: leanState(result.state, form) };
+  for (const key of ["projects", "links"])
+    if (Array.isArray(result[key]))
+      lean = { ...lean, [key]: result[key].map((item) => (item?.state ? { ...item, state: leanState(item.state, form) } : item)) };
+  return lean;
+}
+/** A subagent update as a client that takes transcript tails gets it; null for any other event. */
+function tailedAgentEvent(channel, payload) {
+  const agent = channel === "agent:event" && payload?.event?.type === "subagent-update" ? payload.event.agent : undefined;
+  const tailed = agent && withTranscriptTail(agent);
+  return tailed && tailed !== agent ? { ...payload, event: { ...payload.event, agent: tailed } } : null;
+}
+/** The messages `next` has that `previous` didn't (new or changed), each after the message before it in its Chat, and the ids it no longer has. */
+function messageChanges(previous = [], next = []) {
+  if (previous === next) return { changed: [], removed: [] };
+  const before = new Set(previous);
+  const changed = next.filter((message) => !before.has(message));
+  const ids = new Set(next.map((message) => message.id));
+  const removed = previous.filter((message) => !ids.has(message.id)).map((message) => message.id);
+  if (!changed.length) return { changed: [], removed };
+  const chats = new Map();
+  for (const message of next) {
+    const list = chats.get(message.session_id);
+    if (list) list.push(message);
+    else chats.set(message.session_id, [message]);
+  }
+  return {
+    changed: changed.map((message) => {
+      const chat = chats.get(message.session_id);
+      return { message, after: chat[chat.indexOf(message) - 1]?.id ?? null };
+    }),
+    removed,
+  };
+}
+
 /** The Project or Link (scope key) whose state an event carries; null for one without a state. */
 function stateScope(channel, payload) {
   if (!payload?.state || typeof payload.state !== "object") return null;
@@ -155,6 +249,7 @@ async function startDaemon({
   runtimeOptions = {},
   phoneOptions = {},
   pushOptions = {},
+  homeDir = os.homedir(),
   maxFrameBytes = MAX_FRAME_BYTES,
   pagesTtlMs,
   pagesBudgetChars,
@@ -171,11 +266,14 @@ async function startDaemon({
   const clients = new Map();
   const views = new Map();
   let eventSeq = 0;
-  // Sockets that take state patches, and per scope the last state sent and its number. The numbers start again with
+  // Connections that take state patches, and per scope the last state sent and its number. The numbers start again with
   // each host (epoch), so a client that reconnects to a new one reads its states again.
-  const patchSockets = new Set();
+  // Connection -> the form it takes states in ({ messages, transcripts }, see leanState).
+  const patchClients = new Map();
   const epoch = randomUUID();
   const sentStates = new Map();
+  // Per scope, what a snapshot holds besides the state (a Project's path and name, a Link's definition).
+  const snapshotRest = new Map();
   let stopping;
   let listening = false;
   const sender = createExpoPush({ ...pushOptions, onError, onInvalid: (token) => push.invalidate(token) });
@@ -212,9 +310,19 @@ async function startDaemon({
     if (!clients.size) return;
     // An event that still doesn't fit is skipped, never the connection. Each form is encoded once, when a client takes it.
     let whole;
-    for (const [socket, connection] of clients) {
+    let tailedFrame;
+    const tailed = tailedAgentEvent(channel, payload);
+    for (const [key, connection] of clients) {
+      // A paired desktop hears nothing on a channel it may not call: phone:status carries the pairing link and its token.
+      if (connection.policy?.denies(channel)) continue;
       try {
-        const frame = patched && patchSockets.has(socket) ? patched : (whole ??= eventFrame(channel, payload, seq, inlineLimit));
+        const taker = patchClients.get(key);
+        const frame =
+          patched && taker
+            ? patched.form(taker)
+            : taker && !taker.transcripts && tailed
+              ? (tailedFrame ??= eventFrame(channel, tailed, seq, inlineLimit))
+              : (whole ??= eventFrame(channel, payload, seq, inlineLimit));
         connection.send(null, frame.json, frame.bytes);
       } catch (error) {
         onError(new Error(`Milagre couldn't send a ${channel} event: ${error.message}`));
@@ -232,27 +340,52 @@ async function startDaemon({
     const previous = sentStates.get(scope);
     const version = (previous?.version ?? 0) + 1;
     sentStates.set(scope, { version, state: payload.state });
-    if (![...patchSockets].some((socket) => clients.has(socket))) return null;
+    if (![...patchClients.keys()].some((key) => clients.has(key))) return null;
     const { state, ...rest } = payload;
     const frame = (body) => eventFrame(channel, body, seq, Infinity);
-    if (previous) {
-      const patched = frame({ ...rest, patch: diffState(previous.state, state), base: previous.version, version, epoch });
-      if (patched.bytes <= inlineLimit) return patched;
-    }
-    return frame({ ...rest, resync: true, version, epoch });
+    const numbered = (patchBody) => {
+      if (previous) {
+        const patched = frame({ ...rest, ...patchBody(), base: previous.version, version, epoch });
+        if (patched.bytes <= inlineLimit) return patched;
+      }
+      return frame({ ...rest, resync: true, version, epoch });
+    };
+    // Each form is made once, when a client that takes it is sent the event. A client without messages also gets the
+    // messages this change added, changed or removed, each with the one before it in its Chat (`after`).
+    const forms = new Map();
+    return {
+      form(form) {
+        const key = formKey(form);
+        if (!forms.has(key))
+          forms.set(
+            key,
+            numbered(() => ({
+              patch: diffState(leanState(previous.state, form), leanState(state, form)),
+              ...(form.messages ? {} : { messages: messageChanges(previous.state.messages, state.messages) }),
+            })),
+          );
+        return forms.get(key);
+      },
+    };
   }
   /**
    * A scope's state with its number, for a client that takes patches, beside the rest of its snapshot (a Project's path
    * and name, a Link's definition). A newer state than the one sent goes out first.
    */
-  async function readState(owner) {
+  async function readState(owner, form = WHOLE) {
     if (typeof owner !== "string" || !owner) throw new Error("Choose a Project or Link");
     const link = isLinkScopeKey(owner);
+    const answer = (sent) => ({ ...snapshotRest.get(owner), state: leanState(sent.state, form), version: sent.version, epoch });
+    // The last state sent answers at once: a client reading again is waiting with its events held back, and reading the
+    // snapshot waits behind whatever the Project or Link is busy with (a shared Chat's Worktrees being prepared). Its
+    // next change follows as a patch on it. A client that needs the rest of the snapshot (a name) reads it once.
+    const sent = sentStates.get(owner);
+    if (sent && (!form.messages || snapshotRest.has(owner))) return answer(sent);
     const { state, ...rest } = await runtime.invoke(link ? "link:snapshot" : "project:snapshot", [link ? scopeFromKey(owner).linkId : owner]);
+    snapshotRest.set(owner, rest);
     if (sentStates.get(owner)?.state !== state)
       broadcast(link ? "link:state" : "project:state", link ? { linkId: scopeFromKey(owner).linkId, state } : { path: owner, state });
-    const sent = sentStates.get(owner);
-    return { ...rest, state: sent.state, version: sent.version, epoch };
+    return answer(sentStates.get(owner));
   }
   // Its bridge connects to this daemon's socket as a client, so it only starts once the socket listens.
   // A first pairing is announced to the desktop, which tells the owner in case it was not them.
@@ -260,56 +393,45 @@ async function startDaemon({
     dataDir,
     onChange: (status) => broadcast("phone:status", status),
     onPaired: (info) => broadcast("phone:paired", info),
+    // Only this Mac's window hears it: paired desktops are never sent devices:* events (see broadcast).
+    onPending: (requests) => broadcast("devices:pending", { requests }),
+    // Each paired desktop is one more client of this daemon, with the paired-desktop deny set.
+    openPeer: (carrier) => acceptConnection({ ...carrier, policy: peerPolicy }),
     ...phoneOptions,
   });
-  const server = net.createServer((socket) => {
-    if (stopping || (requireAuthentication && unauthenticated >= 32)) {
-      socket.destroy();
-      return;
-    }
-    sockets.add(socket);
-    let authenticated = !requireAuthentication;
+  /**
+   * One client of the daemon, whatever carries its frames: the Unix socket below, and a paired desktop's channel (peer-channel.cjs).
+   * The carrier supplies `send(message, json, bytes)`, which writes one frame as wire()'s send does (it may throw
+   * FRAME_TOO_LARGE, and returns false once closed); `end()`, which closes after what is queued; `destroy()`, which
+   * closes now; and `isClosed()`. `requireAuthentication`: the first requests must be the daemon:authenticate handshake
+   * (the socket on Windows). `policy.denies(method)` refuses a method before it runs and leaves it out of daemon:status;
+   * the socket has none. The carrier hands the result each parsed request (`receive`), a framing error (`invalid`) and,
+   * once, its own close (`close`).
+   */
+  function acceptConnection({ send, end, destroy, isClosed, requireAuthentication: mustAuthenticate = false, policy = null }) {
+    if (mustAuthenticate && !authenticationToken) throw new Error("requireAuthentication needs a daemon that has an authentication token");
+    let authenticated = !mustAuthenticate;
     let challenge;
     let authenticationRejected = false;
+    let closed = false;
     if (!authenticated) unauthenticated++;
-    const authenticationTimeout = authenticated ? null : setTimeout(() => socket.destroy(), authTimeoutMs);
+    const authenticationTimeout = authenticated ? null : setTimeout(destroy, authTimeoutMs);
     authenticationTimeout?.unref();
     const inflight = new Set();
     // Requests whose reply waits for paging room: they don't hold a MAX_PENDING slot, so a reader's page reads get through.
     const awaitingPages = new Set();
     // Result pages and paged snapshots share one store and its rules.
     const resultPages = createResultPages(maxFrameBytes, { ttlMs: pagesTtlMs, budgetChars: pagesBudgetChars });
-    socket.once("close", () => {
-      resultPages.clear();
-    });
     const view = { focused: false, projectPath: null, chatId: null };
-    // Never accept an actor supplied in RPC arguments. Each authenticated socket owns its viewer capabilities.
+    // Never accept an actor supplied in RPC arguments. Each authenticated connection owns its viewer capabilities.
     const context = Object.freeze({ clientId: randomUUID() });
-    if (authenticated) views.set(socket, view);
-    const connection = wire(socket, {
-      maxFrameBytes,
-      onInvalid(error) {
-        connection.send({ v: VERSION, id: null, error: { code: error.code, message: error.message } });
-        socket.end();
-      },
-      onMessage(request) {
-        void dispatch(request).catch((error) => {
-          onError(error);
-          socket.destroy();
-        });
-      },
-    });
-    if (authenticated) clients.set(socket, connection);
-    socket.on("error", () => {});
-    socket.on("close", () => {
-      clearTimeout(authenticationTimeout);
-      if (!authenticated) unauthenticated--;
-      sockets.delete(socket);
-      clients.delete(socket);
-      views.delete(socket);
-      patchSockets.delete(socket);
-      Promise.resolve(runtime.disconnect?.(context.clientId)).catch(onError);
-    });
+    // This connection in clients, views and patchClients.
+    const key = Symbol("connection");
+    const connection = { send, policy };
+    if (authenticated) {
+      clients.set(key, connection);
+      views.set(key, view);
+    }
     async function dispatch(request) {
       const validId = Number.isSafeInteger(request?.id) || (typeof request?.id === "string" && request.id.length <= 128);
       const id = validId ? request.id : null;
@@ -339,14 +461,15 @@ async function startDaemon({
         ) {
           authenticationRejected = true;
           fail("UNAUTHORIZED", "Local daemon authentication is required");
-          socket.end();
+          end();
           return;
         }
+        if (closed) return;
         authenticated = true;
         unauthenticated--;
         clearTimeout(authenticationTimeout);
-        clients.set(socket, connection);
-        views.set(socket, view);
+        clients.set(key, connection);
+        views.set(key, view);
         connection.send({ v: VERSION, id, result: { authenticated: true } });
         return;
       }
@@ -362,9 +485,13 @@ async function startDaemon({
         fail("CLOSING", "The daemon is closing");
         return;
       }
+      if (policy?.denies(request.method)) {
+        fail("NOT_AVAILABLE_REMOTELY", "Not available on a remote computer");
+        return;
+      }
       if (inflight.has(id) || inflight.size - awaitingPages.size >= MAX_PENDING) {
         fail("TOO_MANY_REQUESTS", "Request ID is in use or too many requests are pending");
-        socket.end();
+        end();
         return;
       }
       inflight.add(id);
@@ -379,7 +506,7 @@ async function startDaemon({
       // Serialised once. A client that reads pages (`pages: true`) gets anything over a quarter of a frame as a page
       // count; one that can't gets it whole up to the frame limit, and a clear FRAME_TOO_LARGE error past it.
       async function reply(result) {
-        const resultJson = encode(result);
+        const resultJson = encode(leanResult(result, patchClients.get(key)));
         if (request.pages === true && !PAGE_METHODS.has(request.method) && resultJson.length > inlineLimit) {
           const pages = await capturePages(resultJson);
           if (pages) connection.send({ v: VERSION, id, pages });
@@ -396,8 +523,21 @@ async function startDaemon({
             protocolVersion: VERSION,
             dataDir,
             socketPath,
-            capabilities: ["desktop-v1", "snapshot-pages-v1", "result-pages-v1", "mobile-push-v1", STATE_PATCHES],
-            methods: [...runtime.methods, ...PHONE_METHODS, ...PUSH_METHODS, ...STATE_METHODS],
+            // A capability tied to a method this connection may not call is not advertised to it (mobile push is push:*).
+            capabilities: [
+              "desktop-v1",
+              "snapshot-pages-v1",
+              "result-pages-v1",
+              ...(policy?.denies("push:register") ? [] : ["mobile-push-v1"]),
+              STATE_PATCHES,
+              CHAT_PAGES,
+              SUBAGENT_TAILS,
+              DESKTOP_PEER,
+              REMOTE_FILES,
+            ],
+            methods: [...runtime.methods, ...PHONE_METHODS, ...DEVICE_METHODS, ...PUSH_METHODS, ...STATE_METHODS, ...PEER_METHODS, ...FILE_METHODS].filter(
+              (method) => !policy?.denies(method),
+            ),
           };
         else if (request.method === "phone:status") result = phone.status();
         // Settings shows the reply, which arrives after the status events: answer with the settled status, not the
@@ -416,11 +556,34 @@ async function startDaemon({
           result = phone.status();
         } else if (request.method === "phone:open-pairing") result = await phone.openPairing();
         else if (request.method === "phone:set-lan") result = await phone.setLan(request.args[0]);
+        else if (request.method === "devices:list") result = await phone.devices();
+        else if (request.method === "devices:remove") result = await phone.removeDevice(request.args[0]);
+        else if (request.method === "devices:pending") result = phone.pendingDevices();
+        else if (request.method === "devices:allow") result = phone.allowDevice(request.args[0]);
+        else if (request.method === "devices:deny") result = phone.denyDevice(request.args[0]);
+        else if (request.method === "peer:routes") result = phone.peerRoutes();
         else if (request.method === "push:register") result = await push.register(request.args[0]);
         else if (request.method === "push:unregister") result = await push.unregister(request.args[0]);
         else if (request.method === "push:focus") result = push.focus(request.args[0]);
+        else if (request.method === "fs:list-dirs")
+          result = await listDirs(request.args[0], {
+            home: homeDir,
+            // The Projects this Mac knows, by real path, so the picker can say "Added".
+            projectPaths: async () => {
+              const [registry, recent] = await Promise.all([runtime.invoke("project:registry", []), runtime.invoke("project:recent", [])]);
+              const paths = [...(Array.isArray(registry) ? registry : []), ...(Array.isArray(recent) ? recent : [])].map((project) => project.path);
+              return Promise.all(paths.map((folder) => fs.realpath(folder).catch(() => folder)));
+            },
+          });
+        else if (request.method === "media:read")
+          result = await readMedia(request.args[0], {
+            dataDir,
+            scopeRoots: scopeRootsVia({ dataDir, call: (method, args) => runtime.invoke(method, args) }),
+            chatImage: (scope, file) => runtime.invoke("project:chat-image", [scope, file]),
+          });
         else if (request.method === "daemon:snapshot") {
-          const snapshot = { ...runtime.snapshot(), eventSeq };
+          const whole = runtime.snapshot();
+          const snapshot = { ...leanResult(whole, patchClients.get(key)), eventSeq };
           if (request.args[0]?.paged === true) {
             // Serialize once: all pages describe the same instant and watermark.
             const pages = await capturePages(JSON.stringify(snapshot));
@@ -430,9 +593,9 @@ async function startDaemon({
         } else if (request.method === "daemon:snapshot-page" || request.method === "daemon:result-page") result = resultPages.page(...request.args);
         else if (request.method === "daemon:flush") result = await runtime.flush();
         else if (request.method === "daemon:state-patches") {
-          patchSockets.add(socket);
+          if (!closed) patchClients.set(key, formOf(request.args[0]));
           result = { epoch };
-        } else if (request.method === "state:read") result = await readState(request.args[0]);
+        } else if (request.method === "state:read") result = await readState(request.args[0], patchClients.get(key));
         else if (request.method === "daemon:focus") {
           const next = request.args[0];
           if (!next || typeof next.focused !== "boolean") throw new Error("Expected a focused boolean");
@@ -450,7 +613,7 @@ async function startDaemon({
         else if (request.method === "project:current" && view.projectPath) result = await runtime.invoke("project:snapshot", [view.projectPath]);
         else result = await runtime.invoke(request.method, request.args, context);
         // An open may finish after its caller disconnects. Dispose that late session as well.
-        if (socket.destroyed && /^(simulator|browser):/.test(request.method)) await runtime.disconnect?.(context.clientId);
+        if (isClosed() && /^(simulator|browser):/.test(request.method)) await runtime.disconnect?.(context.clientId);
         if (request.method === "link:open" && result?.link) view.linkId = result.link.id;
         if (["project:open", "project:current", "project:switch"].includes(request.method) && result?.path) view.projectPath = result.path;
         await reply(result ?? null);
@@ -461,6 +624,52 @@ async function startDaemon({
         inflight.delete(id);
       }
     }
+    return {
+      receive(request) {
+        if (closed) return;
+        void dispatch(request).catch((error) => {
+          onError(error);
+          destroy();
+        });
+      },
+      invalid(error) {
+        connection.send({ v: VERSION, id: null, error: { code: error.code, message: error.message } });
+        end();
+      },
+      close() {
+        if (closed) return;
+        closed = true;
+        resultPages.clear();
+        clearTimeout(authenticationTimeout);
+        if (!authenticated) unauthenticated--;
+        clients.delete(key);
+        views.delete(key);
+        patchClients.delete(key);
+        Promise.resolve(runtime.disconnect?.(context.clientId)).catch(onError);
+      },
+    };
+  }
+
+  const server = net.createServer((socket) => {
+    if (stopping || (requireAuthentication && unauthenticated >= 32)) {
+      socket.destroy();
+      return;
+    }
+    sockets.add(socket);
+    let framed;
+    const client = acceptConnection({
+      send: (message, json, bytes) => framed.send(message, json, bytes),
+      end: () => socket.end(),
+      destroy: () => socket.destroy(),
+      isClosed: () => socket.destroyed,
+      requireAuthentication,
+    });
+    framed = wire(socket, { maxFrameBytes, onInvalid: (error) => client.invalid(error), onMessage: (request) => client.receive(request) });
+    socket.on("error", () => {});
+    socket.on("close", () => {
+      sockets.delete(socket);
+      client.close();
+    });
   });
   let socketPath;
   async function close() {
@@ -504,6 +713,6 @@ async function startDaemon({
     await close();
     throw error;
   }
-  return { socketPath, close };
+  return { socketPath, close, acceptConnection };
 }
 module.exports = { startDaemon, createResultPages };

@@ -2,6 +2,7 @@ const nacl = require("tweetnacl");
 const { randomBytes } = require("node:crypto");
 const { b64url, fromB64url } = require("@milagre/shared/relay-crypto");
 const { createPhoneChannels } = require("./phone-channels.cjs");
+const { PEER_BUDGET } = require("./peer-channel.cjs");
 
 // helloMs: a phone connection that has not finished its hello by then is closed, so idle sockets cannot fill the room.
 // replacedMs: the wait after the relay closes a ready session as replaced (4409): another Mac holds the same identity
@@ -12,12 +13,15 @@ const DEFAULT_TIMING = {
   pingMs: 20_000,
   idleMs: 45_000,
   helloMs: 15_000,
+  pendingRepeatMs: 20_000,
   backoff: [1000, 2000, 5000, 10_000, 30_000],
   replacedMs: 60_000,
   stableMs: 30_000,
   jitter: true,
 };
 const REPLACED = 4409;
+// Headroom for one full phone response (lan-host.cjs MAX_BUFFERED) plus a desktop's own budget.
+const RELAY_PEER_BUDGET = 64 * 1024 * 1024 + PEER_BUDGET;
 const defaultRandom = (n) => new Uint8Array(randomBytes(n));
 
 /**
@@ -40,9 +44,25 @@ function startRelayHost({
   random = defaultRandom,
   onStatus,
   timing,
+  openPeer,
+  allowComputer,
 }) {
-  const { pingMs, idleMs, helloMs, backoff, replacedMs, stableMs, jitter } = { ...DEFAULT_TIMING, ...timing };
-  const channels = createPhoneChannels({ identity, phones, token, bridgeUrl, canPair, retired, WebSocket, fetch: fetchBridge, random, helloMs });
+  const { pingMs, idleMs, helloMs, backoff, replacedMs, stableMs, jitter, pendingRepeatMs } = { ...DEFAULT_TIMING, ...timing };
+  const channels = createPhoneChannels({
+    identity,
+    phones,
+    token,
+    bridgeUrl,
+    canPair,
+    retired,
+    WebSocket,
+    fetch: fetchBridge,
+    random,
+    helloMs,
+    openPeer,
+    allowComputer,
+    pendingRepeatMs,
+  });
   let status = "connecting";
   let closed = false;
   let attempt = 0;
@@ -69,6 +89,12 @@ function startRelayHost({
     const ws = new WebSocket(`${relayUrl}/v1/host?id=${identity.hostId}`, { handshakeTimeout: idleMs });
     const current = { socket: ws, conns: new Map(), ready: false, lastHeard: Date.now(), timer: null, readyTimer: null, stableTimer: null, over: false };
     current.send = (bytes) => sendRaw(current, bytes);
+    // Every channel shares this socket, so its buffer holds whatever phones have in flight too: a single phone response
+    // (MAX_RESPONSE, about 43 MiB on the wire) can sit there while a healthy desktop is connected. A desktop's budget
+    // therefore starts above that. A desktop that stalls on the relay never shows here at all (the relay forwards to each
+    // peer on its own), so catching that one is the relay's job; this only bounds what the Mac itself can pile up.
+    current.queued = () => current.socket.bufferedAmount;
+    current.peerBudget = RELAY_PEER_BUDGET;
     session = current;
 
     const finish = (code) => {
@@ -155,6 +181,12 @@ function startRelayHost({
 
   return {
     status: () => status,
+    /** Keys of the devices with a channel open through the relay now. */
+    connectedKeys: () => (session ? channels.keysOf(session) : []),
+    /** Closes every channel the device with `key` has open through the relay. */
+    drop(key) {
+      if (session) channels.dropKey(session, key);
+    },
     async close() {
       if (closed) return;
       closed = true;

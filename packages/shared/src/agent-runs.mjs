@@ -2,6 +2,11 @@
 // process, which saves every chat's turns (see agents/chat-host.cjs), and the renderer, which shows
 // them as they stream. Types: agent-runs.d.mts.
 
+import { hasTranscriptTail } from "./subagent-transcript.mjs";
+import { qualifyKey } from "./chat-scopes.mjs";
+
+export { LOCAL_COMPUTER, computerOfKey, qualifyKey, unqualifyKey } from "./chat-scopes.mjs";
+
 export const MAX_OUTPUT = 20_000;
 
 /** Command output keeps its end, where results and errors are. */
@@ -12,9 +17,10 @@ export function capOutput(text) {
 /**
  * Names a chat for the agent host. Session ids are counters per project, so every project has
  * a chat 2; the key carries the project path so chats in different projects never share a session.
+ * `computerId`: a paired computer's chat carries its id (`${computerId}|${path}#${id}`); this Mac's doesn't.
  */
-export function chatKey(projectPath, sessionId) {
-  return `${projectPath}#${sessionId}`;
+export function chatKey(projectPath, sessionId, computerId) {
+  return `${qualifyKey(computerId, projectPath)}#${sessionId}`;
 }
 
 /** The session id at the end of a chat key (after the last `#`), or NaN. */
@@ -36,7 +42,10 @@ export function chatInProject(projectPath, key) {
 
 /** The model of the chat's last message, which a turn the agent started by itself runs on. */
 export function lastUserModel(state, sessionId) {
-  return [...state.messages].reverse().find((message) => message.session_id === sessionId && message.role === "user")?.model ?? "";
+  const last = state.messages.findLast((message) => message.session_id === sessionId && message.role === "user");
+  if (last) return last.model ?? "";
+  // A window that holds no messages (chat-pages-v1) has it in the Chat's summary.
+  return state.sessions?.[sessionId]?.summary?.lastModel ?? "";
 }
 
 export function startRun(runs, chatId, model) {
@@ -218,6 +227,9 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
         if (!communications.has(entry.id)) communications.set(entry.id, entry);
       }
       // A resumed provider can rediscover a child before it has replayed the earlier output.
+      // A client that holds transcript tails (subagent-transcript.mjs) gets the host's merged transcript, or its tail,
+      // and keeps it as it comes.
+      const tail = hasTranscriptTail(event.agent) || hasTranscriptTail(previous);
       const agent = previous
         ? {
             ...previous,
@@ -229,11 +241,13 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
             startedAt: Math.min(previous.startedAt, event.agent.startedAt),
             communications: [...communications.values()].sort((a, b) => a.at - b.at).slice(-20),
             transcript:
-              event.agent.source === "milagre-advisor"
+              event.agent.source === "milagre-advisor" || tail
                 ? event.agent.transcript
                 : [...new Map([...previous.transcript, ...event.agent.transcript].map((entry) => [entry.id, entry])).values()].slice(-100),
+            transcriptLength: event.agent.transcriptLength,
           }
         : event.agent;
+      if (agent.transcriptLength === undefined) delete agent.transcriptLength;
       const subagents = previous ? children.map((child) => (child.id === agent.id ? agent : child)) : [...children, agent];
       return { state: { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, subagents } } }, runs, changed: true };
     }
@@ -323,15 +337,38 @@ export function splitRunForSteer(state, runs, projectPath, chatId) {
  * steering message), so the answers sit between what the agent asked and what it does next.
  * `messageId` is the new message's id, so it can be taken back if the answers don't reach the agent.
  */
-export function recordAnswers(state, runs, projectPath, chatId, body) {
+export function recordAnswers(state, runs, projectPath, chatId, body, answered) {
   const sessionId = sessionIdFromKey(chatId);
   const run = runs[chatId];
   if (!chatInProject(projectPath, chatId) || !state.sessions[sessionId] || !run || !body) return { state, runs, messageId: null };
   const split = splitRunForSteer(state, runs, projectPath, chatId);
-  const message = { id: split.state.next_id, session_id: sessionId, body, context: null, role: "user", model: run.model };
+  const message = {
+    id: split.state.next_id,
+    session_id: sessionId,
+    body,
+    context: null,
+    role: "user",
+    model: run.model,
+    ...(answered?.length ? { answered } : {}),
+  };
   return {
     state: { ...split.state, next_id: message.id + 1, messages: [...split.state.messages, message] },
     runs: applyRunEvent(runs, chatId, { type: "answers-sent" }),
     messageId: message.id,
   };
+}
+
+/**
+ * The answers to a question request as the user's message keeps them, for its answer card: each question with what
+ * was answered, in the request's order. A typed answer to a secret question is masked; null when nothing was answered.
+ */
+export function answeredQuestions(request, answers) {
+  if (!request || !answers) return null;
+  const answered = request.questions.flatMap((question) => {
+    const values = Array.isArray(answers[question.id]) ? answers[question.id] : [];
+    if (!values.length) return [];
+    const shown = values.map((value) => (question.secret && !question.options.some((option) => option.label === value) ? "••••••" : value));
+    return [{ header: question.header, question: question.question, answers: shown }];
+  });
+  return answered.length ? answered : null;
 }

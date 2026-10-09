@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UsageSnapshot } from "../../model";
 import { mergeSnapshot, seedSnapshot } from "./format";
+import { isRemoteKey } from "../../lib/computer-bridge";
 
 const POLL_MS = 5 * 60_000;
 // Each scope's last numbers, so switching Projects shows them at once instead of an empty usage row.
 const lastSnapshots = new Map<string, UsageSnapshot>();
 
 export function useUsage(scopeKey?: string) {
+  // Accounts and their usage stay on their own computer (ADR-0005).
+  // A remote scope shows no usage at all: reading with no scope would show this Mac's accounts under that computer.
+  const remote = isRemoteKey(scopeKey);
+  const localScope = remote ? undefined : scopeKey;
   const currentScope = useRef(scopeKey);
   currentScope.current = scopeKey;
   const [snapshotScope, setSnapshotScope] = useState(scopeKey);
@@ -17,11 +22,12 @@ export function useUsage(scopeKey?: string) {
   const inFlight = useRef<Promise<void> | null>(null);
 
   const refresh = useCallback(() => {
+    if (remote) return Promise.resolve();
     if (inFlight.current) return inFlight.current;
     setLoading(true);
     const version = generation.current;
     inFlight.current = window.milagre
-      .readUsage(scopeKey)
+      .readUsage(localScope)
       .then((next) => {
         if (version !== generation.current || currentScope.current !== scopeKey) return;
         setSnapshotScope(scopeKey);
@@ -40,7 +46,7 @@ export function useUsage(scopeKey?: string) {
         }
       });
     return inFlight.current;
-  }, [scopeKey]);
+  }, [scopeKey, remote]);
 
   const refreshIfStale = useCallback(
     (maxAgeMs: number) => {
@@ -53,6 +59,12 @@ export function useUsage(scopeKey?: string) {
     generation.current++;
     inFlight.current = null;
     lastReadAt.current = 0;
+    if (remote) {
+      setSnapshotScope(scopeKey);
+      setSnapshot(null);
+      setLoading(false);
+      return;
+    }
     const last = scopeKey ? lastSnapshots.get(scopeKey) : undefined;
     setSnapshotScope(scopeKey);
     setSnapshot(last ?? null);
@@ -60,7 +72,7 @@ export function useUsage(scopeKey?: string) {
     // Saved numbers first, so the sidebar isn't empty while the first read runs.
     const version = generation.current;
     window.milagre
-      .getCachedUsage(scopeKey)
+      .getCachedUsage(localScope)
       .then((cached) => {
         if (version === generation.current && currentScope.current === scopeKey) {
           setSnapshotScope(scopeKey);
@@ -89,7 +101,7 @@ export function useUsage(scopeKey?: string) {
     };
   }, [refresh]);
 
-  return { snapshot: snapshotScope === scopeKey ? snapshot : null, loading, refresh, refreshIfStale };
+  return { snapshot: !remote && snapshotScope === scopeKey ? snapshot : null, loading, refresh, refreshIfStale };
 }
 
 export type UsageState = ReturnType<typeof useUsage>;

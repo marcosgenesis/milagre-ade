@@ -8,6 +8,7 @@ const { execFileSync } = require("node:child_process");
 const { createProjectRegistry } = require("./project-registry.cjs");
 const { resolveProject } = require("./project-identity.cjs");
 const { reconcileState } = require("./project-state.cjs");
+const { scopeKey } = require("@milagre/shared/chat-scopes");
 let createLinkStore, createLinkWorkspaces;
 try {
   ({ createLinkStore } = require("./link-store.cjs"));
@@ -134,4 +135,17 @@ test("recovery retains an interrupted setup even when its changed files are igno
   const failed = (await store.get(link.id)).preparations[request.operationId];
   assert.ok(failed.retainedPaths.includes(member.worktreePath));
   assert.equal(await fs.readFile(path.join(member.worktreePath, ".env"), "utf8"), "keep this setup output");
+});
+test("a linked Worktree stays available after its agent switches it to another branch", async (t) => {
+  const { createChatScopes } = require("./chat-scopes.cjs");
+  const { link, store, workspaces } = await fixture(t);
+  const ready = await workspaces.prepareLinkChat({ link, chatId: 1, prompt: "change both", operationId: randomUUID() });
+  await store.update(link.id, (state) => ({ ...state, sessions: { 1: { id: 1, workspacePath: ready.workspacePath, worktrees: ready.worktrees } } }));
+  const scopes = createChatScopes({ projects: null, links: store, validateLink: async () => {} });
+  const key = scopeKey({ kind: "link", linkId: link.id });
+  assert.equal((await scopes.executionContext(key, 1)).cwd, ready.workspacePath);
+  execFileSync("git", ["-C", ready.worktrees[0].worktreePath, "checkout", "-qb", "fix/rdp-2217"]);
+  assert.equal((await scopes.executionContext(key, 1)).cwd, ready.workspacePath);
+  await fs.rm(path.join(ready.workspacePath, ready.worktrees[1].alias));
+  await assert.rejects(scopes.executionContext(key, 1), /its shared Worktree is unavailable/);
 });

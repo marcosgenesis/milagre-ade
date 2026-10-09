@@ -5,7 +5,9 @@ const os = require("node:os");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 const { createPhone, LOCAL_PORT, RETIRED_MS } = require("./phone.cjs");
-const { createPhones } = require("./relay-identity.cjs");
+const { createDevices } = require("./devices.cjs");
+const { b64url } = require("@milagre/shared/relay-crypto");
+const { readIdentity } = require("./relay-identity.cjs");
 
 const PAIRING_WINDOW_MS = 10 * 60 * 1000;
 
@@ -23,7 +25,17 @@ async function waitFor(read) {
 /** A bridge and tunnel that only record what the phone asks of them. */
 async function fixture(
   t,
-  { cloudflare = false, failBridge, failTunnel, failLan, lanPort = 8798, onPaired = () => {}, retryDelaysMs = [1, 1, 1], clock = { now: 0 } } = {},
+  {
+    cloudflare = false,
+    failBridge,
+    failTunnel,
+    failLan,
+    lanPort = 8798,
+    onPaired = () => {},
+    retryDelaysMs = [1, 1, 1],
+    clock = { now: 0 },
+    phoneOptions = {},
+  } = {},
 ) {
   const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-phone-")));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
@@ -131,6 +143,7 @@ async function fixture(
       startLan,
       lanPort,
       addresses: () => ["192.168.1.20"],
+      ...phoneOptions,
     });
   const phone = create();
   t.after(() => phone.close());
@@ -205,13 +218,13 @@ test("reset opens the pairing window again and forgets relay phones", async (t) 
   const { phone, dataDir, relays, clock } = await fixture(t);
   await phone.setEnabled(true);
   await phone.settled();
-  const phones = createPhones(dataDir);
+  const phones = createDevices(dataDir);
   await phones.add("phoneA");
   clock.now = PAIRING_WINDOW_MS * 3;
   assert.equal(relays[0].options.canPair(), false);
   await phone.reset();
   await phone.settled();
-  const after = createPhones(dataDir);
+  const after = createDevices(dataDir);
   await after.load();
   assert.equal(after.isKnown("phoneA"), false);
   assert.equal(relays.length, 2);
@@ -222,7 +235,7 @@ test("reset opens the pairing window again and forgets relay phones", async (t) 
 
 test("reset closes the old relay host before it changes the token, the phones or the pairing window", async (t) => {
   const { phone, dataDir, relays, clock, file } = await fixture(t);
-  await createPhones(dataDir).add("phoneA");
+  await createDevices(dataDir).add("phoneA");
   await phone.setEnabled(true);
   await phone.settled();
   const old = relays[0];
@@ -243,7 +256,7 @@ test("reset closes the old relay host before it changes the token, the phones or
   assert.equal(relays.length, 2);
   assert.equal(relays[1].options.phones.isKnown("intruder"), false);
   assert.equal(relays[1].options.phones.isKnown("phoneA"), false);
-  const after = createPhones(dataDir);
+  const after = createDevices(dataDir);
   await after.load();
   assert.equal(after.isKnown("intruder"), false);
   assert.equal(after.isKnown("phoneA"), false);
@@ -255,7 +268,7 @@ test("a reset that fails part way leaves no old host running and reports an erro
   await phone.settled();
   const oldToken = JSON.parse(await fs.readFile(file, "utf8")).token;
   // A directory where the phone list lives: clearing it cannot be written.
-  await fs.mkdir(path.join(dataDir, "relay-phones.json"));
+  await fs.mkdir(path.join(dataDir, "devices.json"));
   const status = await phone.reset();
   await phone.settled();
   assert.equal(status.state, "error");
@@ -292,9 +305,9 @@ test("reset while off rotates the relay identity too", async (t) => {
 
 test("reset while off forgets relay phones too", async (t) => {
   const { phone, dataDir } = await fixture(t);
-  await createPhones(dataDir).add("phoneA");
+  await createDevices(dataDir).add("phoneA");
   await phone.reset();
-  const after = createPhones(dataDir);
+  const after = createDevices(dataDir);
   await after.load();
   assert.equal(after.isKnown("phoneA"), false);
 });
@@ -309,10 +322,13 @@ test("status counts the paired phones, and a first pairing is announced once", a
   await relays[0].options.phones.add("phoneA");
   assert.equal(relays[0].options.phones.isKnown("phoneA"), true);
   assert.equal(phone.status().pairedPhones, 1);
-  assert.deepEqual(paired, [{ pairedPhones: 1 }]);
+  assert.deepEqual(paired, [{ pairedPhones: 1, kind: "phone" }]);
   assert.equal(changes.length, before + 1, "Settings hears the new count");
   await relays[0].options.phones.add("phoneB");
-  assert.deepEqual(paired, [{ pairedPhones: 1 }, { pairedPhones: 2 }]);
+  assert.deepEqual(paired, [
+    { pairedPhones: 1, kind: "phone" },
+    { pairedPhones: 2, kind: "phone" },
+  ]);
   await phone.reset();
   await phone.settled();
   assert.equal(phone.status().pairedPhones, 0, "a reset forgets them");
@@ -388,7 +404,7 @@ test("an old room is let go once its time is up", async (t) => {
 
 test("a reset that fails while the phone is off stays off and says it failed", async (t) => {
   const { phone, dataDir, changes } = await fixture(t);
-  await fs.mkdir(path.join(dataDir, "relay-phones.json"));
+  await fs.mkdir(path.join(dataDir, "devices.json"));
   await assert.rejects(phone.reset());
   assert.deepEqual(phone.status(), { enabled: false, state: "off", remote: "none", lan: { enabled: true, addresses: [] } });
   assert.equal(changes.includes("error"), false);
@@ -418,7 +434,7 @@ test("disabling stops the relay before the bridge", async (t) => {
 
 test("a relay phone that paired before the daemon restarted is still known", async (t) => {
   const { phone, dataDir, relays } = await fixture(t);
-  await createPhones(dataDir).add("phoneA");
+  await createDevices(dataDir).add("phoneA");
   await phone.setEnabled(true);
   await phone.settled();
   assert.equal(relays[0].options.phones.isKnown("phoneA"), true);
@@ -742,7 +758,7 @@ test("routes registers the phone's key without announcing a pairing, and lists t
   assert.match(answer.key, /^[A-Za-z0-9_-]{43}$/);
   assert.deepEqual(answer.lan, ["ws://192.168.1.20:8798"]);
   assert.deepEqual(paired, []);
-  const phones = createPhones(dataDir);
+  const phones = createDevices(dataDir);
   await phones.load();
   assert.equal(phones.isKnown(phoneKey), true);
   await phone.setLan(false);
@@ -780,4 +796,237 @@ test("a confined phone (allowedRoot) never starts a LAN host", async (t) => {
   await phone.settled();
   assert.equal(started.length, 0);
   assert.equal(phone.status().lan.enabled, false);
+});
+
+test("devices lists what paired, with the route each is connected on now", async (t) => {
+  const { phone, relays, lans } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const key = "k".repeat(43);
+  await relays[0].options.phones.add(key, { kind: "phone", name: "Victor's iPhone" });
+  assert.deepEqual(
+    (await phone.devices()).map((device) => [device.key, device.kind, device.name, device.route]),
+    [[key, "phone", "Victor's iPhone", null]],
+  );
+  relays[0].connectedKeys = () => [key];
+  assert.equal((await phone.devices())[0].route, "relay");
+  lans[0].connectedKeys = () => [key];
+  assert.equal((await phone.devices())[0].route, "lan", "the local network wins when both carry it");
+});
+
+test("the device list reads the saved devices while phone access is off", async (t) => {
+  const { phone, dataDir } = await fixture(t);
+  await createDevices(dataDir).add("k".repeat(43), { name: "iPad mini" });
+  assert.deepEqual(
+    (await phone.devices()).map((device) => [device.name, device.route]),
+    [["iPad mini", null]],
+  );
+});
+
+test("removing a device forgets it, closes its channels, and lets it pair again only in a window opened later", async (t) => {
+  const { phone, relays, lans, clock, changes } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const dropped = [];
+  relays[0].drop = (key) => dropped.push(`relay:${key}`);
+  lans[0].drop = (key) => dropped.push(`lan:${key}`);
+  const key = "k".repeat(43);
+  await relays[0].options.phones.add(key, { name: "Victor's iPhone" });
+  clock.now = 1000;
+  const before = changes.length;
+  assert.deepEqual(await phone.removeDevice(key), []);
+  assert.deepEqual(dropped, [`relay:${key}`, `lan:${key}`]);
+  assert.ok(changes.length > before, "a removal is announced as a phone status, so Settings reads the list again");
+  assert.equal(relays[0].options.canPair(key), false, "the window it was removed in stays closed to it");
+  assert.equal(relays[0].options.canPair("o".repeat(43)), true, "other new devices still pair");
+  clock.now = 2000;
+  await phone.openPairing();
+  assert.equal(relays[0].options.canPair(key), true);
+  await assert.rejects(phone.removeDevice("short"), /device key/);
+});
+
+test("a removed phone reaching routes through a trusted route is not added back", async (t) => {
+  const { phone, relays, dataDir } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const key = "k".repeat(43);
+  await relays[0].options.phones.add(key);
+  await phone.removeDevice(key);
+  await phone.routes(key);
+  const after = createDevices(dataDir);
+  await after.load();
+  assert.equal(after.isKnown(key), false);
+});
+
+test("a computer's first pairing is announced with its kind", async (t) => {
+  const { phone, relays, paired } = await fixture(t);
+  await phone.setEnabled(true);
+  await phone.settled();
+  await relays[0].options.phones.add("deskA", { kind: "computer", name: "studio" });
+  assert.deepEqual(paired, [{ pairedPhones: 1, kind: "computer" }]);
+  assert.equal(relays[0].options.phones.kindOf("deskA"), "computer");
+});
+
+test("the relay and LAN hosts get openPeer and allowComputer, and a confined phone never hosts a desktop", async (t) => {
+  const openPeer = () => ({ receive() {}, invalid() {}, close() {} });
+  const open = await fixture(t, { phoneOptions: { openPeer } });
+  await open.phone.setEnabled(true);
+  await open.phone.settled();
+  assert.equal(open.relays[0].options.openPeer, openPeer);
+  assert.equal(typeof open.relays[0].options.allowComputer, "function");
+  assert.equal(open.lans[0].options.openPeer, openPeer);
+  const confined = await fixture(t, { phoneOptions: { openPeer, allowedRoot: "/tmp/milagre-demo" } });
+  await confined.phone.setEnabled(true);
+  await confined.phone.settled();
+  assert.equal(confined.relays[0].options.openPeer, undefined);
+  assert.equal(confined.relays[0].options.allowComputer, undefined);
+  assert.equal(confined.lans.length, 0);
+});
+
+test("peerRoutes names this Mac's relay identity and LAN routes, and refuses while phone access is off", async (t) => {
+  const { phone, dataDir } = await fixture(t);
+  assert.throws(() => phone.peerRoutes(), /starting/);
+  await phone.setEnabled(true);
+  await phone.settled();
+  const identity = await readIdentity(dataDir);
+  assert.deepEqual(phone.peerRoutes(), { hostId: identity.hostId, key: b64url(identity.box.publicKey), lan: ["ws://192.168.1.20:8798"] });
+});
+
+/** Phone access on, with every pending list it announced, and a way to ask as a computer's hello does. */
+async function asking(t, options = {}) {
+  const announced = [];
+  const fixed = await fixture(t, { ...options, phoneOptions: { openPeer: () => ({}), onPending: (list) => announced.push(list) } });
+  await fixed.phone.setEnabled(true);
+  await fixed.phone.settled();
+  const ask = (key, name = null) => {
+    const abort = new AbortController();
+    const request = { waited: false, abort };
+    request.verdict = fixed.relays[0].options.allowComputer({
+      key,
+      name,
+      signal: abort.signal,
+      waiting: () => {
+        request.waited = true;
+      },
+    });
+    return request;
+  };
+  return { ...fixed, announced, ask };
+}
+
+test("a new computer waits for its owner: listed, then allowed or denied", async (t) => {
+  const { phone, announced, ask } = await asking(t);
+  const studio = ask("deskA", "studio");
+  const nameless = ask("deskB");
+  assert.equal(studio.waited && nameless.waited, true, "both told to wait");
+  assert.deepEqual(phone.pendingDevices(), [
+    { key: "deskA", name: "studio", at: 0 },
+    { key: "deskB", name: null, at: 0 },
+  ]);
+  assert.deepEqual(
+    announced.at(-1).map((request) => request.key),
+    ["deskA", "deskB"],
+  );
+  assert.deepEqual(
+    phone.allowDevice("deskA").map((request) => request.key),
+    ["deskB"],
+  );
+  assert.equal(await studio.verdict, "allowed");
+  assert.deepEqual(phone.denyDevice("deskB"), []);
+  assert.equal(await nameless.verdict, "denied");
+  assert.deepEqual(announced.at(-1), []);
+  assert.throws(() => phone.allowDevice("deskA"), /no longer waiting/);
+  assert.throws(() => phone.denyDevice("nope"), /no longer waiting/);
+});
+
+test("a request expires with the pairing window it arrived in, and one after the window isn't held at all", async (t) => {
+  const { phone, clock, ask } = await asking(t);
+  clock.now = PAIRING_WINDOW_MS - 30;
+  const late = ask("deskA", "studio");
+  assert.equal(late.waited, true);
+  assert.equal(await late.verdict, "expired");
+  assert.deepEqual(phone.pendingDevices(), []);
+  clock.now = PAIRING_WINDOW_MS;
+  const after = ask("deskB", "lab");
+  assert.equal(await after.verdict, "expired");
+  assert.equal(after.waited, false, "never shown");
+});
+
+test("a request whose computer left is dropped, and a late Allow finds nothing", async (t) => {
+  const { phone, announced, ask } = await asking(t);
+  const gone = ask("deskA", "studio");
+  gone.abort.abort();
+  assert.equal(await gone.verdict, "dropped");
+  assert.deepEqual(announced.at(-1), []);
+  assert.throws(() => phone.allowDevice("deskA"), /no longer waiting/);
+});
+
+test("a computer's second hello replaces its first request, and a fifth computer at once is busy", async (t) => {
+  const { phone, ask } = await asking(t);
+  const first = ask("deskA", "studio");
+  const second = ask("deskA", "studio");
+  assert.equal(await first.verdict, "dropped");
+  assert.deepEqual(
+    phone.pendingDevices().map((request) => request.key),
+    ["deskA"],
+  );
+  for (const key of ["deskB", "deskC", "deskD"]) ask(key);
+  const fifth = ask("deskE");
+  assert.equal(await fifth.verdict, "busy");
+  assert.equal(fifth.waited, false);
+  assert.equal(phone.pendingDevices().length, 4);
+  phone.allowDevice("deskA");
+  assert.equal(await second.verdict, "allowed");
+});
+
+test("a request that can't be told to wait is dropped, not left listed", async (t) => {
+  const { phone, announced, relays } = await asking(t);
+  const verdict = await relays[0].options.allowComputer({
+    key: "deskA",
+    name: "studio",
+    signal: new AbortController().signal,
+    waiting() {
+      throw new Error("its channel is gone");
+    },
+  });
+  assert.equal(verdict, "dropped");
+  assert.deepEqual(phone.pendingDevices(), []);
+  assert.ok(
+    announced.every((list) => list.length === 0),
+    "it was never announced as waiting",
+  );
+  // And its slot is free again.
+  const next = relays[0].options.allowComputer({ key: "deskB", signal: new AbortController().signal, waiting() {} });
+  phone.denyDevice("deskB");
+  assert.equal(await next, "denied");
+});
+
+test("turning phone access off drops every waiting request", async (t) => {
+  const { phone, ask } = await asking(t);
+  const waiting = ask("deskA", "studio");
+  await phone.setEnabled(false);
+  await phone.settled();
+  assert.equal(await waiting.verdict, "dropped");
+  assert.deepEqual(phone.pendingDevices(), []);
+});
+
+test("a reset and a close drop waiting requests, and a replaced request's abort doesn't touch its successor", async (t) => {
+  const { phone, ask } = await asking(t);
+  const first = ask("deskA", "studio");
+  const second = ask("deskA", "studio");
+  assert.equal(await first.verdict, "dropped");
+  first.abort.abort();
+  assert.deepEqual(
+    phone.pendingDevices().map((request) => request.key),
+    ["deskA"],
+    "the superseded channel closing leaves the new request waiting",
+  );
+  await phone.reset();
+  await phone.settled();
+  assert.equal(await second.verdict, "dropped");
+  assert.deepEqual(phone.pendingDevices(), []);
+  const third = ask("deskB", "lab");
+  await phone.close();
+  assert.equal(await third.verdict, "dropped");
+  assert.deepEqual(phone.pendingDevices(), []);
 });

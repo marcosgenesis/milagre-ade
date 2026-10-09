@@ -12,6 +12,7 @@ const { startDaemon } = require("./server.cjs");
 const { connect } = require("./client.cjs");
 const { MAX_FRAME_BYTES } = require("./protocol.cjs");
 const { applyStatePatch } = require("@milagre/shared/state-patch");
+const { mergeTranscript } = require("@milagre/shared/subagent-transcript");
 
 const gitConfig = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
 
@@ -83,7 +84,8 @@ async function waitFor(read) {
   }
   throw new Error("Timed out waiting for daemon state");
 }
-async function fixture(t, options = {}) {
+async function fixture(t, { createSession, ...options } = {}) {
+  const fixtureOptions = { createSession };
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-daemon-")));
   const dataDir = path.join(directory, "profile");
   const project = path.join(directory, "project");
@@ -100,6 +102,7 @@ async function fixture(t, options = {}) {
       titleModels: {},
       agentCli: Object.assign(async () => ({ command: "/fake/codex" }), { invalidate() {} }),
       createSession(provider, options) {
+        if (fixtureOptions.createSession) return fixtureOptions.createSession(provider, options);
         const session = {
           closed: false,
           turnActive: false,
@@ -436,7 +439,7 @@ test("many paged reads at once on one connection all finish, waiting instead of 
 });
 
 test("a paged response stays while its reader keeps going and expires once it stops", async (t) => {
-  const { dataDir, project, client } = await fixture(t, { pagesTtlMs: 300 });
+  const { dataDir, project, client } = await fixture(t, { pagesTtlMs: 1000 });
   await notedProject(await client(), project);
   const socket = net.createConnection(require("./paths.cjs").socketPath(dataDir));
   t.after(() => socket.destroy());
@@ -447,13 +450,14 @@ test("a paged response stays while its reader keeps going and expires once it st
   assert.ok(steady.pageCount >= 3);
   const parts = [];
   for (let index = 0; index < steady.pageCount; index++) {
-    if (index) await delay(200); // Each gap is under the limit; the whole read is well over it.
+    // Each gap is well under the limit (a busy CI runner once stretched 200ms gaps past 300ms); the whole read is over it.
+    if (index) await delay(600);
     parts.push((await ask("daemon:result-page", [steady.pageId, index])).result);
   }
   assert.equal(JSON.parse(parts.join("")).state.messages.length, 2);
   const stalled = (await ask("project:snapshot", [project], { pages: true })).pages;
   assert.equal(typeof (await ask("daemon:result-page", [stalled.pageId, 0])).result, "string");
-  await delay(500);
+  await delay(1500);
   assert.match((await ask("daemon:result-page", [stalled.pageId, 1])).error.message, /expired/);
 });
 
@@ -621,7 +625,7 @@ test("a first pairing reaches the desktop as phone:paired, with the count in the
   assert.equal((await phoneStatus(desktop, "on")).pairedPhones, 0);
   await relays[0].phones.add("phoneA");
   await waitFor(() => paired.length === 1);
-  assert.deepEqual(paired, [{ pairedPhones: 1 }]);
+  assert.deepEqual(paired, [{ pairedPhones: 1, kind: "phone" }]);
   assert.equal((await desktop.call("phone:status")).pairedPhones, 1);
 });
 
@@ -743,7 +747,7 @@ test("replies waiting for paging room do not hold the slots a reader needs for i
 });
 
 test("paged snapshots follow the result-page rules: two at once, re-armed by each read, expiring when left", async (t) => {
-  const { project, client } = await fixture(t, { pagesTtlMs: 300 });
+  const { project, client } = await fixture(t, { pagesTtlMs: 1000 });
   const first = await client();
   await notedProject(first, project);
   const one = await first.call("daemon:snapshot", [{ paged: true }]);
@@ -752,7 +756,7 @@ test("paged snapshots follow the result-page rules: two at once, re-armed by eac
   // Both are read, side by side: the second capture didn't evict the first, and each read re-arms its limit.
   const parts = [[], []];
   for (let index = 0; index < Math.max(one.pageCount, two.pageCount); index++) {
-    if (index) await delay(120);
+    if (index) await delay(400);
     for (const [slot, manifest] of [one, two].entries()) {
       if (index < manifest.pageCount) parts[slot].push(await first.call("daemon:snapshot-page", [manifest.snapshotId, index]));
     }
@@ -760,7 +764,7 @@ test("paged snapshots follow the result-page rules: two at once, re-armed by eac
   for (const text of parts) assert.equal(JSON.parse(text.join("")).projects.length, 1);
   const stalled = await first.call("daemon:snapshot", [{ paged: true }]);
   await first.call("daemon:snapshot-page", [stalled.snapshotId, 0]);
-  await delay(500);
+  await delay(1500);
   await assert.rejects(first.call("daemon:snapshot-page", [stalled.snapshotId, 1]), /expired/);
 });
 
@@ -895,4 +899,118 @@ test("a state the client can't patch from, or a patch over the event limit, says
   const again = await desktop.call("state:read", [project]);
   assert.equal(again.version, large.payload.version);
   assert.equal(again.state.messages.at(-1).body.length, 5000);
+});
+
+test("a client that reads transcripts on demand gets each subagent with the end of its transcript", async (t) => {
+  const entry = (n) => ({ id: `e${n}`, kind: "message", text: `Entry ${n}` });
+  const { project, client } = await fixture(t, {
+    createSession(_provider, options) {
+      return {
+        closed: false,
+        async startTurn() {
+          // A provider sends its child as it knows it: here only the entry it just added.
+          options.emit({ type: "turn-started", turnId: "turn-1" });
+          options.emit({
+            type: "subagent-update",
+            agent: { id: "child", title: "Review", status: "running", startedAt: 1, updatedAt: Date.now(), transcript: [entry(21)] },
+          });
+          return { turnId: "turn-1" };
+        },
+        async close() {
+          this.closed = true;
+        },
+      };
+    },
+  });
+  await fs.mkdir(path.join(project, ".milagre"));
+  const transcript = Array.from({ length: 20 }, (_, index) => entry(index + 1));
+  await fs.writeFile(
+    path.join(project, ".milagre/coordination.json"),
+    JSON.stringify({
+      next_id: 3,
+      projects: { 1: { id: 1, name: "project" } },
+      worktrees: { 1: { id: 1, project_id: 1, path: project, name: "main" } },
+      sessions: {
+        2: {
+          id: 2,
+          worktree_id: 1,
+          agent_name: "main",
+          status: "Created",
+          subagents: [{ id: "child", title: "Review", status: "running", startedAt: 1, updatedAt: 2, transcript }],
+        },
+      },
+      messages: [],
+      tasks: {},
+    }),
+  );
+  const desktop = await client();
+  const whole = await client();
+  const events = [];
+  const wholeEvents = [];
+  desktop.on("event", (event) => events.push(event));
+  whole.on("event", (event) => wholeEvents.push(event));
+  assert.ok((await desktop.call("daemon:status")).capabilities.includes("subagent-tails-v1"));
+  await desktop.call("daemon:state-patches", [{ messages: false, transcripts: false }]);
+  await whole.call("daemon:state-patches");
+  const opened = await desktop.call("project:open", [project]);
+  const tail = opened.state.sessions[2].subagents[0];
+  assert.deepEqual(
+    tail.transcript.map((item) => item.id),
+    ["e17", "e18", "e19", "e20"],
+  );
+  assert.equal(tail.transcriptLength, 20);
+  assert.equal((await desktop.call("state:read", [project])).state.sessions[2].subagents[0].transcriptLength, 20);
+  assert.equal((await whole.call("project:open", [project])).state.sessions[2].subagents[0].transcript.length, 20);
+  const read = await desktop.call("chat:subagent", [project, 2, "child"]);
+  assert.deepEqual(read.transcript, transcript);
+  await assert.rejects(desktop.call("chat:subagent", [project, 2, "gone"]), /no longer in this Chat/);
+
+  // A running child's update carries only the end of its transcript to this client, and all of it to the other.
+  await desktop.call("chat:send", [{ projectPath: project, sessionId: 2, body: "Go", provider: "codex", model: "test", permissionMode: "ask" }]);
+  const isUpdate = (event) => event.channel === "agent:event" && event.payload.event.type === "subagent-update";
+  const update = (await waitFor(() => events.find(isUpdate))).payload.event.agent;
+  assert.equal(update.transcript.length, 4);
+  assert.equal(update.transcriptLength, 21);
+  assert.equal(update.transcript.at(-1).id, "e21");
+  assert.equal((await waitFor(() => wholeEvents.find(isUpdate))).payload.event.agent.transcript.length, 21);
+  // The whole transcript read before, with that tail on top, is the host's.
+  assert.deepEqual(mergeTranscript(read.transcript, update), (await desktop.call("chat:subagent", [project, 2, "child"])).transcript);
+});
+
+test("a client that reads messages by Chat gets states without them, and each change's messages beside its patch", async (t) => {
+  const { project, client } = await fixture(t);
+  const desktop = await client();
+  const events = [];
+  desktop.on("event", (event) => events.push(event));
+  await desktop.call("daemon:state-patches", [{ messages: false }]);
+  const opened = await desktop.call("project:open", [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  const chat = `${project}#${session.id}`;
+  await desktop.call("chat:git-note", [chat, "First note"]);
+  const held = await desktop.call("state:read", [project]);
+  assert.deepEqual(held.state.messages, []);
+  assert.equal(held.state.messagesInChats, true);
+  // Replies carry states the same way: opening the Project again sends no messages either.
+  const again = await desktop.call("project:open", [project]);
+  assert.deepEqual([again.state.messages, again.state.messagesInChats], [[], true]);
+  assert.ok((await desktop.call("daemon:status")).capabilities.includes("chat-pages-v1"));
+  assert.equal(held.state.sessions[session.id].summary.count, 1);
+  const page = await desktop.call("chat:messages", [project, session.id, { turns: 5 }]);
+  assert.deepEqual(
+    page.messages.map((message) => message.body),
+    ["First note"],
+  );
+
+  await desktop.call("chat:git-note", [chat, "Second note"]);
+  const added = await waitFor(() => events.find((event) => event.channel === "project:state" && event.payload.version > held.version));
+  assert.equal("state" in added.payload, false);
+  assert.equal(JSON.stringify(added.payload.patch ?? {}).includes("Second note"), false, "messages stay out of the patch");
+  assert.deepEqual(
+    added.payload.messages.changed.map(({ message, after }) => [message.body, after]),
+    [["Second note", page.messages[0].id]],
+  );
+  assert.deepEqual(added.payload.messages.removed, []);
+  const applied = applyStatePatch(held.state, added.payload.patch);
+  assert.equal(applied.sessions[session.id].summary.count, 2);
+  assert.deepEqual((await desktop.call("chat:search", [project, "second note"]))[0].message.session_id, session.id);
 });

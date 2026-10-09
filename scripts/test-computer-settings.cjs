@@ -1,0 +1,195 @@
+// Run with npm test -- --only test-computer-settings. A computer's Settings in Electron against a stand-in for main: the
+// Computers group lists This Mac and each computer; its section shows how it is connected and which route is in use, what
+// lives there, saves its name when the field is left, and Remove asks once more before it goes to Settings › Devices.
+// Set MILAGRE_SCREENSHOT_DIR to save screenshots.
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { setTimeout: delay } = require("node:timers/promises");
+
+const fixture = `
+import React, { useState } from "react";
+import { createRoot } from "react-dom/client";
+import { SettingsNav, SettingsPanel } from "/src/components/Settings";
+import { updateSettings } from "/src/lib/settings";
+import "/src/styles.css";
+const HOUR = 3600000;
+let computers = [
+  { id: "c-arketa", name: "arketa", hostId: "a".repeat(22), relayHost: "relay.milagre.cloud", state: "online", route: "lan", lastSeen: Date.now(), addedAt: Date.parse("2026-10-08T10:00:00"), message: null, lan: true, lanRoutes: ["ws://192.168.0.24:8798"] },
+  { id: "c-studio", name: "studio", hostId: "s".repeat(22), relayHost: "relay.milagre.cloud", state: "offline", route: null, lastSeen: Date.now() - 2 * HOUR, addedAt: Date.parse("2026-10-01T10:00:00"), message: null, lan: false, lanRoutes: [] },
+];
+let changed = () => {};
+const snapshot = () => ({ thisMac: "victor-mbp", computers });
+window.renames = [];
+window.removed = [];
+window.milagre = new Proxy({
+  listRecentProjects: async () => [],
+  listEditors: async () => [],
+  onComputersChanged: (callback) => ((changed = callback), () => {}),
+  computers: {
+    list: async () => snapshot(),
+    invoke: async (id, method) => (method === "daemon:status" ? { version: "0.121.0" } : method === "project:recent" ? [{ path: "/a/web", name: "arketa-web" }, { path: "/a/infra", name: "infra" }] : null),
+    rename: async (id, name) => {
+      window.renames.push([id, name]);
+      computers = computers.map((item) => (item.id === id ? { ...item, name } : item));
+      changed(snapshot());
+      return snapshot();
+    },
+    remove: async (id) => {
+      window.removed.push(id);
+      computers = computers.filter((item) => item.id !== id);
+      changed(snapshot());
+      return snapshot();
+    },
+  },
+}, { get(target, key) { return target[key] ?? (String(key).startsWith("on") ? () => () => {} : async () => null); } });
+updateSettings({ otherComputers: true });
+function Fixture() {
+  const [section, setSection] = useState("appearance");
+  const [computerId, setComputerId] = useState(undefined);
+  return (
+    <div style={{ display: "flex", gap: 12, height: "100vh", padding: 12 }}>
+      <SettingsNav section={section} computerId={computerId} onSelect={setSection} onSelectComputer={(id) => { setComputerId(id); setSection("computer"); }} onSelectProject={() => {}} onBack={() => {}} showProjectSettings={false} />
+      <main style={{ flex: 1, minWidth: 0 }}><SettingsPanel section={section} computerId={computerId} models={[]} update={null} onSectionChange={(next) => { window.sectionAfter = next; }} /></main>
+    </div>
+  );
+}
+createRoot(document.getElementById("root")).render(<Fixture />);
+`;
+
+async function browserChecks() {
+  const { app, BrowserWindow } = require("electron");
+  app.setPath("userData", fs.mkdtempSync(path.join(os.tmpdir(), "milagre-computer-settings-")));
+  await app.whenReady();
+  const window = new BrowserWindow({ width: 960, height: 760, show: false, webPreferences: { backgroundThrottling: false } });
+  const evaluate = (source) => window.webContents.executeJavaScript(source);
+  const errors = [];
+  window.webContents.on("console-message", (details) => {
+    if (details.level === "error") errors.push(details.message);
+  });
+  const waitFor = async (source) => {
+    for (let i = 0; i < 200; i++) {
+      if (await evaluate(source)) return;
+      await delay(25);
+    }
+    throw new Error(`Timed out: ${source}`);
+  };
+  const screenshot = async (name) => {
+    if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
+    fs.mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+    window.webContents.invalidate();
+    await delay(250);
+    fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, name + ".png"), (await window.webContents.capturePage()).toPNG());
+  };
+  try {
+    await window.loadURL(process.argv[2]);
+    const nav = (name) => `[...document.querySelectorAll('[data-settings-computers] button')].find((b) => b.textContent.includes(${JSON.stringify(name)}))`;
+    const text = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent.trim() ?? null`);
+    await waitFor(`!!document.querySelector('[data-settings-computers]')`);
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('[data-settings-computers] button')].map((b) => b.textContent.trim())`), [
+      "victor-mbp",
+      "arketa",
+      "studio",
+    ]);
+    await evaluate(`${nav("arketa")}.click()`);
+    await waitFor(`document.querySelector('h1')?.textContent === 'arketa' && !!document.querySelector('[data-computer-settings]')`);
+    await waitFor(`document.querySelector('[data-computer-status]')?.textContent.includes('Milagre 0.121.0')`);
+    assert.match(await text("[data-computer-status]"), /^Connected · Milagre 0\.121\.0 · paired Oct 8$/);
+    assert.equal(await text('[data-connection="lan"] [data-connection-state]'), "In use");
+    assert.match(await text('[data-connection="lan"]'), /ws:\/\/192\.168\.0\.24:8798, end-to-end encrypted/);
+    assert.equal(await text('[data-connection="relay"] [data-connection-state]'), "Ready");
+    await waitFor(`document.querySelector('[data-computer-projects]')?.textContent.includes('2 Projects')`);
+    assert.match(await text("[data-computer-projects]"), /arketa-web, infra\. Accounts and simulators stay on arketa\./);
+    await screenshot("computer-settings");
+    console.log("PASS: a computer's settings show its connection routes, which is in use, and what lives there");
+
+    window.webContents.focus();
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-computer-settings] input[aria-label="Name"]');
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "lab");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.blur();
+    })()`);
+    await waitFor(`window.renames.length === 1 && document.querySelector('h1')?.textContent === 'lab'`);
+    assert.deepEqual(await evaluate(`window.renames`), [["c-arketa", "lab"]]);
+    console.log("PASS: the name is a label on this Mac, saved when the field is left");
+
+    await evaluate(`${nav("studio")}.click()`);
+    await waitFor(`document.querySelector('h1')?.textContent === 'studio'`);
+    assert.match(await text("[data-computer-projects]"), /^studio is offline/);
+    assert.match(await text("[data-computer-status]"), /^Offline, seen 2h ago/);
+    assert.equal(await text('[data-connection="lan"] [data-connection-state]'), "Not available");
+    await evaluate(`document.querySelector('[data-computer-remove]').click()`);
+    await waitFor(`!!document.querySelector('[data-computer-remove-confirm]')`);
+    assert.match(
+      await text("[data-computer-settings]"),
+      /Its chats leave this sidebar and this Mac forgets its keys\. Nothing changes on studio; pair again with a new link\./,
+    );
+    await screenshot("computer-settings-remove");
+    await evaluate(`document.querySelector('[data-computer-remove-confirm]').click()`);
+    await waitFor(`window.removed.length === 1 && window.sectionAfter === 'devices'`);
+    assert.deepEqual(await evaluate(`window.removed`), ["c-studio"]);
+    assert.deepEqual(errors, []);
+    console.log("PASS: Remove asks once more, removes the computer and goes to Settings › Devices");
+    app.exit(0);
+  } catch (error) {
+    console.error(error);
+    console.error(errors);
+    await screenshot("failure").catch(() => {});
+    app.exit(1);
+  }
+}
+
+async function main() {
+  const { createServer } = await import("vite");
+  const server = await createServer({
+    configFile: path.resolve(__dirname, "../apps/desktop/vite.config.ts"),
+    cacheDir: path.resolve(__dirname, "../node_modules/.vite-computer-settings"),
+    server: { host: "127.0.0.1", port: 0 },
+    plugins: [
+      {
+        name: "computer-settings-fixture",
+        resolveId(id) {
+          if (id === "/__computer-settings.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__computer-settings.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__computer-settings") return next();
+            response.setHeader("Content-Type", "text/html");
+            response.end(
+              await server.transformIndexHtml(
+                request.url,
+                '<html><body><div id="root"></div><script type="module" src="/__computer-settings.tsx"></script></body></html>',
+              ),
+            );
+          });
+        },
+      },
+    ],
+  });
+  try {
+    await server.listen();
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const child = require("node:child_process").spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__computer-settings`], {
+      env,
+      stdio: "inherit",
+    });
+    process.exitCode = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code) => resolve(code ?? 1));
+    });
+  } finally {
+    await server.close();
+  }
+}
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
+  console.error(error);
+  if (process.versions.electron) require("electron").app.exit(1);
+  else process.exitCode = 1;
+});

@@ -8,7 +8,8 @@ import type { AgentPort } from "@milagre/shared/model";
 import type { Client } from "./client";
 import { useSession } from "./session";
 import { Icon } from "./icons";
-import { CircleButton, ErrorNotice, PageScroll, PillButton, colors, styles } from "./ui";
+import { CircleButton, ErrorNotice, PageScroll, PillButton, useStyles } from "./ui";
+import { useTheme } from "./theme";
 
 /** The host returns only this Chat's proven processes. A Worktree is never an owner. */
 function useChatPorts(client: Client | null, chatId?: string) {
@@ -59,6 +60,7 @@ function useChatPorts(client: Client | null, chatId?: string) {
 }
 
 export function PortsChip({ chatId }: { chatId: string }) {
+  const { colors } = useTheme();
   const { client } = useSession();
   const { ports } = useChatPorts(client, chatId);
   if (!client || !chatId || !ports.length) return null;
@@ -88,6 +90,8 @@ export function PortsChip({ chatId }: { chatId: string }) {
 }
 
 export function PortsSheet({ hostId, chatId }: { hostId?: string; chatId?: string }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { client } = useSession();
   const source = client && chatId && hostId === client.url ? client : null;
   const { ports, error, refresh } = useChatPorts(source, chatId);

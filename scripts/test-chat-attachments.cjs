@@ -66,6 +66,7 @@ window.milagre = new Proxy({
  interruptAgent: async chatId => { window.interrupted = chatId; },
 }, { get(target, key) { return target[key] ?? (String(key).startsWith('on') ? () => () => {} : async () => null); } });
 localStorage.setItem('milagre-settings', JSON.stringify({ theme: 'dark' }));
+window.updateSettings = (await import('/src/lib/settings')).updateSettings;
 const { default: App } = await import('/src/App');
 createRoot(document.getElementById('root')).render(<App />);
 `;
@@ -164,10 +165,12 @@ async function browserChecks() {
     const syntaxColor = () => evaluate(`getComputedStyle(document.querySelector('dialog [data-syntax="keyword"]')).color`);
     const darkSyntaxColor = await syntaxColor();
     await screenshot("tsx-preview-dark");
-    await evaluate(`document.documentElement.classList.remove('dark')`);
+    await evaluate(`window.updateSettings({ theme: 'light' })`);
+    await waitFor(`!document.documentElement.classList.contains('dark')`);
     assert.notEqual(await syntaxColor(), darkSyntaxColor, "Syntax colors follow the theme");
     await screenshot("tsx-preview-light");
-    await evaluate(`document.documentElement.classList.add('dark')`);
+    await evaluate(`window.updateSettings({ theme: 'dark' })`);
+    await waitFor(`document.documentElement.classList.contains('dark')`);
     await key("Escape");
     await waitFor(`!document.querySelector('dialog')`);
     await click('[aria-label="Remove Card.tsx"]');

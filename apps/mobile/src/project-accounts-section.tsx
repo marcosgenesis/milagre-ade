@@ -7,7 +7,8 @@ import { accountType, providerName } from "@milagre/shared/providers";
 import { useSession } from "./session";
 import { Icon, ProviderLogo } from "./icons";
 import { ProjectIcon, ProjectIcons } from "./project-icon";
-import { ListRow, PageScroll, PullDown, colors, styles } from "./ui";
+import { ListRow, PageScroll, PullDown, useStyles } from "./ui";
+import { useTheme, type Palette } from "./theme";
 
 const statusLabel = (state: string, message?: string) =>
   state === "signed-out"
@@ -18,7 +19,7 @@ const statusLabel = (state: string, message?: string) =>
         ? "Not checked"
         : message || "Account unavailable";
 
-const divider = { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line };
+const dividerFor = (colors: Palette) => ({ borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.line });
 
 export function ProjectAccountsSection() {
   const session = useSession();
@@ -27,6 +28,7 @@ export function ProjectAccountsSection() {
 
 // The same choice inside a Project's own settings, fixed to that Project.
 export function ProjectAccountsGroup({ path }: { path: string }) {
+  const styles = useStyles();
   const session = useSession();
   if (!session.client) return null;
   return (
@@ -41,6 +43,8 @@ export function ProjectAccountsGroup({ path }: { path: string }) {
 }
 
 function Footnote() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <Text style={[styles.caption, { lineHeight: 17 }]}>
       Running turns keep their original account. The next turn uses the one chosen here.{" "}
@@ -54,6 +58,8 @@ function Footnote() {
 /* One row per provider. The row shows the account the next turn uses;
  * a second line appears only when that account needs attention. */
 function ProjectAccountRows({ scopeKey }: { scopeKey: string }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const client = session.client;
   const [snapshot, setSnapshot] = useState<ProjectAccountsSnapshot | null>(null);
@@ -159,7 +165,7 @@ function ProjectAccountRows({ scopeKey }: { scopeKey: string }) {
         ? statusLabel(effective.state, effective.message)
         : "";
     return (
-      <View key={group.provider} style={[{ paddingVertical: 10, gap: 6 }, index > 0 && divider]}>
+      <View key={group.provider} style={[{ paddingVertical: 10, gap: 6 }, index > 0 && dividerFor(colors)]}>
         <PullDown
           label={`${name} account`}
           sections={[
@@ -233,6 +239,8 @@ function ProjectAccountRows({ scopeKey }: { scopeKey: string }) {
 }
 
 function ProjectAccountsForComputer() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const client = session.client;
   const [scopes, setScopes] = useState<ProjectAccountScope[]>([]);
@@ -302,7 +310,7 @@ function ProjectAccountsForComputer() {
             ))}
           </PageScroll>
         ) : null}
-        <View style={divider}>
+        <View style={dividerFor(colors)}>
           {error ? (
             <View style={{ paddingVertical: 8 }}>
               <Text accessibilityRole="alert" style={[styles.text, { color: colors.red }]}>

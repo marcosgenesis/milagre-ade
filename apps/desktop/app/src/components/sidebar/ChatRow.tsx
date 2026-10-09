@@ -1,4 +1,7 @@
 import { ChatTitle } from "./ChatTitle";
+import { issueChipLabel, LINK_PR_HINT, type LinearIssue } from "@milagre/shared/linear";
+import { LinearLogo } from "../ProviderLogo";
+import { LinearIssuePicker } from "../LinearIssuePicker";
 import { SpinnerRing } from "../primitives/SpinnerRing";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -13,6 +16,7 @@ import {
   FileEditIcon,
   Folder01Icon,
   FolderOpenIcon,
+  LaptopIcon,
   GitBranchIcon,
   GitMergeIcon,
   GitPullRequestIcon,
@@ -34,7 +38,7 @@ import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
 import { rowPullRequests } from "@/lib/chat-pull-requests";
 import { useEditors } from "@/lib/editors";
 import type { AgentPort, DiffStat, PullRequest } from "@/model";
-import { portUrl } from "@/lib/ports";
+import { portComputer, portUrl } from "@/lib/ports";
 import { BLOCKERS, pullRequestBlockers, pullRequestPresentation } from "@/lib/pr-blockers";
 import { ScrollArea } from "../primitives/ScrollArea";
 import { useDismiss } from "../../lib/use-dismiss";
@@ -57,11 +61,20 @@ type ChatDetails = {
   diff?: DiffStat;
   /** PRs the chat created or merged, then its worktree branch's PR, in the order they were made. */
   pullRequests?: PullRequest[];
+  /** The Linear issue the chat's Worktree was started from or names. */
+  linearIssue?: LinearIssue;
+  /** The key the chat's Worktree is stored as linked to (Worktree.linearIssue). Only while Linear is on. */
+  linearKey?: string;
+  /** The chat has its own Worktree that another chat doesn't share, so "Link issue…" is offered. Only while Linear is on. */
+  linkable?: boolean;
   /** The chat's last turn failed. */
   failed?: boolean;
   /** Ports the chat's commands listen on. */
   ports?: AgentPort[];
 };
+
+/** The computer a row's chat lives on, shown on its second line once there are two or more computers. */
+export type RowComputer = { name: string; offline: boolean };
 
 export type SidebarRecent = {
   id: string;
@@ -87,11 +100,17 @@ export type ChatRowActions = {
   onPin?: (id: string, order?: number | null) => void;
   onReveal?: (id: string) => void;
   onOpenInEditor?: (id: string) => void;
+  /** The chat is on another Mac: the menu leaves out what only acts on this one (Finder, the editor). */
+  remote?: boolean;
   /** Opens the chat with its "Commit and open PR" dialog. */
   onCommit?: (id: string) => void;
   /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
   onArchiveCheck?: (id: string) => Promise<ArchivePlan>;
   onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => Promise<unknown> | void;
+  /** Links the chat's Worktree to a Linear issue by key. */
+  onLinkIssue?: (id: string, key: string) => void;
+  /** Removes the Worktree's stored Linear issue link. */
+  onUnlinkIssue?: (id: string) => void;
 };
 
 /** What the confirm step offers when nothing is known about the worktree: only hide the chat. */
@@ -113,7 +132,16 @@ const ROW_PR_LIMIT = 2;
 const HOVER_CARD_WIDTH = 256;
 const MENU_WIDTH = 240;
 
-type MenuEntry = { key: string; label: string; icon: HugeIconData; onSelect: () => void; disabled?: boolean; danger?: boolean; archiveChoice?: boolean };
+type MenuEntry = {
+  key: string;
+  label: string;
+  icon?: HugeIconData;
+  /** Drawn instead of `icon`, e.g. a brand mark. */ leading?: ReactNode;
+  onSelect: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  archiveChoice?: boolean;
+};
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
 
@@ -171,6 +199,8 @@ export const ChatRow = memo(function ChatRow({
   onPick,
   actions,
   shortcutHint,
+  computer,
+  dimOffline = false,
   dragging = false,
 }: {
   item: SidebarRecent;
@@ -179,6 +209,9 @@ export const ChatRow = memo(function ChatRow({
   onPick: (item: SidebarRecent) => void;
   actions: ChatRowActions;
   shortcutHint?: string;
+  computer?: RowComputer;
+  /** Dim the row itself when its computer is offline; false inside a section that is already dimmed. */
+  dimOffline?: boolean;
   /** The row is being dragged to a new place. */
   dragging?: boolean;
 }) {
@@ -186,14 +219,22 @@ export const ChatRow = memo(function ChatRow({
   const archivePending = useRef(false);
   const mark = item.mark ?? "idle";
   const pullRequests = !collapsed ? rowPullRequests(item.details?.pullRequests ?? []) : [];
+  const linearIssue = !collapsed ? item.details?.linearIssue : undefined;
   const hasPullRequests = pullRequests.length > 0;
+  // The chip row shows for a Linear issue alone, too.
+  const hasChips = hasPullRequests || linearIssue !== undefined;
   const shownPullRequests = pullRequests.slice(0, ROW_PR_LIMIT);
   const hiddenPullRequests = pullRequests.length - shownPullRequests.length;
+  const twoLines = hasChips || item.worktreeCount !== undefined || Boolean(computer);
+  // This Mac alone keeps the single-Project placement; the computer line is what changes it.
+  const prLines = hasChips || Boolean(computer);
   const rowRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<number | null>(null);
   const [card, setCard] = useState<{ top: number; left: number; flip: boolean } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // The issue picker opened from the menu's "Link issue…", at the menu's place.
+  const [linking, setLinking] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
 
   const clearHover = () => {
@@ -238,7 +279,7 @@ export const ChatRow = memo(function ChatRow({
       <div
         ref={rowRef}
         data-chat-id={item.id}
-        className={`group/row relative ${dragging ? "opacity-50" : ""}`}
+        className={`group/row relative ${dragging ? "opacity-50" : ""} ${computer?.offline && dimOffline ? "opacity-50" : ""}`}
         onPointerEnter={showCardSoon}
         onPointerLeave={hideCardSoon}
         onPointerDown={hideCard}
@@ -263,44 +304,58 @@ export const ChatRow = memo(function ChatRow({
             data-row
             type="button"
             onClick={() => onPick(item)}
+            disabled={archiving}
             aria-busy={archiving || undefined}
             aria-label={archiving ? `Archiving ${item.label}` : undefined}
             aria-current={active ? "page" : undefined}
-            className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
-              active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""
-            }`}
+            className={`sidebar-row relative z-10 mx-2 flex ${twoLines ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
+              active ? "bg-hover-2" : "hover:bg-hover-2"
+            } ${archiving ? "opacity-30" : ""}`}
           >
             <span className="sidebar-chat-initials relative size-6 shrink-0 items-center justify-center rounded-[6px] bg-field text-[10px] font-semibold text-ink-2">
               {recentInitials(item.label)}
-              {archiving || mark === "running" ? (
+              {mark === "running" ? (
                 <span aria-hidden className="absolute -right-1 -top-1 flex rounded-full bg-surface p-px">
-                  <SpinnerRing size={10} stroke={1.75} color={mark === "running" ? "var(--accent)" : undefined} />
+                  <SpinnerRing size={10} stroke={1.75} color="var(--accent)" />
                 </span>
               ) : (
                 mark !== "idle" && <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-surface" />
               )}
             </span>
-            <ChatMarkDot mark={mark} topAligned={hasPullRequests || item.worktreeCount !== undefined} />
+            <ChatMarkDot mark={mark} topAligned={twoLines} />
             <span
-              className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasPullRequests ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
+              className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${prLines ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
                 item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
               }`}
             >
-              {archiving ? (
-                <span role="status" className="inline-flex items-center gap-2">
-                  <SpinnerRing size={12} />
-                  Archiving...
-                </span>
-              ) : (
-                <ChatTitle label={item.label} />
+              <ChatTitle label={item.label} />
+              {item.worktreeCount !== undefined && !computer && (
+                <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>
               )}
-              {item.worktreeCount !== undefined && <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>}
             </span>
           </button>
         )}
 
-        {hasPullRequests && !renaming && (
-          <div data-chat-prs className="sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2">
+        {(hasChips || computer) && !renaming && (
+          <div
+            data-chat-prs
+            className={`sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2 ${archiving ? "opacity-30" : ""}`}
+          >
+            {computer && (
+              <span data-chat-computer className="flex min-w-0 shrink items-center gap-1 truncate text-[12px] leading-4 text-ink-3">
+                <HugeiconsIcon icon={LaptopIcon} size={12} strokeWidth={2} color="currentColor" className="shrink-0" />
+                {computer.offline ? `${computer.name}, offline` : computer.name}
+              </span>
+            )}
+            {computer && item.worktreeCount !== undefined && (
+              <span className="shrink-0 text-[12px] leading-4 text-ink-3">· {item.worktreeCount} Worktrees</span>
+            )}
+            {computer && hasChips && (
+              <span aria-hidden className="text-[12px] leading-4 text-ink-3 opacity-60">
+                ·
+              </span>
+            )}
+            {linearIssue && <LinearIssueChip issue={linearIssue} />}
             {shownPullRequests.map((pr) => (
               <PullRequestChip key={pr.url} pr={pr} labelled={pullRequests.length === 1} />
             ))}
@@ -323,6 +378,15 @@ export const ChatRow = memo(function ChatRow({
             className={`pointer-events-none absolute top-1.5 z-30 ${collapsed ? "right-1" : "right-3"}`}
           />
         )}
+        {archiving && (
+          // Over the whole row, its pull requests included: the row stays in place, faded and untouchable, until the archive ends.
+          <div role="status" className="absolute inset-y-0 left-2 right-2 z-40 flex items-center justify-center">
+            <span className="flex h-6 items-center gap-1.5 rounded-full bg-surface px-2.5 text-[12px] font-medium text-ink shadow-card">
+              <SpinnerRing size={12} />
+              {!collapsed && "Archiving..."}
+            </span>
+          </div>
+        )}
         {!item.pending && !collapsed && !renaming && !shortcutHint && (
           <button
             ref={triggerRef}
@@ -336,7 +400,7 @@ export const ChatRow = memo(function ChatRow({
               if (menu) setMenu(null);
               else openMenu(rect.left, rect.bottom + 4);
             }}
-            className={`absolute right-3 ${hasPullRequests ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
+            className={`absolute right-3 ${prLines ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
               menu ? "bg-hover text-ink opacity-100" : "opacity-0"
             }`}
           >
@@ -351,6 +415,7 @@ export const ChatRow = memo(function ChatRow({
             trigger={triggerRef}
             onClose={() => setMenu(null)}
             onRename={() => setRenaming(true)}
+            onLink={() => setLinking(menu)}
             actions={{
               ...actions,
               onArchive: actions.onArchive
@@ -367,6 +432,16 @@ export const ChatRow = memo(function ChatRow({
                   }
                 : undefined,
             }}
+          />
+        )}
+        {linking && (
+          <LinkIssuePopover
+            position={linking}
+            onPick={(issue) => {
+              setLinking(null);
+              actions.onLinkIssue?.(item.id, issue.key);
+            }}
+            onClose={() => setLinking(null)}
           />
         )}
       </div>
@@ -395,6 +470,25 @@ const isReadyToMerge = (pr: PullRequest) => pullRequestPresentation(pr).ready;
 const isChecking = (pr: PullRequest) => pullRequestPresentation(pr).checking;
 
 /** One PR under the chat's title. Only a chat's single PR has room to spell out its blocker or "Ready". */
+function LinearIssueChip({ issue }: { issue: LinearIssue }) {
+  return (
+    <button
+      type="button"
+      data-linear-issue-chip
+      title={issue.title}
+      aria-label={`Open Linear issue ${issue.key}: ${issue.title}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        window.open(issue.url, "_blank", "noopener,noreferrer");
+      }}
+      className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-sm text-[12px] leading-4 tabular-nums text-ink-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      <LinearLogo size={11} />
+      <span className="truncate">{issueChipLabel(issue)}</span>
+    </button>
+  );
+}
+
 function PullRequestChip({ pr, labelled }: { pr: PullRequest; labelled: boolean }) {
   const blocker = pullRequestBlockers(pr)[0];
   const readyToMerge = isReadyToMerge(pr);
@@ -565,20 +659,29 @@ function ChatHoverCard({
               <HugeIcon icon={EthernetPortIcon} size={14} />
             </span>
             <span className="flex min-w-0 flex-wrap gap-1">
-              {details.ports.map((port) => (
-                <a
-                  key={port.port}
-                  href={portUrl(port)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  data-chat-card-port
-                  title={`${port.command} · open ${portUrl(port)}`}
-                  onClick={onOpenLink}
-                  className="rounded-[6px] bg-hover px-1.5 py-0.5 font-mono text-[11.5px] tabular-nums text-ink-2 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-                >
-                  :{port.port}
-                </a>
-              ))}
+              {details.ports.map((port) => {
+                const computer = portComputer(port);
+                const chip = "rounded-[6px] bg-hover px-1.5 py-0.5 font-mono text-[11.5px] tabular-nums text-ink-2";
+                // Another computer's port is not at this Mac's localhost: shown, not linked.
+                return computer ? (
+                  <span key={port.port} data-chat-card-port data-port-remote title={`${port.command} · listening on ${computer}`} className={chip}>
+                    :{port.port} <span className="font-sans text-ink-3">on {computer}</span>
+                  </span>
+                ) : (
+                  <a
+                    key={port.port}
+                    href={portUrl(port)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-chat-card-port
+                    title={`${port.command} · open ${portUrl(port)}`}
+                    onClick={onOpenLink}
+                    className={`${chip} no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
+                  >
+                    :{port.port}
+                  </a>
+                );
+              })}
             </span>
           </div>
         ) : null}
@@ -597,6 +700,27 @@ function ChatHoverCard({
         {details.branch && (
           <CardLine icon={<HugeIcon icon={GitBranchIcon} size={14} />}>
             <span className="truncate">{details.branch}</span>
+          </CardLine>
+        )}
+        {details.linearIssue && (
+          <CardLine icon={<LinearLogo size={13} />}>
+            <a
+              href={details.linearIssue.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-chat-card-linear-issue
+              onClick={onOpenLink}
+              className="min-w-0 truncate text-ink-2 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {issueChipLabel(details.linearIssue)} · {details.linearIssue.title}
+            </a>
+          </CardLine>
+        )}
+        {details.linearKey && !(details.branch ?? "").toLowerCase().includes(details.linearKey.toLowerCase()) && (
+          <CardLine icon={<LinearLogo size={13} />}>
+            <span data-chat-card-link-hint className="min-w-0 whitespace-normal text-[12px] leading-snug text-ink-3">
+              {LINK_PR_HINT(details.linearKey)}
+            </span>
           </CardLine>
         )}
         {details.path && (
@@ -629,12 +753,40 @@ function CardLine({ icon, children }: { icon: ReactNode; children: ReactNode }) 
  * From the row's ⋮ button or a right-click. Archive hides the
  * chat for good (there is no archived list), so it asks twice.
  * ───────────────────────────────────────────────────────── */
+/** The issue list over the menu's place, for "Link issue…". Picking an issue hands its key up and closes. */
+function LinkIssuePopover({ position, onPick, onClose }: { position: { x: number; y: number }; onPick: (issue: LinearIssue) => void; onClose: () => void }) {
+  useDismiss(true, onClose, (target) => !!target.closest("[data-picker-panel]"));
+  const ref = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState(position.y);
+  // Opens above the menu's place when there isn't room below, and never above the window's top edge.
+  // Measured again as the issue list fills in, since its height isn't known on the first paint.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const place = () => {
+      const height = element.getBoundingClientRect().height;
+      setTop(position.y + height > window.innerHeight - 8 ? Math.max(8, position.y - height - 8) : position.y);
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [position.y]);
+  return createPortal(
+    <div ref={ref} data-linear-link-picker className="fixed z-[70]" style={{ top, left: Math.min(position.x, window.innerWidth - 420 - 8) }}>
+      <LinearIssuePicker className="w-[420px] max-w-[calc(100vw-2rem)]" title="Link a Linear issue" onPick={onPick} onClose={onClose} />
+    </div>,
+    document.body,
+  );
+}
+
 function ChatMenu({
   item,
   position,
   trigger,
   onClose,
   onRename,
+  onLink,
   actions,
 }: {
   item: SidebarRecent;
@@ -643,6 +795,7 @@ function ChatMenu({
   trigger: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onRename: () => void;
+  onLink: () => void;
   actions: ChatRowActions;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -727,6 +880,20 @@ function ChatMenu({
     { key: "copy-path", label: "Copy path", icon: Copy01Icon, onSelect: copy(details.path ?? ""), disabled: !details.path },
     { key: "copy-branch", label: "Copy branch name", icon: GitBranchIcon, onSelect: copy(details.branch ?? ""), disabled: !details.branch },
     { key: "rename", label: "Rename chat", icon: PencilEdit02Icon, onSelect: run(onRename), disabled: !actions.onRename },
+    // Unlink and Link are offered on the same Worktrees (own, not shared, not the main checkout), as on the phone.
+    ...(details.linkable
+      ? details.linearKey
+        ? [
+            {
+              key: "unlink-issue",
+              label: "Unlink issue",
+              leading: <LinearLogo size={14} />,
+              onSelect: run(() => actions.onUnlinkIssue?.(item.id)),
+              disabled: !actions.onUnlinkIssue,
+            },
+          ]
+        : [{ key: "link-issue", label: "Link issue…", leading: <LinearLogo size={14} />, onSelect: run(onLink), disabled: !actions.onLinkIssue }]
+      : []),
     item.unread
       ? { key: "read", label: "Mark as read", icon: Tick02Icon, onSelect: run(() => actions.onMarkUnread?.(item.id, false)), disabled: !actions.onMarkUnread }
       : {
@@ -761,9 +928,9 @@ function ChatMenu({
     item.pinned
       ? { key: "unpin", label: "Unpin", icon: PinOffIcon, onSelect: run(() => actions.onPin?.(item.id, null)), disabled: !actions.onPin }
       : { key: "pin", label: "Pin", icon: PinIcon, onSelect: run(() => actions.onPin?.(item.id)), disabled: !actions.onPin },
-    "divider",
+    "divider" as const,
     ...archiveItems,
-  ];
+  ].filter((entry) => entry === "divider" || !actions.remote || (entry.key !== "reveal" && entry.key !== "editor"));
 
   const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];
@@ -807,7 +974,7 @@ function ChatMenu({
               className={`relative z-10 flex w-full items-center gap-2 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40 ${entry.archiveChoice ? "min-h-8 py-1.5" : "h-8"} ${entry.danger ? "text-red" : "text-ink"}`}
             >
               <span className={`flex size-5 shrink-0 items-center justify-center ${entry.danger ? "text-red" : "text-ink-2"}`}>
-                <HugeIcon icon={entry.icon} size={16} />
+                {entry.leading ?? (entry.icon && <HugeIcon icon={entry.icon} size={16} />)}
               </span>
               <span className={`min-w-0 flex-1 text-[13px] ${entry.archiveChoice ? "leading-snug" : "truncate"}`}>{entry.label}</span>
             </button>

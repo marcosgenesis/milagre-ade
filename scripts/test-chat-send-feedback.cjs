@@ -328,6 +328,23 @@ async function browserChecks() {
     await delay(100);
     assert.equal(await rows("Reply before state"), 1);
     assert.equal(await occurrences("Reply before state"), 1, "the saved message replaces the preview");
+    // A host that keeps messages by Chat: the newest turns come as a page, and Show earlier reads the next one.
+    await window.loadURL(process.argv[2] + "?long=1&lean=1");
+    await waitFor(`document.querySelectorAll('[data-slot="message"]').length === 40`);
+    assert.equal(await evaluate("window.calls.pages"), 1, "the open Chat reads one page");
+    await evaluate(
+      `(() => { const viewport = document.querySelector('[aria-label="Conversation"]'); viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1000 })); viewport.scrollTop = 0; })()`,
+    );
+    await delay(100);
+    assert.equal(await evaluate(`[...document.querySelectorAll("button")].some((button) => button.textContent === "Show earlier messages (260)")`), true);
+    await evaluate(
+      `window.historyAnchor = document.querySelector('[data-slot="message"]'); window.historyTop = window.historyAnchor.getBoundingClientRect().top`,
+    );
+    await clickText("Show earlier messages");
+    await waitFor(`document.querySelectorAll('[data-slot="message"]').length === 80`);
+    assert.equal(await evaluate("window.calls.pages"), 2, "Show earlier reads the next page from the host");
+    assert.equal(await evaluate("window.historyAnchor.isConnected"), true, "the read page keeps mounted messages");
+    await screenshot("lean-history");
     for (const busy of [false, true]) {
       await window.loadURL(process.argv[2] + "?long=1");
       await waitFor(`!!document.querySelector('[data-slot="message"]')`);
@@ -354,7 +371,17 @@ async function browserChecks() {
         assert.equal(await evaluate("window.renderedMessageIds.filter(id => id > 0).length"), 0, "streaming leaves the loaded saved message cards memoized");
       }
       await evaluate(`window.emitAgent(99, { type: 'turn-started' }); window.emitAgent(99, { type: 'text-delta', text: 'Other chat' })`);
-      await delay(100);
+      // The open chat's own streamed text schedules a trailing 250 ms rail refresh; let it land before counting.
+      let railStableSince = Date.now();
+      let railSeen = await evaluate("window.railItemsRendered");
+      while (Date.now() - railStableSince < 500) {
+        await delay(50);
+        const now = await evaluate("window.railItemsRendered");
+        if (now !== railSeen) {
+          railSeen = now;
+          railStableSince = Date.now();
+        }
+      }
       await evaluate("window.transcriptRenders = 0; window.railItemsRendered = 0");
       for (let update = 0; update < 5; update++) {
         await evaluate(`window.emitAgent(99, { type: 'text-delta', text: ' background output' })`);

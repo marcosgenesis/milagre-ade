@@ -35,7 +35,7 @@ function parseTarget(url) {
 }
 
 /**
- * Phone access on the local network: the relay's phone protocol, end to end encrypted, over a socket the phone
+ * Phone and paired-desktop access on the local network: the relay's phone protocol, end to end encrypted, over a socket the phone
  * dials directly. `/v1/hello` lets a phone check, without credentials, that this address is still this Mac.
  * Pairing never happens here: a phone must already be known (paired over the relay, or registered through
  * `phone:routes` on a route it trusts).
@@ -53,8 +53,9 @@ function startLanHost({
   helloMs = HELLO_MS,
   pingMs = PING_MS,
   idleMs = IDLE_MS,
+  openPeer,
 }) {
-  const channels = createPhoneChannels({ identity, phones, token, bridgeUrl, canPair: () => false, WebSocket, fetch, random, helloMs });
+  const channels = createPhoneChannels({ identity, phones, token, bridgeUrl, canPair: () => false, WebSocket, fetch, random, helloMs, openPeer });
   const sockets = new Map(); // conn id -> the phone's socket
   const perAddress = new Map(); // remote address -> open sockets
   const alive = new WeakSet(); // sockets that answered since the last ping
@@ -74,6 +75,8 @@ function startLanHost({
         ws.close(1000);
       }
     },
+    /** What this device's socket holds unsent: bounds a desktop that stopped reading (peer-channel.cjs). */
+    queued: (conn) => sockets.get(conn)?.bufferedAmount ?? 0,
   };
   const hello = JSON.stringify({ v: 1, hostId: identity.hostId });
   const server = http.createServer((req, res) => {
@@ -156,6 +159,8 @@ function startLanHost({
       pinger.unref();
       resolve({
         port: server.address().port,
+        connectedKeys: () => channels.keysOf(session),
+        drop: (key) => channels.dropKey(session, key),
         async close() {
           clearInterval(pinger);
           for (const conn of session.conns.keys()) channels.dropConn(session, conn, false);

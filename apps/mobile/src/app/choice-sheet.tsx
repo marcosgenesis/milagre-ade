@@ -5,15 +5,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GitBranchIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { currentChoice } from "../choice-store";
 import { Icon } from "../icons";
-import { colors, styles } from "../ui";
-import { fonts } from "../theme";
+import { useStyles } from "../ui";
+import { fonts, useTheme } from "../theme";
 
 function ChoiceSeparator() {
+  const { colors } = useTheme();
   return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.line, marginLeft: 40 }} />;
 }
 
 /** Long choice lists use a native sheet with the system search toolbar. */
 export default function ChoiceSheet() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [entry] = useState(currentChoice);
   const [query, setQuery] = useState("");
   const chosen = useRef<string | null>(null);
@@ -75,7 +78,7 @@ export default function ChoiceSheet() {
               opacity: item.disabled ? 0.4 : 1,
             })}
           >
-            <Icon icon={GitBranchIcon} tone={item.checked ? "accent" : "ink3"} size={18} />
+            {entry.leading ?? <Icon icon={entry.icon ?? GitBranchIcon} tone={item.checked ? "accent" : "ink3"} size={18} />}
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={{ color: colors.ink, fontFamily: fonts.mono, fontSize: 14, lineHeight: 21 }}>{item.title}</Text>
               {item.subtitle && (

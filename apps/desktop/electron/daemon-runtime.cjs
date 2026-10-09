@@ -12,11 +12,26 @@ const MAX_HELD = 10_000;
 // delay doubling from reconnectMs each time. Past that the window says it couldn't, and reconnects keep only connecting.
 const START_ATTEMPTS = 3;
 const RESTARTED_HOST = "Milagre's background host stopped unexpectedly, so it was started again.";
+// A paired computer's snapshot may announce at most this many pages and run to this many characters in all: the same
+// limits peer-client.cjs holds its paged replies to (not required from there, which would pull the whole peer client
+// into this file's type check).
+const MAX_PAGES = 1024;
+const MAX_PAGED_CHARS = 128 * 1024 * 1024;
 // A host that has them sends what changed in a state event, not the whole state; the window applies it (state-events.ts).
 const STATE_PATCHES = "state-patches-v1";
-/** Asks a host that can for state patches; an older one keeps sending whole states. */
+// A host that keeps messages by Chat sends states without them; the window reads each Chat's own (chat-messages.ts).
+const CHAT_PAGES = "chat-pages-v1";
+// A host that can sends each subagent with only the end of its transcript; the panel reads a whole one (subagent-transcripts.ts).
+const SUBAGENT_TAILS = "subagent-tails-v1";
+/**
+ * Asks a host that can for state patches, and for states without messages and with transcript tails when it can; an
+ * older one keeps sending whole states.
+ */
 async function takeStatePatches(connection, status) {
-  if (status.capabilities?.includes(STATE_PATCHES)) await connection.call("daemon:state-patches");
+  const capabilities = status.capabilities ?? [];
+  if (capabilities.includes(CHAT_PAGES))
+    await connection.call("daemon:state-patches", [{ messages: false, ...(capabilities.includes(SUBAGENT_TAILS) ? { transcripts: false } : {}) }]);
+  else if (status.capabilities?.includes(STATE_PATCHES)) await connection.call("daemon:state-patches");
 }
 
 // The Project an event belongs to, when it names one.
@@ -31,14 +46,25 @@ const carriesState = (payload) =>
   Boolean(payload && typeof payload === "object" && (payload.stateTooLarge || (payload.state && typeof payload.state === "object")));
 
 async function connectDesktopRuntime(options) {
-  const { emit = () => {}, dataDir, reconnectMs = 1000 } = options;
+  const { emit = () => {}, dataDir, reconnectMs = 1000, maxPagedChars = MAX_PAGED_CHARS } = options;
   // The start every launch and restartHost use; tests stand in for it.
   /** @type {typeof ensureDaemon} */
   const startHost = options.startHost ?? ensureDaemon;
+  // A paired computer's host (computers.cjs) is only reached, through `connect`: this Mac never starts, flushes, stops
+  // or restarts it. Without `connect` the runtime drives this Mac's own host.
+  const remote = typeof options.connect === "function";
+  const first = remote ? await options.connect() : await startHost(options);
   /** @type {import('@milagre/daemon/bootstrap').DaemonClient | null} */
-  let client = await startHost(options);
-  const status = client.status ?? (await client.call("daemon:status"));
-  await takeStatePatches(client, status);
+  let client = first;
+  let status;
+  try {
+    status = first.status ?? (await first.call("daemon:status"));
+    await takeStatePatches(first, status);
+  } catch (error) {
+    // No runtime is made, so nothing else would ever close this connection.
+    first.close();
+    throw error;
+  }
   const methods = [...status.methods];
   let hostOutdated = !status.capabilities?.includes(RESULT_PAGES);
   let closed = false;
@@ -187,7 +213,8 @@ async function connectDesktopRuntime(options) {
     let connection;
     let started = false;
     try {
-      if (mayStart()) {
+      if (remote) connection = await options.connect();
+      else if (mayStart()) {
         try {
           connection = await compatibleClient(dataDir);
         } catch (error) {
@@ -235,9 +262,19 @@ async function connectDesktopRuntime(options) {
       await connection.call("daemon:focus", [{ focused }]);
       capturingSnapshot = true;
       const manifest = await connection.call("daemon:snapshot", [{ paged: true }]);
+      // This Mac's own host is trusted to size its pages; a paired computer's is not (peer-client.cjs holds its replies to the same limits).
+      if (remote && (!Number.isSafeInteger(manifest.pageCount) || manifest.pageCount < 1 || manifest.pageCount > MAX_PAGES))
+        throw new Error("The computer sent an invalid snapshot");
       const pages = [];
+      let chars = 0;
       for (let index = 0; index < manifest.pageCount; index++) {
-        pages.push(await connection.call("daemon:snapshot-page", [manifest.snapshotId, index]));
+        const page = await connection.call("daemon:snapshot-page", [manifest.snapshotId, index]);
+        if (remote) {
+          if (typeof page !== "string") throw new Error("The computer sent an invalid snapshot");
+          chars += page.length;
+          if (chars > maxPagedChars) throw new Error("The computer's snapshot is too large");
+        }
+        pages.push(page);
       }
       const snapshot = JSON.parse(pages.join(""));
       emit("runtime:snapshot", snapshot);
@@ -321,6 +358,7 @@ async function connectDesktopRuntime(options) {
     },
     /** Replaces a running host with this desktop's own (an older one can't load large Projects). The window reconnects to it. */
     async restartHost() {
+      if (remote) throw new Error("Only this Mac's own host restarts from here.");
       if (closed || restarting) return;
       if (!client || recovering) throw new Error("Reconnect to the host before restarting it.");
       const connection = client;
@@ -344,6 +382,7 @@ async function connectDesktopRuntime(options) {
     },
     async close({ stopHost: stop = false } = {}) {
       if (closed) return;
+      if (stop && remote) throw new Error("Only this Mac's own host stops from here.");
       if (stop) {
         if (!client || recovering) throw new Error("Reconnect to the host before installing an update.");
         const connection = client;
@@ -356,7 +395,7 @@ async function connectDesktopRuntime(options) {
           if (client === connection) hostStopped = false;
           throw error;
         }
-      } else if (client && !recovering) await client.call("daemon:flush");
+      } else if (client && !recovering && !remote) await client.call("daemon:flush");
       closed = true;
       clearTimeout(timer);
       client?.close();

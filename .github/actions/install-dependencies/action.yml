@@ -1,0 +1,49 @@
+name: Install dependencies
+description: Set up Node.js and restore node_modules for this lockfile from the cache, running npm ci only on a miss.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: 24
+    # Every install hook (Electron's binary, node-pty's helper, the mobile patches) writes inside node_modules,
+    # so a cached tree for the same lockfile is what npm ci would produce. A miss installs and saves it.
+    - id: cache
+      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          packages/*/node_modules
+        # The mobile postinstall applies apps/mobile/patches inside node_modules, so a patch change needs a new tree.
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('package-lock.json', 'apps/mobile/patches/**') }}
+    # On a miss, npm ci spent most of a minute downloading. The download cache from the closest earlier lockfile
+    # holds nearly every tarball, so only the changed packages come from the registry. npm checks each tarball
+    # against the lockfile's integrity hash, so an older cache can't put the wrong bytes in the tree.
+    - id: downloads
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: |
+          ~/.npm
+          ~/.cache/electron
+        key: npm-downloads-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+        restore-keys: npm-downloads-${{ runner.os }}-
+    # Nothing installs, and no install script runs, before the lockfile is checked.
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: npx --yes lockfile-lint@5.0.1 --path package-lock.json --type npm --allowed-hosts npm --validate-https --validate-integrity
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci --prefer-offline --no-audit --no-fund
+    # Electron fetches its binary on first use; fetch it now so the saved tree has it and warm runs skip the download.
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: node node_modules/electron/install.js
+    - if: steps.cache.outputs.cache-hit != 'true' && steps.downloads.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: |
+          ~/.npm
+          ~/.cache/electron
+        key: npm-downloads-${{ runner.os }}-${{ hashFiles('package-lock.json') }}

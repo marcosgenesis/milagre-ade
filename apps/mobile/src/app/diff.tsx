@@ -7,13 +7,10 @@ import { memberForDiff } from "../chat-scope";
 import { useRpc } from "../use-rpc";
 import { LARGE_DIFF_LINES, diffRows, wordSegments, type DiffRow } from "../diff-rows";
 import { Counts, StatusBox } from "../diff-ui";
-import { ErrorNotice, PillButton, colors, styles } from "../ui";
-import { fonts } from "../theme";
+import { ErrorNotice, PillButton, useStyles } from "../ui";
+import { fonts, useTheme } from "../theme";
 
-const TINT = { add: colors.diffAdd, remove: colors.diffRemove, context: "transparent" } as const;
-const WORD = { add: colors.diffAddWord, remove: colors.diffRemoveWord, context: "transparent" } as const;
 const MARKER = { add: "+", remove: "−", context: "" } as const;
-const MARKER_COLOR = { add: colors.green, remove: colors.red, context: colors.ink3 } as const;
 const code = { fontFamily: fonts.mono, fontSize: 12, lineHeight: 18 } as const;
 
 export type DiffTarget = {
@@ -31,6 +28,7 @@ export type DiffTarget = {
 };
 
 export default function Diff() {
+  const styles = useStyles();
   const params = useLocalSearchParams<DiffTarget>();
   const session = useSession();
   if (!session.client || !memberForDiff(session.snapshot?.project, Number(params.worktreeId), params.memberId)) return <Redirect href="/" />;
@@ -44,6 +42,7 @@ export default function Diff() {
 
 /** Desktop's DiffFile, unified: hunk headers, one line-number gutter, +/− markers, row tints and changed-word highlights. */
 export function DiffView({ target }: { target: DiffTarget }) {
+  const styles = useStyles();
   const session = useSession();
   const worktree = memberForDiff(session.snapshot?.project, Number(target.worktreeId), target.memberId);
   const { path, oldPath, untracked, mode, base } = target;
@@ -110,6 +109,10 @@ export function DiffView({ target }: { target: DiffTarget }) {
 }
 
 const Row = memo(function Row({ row }: { row: DiffRow }) {
+  const { colors } = useTheme();
+  const TINT = { add: colors.diffAdd, remove: colors.diffRemove, context: "transparent" } as const;
+  const WORD = { add: colors.diffAddWord, remove: colors.diffRemoveWord, context: "transparent" } as const;
+  const MARKER_COLOR = { add: colors.green, remove: colors.red, context: colors.ink3 } as const;
   if (row.type === "hunk")
     return (
       <Text numberOfLines={1} style={[code, { fontSize: 11, color: colors.ink3, backgroundColor: colors.inset, paddingHorizontal: 12, paddingVertical: 3 }]}>

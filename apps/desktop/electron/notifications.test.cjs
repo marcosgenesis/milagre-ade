@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { EventEmitter } = require("node:events");
-const { AttentionNotifier } = require("./notifications.cjs");
+const { AttentionNotifier, labelFor } = require("./notifications.cjs");
 
 function setup({ focused = false } = {}) {
   const shown = [];
@@ -152,17 +152,75 @@ test("Dock counts distinct waiting or unread chats, survives project changes, an
   assert.equal(badge, "");
 });
 
-test("a first phone pairing is announced even while Milagre has focus, and its click opens Settings › Phone", () => {
+test("a first phone pairing is announced even while Milagre has focus, and its click opens Settings › Devices", () => {
   const { notifier, shown, opened } = setup({ focused: true });
-  assert.equal(notifier.notifyPhonePaired(), true);
+  assert.equal(notifier.notifyDevicePaired(), true);
   assert.equal(shown.length, 1);
   assert.equal(shown[0].visible, true);
   assert.equal(shown[0].options.title, "New phone paired");
-  assert.match(shown[0].options.body, /If it wasn't you, reset access in Settings → Phone/);
+  assert.match(shown[0].options.body, /If it wasn't you, remove it in Settings → Devices/);
   shown[0].emit("click");
   assert.deepEqual(opened, ["settings:phone"]);
   // A second pairing replaces the first notice.
-  notifier.notifyPhonePaired();
+  notifier.notifyDevicePaired();
   assert.equal(shown[0].closed, true);
   assert.equal(shown[1].visible, true);
+});
+
+test("a computer's first pairing says another Mac can now drive this one, and its click opens Settings › Devices", () => {
+  const { notifier, shown, opened } = setup();
+  assert.equal(notifier.notifyDevicePaired("computer"), true);
+  assert.equal(shown[0].options.title, "New computer paired");
+  assert.equal(shown[0].options.body, "Another Mac can now drive your agents on this Mac. If it wasn't you, remove it in Settings → Devices.");
+  shown[0].emit("click");
+  assert.deepEqual(opened, ["settings:phone"]);
+  // One pairing notice at a time, whatever paired.
+  notifier.notifyDevicePaired("phone");
+  assert.equal(shown[0].closed, true);
+  assert.equal(shown[1].options.title, "New phone paired");
+});
+
+test("a computer waiting for Allow is announced once while Milagre is in the background, and its click opens the window", () => {
+  const { notifier, shown, opened, state } = setup();
+  const studio = { key: "s".repeat(43), name: "studio", at: 1 };
+  assert.equal(notifier.notifyComputerWaiting([studio]), true);
+  assert.equal(shown[0].options.title, "studio wants to drive this Mac's chats");
+  assert.equal(shown[0].options.body, "Open Milagre to allow or deny it.");
+  shown[0].emit("click");
+  assert.deepEqual(opened, ["settings:phone"]);
+  // The same request again (another computer joined the list) says nothing more about it.
+  const lab = { key: "l".repeat(43), name: null, at: 2 };
+  assert.equal(notifier.notifyComputerWaiting([studio, lab]), true);
+  assert.equal(shown[1].options.title, "A computer wants to drive this Mac's chats");
+  assert.equal(shown[0].closed, true, "one notice at a time");
+  assert.equal(notifier.notifyComputerWaiting([studio, lab]), false);
+  // Answered: the notice goes.
+  assert.equal(notifier.notifyComputerWaiting([]), false);
+  assert.equal(shown[1].closed, true);
+  // With the window focused the prompt is on screen; no notification.
+  state.focused = true;
+  assert.equal(notifier.notifyComputerWaiting([{ key: "x".repeat(43), name: "x", at: 3 }]), false);
+});
+
+test("a remote chat's notification puts its computer before the subtitle", () => {
+  assert.equal(labelFor("Fix login", "studio"), "studio · Fix login");
+  assert.equal(labelFor(undefined, "studio"), "studio");
+  assert.equal(labelFor("Fix login", null), "Fix login");
+});
+
+test("forgetComputer closes what a removed computer waited on and clears the badge", () => {
+  const badges = [];
+  const { notifier, shown } = setup();
+  notifier.setBadge = (badge) => badges.push(badge);
+  const remote = "c1|/shop#2";
+  notifier.observe(remote, question);
+  notifier.observe("/mine#1", question);
+  notifier.notify({ ...notice, chatId: remote });
+  notifier.unread.add("c1|/shop#3");
+  notifier.updateBadge();
+  assert.equal(badges.at(-1), "3");
+  notifier.forgetComputer("c1");
+  assert.equal(shown[0].closed, true);
+  assert.equal(badges.at(-1), "1");
+  assert.equal(notifier.open.size, 1);
 });

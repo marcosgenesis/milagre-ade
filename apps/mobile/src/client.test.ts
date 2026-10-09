@@ -221,7 +221,7 @@ test("a refused relay pairing shows its own copy, and any other failure is a los
     fetch,
     30000,
     fakeRelay(() => {
-      throw new RelayTransportError("bad-token", "This phone was paired with an older code. Scan the new one in Settings → Phone.");
+      throw new RelayTransportError("bad-token", "This phone was paired with an older code. Scan the new one in Settings → Devices.");
     }).runtime,
   );
   await assert.rejects(refused.call("daemon:status"), /paired with an older code/);
@@ -601,4 +601,20 @@ test("a host that numbers snapshots sends the next one as a patch on the one the
   assert.equal(second.project.state.messages, first.project.state.messages, "what the patch leaves alone is the same object");
   assert.deepEqual(await client.snapshot("/p"), v2);
   assert.deepEqual(sent, ["none", "e:1", "e:2", "none"]);
+});
+
+test("the app asks for snapshots without messages and reads a Chat's as pages", async () => {
+  const sent: { url: string; pages?: string }[] = [];
+  const client = createClient({ address: "http://127.0.0.1:8787", token: "token" }, async (url, init) => {
+    // oxlint-disable-next-line no-unsafe-optional-chaining -- test stub; init is always passed by the code under test
+    sent.push({ url: String(url), pages: (init?.headers as Record<string, string>)["X-Milagre-Chat-Pages"] });
+    const result = String(url).includes("/chat-messages")
+      ? { messages: [], hasMore: false, total: 0 }
+      : { project: { path: "/p", state: {} }, runs: { runs: {} } };
+    return new Response(JSON.stringify({ v: 1, result }));
+  });
+  await client.snapshot("/p");
+  await client.chatMessages("/p", 7, { before: 40, turns: 5 });
+  assert.equal(sent[0].pages, "1");
+  assert.ok(sent[1].url.endsWith("/chat-messages?projectPath=%2Fp&chatId=7&before=40&turns=5"));
 });

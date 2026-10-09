@@ -15,6 +15,17 @@ const PHONE_TO_HOST = 0x01,
 const encoder = new TextEncoder(),
   decoder = new TextDecoder();
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const KINDS = new Set(["phone", "desktop"]);
+const MAX_NAME = 64;
+// Control characters and bidirectional overrides: a name must not hide or reorder the text around it in a list.
+const UNSAFE = /[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu;
+
+/** A device's name from its hello: unsafe characters removed, trimmed, at most 64 characters; null when there is none. */
+export function helloName(value) {
+  if (typeof value !== "string") return null;
+  const name = Array.from(value.replace(UNSAFE, "").trim()).slice(0, MAX_NAME).join("").trim();
+  return name || null;
+}
 
 export function b64url(bytes) {
   let out = "";
@@ -73,16 +84,20 @@ function channel(key, sendDirection) {
     return n;
   };
   const receiveDirection = sendDirection === PHONE_TO_HOST ? HOST_TO_PHONE : PHONE_TO_HOST;
+  /** Seals `plain`, the UTF-8 bytes of one JSON message. */
+  function sealEncoded(plain) {
+    sent += 1n;
+    const box = nacl.secretbox(plain, nonce(sendDirection, sent), key);
+    const frame = new Uint8Array(9 + box.length);
+    frame[0] = DATA;
+    new DataView(frame.buffer).setBigUint64(1, sent);
+    frame.set(box, 9);
+    return frame;
+  }
   return {
-    seal(value) {
-      sent += 1n;
-      const box = nacl.secretbox(json(value), nonce(sendDirection, sent), key);
-      const frame = new Uint8Array(9 + box.length);
-      frame[0] = DATA;
-      new DataView(frame.buffer).setBigUint64(1, sent);
-      frame.set(box, 9);
-      return frame;
-    },
+    seal: (value) => sealEncoded(json(value)),
+    // A daemon frame is serialised once for every client; sealing its bytes saves a second JSON pass per desktop.
+    sealEncoded,
     open(frame) {
       if (frame[0] !== DATA || frame.length < 9 + nacl.secretbox.overheadLength) throw new Error("Not a channel frame");
       const counter = new DataView(frame.buffer, frame.byteOffset).getBigUint64(1);
@@ -95,11 +110,15 @@ function channel(key, sendDirection) {
   };
 }
 
-export function phoneHello({ phone, host, token, random }) {
+/** `name` says what the device is called and `kind` what it is ("phone" when left out); Macs from before both ignore them. */
+export function phoneHello({ phone, host, token, random, name, kind }) {
   withRandom(random);
   const ephemeral = nacl.box.keyPair();
   const nonce = random(24);
-  const box = nacl.box(json({ token, eph: b64url(ephemeral.publicKey) }), nonce, host, phone.secretKey);
+  const inner = { token, eph: b64url(ephemeral.publicKey) };
+  if (typeof name === "string" && name) inner.name = name;
+  if (kind) inner.kind = kind;
+  const box = nacl.box(json(inner), nonce, host, phone.secretKey);
   const message = new Uint8Array(1 + 32 + 32 + 24 + box.length);
   message[0] = HELLO;
   message.set(ephemeral.publicKey, 1);
@@ -125,9 +144,12 @@ export function hostAccept({ host, hello, isKnown, canPair = false, token, rando
   if (!inner || typeof inner !== "object") throw new RelayAuthError("bad-hello", "Unreadable hello");
   if (inner.eph !== b64url(eph)) throw new RelayAuthError("bad-hello", "The hello was altered");
   if (!sameToken(inner.token, token)) throw new RelayAuthError("bad-token", "This phone was paired with an older code");
+  if (inner.kind !== undefined && !KINDS.has(inner.kind)) throw new RelayAuthError("bad-hello", "Unknown kind of device");
   const id = b64url(phoneKey);
   const firstPairing = !isKnown(id);
-  if (firstPairing && !canPair) throw new RelayAuthError("unknown-phone", "Pairing is closed on this computer");
+  // A function decides per device: a device removed while the window was open stays out until it opens again.
+  const pairable = typeof canPair === "function" ? canPair(id) : canPair;
+  if (firstPairing && !pairable) throw new RelayAuthError("unknown-phone", "Pairing is closed on this computer");
   withRandom(random);
   const mine = nacl.box.keyPair();
   const replyNonce = random(24);
@@ -137,7 +159,14 @@ export function hostAccept({ host, hello, isKnown, canPair = false, token, rando
   reply.set(mine.publicKey, 1);
   reply.set(replyNonce, 33);
   reply.set(box, 57);
-  return { reply, phoneKey: id, firstPairing, channel: channel(nacl.box.before(eph, mine.secretKey), HOST_TO_PHONE) };
+  return {
+    reply,
+    phoneKey: id,
+    firstPairing,
+    kind: inner.kind ?? "phone",
+    name: helloName(inner.name),
+    channel: channel(nacl.box.before(eph, mine.secretKey), HOST_TO_PHONE),
+  };
 }
 
 export function phoneFinish({ ephemeral, phone, host, reply }) {

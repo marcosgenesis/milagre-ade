@@ -20,6 +20,12 @@ export function summarizeChat(messages) {
   if (refs.length) summary.pullRequests = refs;
   if (lastModel) summary.lastModel = lastModel;
   if (openHandoff !== undefined) summary.openHandoff = openHandoff;
+  // A window that holds no messages matches its pending send to the saved one by these (see pendingChatSessionId).
+  const sent = messages
+    .filter((message) => message.clientMessageId)
+    .slice(-5)
+    .map((message) => message.clientMessageId);
+  if (sent.length) summary.clientMessageIds = sent;
   return summary;
 }
 

@@ -12,12 +12,15 @@ import { relayRuntime } from "../relay-native";
 import { lanRoutes } from "../routes-native";
 import type { SavedHost } from "../hosts-store";
 import { Icon } from "../icons";
-import { ErrorNotice, HeaderButton, IconButton, ListRow, PageScroll, colors, showActions, styles } from "../ui";
+import { ErrorNotice, HeaderButton, IconButton, ListRow, PageScroll, showActions, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 type Reachability = "online" | "checking" | "offline";
 const DEMO = process.env.EXPO_PUBLIC_DEMO === "1";
 
 export default function ComputersScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const push = usePush();
   const insets = useSafeAreaInsets();
@@ -219,7 +222,7 @@ export default function ComputersScreen() {
             <Icon icon={LaptopIcon} tone="ink3" size={44} />
             <Text style={[styles.subtitle, { textAlign: "center" }]}>Pair your computer</Text>
             <Text style={[styles.muted, { textAlign: "center" }]}>
-              Open Settings → Phone in Milagre on your Mac, then scan its pairing code. Your projects and chats will appear here.
+              Open Settings → Devices in Milagre on your Mac, then scan its pairing code. Your projects and chats will appear here.
             </Text>
           </View>
         )}

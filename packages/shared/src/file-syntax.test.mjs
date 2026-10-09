@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fileLanguage, highlightFile, syntaxColors } from "./file-syntax.mjs";
+import { fileLanguage, highlightFile } from "./file-syntax.mjs";
 
 const code = '// A component\r\nexport const Card = ({ title }: { title: string }) => (\r\n  <section aria-label="card">{title}</section>\r\n);\r\n';
 
@@ -19,8 +19,6 @@ test("TSX previews color TypeScript and JSX without changing the file text", () 
       `${text} is ${kind}`,
     );
   }
-  assert.notEqual(syntaxColors.keyword.light, syntaxColors.string.light);
-  assert.notEqual(syntaxColors.keyword.dark, syntaxColors.string.dark);
 });
 
 test("file names select supported languages on either platform", () => {

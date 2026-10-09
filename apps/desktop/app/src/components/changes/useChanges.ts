@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { DiffMode } from "../../electron";
 import { useDiffFiles } from "./useDiffFiles";
 import { useCloseWhenDesignsExpand, useSidePanelRoom } from "../agents/dock-area";
+import { bridgeForKey, onAnyAgentEvent } from "../../lib/computer-bridge";
 
 export type Changes = ReturnType<typeof useChanges>;
 
@@ -18,7 +19,7 @@ export function useChanges({ cwd, base, chatId, available }: { cwd: string | und
   const [mode, setMode] = useState<DiffMode>("uncommitted");
   const [scrollTarget, setScrollTarget] = useState<{ path: string; nonce: number } | null>(null);
   const shown = open && available;
-  const files = useDiffFiles({ cwd: cwd ?? "", base, mode, active: shown });
+  const files = useDiffFiles({ cwd: cwd ?? "", base, mode, active: shown, bridge: bridgeForKey(chatId) });
   const { refresh } = files;
 
   const diffOpen = shown && chatId !== null && diffChatId === chatId;
@@ -30,7 +31,7 @@ export function useChanges({ cwd, base, chatId, available }: { cwd: string | und
 
   useEffect(() => {
     if (!shown || !chatId) return;
-    return window.milagre.onAgentEvent((message) => {
+    return onAnyAgentEvent((message) => {
       if (message.chatId !== chatId) return;
       if (isTurnEnd(message.event)) void refresh();
     });

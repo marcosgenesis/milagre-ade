@@ -5,7 +5,8 @@ import type { AccountsSnapshot, ModelProvider } from "@milagre/shared/model";
 import { accountType, providerName } from "@milagre/shared/providers";
 import { useSession } from "./session";
 import { Icon, ProviderLogo } from "./icons";
-import { IconButton, PullDown, colors, styles } from "./ui";
+import { IconButton, PullDown, useStyles } from "./ui";
+import { useTheme } from "./theme";
 
 export function AccountsSection() {
   const session = useSession();
@@ -13,6 +14,8 @@ export function AccountsSection() {
 }
 
 export function AccountsForComputer() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const client = session.client;
   const [snapshot, setSnapshot] = useState<AccountsSnapshot | null>(null);

@@ -1,7 +1,8 @@
-// Run with npm test -- --only test-phone. Exercises Settings › Phone in the real App against a real daemon (its own temporary data
-// directory and socket, port chosen by the OS): turn phone access on, see the QR code and the relay status, copy the
-// link, see a phone pair, reset access, turn it off. The rest of the window's API is mocked, like the other checks.
-// Set MILAGRE_SCREENSHOT_DIR to save screenshots.
+// Run with npm test -- --only test-settings-devices. Exercises Settings › Devices in the real App against a real daemon (its
+// own temporary data directory and socket, port chosen by the OS): see the devices list fail soft on a host without it,
+// turn device access on, see the QR code and the relay status, copy the link, see a phone and a computer pair and the
+// Computers list appear, remove the phone, reset access, turn it off. The rest of the window's API is mocked, like the
+// other checks. Set MILAGRE_SCREENSHOT_DIR to save screenshots.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -31,6 +32,8 @@ window.milagre = new Proxy({
   setPhoneLan: (enabled) => ipcRenderer.invoke("phone:set-lan", enabled),
   resetPhoneAccess: () => ipcRenderer.invoke("phone:reset"),
   openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
+  listDevices: () => ipcRenderer.invoke("devices:list"),
+  removeDevice: (key) => ipcRenderer.invoke("devices:remove", key),
   onPhoneStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("phone:status", listener);
@@ -46,8 +49,8 @@ async function browserChecks() {
   const { app, BrowserWindow, ipcMain, clipboard } = require("electron");
   const { startDaemon } = require("../apps/daemon/src/server.cjs");
   const { connect } = require("../apps/daemon/src/client.cjs");
-  app.setPath("userData", fs.mkdtempSync(path.join(os.tmpdir(), "milagre-phone-ui-")));
-  const dataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "milagre-phone-host-")));
+  app.setPath("userData", fs.mkdtempSync(path.join(os.tmpdir(), "milagre-devices-ui-")));
+  const dataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "milagre-devices-host-")));
   await app.whenReady();
   // The check never dials the public relay: this stand-in reports that it connected. A reset's retired room has no onStatus.
   const relays = [];
@@ -77,9 +80,9 @@ async function browserChecks() {
     height: 760,
     useContentSize: true,
     show: false,
-    webPreferences: { partition: "phone-test", backgroundThrottling: false, nodeIntegration: true, contextIsolation: false },
+    webPreferences: { partition: "devices-test", backgroundThrottling: false, nodeIntegration: true, contextIsolation: false },
   });
-  for (const method of ["phone:status", "phone:set-enabled", "phone:set-lan", "phone:reset", "phone:open-pairing"])
+  for (const method of ["phone:status", "phone:set-enabled", "phone:set-lan", "phone:reset", "phone:open-pairing", "devices:remove"])
     ipcMain.handle(method, (_event, ...args) => host.call(method, args));
   host.on("event", ({ channel, payload }) => {
     if (channel === "phone:status" && !window.isDestroyed()) window.webContents.send(channel, payload);
@@ -113,33 +116,39 @@ async function browserChecks() {
     fs.mkdirSync(screenshotDir, { recursive: true });
     fs.writeFileSync(path.join(screenshotDir, `${name}.png`), (await window.webContents.capturePage()).toPNG());
   }
-  const toggle = `document.querySelector('[role="switch"][aria-label="Allow your phone to connect"]')`;
+  const toggle = `document.querySelector('[role="switch"][aria-label="Allow devices to connect"]')`;
   const token = async () => new URL((await host.call("phone:status")).pairingLink).searchParams.get("token");
 
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`!!document.querySelector('[aria-label="Settings"]')`);
     await evaluate(`document.querySelector('[aria-label="Settings"]').click()`);
-    await click("Phone");
+    await click("Devices");
+
+    // A host from before devices:list: the access controls still work, and the lists say they couldn't be read.
+    await waitFor(`!!${toggle} && document.body.textContent.includes('Allow devices to connect')`);
+    await waitFor(`document.querySelector('[data-devices-error]')?.textContent.startsWith("Couldn't read paired devices")`);
+    ipcMain.handle("devices:list", (_event, ...args) => host.call("devices:list", args));
+    console.log("PASS: without devices:list the section still shows its access controls");
 
     // Off: the toggle, its status, and nothing else to pair with.
-    await waitFor(`!!${toggle} && document.body.textContent.includes('Phone access')`);
     assert.equal(await evaluate(`${toggle}.getAttribute('aria-checked')`), "false");
-    await waitFor(`document.body.textContent.includes('Allow your phone to connect') && document.body.textContent.includes('Off')`);
+    await waitFor(`document.body.textContent.includes('Off')`);
     assert.equal(await evaluate(`!!document.querySelector('[data-phone-qr]')`), false);
     assert.equal(await evaluate(`[...document.querySelectorAll('button')].some(el => el.textContent.includes('Reset access'))`), false);
-    await screenshot("phone-off");
-    console.log("PASS: Settings › Phone starts off, with nothing to pair");
+    await screenshot("devices-off");
+    console.log("PASS: Settings › Devices starts off, with nothing to pair");
 
     // On: a QR image that decodes, the relay status, the pairing window and the warning.
     await evaluate(`${toggle}.click()`);
     await waitFor(`!!document.querySelector('[data-phone-qr]')`);
+    await waitFor(`!document.querySelector('[data-devices-error]')`);
     await waitFor(`(() => { const img = document.querySelector('[data-phone-qr]'); return img.complete && img.naturalWidth > 0; })()`);
     assert.equal(await evaluate(`${toggle}.getAttribute('aria-checked')`), "true");
     assert.equal(await evaluate(`document.querySelector('[data-phone-qr]').src.startsWith('data:image/svg+xml')`), true);
     await waitFor(`document.body.textContent.includes('On, reachable from any network')`);
     assert.equal(await evaluate(`!!document.querySelector('[data-phone-local-only]')`), false);
-    await waitFor(`document.querySelector('[data-phone-pairing="open"]')?.textContent.includes('New phones can pair for 10 more minutes')`);
+    await waitFor(`document.querySelector('[data-phone-pairing="open"]')?.textContent.includes('New devices can pair for 10 more minutes')`);
     assert.match(await evaluate(`document.querySelector('[data-phone-warning]').textContent`), /gives access to your agents/);
     const first = await token();
     assert.match(first, /^[a-f0-9]{64}$/);
@@ -162,31 +171,56 @@ async function browserChecks() {
 
     // Copy: the pairing link lands on the clipboard.
     window.webContents.focus();
-    await click("Copy pairing link");
+    await click("Copy link");
     await waitFor(`[...document.querySelectorAll('button')].some(el => el.textContent.trim() === 'Copied')`);
     const copied = await clipboard.readText();
     assert.equal(copied, (await host.call("phone:status")).pairingLink);
     assert.match(copied, /^milagre:\/\/pair\?relay=/);
-    console.log("PASS: Copy pairing link copies the link");
+    console.log("PASS: Copy link copies the link");
 
-    // Paired phones: none yet, then one once a phone pairs through the relay (here, the host's phone list directly).
-    await waitFor(`document.querySelector('[data-phone-paired]')?.textContent === 'No phones yet'`);
-    await relays
-      .filter((options) => !options.retired)
-      .at(-1)
-      .phones.add("phone-key");
-    await waitFor(`document.querySelector('[data-phone-paired]')?.textContent === '1 phone'`);
-    assert.deepEqual(paired, [{ pairedPhones: 1 }]);
-    await evaluate(`document.querySelector('[data-phone-paired]').scrollIntoView({ block: 'center' })`);
-    await screenshot("phone-paired");
-    console.log("PASS: a phone pairing shows in Paired phones and is announced to the desktop");
+    // Devices: no phones yet and no Computers list, then a phone and a computer as they pair.
+    const phoneKey = "p".repeat(43);
+    const computerKey = "c".repeat(43);
+    const hostDevices = () => relays.filter((options) => !options.retired).at(-1).phones;
+    const computersShown = `[...document.querySelectorAll('h2')].some((h) => h.textContent === 'Computers')`;
+    await waitFor(`document.querySelector('[data-devices-empty]')?.textContent === 'No phones yet'`);
+    assert.equal(await evaluate(computersShown), false);
+    // The Cloudflare note is for a Cloudflare tunnel only (unit-tested in phone.test.ts); this host reaches phones through the relay.
+    assert.equal(await evaluate(`!!document.querySelector('[data-devices-note]')`), false);
+    await hostDevices().add(phoneKey, { kind: "phone", name: "Victor's iPhone" });
+    await waitFor(`document.querySelector('[data-device-row="phone"]')?.textContent.includes("Victor's iPhone")`);
+    assert.equal(await evaluate(`document.querySelector('[data-device-row="phone"] [data-device-line]').textContent`), "Last seen just now");
+    assert.equal(await evaluate(computersShown), false, "Computers stays hidden with no computer");
+    assert.deepEqual(paired, [{ pairedPhones: 1, kind: "phone" }]);
+    await hostDevices().add(computerKey, { kind: "computer", name: "studio" });
+    await waitFor(`${computersShown} && document.querySelector('[data-device-row="computer"]')?.textContent.includes('studio')`);
+    await evaluate(`document.querySelector('[data-device-row="phone"]').scrollIntoView({ block: 'center' })`);
+    await screenshot("devices-lists");
+    console.log("PASS: phones and computers list by name as they pair; Computers shows only once there is one");
+
+    // Remove asks first; Cancel keeps the phone; confirming removes it on the host.
+    const phoneLine = `document.querySelector('[data-device-row="phone"] [data-device-line]')?.textContent`;
+    await evaluate(`document.querySelector('[data-device-row="phone"] [data-device-remove]').click()`);
+    await waitFor(`${phoneLine} === "Remove Victor's iPhone? It can pair again from Pair a device."`);
+    await screenshot("device-remove-confirm");
+    await click("Cancel");
+    await waitFor(`${phoneLine} === "Last seen just now"`);
+    await evaluate(`document.querySelector('[data-device-row="phone"] [data-device-remove]').click()`);
+    await waitFor(`!!document.querySelector('[data-device-remove-confirm]')`);
+    await evaluate(`document.querySelector('[data-device-remove-confirm]').click()`);
+    await waitFor(`!document.querySelector('[data-device-row="phone"]') && document.querySelector('[data-devices-empty]')?.textContent === 'No phones yet'`);
+    assert.deepEqual(
+      (await host.call("devices:list")).map((device) => device.key),
+      [computerKey],
+    );
+    console.log("PASS: Remove asks first and removes the phone on the host");
 
     // Reset asks first, and cancelling changes nothing.
     await click("Reset access");
-    await waitFor(`document.body.textContent.includes('must scan again')`);
+    await waitFor(`document.body.textContent.includes('must pair again')`);
     await screenshot("phone-reset-confirm");
     await click("Cancel");
-    await waitFor(`!document.body.textContent.includes('must scan again')`);
+    await waitFor(`!document.body.textContent.includes('must pair again')`);
     assert.equal(await token(), first);
     await click("Reset access");
     await click("Reset and disconnect");
@@ -200,12 +234,12 @@ async function browserChecks() {
       `(() => { const img = document.querySelector('[data-phone-qr]'); return img && img.complete && img.naturalWidth > 0 && document.body.textContent.includes('Make a new code'); })()`,
     );
     assert.notEqual(second, first);
-    await waitFor(`document.querySelector('[data-phone-paired]')?.textContent === 'No phones yet'`);
+    await waitFor(`document.querySelector('[data-devices-empty]')?.textContent === 'No phones yet' && !${computersShown}`);
     // The old room is held only to tell the phone that paired there that this Mac was reset.
     const retired = relays.filter((options) => options.retired);
     assert.equal(retired.length, 1);
     assert.equal(retired[0].token, undefined);
-    console.log("PASS: reset asks first, makes a new token, forgets the paired phone and keeps the old room answering");
+    console.log("PASS: reset asks first, makes a new token, forgets every device and keeps the old room answering");
 
     // The pushed reset status can reach the renderer before the reset RPC releases its busy guard.
     await waitFor(`[...document.querySelectorAll('button')].some(el => el.textContent.trim() === 'Reset access' && !el.disabled)`);
@@ -236,19 +270,19 @@ async function main() {
     server: { host: "127.0.0.1", port: 0 },
     plugins: [
       {
-        name: "phone-fixture",
+        name: "devices-fixture",
         resolveId(id) {
-          if (id === "/__phone_fixture.tsx") return id;
+          if (id === "/__devices_fixture.tsx") return id;
         },
         load(id) {
-          if (id === "/__phone_fixture.tsx") return fixture;
+          if (id === "/__devices_fixture.tsx") return fixture;
         },
         configureServer(server) {
           server.middlewares.use(async (request, response, next) => {
-            if (request.url !== "/__phone__") return next();
+            if (request.url !== "/__devices__") return next();
             const html = await server.transformIndexHtml(
               request.url,
-              '<html><body><div id="root"></div><script type="module" src="/__phone_fixture.tsx"></script></body></html>',
+              '<html><body><div id="root"></div><script type="module" src="/__devices_fixture.tsx"></script></body></html>',
             );
             response.setHeader("Content-Type", "text/html");
             response.end(html);
@@ -261,7 +295,7 @@ async function main() {
     await server.listen();
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
-    const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__phone__`], { env, stdio: "inherit" });
+    const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__devices__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
       child.on("exit", (code) => resolve(code ?? 1));

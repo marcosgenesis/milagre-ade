@@ -3,7 +3,9 @@ import type { ComponentProps } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Copy01Icon, Download04Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { ChatStep } from "../../model";
-import { mediaUrl } from "../../lib/media";
+import { canCopyImage, mediaUrl } from "../../lib/media";
+import { isRemoteKey, useScope } from "../../lib/computer-bridge";
+import { useRemoteMedia } from "../../lib/remote-media";
 import { ImageGeneration } from "./ImageGeneration";
 import type { ImageGenerationStatus } from "./ImageGeneration";
 import { StepRow } from "./StepRow";
@@ -46,17 +48,28 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
     const timer = window.setTimeout(() => setCopied(false), 1500);
     return () => window.clearTimeout(timer);
   }, [copied]);
-  const src = step.file && !broken ? mediaUrl(step.file) : null;
-  if (step.status === "failed" || (step.status === "done" && !src))
+  const scope = useScope();
+  const remote = isRemoteKey(scope);
+  const { sources: remoteSources, failed: remoteFailed } = useRemoteMedia(remote && step.file ? scope : null, step.file ? [step.file] : []);
+  // On another Mac the image comes through media:read; copy, save and the menu then act on its bytes.
+  const file = step.file ? (remote ? remoteSources[step.file] : step.file) : undefined;
+  const src = file && !broken ? (remote ? file : mediaUrl(file)) : null;
+  // A remote image's bytes may still be on their way; only a failed read (or a broken file) is a failed row.
+  const pending = remote && !!step.file && !file && !remoteFailed[step.file];
+  if (step.status === "failed" || (step.status === "done" && !src && !pending))
     return <StepRow step={step.status === "failed" ? step : { ...step, status: "failed", title: "Couldn't show the generated image" }} />;
-  const file = step.file!;
   const status: ImageGenerationStatus = step.status === "done" && size ? "complete" : "generating";
-  const copy = () =>
+  const canCopy = canCopyImage(file);
+  const copy = () => {
+    if (!file) return;
     void window.milagre
       .copyImage(file)
       .then(() => setCopied(true))
       .catch(() => {});
-  const save = () => void window.milagre.saveImage(file).catch(() => {});
+  };
+  const save = () => {
+    if (file) void window.milagre.saveImage(file).catch(() => {});
+  };
   return (
     <div
       data-slot="generated-image"
@@ -65,7 +78,7 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
         status === "complete"
           ? (event) => {
               event.preventDefault();
-              void window.milagre.showImageMenu(file);
+              if (canCopy) void window.milagre.showImageMenu(file);
             }
           : undefined
       }
@@ -80,10 +93,12 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
         resolution={size ? `${size.width} × ${size.height}` : ""}
         aspectRatio={size ? `${size.width} / ${size.height}` : "1 / 1"}
         actions={
-          <>
-            <ImageAction label={copied ? "Copied" : "Copy image"} icon={copied ? Tick02Icon : Copy01Icon} onClick={copy} />
-            <ImageAction label="Download image" icon={Download04Icon} onClick={save} />
-          </>
+          canCopy ? (
+            <>
+              <ImageAction label={copied ? "Copied" : "Copy image"} icon={copied ? Tick02Icon : Copy01Icon} onClick={copy} />
+              <ImageAction label="Download image" icon={Download04Icon} onClick={save} />
+            </>
+          ) : undefined
         }
       >
         {src ? (
@@ -109,7 +124,7 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
       </ImageGeneration>
       {open && src && (
         <MediaLightbox
-          items={[{ id: step.id, name: file.split("/").at(-1) || "Generated image", src, kind: "image", file }]}
+          items={[{ id: step.id, name: (step.file ?? "").split("/").at(-1) || "Generated image", src, kind: "image", file: canCopy ? file : undefined }]}
           start={0}
           thumbFor={thumbFor}
           close={close}

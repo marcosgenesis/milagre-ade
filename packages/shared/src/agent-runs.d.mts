@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  AnsweredQuestion,
   AgentTask,
   ChatStep,
   ContextUsage,
@@ -7,6 +8,7 @@ import type {
   TranscriptState,
   PermissionDecision,
   PermissionRequest,
+  QuestionAnswers,
   QuestionRequest,
 } from "./model.ts";
 
@@ -44,7 +46,8 @@ export type AppliedEvent<T = CoordinatorState> = { state: T; runs: AgentRuns; ch
 export const MAX_OUTPUT: number;
 export function capOutput(text: string): string;
 export function lastUserModel(state: TranscriptState, sessionId: number): string;
-export function chatKey(projectPath: string, sessionId: number): string;
+export function chatKey(projectPath: string, sessionId: number, computerId?: string): string;
+export { LOCAL_COMPUTER, computerOfKey, qualifyKey, unqualifyKey } from "./chat-scopes.mjs";
 export function sessionIdFromKey(key: string): number;
 export function projectOfKey(key: string): string;
 export function chatInProject(projectPath: string, key: string): boolean;
@@ -60,4 +63,6 @@ export function recordAnswers<T extends TranscriptState>(
   projectPath: string,
   chatId: string,
   body: string,
+  answered?: AnsweredQuestion[] | null,
 ): { state: T; runs: AgentRuns; messageId: number | null };
+export function answeredQuestions(request: QuestionRequest | undefined, answers: QuestionAnswers | null): AnsweredQuestion[] | null;

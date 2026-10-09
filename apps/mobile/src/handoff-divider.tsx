@@ -3,7 +3,7 @@ import { ArrowDataTransferHorizontalIcon } from "@hugeicons/core-free-icons";
 import type { HandoffContext } from "@milagre/shared/model";
 import { Icon, ProviderLogo, SpinnerRing } from "./icons";
 import { handoffSides } from "./handoff-sides";
-import { colors } from "./ui";
+import { useTheme } from "./theme";
 
 /** A provider switch inside the Chat, as on desktop. Tapping it opens the brief the new provider was sent. */
 export function HandoffDivider({
@@ -15,6 +15,7 @@ export function HandoffDivider({
   models: { id: string; name: string }[];
   onOpen: (brief: string) => void;
 }) {
+  const { colors } = useTheme();
   const sides = handoffSides(context, models);
   const brief = context.status === "done" ? context.brief : undefined;
   return (
@@ -32,11 +33,11 @@ export function HandoffDivider({
         <Text style={{ color: colors.ink3, fontSize: 12 }}>{sides.restored ? "Context restored" : "Context handoff"}</Text>
         {!sides.restored && (
           <>
-            <ProviderLogo provider={context.from.provider} size={13} tone="ink3" />
+            <ProviderLogo provider={context.from.provider} size={13} />
             <Text style={{ color: colors.ink3, fontSize: 12 }}>{sides.from} →</Text>
           </>
         )}
-        <ProviderLogo provider={context.to.provider} size={13} tone="ink2" />
+        <ProviderLogo provider={context.to.provider} size={13} />
         <Text style={{ color: colors.ink2, fontSize: 12, fontWeight: "500" }}>{sides.to}</Text>
         {context.status === "failed" && <Text style={{ color: colors.orange, fontSize: 12 }}>· Handoff failed</Text>}
       </View>

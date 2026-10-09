@@ -6,6 +6,14 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Creepster (Font Diner, SIL OFL 1.1, see assets/Creepster-OFL.txt): the dripping Mortal Kombat lettering of the
+ * Ultracode overlay. Used nowhere else. */
+@font-face {
+  font-family: "Creepster";
+  src: url("./assets/Creepster-Regular.ttf") format("truetype");
+  font-display: block;
+}
+
 .command-palette {
   top: min(14vh, 100px);
   left: 50%;
@@ -60,45 +68,49 @@
 
 :root {
   /* surfaces — cool, blue-tinted neutrals */
-  --page: oklch(0.985 0.001 286.376);
-  --canvas: oklch(0.961 0.002 247.84);
-  --surface: oklch(1 0 0);
-  --inset: oklch(0.979 0.002 247.839);
-  --hover: oklch(0.97 0.002 247.839);
-  --hover-2: oklch(0.933 0.003 247.86);
+  --page: #f4f9fe;
+  --canvas: #e9f1fa;
+  --surface: #ffffff;
+  --inset: #f9fcff;
+  --hover: #f6f6f7;
+  --hover-2: #edeeee;
 
   /* ink ramp */
-  --ink: oklch(0.247 0.006 258.361);
-  --ink-2: oklch(0.506 0.01 264.477);
-  --ink-3: oklch(0.695 0.009 264.505);
+  --ink: #1c222b;
+  --ink-2: #616770;
+  --ink-3: #8c929a;
 
   /* borders — solid and crisp, not alpha */
-  --line: oklch(0.946 0.003 264.542);
-  --line-strong: oklch(0.912 0.005 258.326);
-  --line-soft: oklch(0.966 0.002 264.542);
+  --line: #edeeee;
+  --line-strong: #e0e1e3;
+  --line-soft: #f3f4f4;
   --grid-line: color-mix(in srgb, var(--line) 78%, transparent);
-  --field: oklch(0.961 0.001 286.375);
+  --field: #f5f5f5;
   --stripe: oklch(0.405 0 0 / 0.075);
-  --stripe-bg: oklch(0.97 0 0);
+  --stripe-bg: var(--page);
 
   /* accent */
-  --accent: oklch(0.626 0.205 254.947);
-  --accent-ink: oklch(0.556 0.187 255.617);
-  --accent-tint: oklch(0.96 0.019 252.878);
+  --accent: #007df3;
+  --accent-ink: #0068cd;
+  --accent-tint: #e3f0fe;
 
   /* semantic */
-  --green: oklch(0.603 0.155 150.883);
-  --green-tint: oklch(0.958 0.017 159.118);
-  --orange: oklch(0.689 0.179 49.902);
-  --orange-tint: oklch(0.964 0.021 67.581);
-  --red: oklch(0.621 0.192 23.042);
-  --red-tint: oklch(0.956 0.017 17.462);
+  --green: #199a4d;
+  --green-tint: #e5f2ef;
+  /* Ultracode's color, the same purple as its Fatality overlay */
+  --purple: oklch(0.627 0.265 303.9);
+  --purple-ink: oklch(0.558 0.288 302.321);
+  --purple-tint: oklch(0.977 0.014 308.299);
+  --orange: #ef720d;
+  --orange-tint: #f5efee;
+  --red: #e3474c;
+  --red-tint: #f5ecef;
 
   /* chart overlays — neutral system colors with enough contrast on either theme */
-  --tooltip-bg: oklch(0.272 0.008 264.435);
-  --tooltip-fg: oklch(0.976 0.002 247.839);
-  --tooltip-muted: oklch(0.731 0.008 260.731);
-  --tooltip-border: oklch(0.356 0.007 264.474);
+  --tooltip-bg: #272d36;
+  --tooltip-fg: #f4f9fe;
+  --tooltip-muted: #b1b6bd;
+  --tooltip-border: #3c424b;
 
   /* shadows — our solid hairline ring + shadow-plugin's smooth layered stacks
    * (--shadow-xs…lg come from shadow-plugin/unprefixed) so every surface reads
@@ -109,42 +121,51 @@
   --shadow-raised: 0 0 0 1px var(--line), var(--shadow-md);
   --shadow-overlay: 0 0 0 1px var(--line), var(--shadow-lg);
   --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.12);
+
+  /* diff view row tints */
+  --diff-add: #ddeee8;
+  --diff-add-word: #bbddc8;
+  --diff-remove: #f6e9ec;
+  --diff-remove-word: #f7cecf;
 }
 
 .dark {
-  --page: oklch(0.209 0.004 264.477);
-  --canvas: oklch(0.231 0.004 264.487);
-  --surface: oklch(0.26 0.006 271.191);
-  --inset: oklch(0.243 0.004 264.492);
-  --hover: oklch(0.289 0.006 271.22);
-  --hover-2: oklch(0.318 0.007 274.747);
+  --page: #0d1624;
+  --canvas: #111b29;
+  --surface: #172232;
+  --inset: #121c2b;
+  --hover: #202b3b;
+  --hover-2: #273242;
 
-  --ink: oklch(0.964 0.002 247.839);
-  --ink-2: oklch(0.731 0.008 260.731);
-  --ink-3: oklch(0.541 0.01 264.484);
+  --ink: #e9eff7;
+  --ink-2: #9199a4;
+  --ink-3: #646c79;
 
-  --line: oklch(0.308 0.006 258.354);
-  --line-strong: oklch(0.356 0.007 264.474);
-  --line-soft: oklch(0.278 0.006 258.354);
-  --field: oklch(0.293 0.006 271.223);
+  --line: #273242;
+  --line-strong: #303b4a;
+  --line-soft: #212c3c;
+  --field: #212c3c;
   --stripe: oklch(1 0 0 / 0.055);
-  --stripe-bg: oklch(0.226 0.004 264.485);
+  --stripe-bg: var(--page);
 
-  --accent: oklch(0.68 0.173 253.301);
-  --accent-ink: oklch(0.788 0.113 248.33);
-  --accent-tint: oklch(0.68 0.173 253.301 / 0.16);
+  --accent: #3e9afd;
+  --accent-ink: #80b9fd;
+  --accent-tint: #3e9afd29;
 
-  --green: oklch(0.705 0.154 153.814);
-  --green-tint: oklch(0.705 0.154 153.814 / 0.14);
-  --orange: oklch(0.746 0.156 55.642);
-  --orange-tint: oklch(0.746 0.156 55.642 / 0.14);
-  --red: oklch(0.666 0.18 21.433);
-  --red-tint: oklch(0.666 0.18 21.433 / 0.14);
+  --green: #3cbb72;
+  --green-tint: #3cbb7224;
+  --purple: oklch(0.627 0.265 303.9);
+  --purple-ink: oklch(0.827 0.119 306.383);
+  --purple-tint: oklch(0.627 0.265 303.9 / 0.18);
+  --orange: #f68f3c;
+  --orange-tint: #f68f3c24;
+  --red: #ee5c61;
+  --red-tint: #ee5c6124;
 
-  --tooltip-bg: oklch(0.182 0.004 264.459);
-  --tooltip-fg: oklch(0.964 0.002 247.839);
-  --tooltip-muted: oklch(0.731 0.008 260.731);
-  --tooltip-border: oklch(0.308 0.006 258.354);
+  --tooltip-bg: #050912;
+  --tooltip-fg: #e9eff7;
+  --tooltip-muted: #9ba1aa;
+  --tooltip-border: #191f28;
 
   --shadow-hairline: 0 0 0 1px var(--line);
   /* Elevation rings go to a subtle *light* hairline in dark mode: the ring
@@ -156,6 +177,12 @@
   --shadow-raised: 0 0 0 1px oklch(1 0 0 / 0.13), 0 2px 10px oklch(0 0 0 / 0.22);
   --shadow-overlay: 0 0 0 1px oklch(1 0 0 / 0.15), 0 8px 28px oklch(0 0 0 / 0.34);
   --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.4);
+
+  /* diff view row tints */
+  --diff-add: #3cbb721f;
+  --diff-add-word: #3cbb724d;
+  --diff-remove: #ee5c611f;
+  --diff-remove-word: #ee5c614d;
 }
 
 @theme inline {
@@ -177,6 +204,8 @@
   --color-accent-tint: var(--accent-tint);
   --color-green: var(--green);
   --color-green-tint: var(--green-tint);
+  --color-purple-ink: var(--purple-ink);
+  --color-purple-tint: var(--purple-tint);
   --color-orange: var(--orange);
   --color-orange-tint: var(--orange-tint);
   --color-red: var(--red);
@@ -216,18 +245,6 @@
  * sliders set how much shows through, 0 to 1: `--window-translucency` thins the page's own tint,
  * and `--panel-translucency` thins the sidebar, panels and fields (at 0.4 a light surface keeps
  * 72% of its opacity and a dark one 62%, so text stays readable). */
-.translucent {
-  --page: oklch(0.985 0.001 286.376 / calc(1 - var(--window-translucency, 0.8)));
-  --surface: oklch(1 0 0 / calc(1 - var(--panel-translucency, 0.4) * 0.7));
-  --inset: oklch(0.979 0.002 247.839 / calc(1 - var(--panel-translucency, 0.4)));
-  --field: oklch(0.961 0.001 286.375 / calc(1 - var(--panel-translucency, 0.4)));
-}
-.translucent.dark {
-  --page: oklch(0.209 0.004 264.477 / calc(1 - var(--window-translucency, 0.8)));
-  --surface: oklch(0.26 0.006 271.191 / calc(1 - var(--panel-translucency, 0.4) * 0.95));
-  --inset: oklch(0.243 0.004 264.492 / calc(1 - var(--panel-translucency, 0.4)));
-  --field: oklch(0.293 0.006 271.223 / calc(1 - var(--panel-translucency, 0.4)));
-}
 .translucent,
 .translucent body {
   background: transparent;
@@ -425,6 +442,41 @@ a {
   box-shadow:
     0 1px 2px oklch(0 0 0 / 0.24),
     0 3px 9px oklch(0 0 0 / 0.2);
+}
+
+/* Ultracode on: the composer takes its purple, and its border and glow breathe slowly, focused or not. The glow is
+ * centred and short: the composer sits 6px above the pane's clipped bottom edge. */
+.promptbar-surface[data-ultracode],
+.promptbar-surface[data-ultracode]:focus-within {
+  border-color: color-mix(in oklab, var(--purple) 55%, transparent);
+  background: color-mix(in oklab, color-mix(in oklab, var(--surface) 88%, var(--purple)) 80%, transparent);
+  animation: ultracode-breathe 3.6s ease-in-out infinite;
+}
+
+@keyframes ultracode-breathe {
+  0%,
+  100% {
+    border-color: color-mix(in oklab, var(--purple) 40%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--purple) 10%, transparent),
+      0 0 6px color-mix(in oklab, var(--purple) 18%, transparent);
+  }
+  50% {
+    border-color: color-mix(in oklab, var(--purple) 75%, transparent);
+    box-shadow:
+      0 0 0 3px color-mix(in oklab, var(--purple) 20%, transparent),
+      0 0 10px color-mix(in oklab, var(--purple) 40%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promptbar-surface[data-ultracode],
+  .promptbar-surface[data-ultracode]:focus-within {
+    animation: none;
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, var(--purple) 16%, transparent),
+      0 0 8px color-mix(in oklab, var(--purple) 30%, transparent);
+  }
 }
 
 .prompt-input-highlighted {
@@ -765,18 +817,12 @@ a:focus-visible .animated-underline::after {
   color: var(--ink-2);
 }
 
-/* Shiki tokens carry both themes' colours as variables; the app's theme class picks one. */
+/* Shiki tokens read the theme's --shiki-token-* variables through --shiki-light. */
 .code-token {
   color: var(--shiki-light);
   font-style: var(--shiki-light-font-style, inherit);
   font-weight: var(--shiki-light-font-weight, inherit);
   text-decoration: var(--shiki-light-text-decoration, inherit);
-}
-.dark .code-token {
-  color: var(--shiki-dark);
-  font-style: var(--shiki-dark-font-style, inherit);
-  font-weight: var(--shiki-dark-font-weight, inherit);
-  text-decoration: var(--shiki-dark-text-decoration, inherit);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1352,20 +1398,6 @@ code.step-shimmer {
   }
 }
 
-/* Diff view row tints; the word variants sit on top of the row tint for the changed words. */
-:root {
-  --diff-add: oklch(0.962 0.03 155);
-  --diff-add-word: oklch(0.89 0.08 155);
-  --diff-remove: oklch(0.962 0.025 20);
-  --diff-remove-word: oklch(0.89 0.07 20);
-}
-.dark {
-  --diff-add: oklch(0.705 0.154 153.814 / 0.12);
-  --diff-add-word: oklch(0.705 0.154 153.814 / 0.3);
-  --diff-remove: oklch(0.666 0.18 21.433 / 0.12);
-  --diff-remove-word: oklch(0.666 0.18 21.433 / 0.3);
-}
-
 /* A title resolves in place without changing the row's width or height. */
 .chat-title {
   display: block;
@@ -1453,4 +1485,9 @@ code.step-shimmer {
   .milagre-canvas-flow .milagre-link-active {
     animation: none;
   }
+}
+
+/* The Terminal panel's surface shows through xterm: its stylesheet paints the viewport black whatever the theme says. */
+[data-terminal-body] .xterm .xterm-viewport {
+  background-color: transparent;
 }

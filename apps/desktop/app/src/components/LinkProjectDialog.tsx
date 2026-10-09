@@ -4,20 +4,23 @@ import type { NamedProjectLink } from "@milagre/shared/model";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { ProjectAvatarStack } from "./ProjectAvatarStack";
+import { bridgeForKey } from "../lib/computer-bridge";
 type Project = { id: string; name: string; path: string };
-export function LinkProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (link: NamedProjectLink) => void }) {
+/** Creates a Link, or edits `link`'s name and member Projects. Chats already started keep their Worktrees. */
+export function LinkProjectDialog({ link, onClose, onCreated }: { link?: NamedProjectLink; onClose: () => void; onCreated: (link: NamedProjectLink) => void }) {
+  const bridge = bridgeForKey(link ? `milagre-link:${link.id}` : null);
   const dialog = useRef<HTMLDialogElement>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [name, setName] = useState("");
+  const [selected, setSelected] = useState<string[]>(() => link?.projectIds ?? []);
+  const [name, setName] = useState(link?.name ?? "");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     dialog.current?.showModal();
     let live = true;
-    void window.milagre
+    void bridge
       .listProjects()
       .then((rows) => {
         if (live) setProjects(rows);
@@ -33,13 +36,20 @@ export function LinkProjectDialog({ onClose, onCreated }: { onClose: () => void;
       dialog.current?.close();
     };
   }, []);
-  const filtered = projects.filter((project) => `${project.name} ${project.path}`.toLowerCase().includes(search.toLowerCase()));
+  // A member whose folder is gone is still listed, so it can be removed.
+  const missing = (link?.projectIds ?? [])
+    .filter((id) => !projects.some((project) => project.id === id))
+    .map((id) => ({ id, name: id.split("/").at(-2) ?? "Project", path: "Unavailable" }));
+  const filtered = [...projects, ...(loading ? [] : missing)].filter((project) =>
+    `${project.name} ${project.path}`.toLowerCase().includes(search.toLowerCase()),
+  );
   async function create() {
     if (saving || selected.length < 2 || !name.trim()) return;
     setSaving(true);
     setError(null);
     try {
-      onCreated(await window.milagre.createNamedLink({ name: name.trim(), projectIds: selected }));
+      const request = { name: name.trim(), projectIds: selected };
+      onCreated(await (link ? bridge.updateNamedLink({ id: link.id, ...request }) : bridge.createNamedLink(request)));
     } catch (error) {
       setError(ipcErrorMessage(error));
       setSaving(false);
@@ -66,9 +76,11 @@ export function LinkProjectDialog({ onClose, onCreated }: { onClose: () => void;
         className="flex max-h-[calc(100vh-64px)] flex-col p-5"
       >
         <h2 id="link-dialog-title" className="text-[17px] font-semibold">
-          Link projects
+          {link ? "Edit Link" : "Link projects"}
         </h2>
-        <p className="mt-1 text-[13px] text-ink-2">One Chat, with a new Worktree in each Project.</p>
+        <p className="mt-1 text-[13px] text-ink-2">
+          {link ? "New Chats get a Worktree in each Project. Chats already started keep theirs." : "One Chat, with a new Worktree in each Project."}
+        </p>
         <label className="mt-5 text-[12px] font-medium text-ink-2" htmlFor="link-name">
           Link name
         </label>
@@ -142,7 +154,7 @@ export function LinkProjectDialog({ onClose, onCreated }: { onClose: () => void;
             disabled={saving || !name.trim() || selected.length < 2}
             className="rounded-control bg-ink px-3 py-2 text-[13px] font-medium text-surface disabled:opacity-40"
           >
-            {saving ? "Creating…" : "Create Link"}
+            {link ? (saving ? "Saving…" : "Save") : saving ? "Creating…" : "Create Link"}
           </button>
         </div>
       </form>

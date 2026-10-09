@@ -80,6 +80,8 @@ export interface Worktree {
   name: string;
   /** The ref a worktree Milagre created started from; its changes are measured against it. */
   base?: string;
+  /** The Linear issue this Worktree was started from (its key); the branch may also name one. */
+  linearIssue?: string;
   /** Lines changed against the base, refreshed in the background so the hover card shows it at once. */
   diff?: DiffStat;
   sharedChat?: { linkId: string; sessionId: number };
@@ -101,6 +103,8 @@ export interface ChatSummary {
   lastModel?: string;
   /** A handoff divider still preparing, by message id. */
   openHandoff?: number;
+  /** The clientMessageId of the Chat's last few sends, so a window without messages finds the Chat its preview became. */
+  clientMessageIds?: string[];
 }
 
 export interface AgentSession {
@@ -165,6 +169,8 @@ export interface WorktreeBinding {
   worktreePath: string;
   branch: string;
   base: string;
+  /** The folder name the shared Chat's workspace links this Worktree under. */
+  alias?: string;
 }
 export interface LinkChatSession extends Omit<AgentSession, "worktree_id"> {
   workspacePath: string;
@@ -180,6 +186,8 @@ export interface LinkPreparation {
   retainedPaths?: string[];
 }
 export interface LinkState {
+  /** From a host that keeps messages by Chat (chat-pages-v1): `messages` is empty, and the Chats on screen read their own. */
+  messagesInChats?: boolean;
   next_id: number;
   sessions: Record<string, LinkChatSession>;
   messages: ChatMessage[];
@@ -211,6 +219,15 @@ export interface ChatMessage {
   /** The host's sidecar with the long details of these steps (each marked `hasDetail`); read with the chat:message command. */
   detailFile?: string;
   operationId?: string;
+  /** On the user's answers to an agent's questions: each question with what they answered, shown as a card. */
+  answered?: AnsweredQuestion[];
+}
+
+/** One question the user answered, as their message keeps it. A typed answer to a secret question is masked. */
+export interface AnsweredQuestion {
+  header: string;
+  question: string;
+  answers: string[];
 }
 
 /** A provider switch inside a chat, shown as a divider before the message that caused it. `brief` is what the new provider was sent. */
@@ -233,7 +250,13 @@ export type AdvisorResultContext = {
   outcome: "completed" | "failed" | "cancelled";
 };
 
-export type ChatContext = AdvisorResultContext | LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
+/** Something on GitHub that stops an open PR from merging and that the agent can fix. */
+export type PullRequestBlocker = "conflicts" | "changes-requested" | "checks-failed" | "behind";
+
+/** A PR-blocker pill the user clicked. Milagre wrote the message and the skill prompt the agent got. */
+export type PullRequestActionContext = { kind: "pr-action"; action: PullRequestBlocker; pr: number; url: string };
+
+export type ChatContext = AdvisorResultContext | LinkedContext | { kind: "git-action" } | HandoffContext | PullRequestActionContext | "handover" | null;
 
 /**
  * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
@@ -413,8 +436,14 @@ export interface Subagent {
   endedAt?: number;
   latestActivity?: string;
   communications?: SubagentCommunication[];
-  transcript: Array<{ id: string; kind: "tool" | "message"; text: string }>;
+  transcript: SubagentTranscriptEntry[];
+  /**
+   * How many entries the transcript has, when `transcript` holds only its last ones (a client that reads transcripts on
+   * demand, see subagent-transcript.mjs); absent when it holds them all.
+   */
+  transcriptLength?: number;
 }
+export type SubagentTranscriptEntry = { id: string; kind: "tool" | "message"; text: string };
 
 /** One item of the agent's to-do list. */
 export interface AgentTask {
@@ -433,6 +462,8 @@ export interface AgentPort {
   command: string;
   /** The address it listens on: "*", "127.0.0.1", "::1". */
   address: string;
+  /** Set by a desktop window on a port that listens on another computer, which `localhost` doesn't reach. */
+  computerId?: string;
 }
 
 /** Every chat's listening ports, by chat key; a chat with none is absent. */
@@ -489,6 +520,8 @@ export interface ChatSendRequest {
   replies?: "concise" | "normal";
   /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
   tldrEnabled?: boolean;
+  /** A PR-blocker pill's action. Milagre checks it and writes the body, prompt and context itself, ignoring the ones sent. */
+  prAction?: { action: PullRequestBlocker; pr: number; url: string };
 }
 
 /** A code editor found on this Mac. */
@@ -501,9 +534,12 @@ export interface WorktreeRequest {
   projectPath: string;
   baseBranch: string;
   prompt: string;
+  issueKey?: string;
 }
 
 export interface CoordinatorState {
+  /** From a host that keeps messages by Chat (chat-pages-v1): `messages` is empty, and the Chats on screen read their own. */
+  messagesInChats?: boolean;
   next_id: number;
   projects: Record<string, Project>;
   worktrees: Record<string, Worktree>;
@@ -525,6 +561,13 @@ export interface OpenProject {
   state: CoordinatorState;
   /** Only on the first open after chats came back from linked worktrees' old files. */
   restoredChats?: RestoredChats[];
+}
+
+/** worktree:link-issue's answer: `renamed` when the branch took the issue's name, `stored` when only the key was kept. */
+export interface LinkIssueResult {
+  project: OpenProject;
+  mode: "renamed" | "stored";
+  branch: string;
 }
 
 export function sortedWorktrees(state: CoordinatorState) {

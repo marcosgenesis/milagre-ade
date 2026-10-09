@@ -5,7 +5,6 @@ const { randomBytes } = require("node:crypto");
 const { boxKeyPair, signKeyPair, hostIdOf, b64url, fromB64url } = require("@milagre/shared/relay-crypto");
 
 const random = (n) => new Uint8Array(randomBytes(n));
-const MAX_PHONES = 32;
 // Each retired identity holds one more relay socket while the phone is on, so only the last few are kept.
 const MAX_RETIRED = 3;
 
@@ -33,7 +32,7 @@ async function readIdentity(dataDir) {
       box = decode(value.box);
     return { hostId: hostIdOf(sign.publicKey), sign, box };
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    if (/** @type {any} */ (error).code !== "ENOENT") throw error;
   }
   return rotateIdentity(dataDir);
 }
@@ -45,6 +44,8 @@ const decode = (pair) => ({ publicKey: fromB64url(pair.publicKey), secretKey: fr
  * New sign and box key pairs, replacing any saved ones. Reset calls it, so a host id that leaked with an old link
  * no longer names this Mac on the relay. `retireUntil` (ms epoch) keeps the old signing key until then, so the old
  * room can still tell the phones that dial it that this Mac was reset (see readRetired).
+ * @param {string} dataDir
+ * @param {{ retireUntil?: number; now?: number }} [options]
  */
 async function rotateIdentity(dataDir, { retireUntil, now = Date.now() } = {}) {
   if (retireUntil) {
@@ -95,38 +96,4 @@ async function readRetired(dataDir, now = Date.now()) {
   return out;
 }
 
-/** Phones that paired with the current token. Reset clears it, so an old phone must scan again. */
-function createPhones(dataDir) {
-  const file = path.join(dataDir, "relay-phones.json");
-  let known = [];
-  // Writes land in call order, so a clear is never overwritten by an add that started before it.
-  let writes = Promise.resolve();
-  const write = (phones) => {
-    const next = writes.then(() => writePrivate(file, { phones }));
-    writes = next.catch(() => {});
-    return next;
-  };
-  return {
-    async load() {
-      try {
-        assertPrivate(file);
-        known = JSON.parse(await fs.readFile(file, "utf8")).phones ?? [];
-      } catch {
-        known = [];
-      }
-    },
-    isKnown: (id) => known.includes(id),
-    /** How many phones are paired now. */
-    count: () => known.length,
-    async add(id) {
-      known = [...known.filter((item) => item !== id), id].slice(-MAX_PHONES);
-      await write(known);
-    },
-    async clear() {
-      known = [];
-      await write(known);
-    },
-  };
-}
-
-module.exports = { readIdentity, rotateIdentity, readRetired, createPhones };
+module.exports = { readIdentity, rotateIdentity, readRetired, writePrivate };

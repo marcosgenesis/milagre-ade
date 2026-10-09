@@ -1,7 +1,7 @@
 // Run with npm test -- --only test-settings-devices. Exercises Settings › Devices in the real App against a real daemon (its
 // own temporary data directory and socket, port chosen by the OS): see the devices list fail soft on a host without it,
 // turn device access on, see the QR code and the relay status, copy the link, see a phone and a computer pair and the
-// Computers list appear, remove the phone, reset access, turn it off. The rest of the window's API is mocked, like the
+// Computers list appear, remove the phone, reset access, turn it off, then on again behind a Cloudflare tunnel. The rest of the window's API is mocked, like the
 // other checks. Set MILAGRE_SCREENSHOT_DIR to save screenshots.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -59,10 +59,12 @@ async function browserChecks() {
     setTimeout(() => options.onStatus?.("online"), 20);
     return { close: async () => {}, status: () => "online" };
   };
+  // Nor does it run cloudflared: the tunnel only answers with the address a real one would have.
+  const tunnels = { startNamedTunnel: async ({ hostname }) => ({ url: `https://${hostname}`, close: async () => {} }) };
   const daemon = await startDaemon({
     dataDir,
     version: "test",
-    phoneOptions: { localPort: 0, lanPort: 0, lanHostname: "127.0.0.1", addresses: () => ["192.168.1.20"], startRelay },
+    phoneOptions: { localPort: 0, lanPort: 0, lanHostname: "127.0.0.1", addresses: () => ["192.168.1.20"], startRelay, tunnels },
     runtimeOptions: {
       cwd: dataDir,
       environmentReady: Promise.resolve(),
@@ -250,6 +252,24 @@ async function browserChecks() {
     assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, "mobile.json"), "utf8")).enabled, false);
     await screenshot("phone-off-again");
     console.log("PASS: turning it off removes the code");
+
+    // Behind a Cloudflare tunnel: phones scan the tunnel's code, and Copy link gives another Mac the relay's link.
+    fs.writeFileSync(
+      path.join(dataDir, "cloudflare.json"),
+      JSON.stringify({ hostname: "mac.example.com", port: 0, connectorToken: "connector", access: { id: `${"a".repeat(32)}.access`, secret: "b".repeat(40) } }),
+      { mode: 0o600 },
+    );
+    await evaluate(`${toggle}.click()`);
+    await waitFor(`!!document.querySelector('[data-phone-qr]') && document.body.textContent.includes('Reachable at mac.example.com')`);
+    await waitFor(`document.querySelector('[data-phone-pairing="open"]')?.textContent.includes('New devices can pair for 10 more minutes')`);
+    const tunnelStatus = await host.call("phone:status");
+    assert.match(tunnelStatus.pairingLink, /^milagre:\/\/pair\?address=https%3A%2F%2Fmac\.example\.com/);
+    await click("Copy link");
+    await waitFor(`[...document.querySelectorAll('button')].some(el => el.textContent.trim() === 'Copied')`);
+    assert.equal(await clipboard.readText(), tunnelStatus.computerLink);
+    assert.match(tunnelStatus.computerLink, /^milagre:\/\/pair\?relay=/);
+    await screenshot("tunnel-on");
+    console.log("PASS: behind a Cloudflare tunnel the relay runs too, and Copy link copies its link for another Mac");
 
     host.close();
     await daemon.close();

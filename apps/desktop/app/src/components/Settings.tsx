@@ -857,8 +857,10 @@ function DevicesSettings() {
       .finally(() => setBusy(false));
   };
   const copyLink = () => {
-    if (!status?.pairingLink) return;
-    void navigator.clipboard.writeText(status.pairingLink).then(
+    // Another Mac can only pair through the relay, so the link to paste there is the relay's even behind a tunnel.
+    const link = status?.computerLink ?? status?.pairingLink;
+    if (!link) return;
+    void navigator.clipboard.writeText(link).then(
       () => {
         setCopied(true);
         if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
@@ -870,7 +872,7 @@ function DevicesSettings() {
 
   const on = status?.state === "on" && status.qrSvg && status.pairingLink;
   // Showing the QR is what invites a new device to pair, so it opens the window; a status that arrives later keeps the countdown honest.
-  const showingQr = Boolean(on) && status?.remote === "relay";
+  const showingQr = Boolean(on) && status?.pairingUntil !== undefined;
   useEffect(() => {
     if (!showingQr) return;
     let live = true;

@@ -5,10 +5,11 @@ import { useFocusEffect } from "expo-router";
 import { useMuriloMode } from "./murilo-mode";
 import { useUltracodeFatality } from "./ultracode-fatality-setting";
 import { useSession } from "./session";
-import { ErrorNotice, Toggle, styles } from "./ui";
+import { ErrorNotice, Toggle, useStyles } from "./ui";
 
 /** Settings › Experimental: this phone's and the connected Mac's experimental switches, like desktop's Experimental section. */
 export function ExperimentalSection() {
+  const styles = useStyles();
   const session = useSession();
   const [muriloMode, setMuriloMode] = useMuriloMode();
   const [fatality, setFatality] = useUltracodeFatality();

@@ -7,10 +7,13 @@ import { ArrowLeft01Icon, ArrowRight01Icon, Cancel01Icon, ClipboardPasteIcon, Ke
 import { parsePairing, type Pairing } from "../pairing";
 import { useSession } from "../session";
 import { Icon } from "../icons";
-import { CircleButton, ErrorNotice, Field, PageScroll, PillButton, colors, styles } from "../ui";
+import { CircleButton, ErrorNotice, Field, PageScroll, PillButton, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /** One sheet, two steps: scan (with paste as a shortcut), or type the address and token. */
 export default function AddComputer() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const [permission, requestPermission] = useCameraPermissions();
   const [manual, setManual] = useState(false);

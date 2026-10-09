@@ -8,10 +8,13 @@ import { useSession } from "../session";
 import { usePanelNavigation } from "../side-panels";
 import { ProjectIcon } from "../project-icon";
 import { useRpc } from "../use-rpc";
-import { ErrorNotice, Field, PageScroll, colors, styles } from "../ui";
+import { ErrorNotice, Field, PageScroll, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /** Creates a Link, or with `linkId` edits that Link's name and member Projects. Chats already started keep their Worktrees. */
 export default function LinkProjects() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const { linkId } = useLocalSearchParams<{ linkId?: string }>();
   const editing = linkId ? session.recent.find((item) => item.link?.id === linkId) : undefined;

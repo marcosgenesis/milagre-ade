@@ -3,13 +3,16 @@ import { Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { currentConfirmation } from "../confirm-store";
-import { colors, styles } from "../ui";
+import { useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /**
  * A confirmation as a bottom sheet: the question, then its buttons, Cancel last. The choice runs once the sheet has
  * gone, so whatever it does next (leaving the Chat, another sheet) never fights the sheet's own dismissal.
  */
 export default function ConfirmSheet() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const [entry] = useState(currentConfirmation);
   const chosen = useRef<number | null>(null);

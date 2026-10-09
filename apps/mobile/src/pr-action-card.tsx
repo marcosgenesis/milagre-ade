@@ -3,10 +3,11 @@ import { GitPullRequestIcon } from "@hugeicons/core-free-icons";
 import type { PullRequestActionContext } from "@milagre/shared/model";
 import { BLOCKERS } from "@milagre/shared/pr-blockers";
 import { Icon } from "./icons";
-import { colors } from "./ui";
+import { useTheme } from "./theme";
 
 /** A PR-blocker pill the user tapped, shown as what it asked for instead of the skill prompt the agent read. Tapping opens the PR. */
 export function PullRequestActionCard({ action }: { action: PullRequestActionContext }) {
+  const { colors } = useTheme();
   const blocker = BLOCKERS[action.action];
   return (
     <Pressable

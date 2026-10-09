@@ -9,7 +9,8 @@ import { attentionLabel } from "@milagre/shared/attention";
 import { readAttentionButton, saveAttentionButton } from "./hosts-native";
 import { useSession } from "./session";
 import { Icon } from "./icons";
-import { PullDown, colors } from "./ui";
+import { PullDown } from "./ui";
+import { useTheme } from "./theme";
 
 const NONE: string[] = [];
 /** Chat keys, in every Project, whose turn waits on an approval or question. A Mac from before /attention gives none. */
@@ -68,11 +69,13 @@ export function useAttentionButton(): [boolean, (on: boolean) => void] {
 }
 
 export function AttentionDot() {
+  const { colors } = useTheme();
   return <View accessibilityLabel="Needs attention" style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.orange }} />;
 }
 
 /** Under the header's right edge. One waiting Chat opens on tap; several open a menu to pick one, oldest first. */
 export function AttentionPill({ projectPath }: { projectPath: string }) {
+  const { colors } = useTheme();
   const { client, recent, cachedProject } = useSession();
   const insets = useSafeAreaInsets();
   const [enabled] = useAttentionButton();

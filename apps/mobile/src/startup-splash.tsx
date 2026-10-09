@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, StyleSheet, useColorScheme } from "react-native";
+import { Animated, Easing, StyleSheet } from "react-native";
 import * as SplashScreen from "expo-splash-screen";
-import { hex } from "./theme";
+import { useTheme } from "./theme";
 import { LoadingLogo } from "./loading-logo";
 
 // The native launch screen shows the assembled mark at this size and spot, so the hand-off is seamless.
@@ -13,8 +13,8 @@ void SplashScreen.preventAutoHideAsync().catch(() => undefined);
  * Timings and curves match styles.css.
  */
 export function StartupSplash({ ready, onDone }: { ready: boolean; onDone: () => void }) {
-  const scheme = useColorScheme();
-  const page = hex(scheme).page;
+  const { colors } = useTheme();
+  const page = colors.page;
   const [[fade, shrink]] = useState(() => [new Animated.Value(0), new Animated.Value(0)]);
   const done = useRef(onDone);
   useEffect(() => {

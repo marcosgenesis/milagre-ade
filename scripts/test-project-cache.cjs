@@ -85,6 +85,7 @@ export const FlatList = ({ data, renderItem, ListEmptyComponent, keyExtractor })
 const ui = `
 import React from 'react';
 export const colors = {}; export const styles = {};
+export const useStyles = () => new Proxy({}, { get: () => ({}) });
 export const ErrorNotice = ({message}) => <span>{message}</span>;
 export const Field = ({value, onChangeText, label}) => <input aria-label={label} value={value} onChange={e => onChangeText(e.target.value)} />;
 export const IconButton = ({label, onPress}) => <button aria-label={label} onClick={onPress} />;
@@ -101,6 +102,8 @@ const stubs = {
     "export const savedHosts = { list: async () => [] }; export const savedNavigation = { read: async () => null }; export const readPermission = async () => null; export const savePermission = async () => {};",
   "./live": "export const syncProject = () => () => {};",
   "./ui": ui,
+  "./theme":
+    "export const useTheme = () => ({ colors: new Proxy({}, { get: (_, key) => String(key) }), scheme: 'light', settings: {}, set() {} }); export const fonts = { mono: 'monospace' }; export const createStylesHook = () => () => new Proxy({}, { get: () => ({}) });",
   "expo-router": "import { useEffect } from 'react'; export const useFocusEffect = effect => useEffect(effect, [effect]);",
   "expo-linking": "export const openURL = async () => {};",
   "expo-clipboard": "export const setStringAsync = async () => {};",

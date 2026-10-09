@@ -6,7 +6,8 @@ import type { PullRequest } from "@milagre/shared/model";
 import { pullRequestPresentation, rowPullRequests } from "@milagre/shared/pr-blockers";
 import { issueChipLabel, type LinearIssue } from "@milagre/shared/linear";
 import { Icon, LinearLogo } from "./icons";
-import { colors, PullDown } from "./ui";
+import { PullDown } from "./ui";
+import { useTheme } from "./theme";
 
 const icons = { merged: GitMergeIcon, ready: Tick02Icon, checking: CircleDotIcon, open: GitPullRequestIcon };
 
@@ -20,6 +21,7 @@ export function ChatPullRequestChips({
   linearIssue?: LinearIssue;
   children?: ReactNode;
 }) {
+  const { colors } = useTheme();
   if (!pullRequests.length && !linearIssue) return null;
   const ordered = rowPullRequests(pullRequests);
   const open = (url: string) => {

@@ -3,10 +3,13 @@ import { router } from "expo-router";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { currentBrief } from "../handoff-brief-store";
 import { Markdown } from "../markdown";
-import { CircleButton, PageScroll, colors, styles } from "../ui";
+import { CircleButton, PageScroll, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /** The brief the new provider was sent when a Chat switched providers, read-only, as desktop's brief dialog shows it. */
 export default function HandoffBriefSheet() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const brief = currentBrief();
   return (
     <PageScroll style={styles.screen} contentContainerStyle={{ padding: 0, gap: 0, paddingBottom: 40 }}>

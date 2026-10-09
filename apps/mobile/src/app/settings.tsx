@@ -2,16 +2,24 @@ import { useCallback, useState } from "react";
 import { MAIN_SYNC_HINT, MAIN_SYNC_TITLE } from "@milagre/shared/main-sync";
 import { Text, View } from "react-native";
 import { Stack, router, useFocusEffect } from "expo-router";
-import { ChartBarLineIcon, Download04Icon, MagicWand01Icon, Notification01Icon, TestTube01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
+import {
+  ChartBarLineIcon,
+  Download04Icon,
+  MagicWand01Icon,
+  Notification01Icon,
+  PaintBoardIcon,
+  TestTube01Icon,
+  UserMultipleIcon,
+} from "@hugeicons/core-free-icons";
 import { usePush } from "../push";
 import { useAppUpdates } from "../update-sheet";
 import { Icon } from "../icons";
 import { useSession } from "../session";
 import { ProjectIcon } from "../project-icon";
-import { ErrorNotice, ListRow, PageScroll, Toggle, styles } from "../ui";
+import { ErrorNotice, ListRow, PageScroll, Toggle, useStyles } from "../ui";
 import { useAttentionButton } from "../attention";
 
-type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts" | "skills" | "experimental";
+type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts" | "skills" | "appearance" | "experimental";
 
 export default function SettingsScreen() {
   return (
@@ -26,6 +34,7 @@ export default function SettingsScreen() {
 
 /** Settings pages stay on the native stack for the header and interactive back gesture. */
 export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void }) {
+  const styles = useStyles();
   const push = usePush();
   const [attentionButton, setAttentionButton] = useAttentionButton();
   const updates = useAppUpdates();
@@ -100,6 +109,8 @@ export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void 
         <ListRow compact title="Plan usage" leading={<Icon icon={ChartBarLineIcon} tone="ink" size={20} />} onPress={() => onOpen("usage")} />
         <View style={styles.separator} />
         <ListRow compact title="Skills" leading={<Icon icon={MagicWand01Icon} tone="ink" size={20} />} onPress={() => onOpen("skills")} />
+        <View style={styles.separator} />
+        <ListRow compact title="Appearance" leading={<Icon icon={PaintBoardIcon} tone="ink" size={20} />} onPress={() => onOpen("appearance")} />
         <View style={styles.separator} />
         <ListRow compact title="Experimental" leading={<Icon icon={TestTube01Icon} tone="ink" size={20} />} onPress={() => onOpen("experimental")} />
         <View style={styles.separator} />

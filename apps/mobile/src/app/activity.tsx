@@ -7,11 +7,14 @@ import type { ChatStep } from "@milagre/shared/model";
 import { ToolRow } from "../tool-row";
 import { Markdown } from "../markdown";
 import { useSession } from "../session";
-import { CircleButton, PageScroll, colors, styles } from "../ui";
+import { CircleButton, PageScroll, useStyles } from "../ui";
 import { useChatPage } from "../chat-pages";
+import { useTheme } from "../theme";
 
 /** A reply's tools and notes, like desktop's expanded ActivityBlock; live while the turn runs. Each tool expands to its output. */
 export default function ActivitySheet() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { id, message } = useLocalSearchParams<{ id: string; message: string }>();
   const session = useSession();
   const project = session.snapshot?.project;

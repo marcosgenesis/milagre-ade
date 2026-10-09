@@ -1,8 +1,9 @@
 import { Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
-import { colors } from "./ui";
+import { useTheme } from "./theme";
 
 export function FileChip({ path }: { path: string }) {
+  const { colors } = useTheme();
   const name = path.split(/[\\/]/).pop() || path;
   const ext = name.includes(".") ? name.split(".").pop()!.slice(0, 4).toUpperCase() : "FILE";
   return (

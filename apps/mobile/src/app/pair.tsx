@@ -3,11 +3,12 @@ import { Text, View } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { parsePairing } from "../pairing";
 import { useSession } from "../session";
-import { ErrorNotice, PillButton, styles } from "../ui";
+import { ErrorNotice, PillButton, useStyles } from "../ui";
 import { SpinnerRing } from "../icons";
 
 /** Opened by the milagre://pair link in the host's QR code when it is scanned with the Camera app. */
 export default function PairLink() {
+  const styles = useStyles();
   const params = useLocalSearchParams<{
     address?: string;
     token?: string;

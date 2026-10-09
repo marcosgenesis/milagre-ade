@@ -15,7 +15,8 @@ import { EffortSlider } from "../effort-slider";
 import { UltracodeFatality } from "../ultracode-fatality";
 import { ultraRumble } from "../ultra-haptics";
 import { useUltracodeFatality } from "../ultracode-fatality-setting";
-import { CircleButton, colors, styles } from "../ui";
+import { CircleButton, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /** The model's context window as the picker shows it: "1M", "272k". */
 function contextLabel(model: { provider: ModelProvider; id: string }) {
@@ -26,6 +27,8 @@ function contextLabel(model: { provider: ModelProvider; id: string }) {
 /** Model, thinking effort, fast mode and Ultracode for one Chat: provider chips that scroll sideways as providers grow,
  * the provider's models, and the settings pinned below them. Cancel (✕) discards, Done (✓) applies, per Apple's sheet guidance. */
 export default function ModelSheet() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const params = useLocalSearchParams<{ chatId: string; model?: string; provider?: string; on?: string; busy?: string }>();
   const session = useSession();
   const composer = useComposer();
@@ -277,6 +280,8 @@ function SettingTile({
   value: boolean;
   onChange: (value: boolean) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const ink = tone === "purple" ? colors.purpleInk : colors.orange;
   return (
     <Pressable

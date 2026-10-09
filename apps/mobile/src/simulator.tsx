@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, Text, View, useColorScheme } from "react-native";
+import { AppState, Pressable, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DomWebView, type DomWebViewRef } from "@expo/dom-webview";
@@ -10,8 +10,8 @@ import { createSimulatorBridge, createSimulatorReceiverHtml } from "@milagre/sha
 import type { Client } from "./client";
 import { useSession } from "./session";
 import { Icon } from "./icons";
-import { hex } from "./theme";
-import { CircleButton, PageScroll, PillButton, colors, styles } from "./ui";
+import { useTheme } from "./theme";
+import { CircleButton, PageScroll, PillButton, useStyles } from "./ui";
 
 /** Poll discovery only while this screen is visible. Discovery never starts a video session. */
 function useSimulators(client: Client | null, chatId?: string) {
@@ -59,6 +59,7 @@ function useSimulators(client: Client | null, chatId?: string) {
 
 /** Same border, height, spacing and icon size as the desktop Ports pill. */
 export function SimulatorChip({ chatId }: { chatId: string }) {
+  const { colors } = useTheme();
   const { client } = useSession();
   const { list } = useSimulators(client, chatId);
   const attachedCount = list?.attached?.length ?? 0;
@@ -89,6 +90,8 @@ export function SimulatorChip({ chatId }: { chatId: string }) {
 }
 
 export function SimulatorSheet({ hostId, chatId }: { hostId?: string; chatId?: string }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { client } = useSession();
   const insets = useSafeAreaInsets();
   const source = client && chatId && (!hostId || hostId === client.url) ? client : null;
@@ -255,12 +258,12 @@ export function SimulatorSheet({ hostId, chatId }: { hostId?: string; chatId?: s
 }
 
 function SimulatorWebView({ client, deviceId, chatId }: { client: Client; deviceId: string; chatId: string }) {
-  const scheme = useColorScheme();
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const theme = useMemo(() => {
-    const palette = hex(scheme);
     // The page and its bottom safe area use page, not the raised surface color.
-    return { ...palette, surface: palette.page, scheme: scheme === "dark" ? ("dark" as const) : ("light" as const) };
-  }, [scheme]);
+    return { ...colors, surface: colors.page, scheme };
+  }, [colors, scheme]);
   const latestTheme = useRef(theme);
   const view = useRef<DomWebViewRef>(null);
   const syncTheme = useCallback(

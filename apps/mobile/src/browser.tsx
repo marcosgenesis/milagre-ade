@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, Text, View, useColorScheme } from "react-native";
+import { AppState, Pressable, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DomWebView, type DomWebViewRef } from "@expo/dom-webview";
@@ -10,8 +10,8 @@ import { createBrowserBridge, createBrowserReceiverHtml } from "@milagre/shared/
 import type { Client } from "./client";
 import { useSession } from "./session";
 import { Icon } from "./icons";
-import { hex } from "./theme";
-import { CircleButton, PageScroll, PillButton, colors, styles } from "./ui";
+import { useTheme } from "./theme";
+import { CircleButton, PageScroll, PillButton, useStyles } from "./ui";
 
 /** Poll this Chat's browser pages only while the screen is visible. Listing never starts a capture. */
 function useBrowsers(client: Client | null, chatId: string | undefined) {
@@ -59,6 +59,7 @@ function useBrowsers(client: Client | null, chatId: string | undefined) {
 
 /** Same border, height, spacing and icon size as the Simulators pill. Hidden until this Chat has a page or a browser to attach. */
 export function BrowserChip({ chatId }: { chatId?: string }) {
+  const { colors } = useTheme();
   const { client } = useSession();
   const { list } = useBrowsers(client, chatId);
   if (!client || !chatId || !list?.supported || (!list.targets.length && !list.others.length)) return null;
@@ -89,6 +90,8 @@ export function BrowserChip({ chatId }: { chatId?: string }) {
 }
 
 export function BrowserSheet({ hostId, chatId }: { hostId?: string; chatId?: string }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { client } = useSession();
   const insets = useSafeAreaInsets();
   const source = client && (!hostId || hostId === client.url) ? client : null;
@@ -270,12 +273,12 @@ function BrowserWebView({
   targetId: string;
   onPage(page: { title: string; url: string }): void;
 }) {
-  const scheme = useColorScheme();
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const theme = useMemo(() => {
-    const palette = hex(scheme);
     // The sheet and its bottom safe area use page, not the raised surface color.
-    return { ...palette, surface: palette.page, scheme: scheme === "dark" ? ("dark" as const) : ("light" as const) };
-  }, [scheme]);
+    return { ...colors, surface: colors.page, scheme };
+  }, [colors, scheme]);
   const latestTheme = useRef(theme);
   const view = useRef<DomWebViewRef>(null);
   const syncTheme = useCallback(

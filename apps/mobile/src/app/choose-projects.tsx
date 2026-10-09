@@ -3,10 +3,13 @@ import { Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useSession } from "../session";
 import { ProjectIcon } from "../project-icon";
-import { ErrorNotice, PageScroll, colors, styles } from "../ui";
+import { ErrorNotice, PageScroll, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /** A checkbox per Project: unchecked ones leave the Projects list here and the all-Projects sidebar on the Mac. Links are always listed. */
 export default function ChooseProjects() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   // By name, not by recency: opening a Project reorders the recent list, and a row must not move under the finger.
   const projects = session.recent

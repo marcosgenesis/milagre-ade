@@ -6,10 +6,13 @@ import type { PermissionMode } from "@milagre/shared/model";
 import { PermissionIcon } from "../agent-controls";
 import { useComposer, useSession } from "../session";
 import { Icon } from "../icons";
-import { CircleButton, colors, styles } from "../ui";
+import { CircleButton, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /** Desktop's permission picker as a sheet: Ask approval, Auto mode, Full permission. A tap applies it and closes. */
 export default function PermissionSheet() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { chatId, busy } = useLocalSearchParams<{ chatId: string; busy?: string }>();
   const composer = useComposer();
   const session = useSession();

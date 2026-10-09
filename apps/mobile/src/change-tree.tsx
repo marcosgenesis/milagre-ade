@@ -5,7 +5,8 @@ import type { DiffFileEntry } from "@milagre/shared/git-diff";
 import type { DiffTreeNode } from "@milagre/shared/diff-tree";
 import { Icon } from "./icons";
 import { Counts, StatusBox } from "./diff-ui";
-import { colors, styles } from "./ui";
+import { useStyles } from "./ui";
+import { useTheme } from "./theme";
 
 export function ChangeTree({ nodes, depth, onOpen }: { nodes: DiffTreeNode<DiffFileEntry>[]; depth: number; onOpen: (file: DiffFileEntry) => void }) {
   return (
@@ -18,6 +19,8 @@ export function ChangeTree({ nodes, depth, onOpen }: { nodes: DiffTreeNode<DiffF
 }
 
 function TreeRow({ node, depth, onOpen }: { node: DiffTreeNode<DiffFileEntry>; depth: number; onOpen: (file: DiffFileEntry) => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [collapsed, setCollapsed] = useState(false);
   const row = { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44, paddingLeft: 12 + depth * 14, paddingRight: 14 } as const;
   if (node.type === "file")

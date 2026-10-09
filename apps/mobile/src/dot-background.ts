@@ -1,5 +1,5 @@
-import { useColorScheme, type ViewStyle } from "react-native";
-import { hex } from "./theme";
+import type { ViewStyle } from "react-native";
+import { useTheme } from "./theme";
 
 /**
  * Desktop's DotBackground as a background style: a 20px grid of 1px dots (line-strong, line in dark mode), covered by
@@ -7,8 +7,7 @@ import { hex } from "./theme";
  * than as a view, because iOS finds the transcript for its native top edge blur only through each view's first child.
  */
 export function useDotBackground(): ViewStyle {
-  const scheme = useColorScheme();
-  const palette = hex(scheme);
+  const { colors: palette, scheme } = useTheme();
   const dot = scheme === "dark" ? palette.line : palette.lineStrong;
   return {
     backgroundColor: palette.page,

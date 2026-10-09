@@ -135,7 +135,8 @@ export default function ChoiceSheet() {
               paddingVertical: 14,
               borderRadius: 10,
               borderCurve: "continuous",
-              backgroundColor: pressed ? colors.hover : item.checked ? colors.accentTint : "transparent",
+              // The chosen row shows only its tick, like the Linear issue rows; no fill.
+              backgroundColor: pressed ? colors.hover : "transparent",
               opacity: item.disabled ? 0.4 : 1,
             })}
           >

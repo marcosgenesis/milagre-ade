@@ -42,7 +42,7 @@ import { lazyView } from "../lib/lazy-view";
 import type { LinkedWork } from "@milagre/shared/model";
 import { TerminalPanel } from "./terminal/TerminalPanel";
 import { CORNER_PITCH, PanelToggles } from "./agents/PanelToggles";
-import { BridgeContext, bridgeForKey } from "../lib/computer-bridge";
+import { BridgeContext, bridgeForKey, isRemoteKey } from "../lib/computer-bridge";
 import { busyTerminals, newTerminal, useTerminalSync, type TerminalPlace } from "../lib/terminal-actions";
 const CanvasView = lazyView(() => import("./CanvasView").then((module) => module.CanvasView));
 const CANVAS_STATES = {};
@@ -442,14 +442,19 @@ export function LinkWorkspace({
               chatActions={{
                 onRename: (id, title) => void bridge.patchChat(owner, Number(id), { title }).catch((error) => setError(ipcErrorMessage(error))),
                 onMarkUnread: (id, unread) => void bridge.patchChat(owner, Number(id), { unread }),
-                onReveal: (id) => {
-                  const target = state.sessions[id];
-                  if (target) void window.milagre.revealInFolder(target.workspacePath);
-                },
-                onOpenInEditor: (id) => {
-                  const target = state.sessions[id];
-                  if (target) void openInEditor(target.workspacePath);
-                },
+                remote: isRemoteKey(owner),
+                onReveal: isRemoteKey(owner)
+                  ? undefined
+                  : (id) => {
+                      const target = state.sessions[id];
+                      if (target) void window.milagre.revealInFolder(target.workspacePath);
+                    },
+                onOpenInEditor: isRemoteKey(owner)
+                  ? undefined
+                  : (id) => {
+                      const target = state.sessions[id];
+                      if (target) void openInEditor(target.workspacePath);
+                    },
                 onCommit: (id) => {
                   setGitChoice(Number(id));
                   setGitMemberId("");
@@ -611,8 +616,8 @@ export function LinkWorkspace({
                 activePath={changes.activePath}
                 commentCounts={comments.counts}
                 onCommit={(member) => setGitDialog({ sessionId: session.id, member: memberWorktreeForAction(state, session.id, member.projectId) })}
-                onOpenEditor={(member) => void openInEditor(member.worktreePath)}
-                onReveal={(member) => void window.milagre.revealInFolder(member.worktreePath)}
+                onOpenEditor={isRemoteKey(owner) ? undefined : (member) => void openInEditor(member.worktreePath)}
+                onReveal={isRemoteKey(owner) ? undefined : (member) => void window.milagre.revealInFolder(member.worktreePath)}
               />
             )}
           </ChangesPanelSlot>

@@ -1252,6 +1252,11 @@ function App() {
     prAction?: PullRequestActionContext,
   ): Promise<boolean> {
     if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
+    // A file attached from this Mac is a path the other Mac can't read; pasted images travel as data and still go.
+    if (isRemoteKey(project.path) && files.length) {
+      setNotice("Files from this Mac can't be attached to a chat on another computer. Paste images instead.");
+      return false;
+    }
     sendInFlight.current = true;
     const view = chatView.current;
     const stillHere = () => projectRef.current?.path === project.path && chatView.current === view;
@@ -1528,19 +1533,24 @@ function App() {
   // The sidebar is memo()'d: these keep one identity across renders (each runs the latest closure) so a streamed
   // batch or another pane's state change doesn't re-render it.
   const pickChat = useEvent((id: string) => openChat(Number(id)));
+  const remoteProject = isRemoteKey(project?.path);
   const chatActions = useMemo<ChatRowActions>(
     () => ({
       onRename: (id, title) => latest.current.patchChat(Number(id), { title }),
       onMarkUnread: (id, unread) => latest.current.patchChat(Number(id), { unread }),
       onPin: (id, order) => latest.current.patchChat(Number(id), order == null ? { pinned: false, pin_order: undefined } : { pinned: true, pin_order: order }),
-      onReveal: (id) => latest.current.revealChat(Number(id)),
-      onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
+      ...(remoteProject
+        ? { remote: true }
+        : {
+            onReveal: (id: string) => latest.current.revealChat(Number(id)),
+            onOpenInEditor: (id: string) => latest.current.openChatInEditor(Number(id)),
+          }),
       onCommit: (id) => latest.current.openGitDialog(Number(id)),
       onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
       // The row shows the progress until this settles.
       onArchive: (id, mode, plan) => latest.current.archiveChat(Number(id), mode, plan),
     }),
-    [],
+    [remoteProject],
   );
   const startNewChatFromSidebar = useEvent(() => startNewChat());
   const openProjectFromSidebar = useEvent(() => void openProject());
@@ -1851,15 +1861,26 @@ function App() {
           keywords: "git changes pull request push",
           run: () => openGitDialog(sessionId),
         },
-        {
-          id: "editor",
-          label: "Open in editor",
-          group: "Current chat",
-          icon: "editor",
-          keywords: "code vscode cursor",
-          run: () => openChatInEditor(sessionId),
-        },
-        { id: "reveal", label: "Reveal folder", group: "Current chat", icon: "folder", keywords: "finder explorer worktree", run: () => revealChat(sessionId) },
+        ...(isRemoteKey(project?.path)
+          ? []
+          : [
+              {
+                id: "editor",
+                label: "Open in editor",
+                group: "Current chat",
+                icon: "editor" as const,
+                keywords: "code vscode cursor",
+                run: () => openChatInEditor(sessionId),
+              },
+              {
+                id: "reveal",
+                label: "Reveal folder",
+                group: "Current chat",
+                icon: "folder" as const,
+                keywords: "finder explorer worktree",
+                run: () => revealChat(sessionId),
+              },
+            ]),
         ...(chatCount
           ? [
               {
@@ -2088,7 +2109,7 @@ function App() {
               className={`min-h-0 flex-1 flex-col overflow-hidden ${view === "chat" && !diffPresence.occupied ? "flex" : "hidden"}`}
               style={{ animation: "fade-in 160ms ease-out" }}
             >
-              <EditorLinks root={selectedWorktree?.path ?? project.path}>
+              <EditorLinks root={isRemoteKey(project.path) ? "" : (selectedWorktree?.path ?? project.path)}>
                 <DraftChatComposer
                   key={project.path}
                   store={draftStore}

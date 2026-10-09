@@ -91,6 +91,8 @@ export type ChatRowActions = {
   onPin?: (id: string, order?: number | null) => void;
   onReveal?: (id: string) => void;
   onOpenInEditor?: (id: string) => void;
+  /** The chat is on another Mac: the menu leaves out what only acts on this one (Finder, the editor). */
+  remote?: boolean;
   /** Opens the chat with its "Commit and open PR" dialog. */
   onCommit?: (id: string) => void;
   /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
@@ -795,9 +797,9 @@ function ChatMenu({
     item.pinned
       ? { key: "unpin", label: "Unpin", icon: PinOffIcon, onSelect: run(() => actions.onPin?.(item.id, null)), disabled: !actions.onPin }
       : { key: "pin", label: "Pin", icon: PinIcon, onSelect: run(() => actions.onPin?.(item.id)), disabled: !actions.onPin },
-    "divider",
+    "divider" as const,
     ...archiveItems,
-  ];
+  ].filter((entry) => entry === "divider" || !actions.remote || (entry.key !== "reveal" && entry.key !== "editor"));
 
   const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];

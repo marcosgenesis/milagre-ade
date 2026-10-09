@@ -175,6 +175,42 @@ async function browserChecks() {
     );
     await waitFor(`document.querySelector('[data-chat-pane]')?.textContent.includes('The deploy check fails about one run in five.')`);
     await screenshot("remote-chat");
+
+    const menuOf = async (scope, title) => {
+      await evaluate(
+        `(() => { const button = [...document.querySelectorAll(${JSON.stringify(inScope(scope, "[data-chat-id] button"))})].find((b) => b.textContent.includes(${JSON.stringify(title)})); const r = button.getBoundingClientRect(); button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.x + 20, clientY: r.y + 10 })); })()`,
+      );
+      await waitFor(`!!document.querySelector('[role="menu"]')`);
+      const labels = await evaluate(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((item) => item.textContent.trim())`);
+      await evaluate(
+        `(document.activeElement?.closest('[role="menu"]') ?? document.querySelector('[role="menu"]')).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`,
+      );
+      await waitFor(`!document.querySelector('[role="menu"]')`);
+      return labels;
+    };
+    const remoteMenu = await menuOf("c-arketa|/Users/a/arketa-web", "Fix flaky deploy check");
+    assert.equal(
+      remoteMenu.some((label) => /Finder|editor|Open in/.test(label)),
+      false,
+      `no local-only entry on a remote chat: ${remoteMenu}`,
+    );
+    assert.ok(remoteMenu.includes("Commit and open PR…"), "git works on the other Mac");
+    const localMenu = await menuOf("/work/milagre-ade", "Desktop connect sidebar");
+    assert.ok(
+      localMenu.some((label) => /Finder|file manager/.test(label)),
+      "this Mac's chats keep them",
+    );
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "K", modifiers: ["meta"] });
+    await waitFor(`!!document.querySelector('dialog[open][aria-label="Command palette"]')`);
+    const commands = await evaluate(`[...document.querySelectorAll('dialog[open] [role="option"]')].map((option) => option.textContent.trim())`);
+    assert.equal(
+      commands.some((label) => /Reveal folder|Open in editor/.test(label)),
+      false,
+      `no local-only command for a remote chat: ${commands}`,
+    );
+    await evaluate(`document.querySelector('dialog[open]').dispatchEvent(new Event('cancel', { cancelable: true }))`);
+    await waitFor(`!document.querySelector('dialog[open]')`);
+    console.log("PASS: a remote chat's menus and commands leave out Finder and the editor; this Mac's keep them");
     console.log("PASS: a remote computer's chat opens from the merged list");
 
     await evaluate(`window.setOther(false)`);

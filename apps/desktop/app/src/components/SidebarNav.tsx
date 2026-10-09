@@ -48,7 +48,7 @@ import { ComputersButton } from "./sidebar/ComputersButton";
 import { ChatRow, type ChatRowActions, type RowComputer, type SidebarRecent } from "./sidebar/ChatRow";
 import { useComputers, isDimmed } from "../lib/computers";
 import { mergeScopes, useComputerScopes, withoutLocal } from "../lib/computer-scopes";
-import { LOCAL_COMPUTER, computerOfKey } from "@milagre/shared/chat-scopes";
+import { LOCAL_COMPUTER, computerOfKey, unqualifyKey } from "@milagre/shared/chat-scopes";
 import { useDismiss } from "../lib/use-dismiss";
 import { dropIntent, pinOrderAt, type DropIntent, type DropZone } from "@/lib/chat-list";
 import type { ProjectLink } from "@/electron";
@@ -56,7 +56,7 @@ import { ipcErrorMessage } from "@milagre/shared/result";
 import { useSettings } from "../lib/settings";
 import { RECENT_PROJECTS_CHANGED } from "../lib/project-list";
 import { cachedProjectCopy, scopeChats, useScopeStates } from "../lib/sidebar-scopes";
-import { bridgeForKey } from "../lib/computer-bridge";
+import { bridgeForKey, isRemoteKey } from "../lib/computer-bridge";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -641,7 +641,7 @@ function WorkspaceMenu({
   const copy = (text: string) => void navigator.clipboard.writeText(text).catch(() => {});
   const projectActions: Record<ProjectMenuKey, { run: () => void; disabled: boolean }> = {
     reveal: { run: () => void window.milagre?.revealInFolder(projectPath ?? "").catch(() => {}), disabled: !projectPath },
-    "copy-path": { run: () => copy(projectPath ?? ""), disabled: !projectPath },
+    "copy-path": { run: () => copy(unqualifyKey(projectPath ?? "")), disabled: !projectPath },
     "copy-name": { run: () => copy(workspace.name), disabled: false },
     settings: { run: () => onOpenProjectSettings?.(projectPath ?? ""), disabled: !onOpenProjectSettings || !projectPath },
   };
@@ -664,26 +664,28 @@ function WorkspaceMenu({
       <ScrollArea className="p-1.5">
         <GlideMenu className="flex flex-col gap-px" rowSelector="[data-menu-row]:not(:disabled)" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
           {!selectedLink &&
-            projectMenuActions(IS_MAC).map((item) => (
-              <button
-                key={item.key}
-                data-menu-row
-                data-project-action={item.key}
-                role="menuitem"
-                type="button"
-                disabled={projectActions[item.key].disabled}
-                onClick={() => {
-                  onClose();
-                  projectActions[item.key].run();
-                }}
-                className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40"
-              >
-                <span className="flex size-5 shrink-0 items-center justify-center text-ink-2">
-                  <HugeIcon icon={PROJECT_MENU_ICONS[item.key]} size={16} />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
-              </button>
-            ))}
+            projectMenuActions(IS_MAC)
+              .filter((item) => item.key !== "reveal" || !isRemoteKey(projectPath))
+              .map((item) => (
+                <button
+                  key={item.key}
+                  data-menu-row
+                  data-project-action={item.key}
+                  role="menuitem"
+                  type="button"
+                  disabled={projectActions[item.key].disabled}
+                  onClick={() => {
+                    onClose();
+                    projectActions[item.key].run();
+                  }}
+                  className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40"
+                >
+                  <span className="flex size-5 shrink-0 items-center justify-center text-ink-2">
+                    <HugeIcon icon={PROJECT_MENU_ICONS[item.key]} size={16} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
+                </button>
+              ))}
           {!selectedLink && <div className="my-1 h-px bg-line" />}
           <p className="px-2 py-1 text-[11px] font-medium text-ink-3">Projects</p>
           {projects.map((row) => {
@@ -1089,12 +1091,14 @@ export default memo(function SidebarNav({
       ];
     const actions: Record<ProjectMenuKey, Pick<ScopeMenuItem, "run" | "disabled">> = {
       reveal: { run: () => void window.milagre?.revealInFolder(scope.key).catch(() => {}) },
-      "copy-path": { run: () => copy(scope.key) },
+      "copy-path": { run: () => copy(unqualifyKey(scope.key)) },
       "copy-name": { run: () => copy(scope.name) },
       settings: { run: () => onOpenProjectSettings?.(scope.key), disabled: !onOpenProjectSettings },
     };
     return [
-      ...projectMenuActions(IS_MAC).map((item) => ({ key: item.key, label: item.label, icon: PROJECT_MENU_ICONS[item.key], ...actions[item.key] })),
+      ...projectMenuActions(IS_MAC)
+        .filter((item) => item.key !== "reveal" || !isRemoteKey(scope.key))
+        .map((item) => ({ key: item.key, label: item.label, icon: PROJECT_MENU_ICONS[item.key], ...actions[item.key] })),
       ...(current
         ? []
         : [{ key: "remove", label: "Remove from list", icon: Cancel01Icon, destructive: true, separatorBefore: true, run: () => forgetProject(scope.key) }]),

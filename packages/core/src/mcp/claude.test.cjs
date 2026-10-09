@@ -35,7 +35,7 @@ test("a server still pending at the cap is failed with a timeout error", () => {
     scope: "user",
     state: "failed",
     tools: 0,
-    error: "Timed out after 30 s",
+    error: "Timed out. Check this server in a terminal.",
   });
 });
 
@@ -84,7 +84,7 @@ test("checkClaude stops polling at the cap", async () => {
     now: () => clock,
     sleep: async (ms) => void (clock += ms),
   });
-  assert.equal(servers[0].error, "Timed out after 30 s");
+  assert.equal(servers[0].error, "Timed out. Check this server in a terminal.");
   assert.equal(sdk.calls.closed, true);
 });
 

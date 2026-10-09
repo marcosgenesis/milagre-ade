@@ -15,7 +15,14 @@ const snapshot = {
     { provider: "antigravity", accounts: [{ id: "default", label: "Default account", state: "ready" }] },
   ],
 };
-const accounts = { list: async () => snapshot };
+let listCalls = 0;
+const accounts = {
+  snapshot: () => snapshot,
+  list: async () => {
+    listCalls++;
+    return snapshot;
+  },
+};
 const routing = { forAccount: async (provider, accountId) => ({ command: `/bin/${provider}`, env: { ACCOUNT: accountId }, accountId }) };
 const report = { name: "pencil", transport: "command", scope: "user", state: "connected", tools: 5, error: null };
 
@@ -26,6 +33,33 @@ test("accounts lists Claude and Codex accounts, not Antigravity", async () => {
     { provider: "claude", accountId: "work", label: "Work" },
     { provider: "codex", accountId: "default", label: "Connected CLI account" },
   ]);
+});
+
+test("accounts and check never inspect identities", async () => {
+  const mcp = createMcp({ accounts, routing, cwd: "/", checkers: { claude: async () => [] } });
+  await mcp.accounts();
+  await mcp.check("claude", "default");
+  assert.equal(listCalls, 0);
+});
+
+test("an unknown state still reaches the CLI check", async () => {
+  const unknown = { snapshot: () => ({ providers: [{ provider: "codex", accounts: [{ id: "default", label: "CLI", state: "unknown" }] }] }) };
+  let called = false;
+  const mcp = createMcp({ accounts: unknown, routing, cwd: "/", checkers: { codex: async () => ((called = true), []) } });
+  assert.equal((await mcp.check("codex", "default")).problem, null);
+  assert.equal(called, true);
+});
+
+test("a hanging account or CLI lookup still ends at the cap", async () => {
+  const hang = () => new Promise(() => {});
+  for (const mcp of [
+    createMcp({ accounts: { snapshot: hang }, routing, cwd: "/", timeoutMs: 20 }),
+    createMcp({ accounts, routing: { forAccount: hang }, cwd: "/", timeoutMs: 20 }),
+  ]) {
+    const result = await mcp.check("claude", "default");
+    assert.equal(result.problem, "Timed out after 30 s. Check the servers in a terminal.");
+    assert.equal(result.provider, "claude");
+  }
 });
 
 test("check runs the provider's checker with the account's command and environment", async () => {

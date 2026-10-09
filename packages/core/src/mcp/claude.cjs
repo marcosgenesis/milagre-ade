@@ -3,7 +3,7 @@
 
 const SCOPES = { user: "user", local: "local", project: "project", dynamic: "plugin", claudeai: "claude.ai" };
 const STATES = { connected: "connected", failed: "failed", "needs-auth": "needs-sign-in", disabled: "disabled", pending: "pending" };
-const TIMEOUT_ERROR = "Timed out after 30 s";
+const TIMEOUT_ERROR = "Timed out. Check this server in a terminal.";
 
 function transportOf(type) {
   if (type === "http" || type === "sse" || type === "ws") return "url";

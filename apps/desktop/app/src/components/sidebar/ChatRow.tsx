@@ -35,7 +35,7 @@ import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
 import { rowPullRequests } from "@/lib/chat-pull-requests";
 import { useEditors } from "@/lib/editors";
 import type { AgentPort, DiffStat, PullRequest } from "@/model";
-import { portUrl } from "@/lib/ports";
+import { portComputer, portUrl } from "@/lib/ports";
 import { BLOCKERS, pullRequestBlockers, pullRequestPresentation } from "@/lib/pr-blockers";
 import { ScrollArea } from "../primitives/ScrollArea";
 import { useDismiss } from "../../lib/use-dismiss";
@@ -601,20 +601,29 @@ function ChatHoverCard({
               <HugeIcon icon={EthernetPortIcon} size={14} />
             </span>
             <span className="flex min-w-0 flex-wrap gap-1">
-              {details.ports.map((port) => (
-                <a
-                  key={port.port}
-                  href={portUrl(port)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  data-chat-card-port
-                  title={`${port.command} · open ${portUrl(port)}`}
-                  onClick={onOpenLink}
-                  className="rounded-[6px] bg-hover px-1.5 py-0.5 font-mono text-[11.5px] tabular-nums text-ink-2 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-                >
-                  :{port.port}
-                </a>
-              ))}
+              {details.ports.map((port) => {
+                const computer = portComputer(port);
+                const chip = "rounded-[6px] bg-hover px-1.5 py-0.5 font-mono text-[11.5px] tabular-nums text-ink-2";
+                // Another computer's port is not at this Mac's localhost: shown, not linked.
+                return computer ? (
+                  <span key={port.port} data-chat-card-port data-port-remote title={`${port.command} · listening on ${computer}`} className={chip}>
+                    :{port.port} <span className="font-sans text-ink-3">on {computer}</span>
+                  </span>
+                ) : (
+                  <a
+                    key={port.port}
+                    href={portUrl(port)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-chat-card-port
+                    title={`${port.command} · open ${portUrl(port)}`}
+                    onClick={onOpenLink}
+                    className={`${chip} no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
+                  >
+                    :{port.port}
+                  </a>
+                );
+              })}
             </span>
           </div>
         ) : null}

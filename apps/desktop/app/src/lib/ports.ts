@@ -3,12 +3,19 @@ import { LOCAL_COMPUTER } from "@milagre/shared/chat-scopes";
 import type { AgentPort, AgentPorts } from "../model";
 import { keepComputers, replaceComputerEntries } from "./agent-runs";
 import { bridgeFor } from "./computer-bridge";
-import { useComputers } from "./computers";
+import { computerNameOf, useComputers } from "./computers";
 
 /** Where a port opens in the browser. A server bound only to IPv6 loopback needs its address; "localhost" covers the rest. */
 export function portUrl(port: AgentPort) {
   return `http://${port.address === "::1" ? "[::1]" : "localhost"}:${port.port}`;
 }
+
+/** A computer's ports, marked with it: their `localhost` is not this Mac's. */
+const tagged = (computerId: string, next: AgentPorts): AgentPorts =>
+  Object.fromEntries(Object.entries(next ?? {}).map(([key, list]) => [key, Array.isArray(list) ? list.map((port) => ({ ...port, computerId })) : list]));
+
+/** Where a port listens when it isn't this Mac: "studio", else null. */
+export const portComputer = (port: AgentPort) => (port.computerId ? computerNameOf(port.computerId) : null);
 
 /** Every chat's listening ports, by chat key, on this Mac and on each paired computer. */
 export function useAgentPorts() {
@@ -29,7 +36,7 @@ export function useAgentPorts() {
     // A computer's ports arrive keyed by its chat keys (computer-routing.cjs); each replaces only that computer's.
     const remote = window.milagre.onComputerEvent?.((event) => {
       const next = event.channel === "agent:ports" ? event.payload : event.channel === "runtime:snapshot" ? event.payload?.ports : null;
-      if (next) setPorts((current) => replaceComputerEntries(current, event.computerId, next));
+      if (next) setPorts((current) => replaceComputerEntries(current, event.computerId, tagged(event.computerId, next)));
     });
     void window.milagre
       .getAgentPorts()
@@ -60,7 +67,7 @@ export function useAgentPorts() {
         .getAgentPorts()
         .then((next) => {
           // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
-          if (live) setPorts((current) => replaceComputerEntries(current, id, next));
+          if (live) setPorts((current) => replaceComputerEntries(current, id, tagged(id, next)));
         })
         .catch(() => {});
     return () => {

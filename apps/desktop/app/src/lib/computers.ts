@@ -124,3 +124,6 @@ export function withComputer(key: string, subtitle: string): string {
   const name = snapshot.computers.find((computer) => computer.id === id)?.name ?? "Computer";
   return subtitle ? `${name} · ${subtitle}` : name;
 }
+
+/** The name a computer is shown by, "Computer" when it is gone from the list. */
+export const computerNameOf = (computerId: string): string => snapshot.computers.find((computer) => computer.id === computerId)?.name ?? "Computer";

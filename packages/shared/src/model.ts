@@ -460,6 +460,8 @@ export interface AgentPort {
   command: string;
   /** The address it listens on: "*", "127.0.0.1", "::1". */
   address: string;
+  /** Set by a desktop window on a port that listens on another computer, which `localhost` doesn't reach. */
+  computerId?: string;
 }
 
 /** Every chat's listening ports, by chat key; a chat with none is absent. */

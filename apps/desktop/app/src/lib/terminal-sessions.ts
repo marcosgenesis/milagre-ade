@@ -4,6 +4,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { followTerminal, type TerminalFollower } from "@milagre/shared/terminal-client";
 import type { TerminalInfo } from "@milagre/shared/terminal";
+import { THEME_EVENT } from "./theme-sheet";
 import { isMac } from "./shortcut-hints";
 import { removeTerminal, updateTerminal } from "./terminal-store";
 import { bridgeForKey } from "./computer-bridge";
@@ -31,56 +32,24 @@ const PTY_RESIZE_MS = 100;
 // Browsers keep a handful of WebGL contexts; only the shown Terminals draw on the GPU, so a few stay well under it.
 let webglBroken = false;
 
-const LIGHT: ITheme = {
-  black: "#24292f",
-  red: "#cf222e",
-  green: "#116329",
-  yellow: "#7d4e00",
-  blue: "#0969da",
-  magenta: "#8250df",
-  cyan: "#1b7c83",
-  white: "#6e7781",
-  brightBlack: "#57606a",
-  brightRed: "#a40e26",
-  brightGreen: "#1a7f37",
-  brightYellow: "#633c01",
-  brightBlue: "#218bff",
-  brightMagenta: "#a475f9",
-  brightCyan: "#3192aa",
-  brightWhite: "#8c959f",
-};
-const DARK: ITheme = {
-  black: "#484f58",
-  red: "#ff7b72",
-  green: "#3fb950",
-  yellow: "#d29922",
-  blue: "#58a6ff",
-  magenta: "#bc8cff",
-  cyan: "#39c5cf",
-  white: "#b1bac4",
-  brightBlack: "#6e7681",
-  brightRed: "#ffa198",
-  brightGreen: "#56d364",
-  brightYellow: "#e3b341",
-  brightBlue: "#79c0ff",
-  brightMagenta: "#d2a8ff",
-  brightCyan: "#56d4dd",
-  brightWhite: "#ffffff",
-};
+const ANSI_NAMES = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"] as const;
 
 /** The app's colors as xterm takes them; the panel's own surface shows through the transparent background. */
 function terminalTheme(): ITheme {
-  const root = document.documentElement,
-    style = getComputedStyle(root);
+  const style = getComputedStyle(document.documentElement);
   const color = (name: string) => style.getPropertyValue(name).trim();
-  const dark = root.classList.contains("dark");
+  const ansi: Record<string, string> = {};
+  ANSI_NAMES.forEach((name, index) => {
+    ansi[name] = color(`--ansi-${index}`);
+    ansi[`bright${name[0]!.toUpperCase()}${name.slice(1)}`] = color(`--ansi-${index + 8}`);
+  });
   return {
-    ...(dark ? DARK : LIGHT),
+    ...ansi,
     background: "#00000000",
     foreground: color("--ink"),
-    cursor: color("--ink"),
+    cursor: color("--cursor"),
     cursorAccent: color("--surface"),
-    selectionBackground: color("--accent") ? `color-mix(in oklch, ${color("--accent")} 30%, transparent)` : undefined,
+    selectionBackground: color("--selection"),
   };
 }
 
@@ -92,11 +61,13 @@ function fontFamily() {
 let themeWatch: MutationObserver | null = null;
 function watchTheme() {
   if (themeWatch) return;
-  themeWatch = new MutationObserver(() => {
+  const reapply = () => {
     const theme = terminalTheme();
     for (const session of sessions.values()) session.term.options.theme = theme;
-  });
+  };
+  themeWatch = new MutationObserver(reapply);
   themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  window.addEventListener(THEME_EVENT, reapply);
 }
 
 function create(info: TerminalInfo): Session {

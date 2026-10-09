@@ -53,47 +53,51 @@ import {
 import { MenuView, type MenuAction } from "@expo/ui/community/menu";
 import * as Haptics from "expo-haptics";
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { colors as palette, fonts } from "./theme";
+import { createStylesHook, fonts, useTheme, type Palette } from "./theme";
 import { confirmSheet } from "./confirm-store";
 import { showChoiceSheet } from "./choice-store";
 import { NativePickerIcon, type NativePickerIconName } from "./native-picker-icon";
 import { Icon, type IconData, type Tone } from "./icons";
 
-export const colors = { ...palette, bg: palette.page, panel: palette.surface, text: palette.ink, muted: palette.ink2, error: palette.red };
-export const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.page },
-  content: { padding: 20, gap: 20, paddingBottom: 36 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, flexWrap: "wrap" },
-  card: {
-    backgroundColor: colors.surface,
-    padding: 16,
-    borderRadius: 20,
-    borderCurve: "continuous",
-    gap: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-  },
-  title: { color: colors.ink, fontSize: 34, fontWeight: "700", letterSpacing: -0.6 },
-  subtitle: { color: colors.ink, fontSize: 20, fontWeight: "600" },
-  text: { color: colors.ink, fontSize: 16, lineHeight: 23 },
-  muted: { color: colors.ink2, fontSize: 15, lineHeight: 21 },
-  label: { color: colors.ink2, fontSize: 13, fontWeight: "500" },
-  caption: { color: colors.ink3, fontSize: 12 },
-  section: { color: colors.ink3, fontSize: 11, fontWeight: "600", letterSpacing: 0.6, textTransform: "uppercase" },
-  input: {
-    backgroundColor: colors.field,
-    color: colors.ink,
-    fontSize: 16,
-    borderRadius: 12,
-    borderCurve: "continuous",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    minHeight: 44,
-  },
-  error: { backgroundColor: colors.redTint, borderRadius: 16, borderCurve: "continuous", padding: 16, gap: 12 },
-  code: { color: colors.ink, fontSize: 13, lineHeight: 20, fontFamily: fonts.mono },
-  separator: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line },
-});
+export const makeStyles = (colors: Palette) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: colors.page },
+    content: { padding: 20, gap: 20, paddingBottom: 36 },
+    row: { flexDirection: "row", alignItems: "center", gap: 12, flexWrap: "wrap" },
+    card: {
+      backgroundColor: colors.surface,
+      padding: 16,
+      borderRadius: 20,
+      borderCurve: "continuous",
+      gap: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.line,
+    },
+    title: { color: colors.ink, fontSize: 34, fontWeight: "700", letterSpacing: -0.6 },
+    subtitle: { color: colors.ink, fontSize: 20, fontWeight: "600" },
+    text: { color: colors.ink, fontSize: 16, lineHeight: 23 },
+    muted: { color: colors.ink2, fontSize: 15, lineHeight: 21 },
+    label: { color: colors.ink2, fontSize: 13, fontWeight: "500" },
+    caption: { color: colors.ink3, fontSize: 12 },
+    section: { color: colors.ink3, fontSize: 11, fontWeight: "600", letterSpacing: 0.6, textTransform: "uppercase" },
+    input: {
+      backgroundColor: colors.field,
+      color: colors.ink,
+      fontSize: 16,
+      borderRadius: 12,
+      borderCurve: "continuous",
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      minHeight: 44,
+    },
+    error: { backgroundColor: colors.redTint, borderRadius: 16, borderCurve: "continuous", padding: 16, gap: 12 },
+    code: { color: colors.ink, fontSize: 13, lineHeight: 20, fontFamily: fonts.mono },
+    separator: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line },
+  });
+
+export type Styles = ReturnType<typeof makeStyles>;
+/** The shared styles for the current theme, built once per palette. */
+export const useStyles = createStylesHook(makeStyles);
 
 const tap = () => {
   if (Platform.OS === "ios") void Haptics.selectionAsync().catch(() => {});
@@ -101,6 +105,7 @@ const tap = () => {
 
 // Native scrolling and choice controls have one shared entry point.
 export const PageScroll = React.forwardRef<ScrollView, ScrollViewProps>(function PageScroll({ children, contentContainerStyle, ...props }, ref) {
+  const styles = useStyles();
   return (
     <ScrollView
       ref={ref}
@@ -129,9 +134,10 @@ export function Button({
   loading?: boolean;
   destructive?: boolean;
 }) {
+  const { colors } = useTheme();
   return (
     <View style={{ minHeight: 44, justifyContent: "center", alignItems: "center" }}>
-      <Host ignoreSafeArea="all" matchContents seedColor={(destructive ? palette.red : palette.ink) as string}>
+      <Host ignoreSafeArea="all" matchContents seedColor={(destructive ? colors.red : colors.ink) as string}>
         <NativeButton
           label={title}
           variant={secondary ? "outlined" : "filled"}
@@ -166,6 +172,7 @@ export function PillButton({
   loading?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -204,13 +211,16 @@ export function PillButton({
   );
 }
 export function Toggle({ title, selected, onPress, disabled = false }: { title: string; selected: boolean; onPress: () => void; disabled?: boolean }) {
+  const { colors } = useTheme();
   return (
-    <Host ignoreSafeArea="all" matchContents={{ vertical: true }} style={{ minHeight: 44 }} seedColor={palette.green as string}>
+    <Host ignoreSafeArea="all" matchContents={{ vertical: true }} style={{ minHeight: 44 }} seedColor={colors.green as string}>
       <Switch label={title} value={selected} disabled={disabled} onValueChange={onPress} />
     </Host>
   );
 }
 export function Field({ label, hideLabel = false, ...props }: TextInputProps & { label: string; hideLabel?: boolean }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={{ gap: 8 }}>
       {!hideLabel && <Text style={styles.label}>{label}</Text>}
@@ -227,6 +237,8 @@ export function Field({ label, hideLabel = false, ...props }: TextInputProps & {
   );
 }
 export function ErrorNotice({ message, retry, retryTitle = "Reconnect" }: { message: string; retry?: () => void; retryTitle?: string }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View accessibilityRole="alert" style={styles.error}>
       <Text selectable style={{ color: colors.red, fontSize: 15, lineHeight: 22 }}>
@@ -295,6 +307,7 @@ export function ListRow({
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
 }) {
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -349,6 +362,7 @@ export function IconButton({
   tone?: Tone;
   size?: number;
 }) {
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -433,6 +447,7 @@ export function HeaderButton({ label, icon, onPress }: { label: string; icon: Ic
 }
 /** The round bordered buttons inside sheets (close, back, done). */
 export function CircleButton({ label, icon, onPress, filled = false }: { label: string; icon: IconData; onPress?: () => void; filled?: boolean }) {
+  const { colors } = useTheme();
   const body = (
     <View
       style={{
@@ -580,6 +595,7 @@ export function PullDown({
   nativeTrigger?: NativeMenuTrigger;
   searchable?: { placeholder: string; emptyLabel: string };
 }) {
+  const { colors } = useTheme();
   if (searchable)
     return (
       <Pressable

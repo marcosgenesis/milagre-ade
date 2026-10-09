@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Stack, router } from "expo-router";
-import { useColorScheme } from "react-native";
 import { ThemeProvider, DarkTheme, DefaultTheme } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -8,7 +7,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SessionProvider, useSession } from "../session";
 import { PushProvider } from "../push";
 import { StartupSplash } from "../startup-splash";
-import { hex } from "../theme";
+import { useTheme } from "../theme";
 import { UpdateShell } from "../update-sheet";
 import { SidePanelsHost, SidePanelsProvider } from "../side-panels";
 import { setConfirmPresenter } from "../confirm-store";
@@ -19,8 +18,7 @@ setConfirmPresenter(() => router.push("/confirm-sheet"));
 setChoicePresenter(() => router.push("/choice-sheet"));
 
 export default function Layout() {
-  const scheme = useColorScheme();
-  const palette = hex(scheme);
+  const { colors: palette, scheme } = useTheme();
   const base = scheme === "dark" ? DarkTheme : DefaultTheme;
   const theme = {
     ...base,

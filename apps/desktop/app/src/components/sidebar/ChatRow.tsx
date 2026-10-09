@@ -108,7 +108,7 @@ export type ChatRowActions = {
   onArchiveCheck?: (id: string) => Promise<ArchivePlan>;
   onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => Promise<unknown> | void;
   /** Links the chat's Worktree to a Linear issue by key. */
-  onLinkIssue?: (id: string, key: string) => void;
+  onLinkIssue?: (id: string, key: string, workspace?: string) => void;
   /** Removes the Worktree's stored Linear issue link. */
   onUnlinkIssue?: (id: string) => void;
 };
@@ -439,7 +439,7 @@ export const ChatRow = memo(function ChatRow({
             position={linking}
             onPick={(issue) => {
               setLinking(null);
-              actions.onLinkIssue?.(item.id, issue.key);
+              actions.onLinkIssue?.(item.id, issue.key, issue.workspace);
             }}
             onClose={() => setLinking(null)}
           />

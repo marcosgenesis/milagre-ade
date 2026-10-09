@@ -2,21 +2,47 @@
 
 export type LinearViewer = { name: string; email: string };
 export type LinearOrganization = { name: string; urlKey: string };
-export type LinearStatus = { connected: false } | { connected: true; viewer: LinearViewer; organization: LinearOrganization };
+/** One connected workspace; `id` is its URL key in lower case. */
+export type LinearWorkspace = { id: string; viewer: LinearViewer; organization: LinearOrganization };
+/** `viewer` and `organization` repeat the first workspace; a Mac that predates workspaces sends no `workspaces`. */
+export type LinearStatus =
+  | { connected: false; workspaces?: LinearWorkspace[] }
+  | { connected: true; viewer: LinearViewer; organization: LinearOrganization; workspaces?: LinearWorkspace[] };
 
 export const LINEAR_TITLE = "Linear";
 export const LINEAR_HINT = "Start chats from Linear issues and see each Worktree's issue.";
 export const LINEAR_CONNECTING = "Finish signing in to Linear in your browser.";
 
+export const LINEAR_ADD_WORKSPACE = "Add workspace";
+export const LINEAR_ADD_WORKSPACE_HINT = "Opens Linear in your browser to pick the workspace. Signing in to one already here signs it in again.";
+
+/** The connected workspaces, oldest first, also from a Mac that predates workspaces. */
+export function linearWorkspaces(status: LinearStatus | null | undefined): LinearWorkspace[] {
+  if (!status) return [];
+  if (status.workspaces) return status.workspaces;
+  return status.connected ? [{ id: status.organization.urlKey.toLowerCase(), viewer: status.viewer, organization: status.organization }] : [];
+}
+
+/** One workspace's row: its name, and who is signed in to it. */
+export function linearWorkspaceLine(workspace: LinearWorkspace): string {
+  return `${workspace.organization.name}, as ${workspace.viewer.name}`;
+}
+
 /** Connecting happens on the Mac only, so a disconnected phone points there. */
 export function linearStatusLine(status: LinearStatus, where: "mac" | "phone"): string {
-  if (status.connected) return `Connected as ${status.viewer.name} to ${status.organization.name}`;
+  const [only, ...more] = linearWorkspaces(status);
+  if (only && !more.length) return `Connected as ${only.viewer.name} to ${only.organization.name}`;
+  if (only) return `Connected to ${more.length + 1} workspaces`;
   return where === "mac" ? "Not connected" : "Connect Linear from Settings on your Mac";
 }
 
 export type LinearIssueState = { name: string; type: "triage" | "backlog" | "unstarted" | "started" | "completed" | "canceled"; color: string };
-export type LinearIssue = { key: string; title: string; url: string; branchName: string; description?: string; state: LinearIssueState };
-export type LinearIssuesResult = { issues: LinearIssue[] } | { error: string; notConnected?: boolean };
+/** `workspace` is the workspace the issue was read from; a Mac that predates workspaces sends none. */
+export type LinearIssue = { key: string; title: string; url: string; branchName: string; description?: string; state: LinearIssueState; workspace?: string };
+/** `workspace` is the one listed and `workspaces` every connected one, for the picker's tabs. */
+export type LinearIssuesResult =
+  | { issues: LinearIssue[]; workspace?: string; workspaces?: { id: string; name: string }[] }
+  | { error: string; notConnected?: boolean };
 
 /** First message of a Chat started from an issue; text the user had typed goes after the URL. */
 export function issueFirstMessage(issue: LinearIssue, typed?: string): string {

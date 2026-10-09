@@ -73,10 +73,14 @@ import { showChoiceSheet } from "../choice-store";
 
 const PAGE = 40;
 
+/** A row's id: two workspaces can both have an ENG-1. A Mac that predates workspaces sends the key alone. */
+const issueChoiceId = (issue: LinearIssue) => (issue.workspace ? `${issue.workspace}:${issue.key}` : issue.key);
 /** The choice sheet's rows for a list of Linear issues. */
 function issueChoices(issues: LinearIssue[]) {
-  return issues.map((issue) => ({ id: issue.key, title: `${issue.key} ${issue.title}`, subtitle: issue.state.name }));
+  return issues.map((issue) => ({ id: issueChoiceId(issue), title: `${issue.key} ${issue.title}`, subtitle: issue.state.name }));
 }
+/** The workspace the issue sheet showed last, so it opens there again. */
+let lastLinearWorkspace: string | undefined;
 
 export default function ChatScreen() {
   const { colors } = useTheme();
@@ -408,7 +412,7 @@ export default function ChatScreen() {
     });
   };
   // eslint-disable-next-line react-hooks/refs -- latest-callback ref, read only when an issue is picked in the choice sheet.
-  startIssue.current = (issue) => void send(issueFirstMessage(issue, draft), true, undefined, issue.key);
+  startIssue.current = (issue) => void send(issueFirstMessage(issue, draft), true, undefined, issue);
   /** Lists the open issues in the choice sheet; picking one starts the Chat from it. */
   async function chooseIssue() {
     await pickLinearIssue("Start from a Linear issue", (issue) => startIssue.current(issue));
@@ -419,7 +423,7 @@ export default function ChatScreen() {
     setError("");
     let result: LinearIssuesResult;
     try {
-      result = await client.call<LinearIssuesResult>("linear:issues", [{}]);
+      result = await client.call<LinearIssuesResult>("linear:issues", [lastLinearWorkspace ? { workspace: lastLinearWorkspace } : {}]);
     } catch (e) {
       setError((e as Error).message);
       return;
@@ -428,28 +432,38 @@ export default function ChatScreen() {
       setError(result.error);
       return;
     }
-    let issues = result.issues;
+    // Every list read from any tab, so a pick resolves to the issue on the row that was tapped.
+    const seen = new Map<string, LinearIssue>();
+    const keep = (list: LinearIssue[]) => {
+      for (const issue of list) seen.set(issueChoiceId(issue), issue);
+      return issueChoices(list);
+    };
+    lastLinearWorkspace = result.workspace;
     showChoiceSheet({
       title,
       placeholder: "Search issues",
       emptyLabel: "No issues found.",
       leading: <LinearLogo size={18} tone="ink" />,
-      items: issueChoices(issues),
-      // The Mac keeps the list for a minute; a pull reads it from Linear again.
-      refresh: async () => {
-        const next = await client.call<LinearIssuesResult>("linear:issues", [{ fresh: true }]);
+      items: keep(result.issues),
+      // One tab per workspace when there are several; a Mac that predates workspaces sends none.
+      tabs: result.workspaces?.map((workspace) => ({ id: workspace.id, label: workspace.name })),
+      tab: result.workspace,
+      // The Mac keeps each list for a minute; a pull reads it from Linear again.
+      load: async (workspace, fresh) => {
+        const next = await client.call<LinearIssuesResult>("linear:issues", [{ fresh, ...(workspace ? { workspace } : {}) }]);
         if ("error" in next) throw new Error(next.error);
-        issues = next.issues;
-        return issueChoices(issues);
+        if (next.workspace) lastLinearWorkspace = next.workspace;
+        return keep(next.issues);
       },
-      onSelect: (key) => {
-        const issue = issues.find((item) => item.key === key);
+      onSelect: (id) => {
+        const issue = seen.get(id);
         if (issue) onPick(issue);
       },
     });
   }
   /** Whether the message went: "busy" when it wasn't tried, the Chat being busy. An issue key starts the Chat in its own new worktree. */
-  async function send(body = draft, withAttachments = true, prAction?: PullRequestActionContext, issueKey?: string): Promise<boolean | "busy"> {
+  async function send(body = draft, withAttachments = true, prAction?: PullRequestActionContext, issue?: LinearIssue): Promise<boolean | "busy"> {
+    const issueKey = issue?.key;
     // A turn running now takes this message as a steer, on the provider it already runs.
     const steered = Boolean(run);
     if (!body && !(withAttachments && attachments.length)) return false;
@@ -505,7 +519,12 @@ export default function ChatScreen() {
         let ready = preparedTarget.current;
         if (!ready || ready.client !== client || ready.path !== sendingProjectPath || ready.base !== base || ready.issueKey !== issueKey) {
           const created = await client.call<{ project: OpenProject; worktreeId: number }>("worktree:create", [
-            { projectPath: sendingProjectPath, baseBranch: base, prompt: sent, ...(issueKey !== undefined ? { issueKey } : {}) },
+            {
+              projectPath: sendingProjectPath,
+              baseBranch: base,
+              prompt: sent,
+              ...(issueKey !== undefined ? { issueKey, ...(issue?.workspace ? { issueWorkspace: issue.workspace } : {}) } : {}),
+            },
           ]);
           const chat = sessionForWorktree(created.project.state, created.worktreeId);
           if (!chat) throw new Error("No Chat was created for the new worktree.");
@@ -708,13 +727,15 @@ export default function ChatScreen() {
   }
   function linkIssue() {
     if (!worktree) return;
-    void pickLinearIssue("Link a Linear issue", (issue) => void linkWorktreeIssue(issue.key));
+    void pickLinearIssue("Link a Linear issue", (issue) => void linkWorktreeIssue(issue.key, issue.workspace));
   }
-  async function linkWorktreeIssue(key: string) {
+  async function linkWorktreeIssue(key: string, workspace?: string) {
     if (!worktree) return;
     setError("");
     try {
-      const result = await client.call<LinkIssueResult>("worktree:link-issue", [{ projectPath: project.path, worktreeId: worktree.id, key }]);
+      const result = await client.call<LinkIssueResult>("worktree:link-issue", [
+        { projectPath: project.path, worktreeId: worktree.id, key, ...(workspace ? { workspace } : {}) },
+      ]);
       await session.refresh();
       setLinkVersion((version) => version + 1);
       showToast(result.mode === "renamed" ? `Branch renamed to ${result.branch}.` : `Issue linked. ${LINK_PR_HINT(key)}`);

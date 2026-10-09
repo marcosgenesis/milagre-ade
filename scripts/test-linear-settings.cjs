@@ -1,4 +1,5 @@
-// Settings > Experimental > Linear in Electron: the switch reveals the connection, which connects and disconnects.
+// Settings > Experimental > Linear in Electron: the switch reveals the connections, one row per workspace; Connect adds
+// the first, Add another, and each workspace disconnects on its own.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -10,9 +11,14 @@ import { createRoot } from 'react-dom/client';
 import { SettingsNav, SettingsPanel } from '/src/components/Settings';
 import '/src/styles.css';
 let enabled = false;
-let status = { connected: false };
+let status = { connected: false, workspaces: [] };
 const listeners = new Set();
-const connected = { connected: true, viewer: { name: 'Victor', email: 'v@x' }, organization: { name: 'Acme', urlKey: 'acme' } };
+const acme = { id: 'acme', viewer: { name: 'Victor', email: 'v@x' }, organization: { name: 'Acme', urlKey: 'acme' } };
+const beta = { id: 'beta', viewer: { name: 'Vic', email: 'v@beta' }, organization: { name: 'Beta Labs', urlKey: 'beta' } };
+const statusOf = (workspaces) =>
+  workspaces.length ? { connected: true, viewer: workspaces[0].viewer, organization: workspaces[0].organization, workspaces } : { connected: false, workspaces: [] };
+// A Mac that predates workspaces sends its one connection without a list.
+const connected = { connected: true, viewer: acme.viewer, organization: acme.organization };
 window.milagre = {
   listEditors: async () => [], listRecentProjects: async () => [], listProjects: async () => [],
   readLinearEnabled: async () => ({ enabled }),
@@ -21,8 +27,11 @@ window.milagre = {
   connectLinear: () =>
     window.__hangConnect
       ? new Promise((resolve, reject) => (window.__rejectConnect = () => reject(new Error('Linear sign-in timed out. Try again.'))))
-      : new Promise((resolve) => setTimeout(() => resolve((status = connected)), 300)),
-  disconnectLinear: async () => (status = { connected: false }),
+      : new Promise((resolve) => setTimeout(() => {
+          const list = status.workspaces ?? [];
+          resolve((status = statusOf([...list, list.some((item) => item.id === 'acme') ? beta : acme])));
+        }, 300)),
+  disconnectLinear: async (id) => (status = statusOf((status.workspaces ?? [acme]).filter((item) => item.id !== id))),
   onLinearStatusChanged: (callback) => (listeners.add(callback), () => listeners.delete(callback)),
 };
 // What the Mac's daemon does when the status changes behind the window's back (a phone, or a sign-in finishing).
@@ -86,14 +95,25 @@ async function browserChecks() {
     assert.equal(await evaluate(`!!${button("Start again")}`), true);
     await screenshot("connecting");
     await waitFor(`document.querySelector('[data-linear-settings]').dataset.linearConnected === 'true'`);
-    assert.match(await evaluate(text), /Connected as Victor to Acme/);
+    assert.match(await evaluate(text), /AcmeSigned in as Victor/);
+    assert.equal(await evaluate(`!!${button("Add")}`), true, "a connected Mac can add another workspace");
     await screenshot("connected");
+    // Add signs in to a second workspace; both get a row of their own.
+    await evaluate(`${button("Add")}.click()`);
+    await waitFor(`document.querySelectorAll('[data-linear-workspace]').length === 2`);
+    assert.match(await evaluate(text), /Beta LabsSigned in as Vic/);
+    await evaluate(`document.querySelector('[data-linear-connect]').scrollIntoView({ block: 'center' })`);
+    await screenshot("two-workspaces");
+    // Disconnect ends only its own workspace.
+    await evaluate(`document.querySelector('[data-linear-workspace="acme"]').click()`);
+    await waitFor(`document.querySelectorAll('[data-linear-workspace]').length === 1`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-linear-workspace="beta"]')`), true);
+    assert.doesNotMatch(await evaluate(text), /Acme/);
     await evaluate(`${button("Disconnect")}.click()`);
-    await waitFor(`document.querySelector('[data-linear-settings]').dataset.linearConnected === 'false'`);
     // A status that arrives from the daemon (a sign-in that finished elsewhere) updates the row without a click.
     await evaluate(`window.__emitLinear(window.__connectedStatus)`);
     await waitFor(`document.querySelector('[data-linear-settings]').dataset.linearConnected === 'true'`);
-    assert.match(await evaluate(text), /Connected as Victor to Acme/);
+    assert.match(await evaluate(text), /AcmeSigned in as Victor/);
     await evaluate(`${button("Disconnect")}.click()`);
     await waitFor(`document.querySelector('[data-linear-settings]').dataset.linearConnected === 'false'`);
     // A connect still waiting when the connected status arrives ends quietly: no error, no "Start again", even when
@@ -106,13 +126,13 @@ async function browserChecks() {
     await evaluate(`window.__rejectConnect()`);
     await delay(150);
     const row = await evaluate(text);
-    assert.match(row, /Connected as Victor to Acme/);
+    assert.match(row, /AcmeSigned in as Victor/);
     assert.doesNotMatch(row, /timed out|Finish signing in/);
     assert.equal(await evaluate(`!!${button("Start again")}`), false);
     assert.equal(await evaluate(`!!document.querySelector('[data-linear-settings] .text-red')`), false, "no error shown");
     await screenshot("connected-elsewhere");
     assert.deepEqual(errors, []);
-    console.log("PASS: Experimental > Linear shows the connection only when on, connects through the browser and disconnects");
+    console.log("PASS: Experimental > Linear shows the connections only when on, adds workspaces through the browser and disconnects each");
     app.exit(0);
   } catch (error) {
     console.error(error);

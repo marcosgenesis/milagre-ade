@@ -3,7 +3,16 @@ import { ProjectAccountsGroup, ProjectAccountsSettings } from "./ProjectAccounts
 import { AccountsSettings } from "./AccountsSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
-import { LINEAR_CONNECTING, LINEAR_HINT, LINEAR_TITLE, linearStatusLine, type LinearStatus } from "@milagre/shared/linear";
+import {
+  LINEAR_ADD_WORKSPACE,
+  LINEAR_ADD_WORKSPACE_HINT,
+  LINEAR_CONNECTING,
+  LINEAR_HINT,
+  LINEAR_TITLE,
+  linearStatusLine,
+  linearWorkspaces,
+  type LinearStatus,
+} from "@milagre/shared/linear";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -1483,7 +1492,7 @@ export function MainSyncDefaultSetting() {
   );
 }
 
-// Experimental > Linear: the daemon keeps the switch (phones share it) and the Mac's one connection.
+// Experimental > Linear: the daemon keeps the switch (phones share it) and the Mac's connections, one per workspace.
 function LinearSettings() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [status, setStatus] = useState<LinearStatus | null>(null);
@@ -1491,6 +1500,8 @@ function LinearSettings() {
   const [error, setError] = useState<string | null>(null);
   // Connect again replaces a waiting sign-in; only the latest attempt may update the row.
   const attempt = useRef(0);
+  const known = useRef(0); // workspaces connected, to tell a finished sign-in from another workspace's disconnect
+  known.current = linearWorkspaces(status).length;
   useEffect(() => {
     let live = true;
     // Started inside a promise so a bridge without the command (an older host) reads as off instead of throwing.
@@ -1508,8 +1519,9 @@ function LinearSettings() {
       );
     const stop = window.milagre.onLinearStatusChanged?.((next) => {
       if (!live) return;
+      const grew = linearWorkspaces(next).length > known.current;
       setStatus(next);
-      if (next.connected) {
+      if (grew) {
         // The sign-in finished: a connect still waiting is over, and a late failure of it must not show.
         attempt.current++;
         setConnecting(false);
@@ -1544,10 +1556,10 @@ function LinearSettings() {
       if (id === attempt.current) setConnecting(false);
     }
   }
-  async function disconnect() {
+  async function disconnect(workspace: string) {
     setError(null);
     try {
-      setStatus(await window.milagre.disconnectLinear());
+      setStatus(await window.milagre.disconnectLinear(workspace));
     } catch (failure) {
       setError(ipcErrorMessage(failure));
     }
@@ -1557,17 +1569,22 @@ function LinearSettings() {
       <Row label={LINEAR_TITLE} description={LINEAR_HINT}>
         <Switch label={LINEAR_TITLE} checked={enabled === true} onChange={(next) => void changeEnabled(next)} />
       </Row>
-      {enabled && status && (
-        <Row label={linearStatusLine(status, "mac")} description={connecting ? LINEAR_CONNECTING : undefined}>
-          {status.connected ? (
-            <button type="button" className={SECONDARY_BUTTON} onClick={() => void disconnect()}>
+      {enabled &&
+        linearWorkspaces(status).map((workspace) => (
+          <Row key={workspace.id} label={workspace.organization.name} description={`Signed in as ${workspace.viewer.name}`}>
+            <button type="button" data-linear-workspace={workspace.id} className={SECONDARY_BUTTON} onClick={() => void disconnect(workspace.id)}>
               Disconnect
             </button>
-          ) : (
-            <button type="button" className={SECONDARY_BUTTON} onClick={() => void connect()}>
-              {connecting ? "Start again" : "Connect"}
-            </button>
-          )}
+          </Row>
+        ))}
+      {enabled && status && (
+        <Row
+          label={status.connected ? LINEAR_ADD_WORKSPACE : linearStatusLine(status, "mac")}
+          description={connecting ? LINEAR_CONNECTING : status.connected ? LINEAR_ADD_WORKSPACE_HINT : undefined}
+        >
+          <button type="button" data-linear-connect className={SECONDARY_BUTTON} onClick={() => void connect()}>
+            {connecting ? "Start again" : status.connected ? "Add" : "Connect"}
+          </button>
         </Row>
       )}
       {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}

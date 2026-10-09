@@ -10,8 +10,11 @@ type ChoiceRequest = {
   items: ChoiceItem[];
   icon?: IconData;
   leading?: ReactElement;
-  /** Reads the items again; given, the sheet refreshes on pull and keeps its error for the empty state. */
-  refresh?: () => Promise<ChoiceItem[]>;
+  /** Tabs over the list (Linear workspaces); `tab` is the one `items` came from. Shown only with two or more. */
+  tabs?: { id: string; label: string }[];
+  tab?: string;
+  /** Reads a tab's items, from Linear again when `fresh`; given, the sheet refreshes on pull and shows a failure. */
+  load?: (tab: string | undefined, fresh: boolean) => Promise<ChoiceItem[]>;
   onSelect: (id: string) => void;
 };
 type ChoiceRequestEntry = Omit<ChoiceRequest, "onSelect"> & { choose: (id: string | null) => void };
@@ -27,13 +30,22 @@ export function currentChoice() {
   return current;
 }
 
-export function showChoiceSheet({ onSelect, refresh, ...request }: ChoiceRequest) {
+export function showChoiceSheet({ onSelect, load, ...request }: ChoiceRequest) {
   current?.choose(null);
   let done = false;
   const entry: ChoiceRequestEntry = {
     ...request,
-    // A refresh replaces the entry's items, so a pick from the new list is still checked against what was shown.
-    ...(refresh ? { refresh: async () => (entry.items = await refresh()) } : {}),
+    // A load replaces the entry's items, so a pick from the new list is still checked against what was shown.
+    ...(load
+      ? {
+          load: async (tab, fresh) => {
+            const items = await load(tab, fresh);
+            entry.items = items;
+            entry.tab = tab;
+            return items;
+          },
+        }
+      : {}),
     choose(id) {
       if (done) return;
       done = true;

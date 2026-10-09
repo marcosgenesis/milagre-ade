@@ -9,15 +9,21 @@ const { createLinear } = require("./index.cjs");
 const json = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
 // A fake Linear: the token endpoint, the viewer query and revoke. The browser "approves" by calling the callback.
-function fakeLinear() {
+function fakeLinear({ organizations = ["acme"] } = {}) {
   const calls = [];
   const revokes = [];
+  let signIns = 0;
+  let current = organizations[0];
   const fetchImpl = async (url, init) => {
     calls.push(url);
     if (url.endsWith("/oauth/revoke")) revokes.push(Object.fromEntries(new URLSearchParams(init.body)));
-    if (url.endsWith("/oauth/token")) return json(200, { access_token: "a1", refresh_token: "r1", expires_in: 86400 });
+    if (url.endsWith("/oauth/token")) {
+      signIns++;
+      current = organizations[Math.min(signIns, organizations.length) - 1];
+      return json(200, { access_token: `a${signIns}`, refresh_token: `r${signIns}`, expires_in: 86400 });
+    }
     if (url.endsWith("/oauth/revoke")) return json(200, {});
-    return json(200, { data: { viewer: { name: "Victor", email: "v@x" }, organization: { name: "Acme", urlKey: "acme" } } });
+    return json(200, { data: { viewer: { name: "Victor", email: "v@x" }, organization: { name: current.toUpperCase(), urlKey: current } } });
   };
   const approve = (url) => {
     const params = new URL(url).searchParams;
@@ -26,10 +32,10 @@ function fakeLinear() {
   return { calls, revokes, fetchImpl, approve };
 }
 
-function setup(t, overrides = {}) {
+function setup(t, overrides = {}, fake = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "milagre-linear-"));
   t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
-  const linear = fakeLinear();
+  const linear = fakeLinear(fake);
   let changes = 0;
   const service = createLinear({
     dataDir,
@@ -46,9 +52,11 @@ function setup(t, overrides = {}) {
 
 test("connect signs in through the browser and saves who connected", async (t) => {
   const { service, changes } = setup(t);
-  assert.deepEqual(service.status(), { connected: false });
+  assert.deepEqual(service.status(), { connected: false, workspaces: [] });
   const status = await service.connect();
-  assert.deepEqual(status, { connected: true, viewer: { name: "Victor", email: "v@x" }, organization: { name: "Acme", urlKey: "acme" } });
+  const viewer = { name: "Victor", email: "v@x" };
+  const organization = { name: "ACME", urlKey: "acme" };
+  assert.deepEqual(status, { connected: true, viewer, organization, workspaces: [{ id: "acme", viewer, organization }] });
   assert.deepEqual(service.status(), status);
   assert.equal(changes(), 1);
 });
@@ -61,10 +69,10 @@ test("disconnect forgets the token even when the revoke fails", async (t) => {
   };
   const { service, changes } = setup(t, { fetchImpl, openBrowser: linear.approve });
   await service.connect();
-  assert.deepEqual(await service.disconnect(), { connected: false });
-  assert.deepEqual(service.status(), { connected: false });
+  assert.deepEqual(await service.disconnect(), { connected: false, workspaces: [] });
+  assert.deepEqual(service.status(), { connected: false, workspaces: [] });
   assert.equal(changes(), 2);
-  assert.deepEqual(await service.disconnect(), { connected: false });
+  assert.deepEqual(await service.disconnect(), { connected: false, workspaces: [] });
   assert.equal(changes(), 2, "disconnecting when already disconnected changes nothing");
 });
 
@@ -160,7 +168,7 @@ test("disconnect falls back to the access token when revoking the refresh token 
   };
   const { service } = setup(t, { fetchImpl, openBrowser: linear.approve });
   await service.connect();
-  assert.deepEqual(await service.disconnect(), { connected: false });
+  assert.deepEqual(await service.disconnect(), { connected: false, workspaces: [] });
   assert.deepEqual(linear.revokes, [
     { token: "r1", failed: true },
     { token: "a1", token_type_hint: "access_token" },
@@ -178,7 +186,7 @@ test("disconnect falls back to the access token when revoking the refresh token 
   };
   const { service } = setup(t, { fetchImpl, openBrowser: linear.approve });
   await service.connect();
-  assert.deepEqual(await service.disconnect(), { connected: false });
+  assert.deepEqual(await service.disconnect(), { connected: false, workspaces: [] });
   assert.deepEqual(linear.revokes, [
     { token: "r1", failed: true },
     { token: "a1", token_type_hint: "access_token" },
@@ -194,7 +202,7 @@ test("a sign-in that fails after the token exchange revokes the new grant and sa
   const { service, changes } = setup(t, { fetchImpl, openBrowser: linear.approve });
   await assert.rejects(service.connect(), { code: "failed", message: "Linear sign-in failed: Viewer unavailable" });
   assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token" }]);
-  assert.deepEqual(service.status(), { connected: false });
+  assert.deepEqual(service.status(), { connected: false, workspaces: [] });
   assert.equal(changes(), 0);
 });
 
@@ -219,7 +227,52 @@ test("a sign-in cancelled while its token is being exchanged saves nothing and r
   release();
   await disposed;
   await rejected;
-  assert.deepEqual(service.status(), { connected: false });
+  assert.deepEqual(service.status(), { connected: false, workspaces: [] });
   assert.equal(changes(), 0);
   assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token" }]);
+});
+
+test("connecting a second workspace lists both, oldest first", async (t) => {
+  let clock = 1000;
+  const { service, changes } = setup(t, { now: () => (clock += 1000) }, { organizations: ["acme", "beta"] });
+  await service.connect();
+  const status = await service.connect();
+  assert.deepEqual(
+    status.workspaces.map((item) => [item.id, item.organization.name]),
+    [
+      ["acme", "ACME"],
+      ["beta", "BETA"],
+    ],
+  );
+  assert.equal(status.organization.urlKey, "acme", "the old fields repeat the first workspace");
+  assert.deepEqual(service.workspaces(), status.workspaces);
+  assert.equal(changes(), 2);
+});
+
+test("disconnecting one workspace leaves the other connected and revokes only its grant", async (t) => {
+  const { service, linear } = setup(t, {}, { organizations: ["acme", "beta"] });
+  await service.connect();
+  await service.connect();
+  const status = await service.disconnect("acme");
+  assert.deepEqual(
+    status.workspaces.map((item) => item.id),
+    ["beta"],
+  );
+  assert.equal(status.connected, true);
+  assert.equal(status.organization.urlKey, "beta");
+  assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token" }]);
+  assert.deepEqual(await service.disconnect(), { connected: false, workspaces: [] });
+  assert.deepEqual(linear.revokes.at(-1), { token: "r2", token_type_hint: "refresh_token" });
+});
+
+test("signing in to a connected workspace again keeps one entry and revokes its old grant", async (t) => {
+  const { service, linear, changes } = setup(t);
+  await service.connect();
+  const status = await service.connect();
+  assert.deepEqual(
+    status.workspaces.map((item) => item.id),
+    ["acme"],
+  );
+  assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token" }]);
+  assert.equal(changes(), 2);
 });

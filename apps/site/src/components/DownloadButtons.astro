@@ -31,6 +31,8 @@ import { DOWNLOAD_ARM64, DOWNLOAD_LINUX_APPIMAGE, DOWNLOAD_LINUX_DEB, DOWNLOAD_L
 
 <style>
   .downloads { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  /* Centred on the text's cap height rather than its line box, which sits a pixel low. */
+  .button svg { flex: none; transform: translateY(-1px); }
   /* Quiet links for the other builds of the same platform: Intel Mac, and .deb and .rpm next to the AppImage. */
   .notes { display: flex; gap: 8px; margin: 0; color: var(--ink-3); font-size: 13px; }
   .notes a { color: var(--ink-2); text-decoration: none; }

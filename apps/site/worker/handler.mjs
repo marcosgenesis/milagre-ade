@@ -56,8 +56,8 @@ export async function repoStars(fetchImpl, { token, timeoutMs = 3000 } = {}) {
 
 export async function handleRequest(request, { assets, fetchImpl, token }) {
   const url = new URL(request.url);
-  if (url.hostname === "www.milagre.cloud") {
-    url.hostname = "milagre.cloud";
+  if (url.hostname === "www.milagre.cloud" || url.hostname === "www.milagre.dev") {
+    url.hostname = url.hostname.slice("www.".length);
     return Response.redirect(url.toString(), 301);
   }
   const download = url.pathname.match(/^\/download\/([a-z0-9-]+)\/?$/);

@@ -115,6 +115,9 @@ test("www redirects permanently to the apex, keeping path and query", async () =
   const response = await handleRequest(new Request("https://www.milagre.cloud/download/mac-x64?ref=x"), { assets, fetchImpl });
   assert.equal(response.status, 301);
   assert.equal(response.headers.get("location"), "https://milagre.cloud/download/mac-x64?ref=x");
+  const dev = await handleRequest(new Request("https://www.milagre.dev/?ref=x"), { assets, fetchImpl });
+  assert.equal(dev.status, 301);
+  assert.equal(dev.headers.get("location"), "https://milagre.dev/?ref=x");
 });
 
 test("every other path is served from static assets", async () => {

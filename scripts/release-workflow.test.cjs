@@ -368,6 +368,10 @@ test("a beta also builds Linux on the beta channel, and a failed Linux build lea
     "the packaged app is exercised",
   );
   assert.match(JSON.stringify(linux.steps), /beta-linux\.yml/);
+  // The candidate's own finalizer may predate Linux betas, so the feed is checked with the workflow's copy.
+  const check = linux.steps.find((step) => step.name === "Check the beta feed");
+  assert.equal(check.env.WORKFLOW_SHA, "${{ github.sha }}");
+  assert.match(check.run, /git show "\$WORKFLOW_SHA:scripts\/finalize-update-feeds\.cjs"/);
   const publish = betaWorkflow.jobs.publish;
   assert.deepEqual(publish.needs, ["prepare", "build", "build-linux"]);
   assert.equal(publish.if, "always() && needs.build.result == 'success'");

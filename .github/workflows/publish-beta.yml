@@ -83,8 +83,14 @@ jobs:
         run: |-
           "release/Milagre-${VERSION}-x86_64.AppImage" --appimage-extract > /dev/null
           xvfb-run -a node scripts/test-desktop.cjs --packaged squashfs-root/AppRun
+      # The checkout is the candidate's commit, whose finalizer can predate Linux betas; the check uses this workflow's.
       - name: Check the beta feed
-        run: node scripts/finalize-update-feeds.cjs --tag "v${VERSION}" --platform linux --check
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |-
+          git fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          git show "$WORKFLOW_SHA:scripts/finalize-update-feeds.cjs" > scripts/finalize-update-feeds.workflow.cjs
+          node scripts/finalize-update-feeds.workflow.cjs --tag "v${VERSION}" --platform linux --check
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: beta-linux

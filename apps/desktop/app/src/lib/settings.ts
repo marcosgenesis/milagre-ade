@@ -4,7 +4,7 @@ import type { PermissionMode } from "../model";
 import { DEFAULT_THEME_ID, isHex, resolvePalette, resolveThemeSettings } from "@milagre/shared/themes";
 import type { CustomTheme, ThemeChoice } from "@milagre/shared/themes";
 import type { ChatOrder } from "./chat-list";
-import { THEME_EVENT, applyPalette } from "./theme-sheet";
+import { THEME_EVENT, applyPalette } from "./theme-sheet.ts";
 
 export type ThemePreference = "system" | "light" | "dark";
 /** Whether plan usage reads as the share used or the share left. */

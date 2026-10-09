@@ -188,15 +188,26 @@ const checks = [
     },
   },
   {
-    name: "the phone is a 3D model where WebGL works",
+    name: "the phone is a 3D model where WebGL works, and the flat frame where it doesn't",
     async run(open, evaluate) {
       const window = await open({ width: 1440, height: 900 });
-      await waitFor(evaluate, window, `document.querySelector(".demo").classList.contains("three")`, "3D phone");
-      const canvas = await evaluate(
+      const webgl = await evaluate(
         window,
-        `(() => { const r = document.querySelector(".phone-canvas").getBoundingClientRect(); return { w: r.width, h: r.height }; })()`,
+        `(() => { const c = document.createElement("canvas"); return !!(c.getContext("webgl2") || c.getContext("webgl")); })()`,
       );
-      assert.ok(canvas.w > 100 && canvas.h > 200, `canvas ${JSON.stringify(canvas)}`);
+      if (webgl) {
+        await waitFor(evaluate, window, `document.querySelector(".demo").classList.contains("three")`, "3D phone");
+        const canvas = await evaluate(
+          window,
+          `(() => { const r = document.querySelector(".phone-canvas").getBoundingClientRect(); return { w: r.width, h: r.height }; })()`,
+        );
+        assert.ok(canvas.w > 100 && canvas.h > 200, `canvas ${JSON.stringify(canvas)}`);
+      } else {
+        // CI's Linux runners block WebGL: the recording keeps its flat frame and stays visible.
+        await delay(1000);
+        assert.equal(await evaluate(window, `document.querySelector(".demo").classList.contains("three")`), false);
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector(".phone-video")).opacity`), "1");
+      }
       window.destroy();
     },
   },

@@ -14,7 +14,12 @@ export const LINEAR_HINT = "Start chats from Linear issues and see each Worktree
 export const LINEAR_CONNECTING = "Finish signing in to Linear in your browser.";
 
 export const LINEAR_ADD_WORKSPACE = "Add workspace";
-export const LINEAR_ADD_WORKSPACE_HINT = "Opens Linear in your browser to pick the workspace. Signing in to one already here signs it in again.";
+export const LINEAR_ADD_WORKSPACE_HINT =
+  "Opens a Linear sign-in of its own, so you can use another account. Signing in to a workspace already here signs it in again.";
+export const LINEAR_CONNECTING_WINDOW = "Finish signing in in the Linear window, or use your browser instead.";
+export const LINEAR_USE_BROWSER = "Use my browser instead";
+/** What a sign-in that was replaced or whose window was closed rejects with: nothing to show. */
+export const LINEAR_SIGN_IN_REPLACED = "Replaced by a newer Linear sign-in.";
 
 /** The connected workspaces, oldest first, also from a Mac that predates workspaces. */
 export function linearWorkspaces(status: LinearStatus | null | undefined): LinearWorkspace[] {

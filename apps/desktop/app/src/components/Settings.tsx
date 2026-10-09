@@ -7,7 +7,10 @@ import {
   LINEAR_ADD_WORKSPACE,
   LINEAR_ADD_WORKSPACE_HINT,
   LINEAR_CONNECTING,
+  LINEAR_CONNECTING_WINDOW,
   LINEAR_HINT,
+  LINEAR_SIGN_IN_REPLACED,
+  LINEAR_USE_BROWSER,
   LINEAR_TITLE,
   linearStatusLine,
   linearWorkspaces,
@@ -1496,7 +1499,8 @@ export function MainSyncDefaultSetting() {
 function LinearSettings() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [status, setStatus] = useState<LinearStatus | null>(null);
-  const [connecting, setConnecting] = useState(false);
+  // "window": Add workspace's own sign-in window; "browser": the first Connect, or the fallback from the window.
+  const [connecting, setConnecting] = useState<false | "window" | "browser">(false);
   const [error, setError] = useState<string | null>(null);
   // Connect again replaces a waiting sign-in; only the latest attempt may update the row.
   const attempt = useRef(0);
@@ -1543,15 +1547,17 @@ function LinearSettings() {
       setError(ipcErrorMessage(failure));
     }
   }
-  async function connect() {
+  async function connect(inWindow: boolean) {
     const id = ++attempt.current;
     setError(null);
-    setConnecting(true);
+    setConnecting(inWindow ? "window" : "browser");
     try {
-      const next = await window.milagre.connectLinear();
+      const next = await window.milagre.connectLinear(inWindow ? { window: true } : undefined);
       if (id === attempt.current) setStatus(next);
     } catch (failure) {
-      if (id === attempt.current) setError(ipcErrorMessage(failure));
+      // Closing the sign-in window ends it; the row going back to Add says enough.
+      const message = ipcErrorMessage(failure);
+      if (id === attempt.current && !message.includes(LINEAR_SIGN_IN_REPLACED)) setError(message);
     } finally {
       if (id === attempt.current) setConnecting(false);
     }
@@ -1580,11 +1586,27 @@ function LinearSettings() {
       {enabled && status && (
         <Row
           label={status.connected ? LINEAR_ADD_WORKSPACE : linearStatusLine(status, "mac")}
-          description={connecting ? LINEAR_CONNECTING : status.connected ? LINEAR_ADD_WORKSPACE_HINT : undefined}
+          description={
+            connecting === "window" ? LINEAR_CONNECTING_WINDOW : connecting ? LINEAR_CONNECTING : status.connected ? LINEAR_ADD_WORKSPACE_HINT : undefined
+          }
         >
-          <button type="button" data-linear-connect className={SECONDARY_BUTTON} onClick={() => void connect()}>
-            {connecting ? "Start again" : status.connected ? "Add" : "Connect"}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {connecting === "window" && (
+              <button type="button" data-linear-use-browser className={SECONDARY_BUTTON} onClick={() => void connect(false)}>
+                {LINEAR_USE_BROWSER}
+              </button>
+            )}
+            {/* Connecting the first workspace keeps the browser's Linear login; another one signs in afresh. Start again
+                keeps whichever way the waiting sign-in went. */}
+            <button
+              type="button"
+              data-linear-connect
+              className={SECONDARY_BUTTON}
+              onClick={() => void connect(connecting ? connecting === "window" : status.connected)}
+            >
+              {connecting ? "Start again" : status.connected ? "Add" : "Connect"}
+            </button>
+          </div>
         </Row>
       )}
       {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}

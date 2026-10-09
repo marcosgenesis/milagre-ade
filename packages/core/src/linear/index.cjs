@@ -18,6 +18,9 @@ function createLinear({
   timeoutMs,
   fetchImpl = globalThis.fetch,
   openBrowser = openInBrowser,
+  // Opens the sign-in in the Mac app's own window with an empty session, so another account can sign in. Without it,
+  // a window sign-in falls back to the browser.
+  openWindow = null,
   now = Date.now,
   changed = () => {},
 }) {
@@ -53,7 +56,7 @@ function createLinear({
   // Best effort: a token Linear can't be told about is gone from this Mac either way.
   const revoke = (token, hint) => revokeToken({ fetchImpl, apiBase, token, hint });
 
-  async function signIn(attempt) {
+  async function signIn(attempt, { window = false } = {}) {
     let previous = null;
     const pkce = createPkce();
     const state = crypto.randomBytes(16).toString("hex");
@@ -61,7 +64,9 @@ function createLinear({
     attempt.callback = callback;
     try {
       if (attempt.cancelled) throw new LinearError("Replaced by a newer Linear sign-in.", "cancelled");
-      openBrowser(authorizeUrl({ clientId, redirectUri: callback.redirectUri, state, challenge: pkce.challenge }));
+      const url = authorizeUrl({ clientId, redirectUri: callback.redirectUri, state, challenge: pkce.challenge });
+      if (window && openWindow) openWindow(url);
+      else openBrowser(url);
       const code = await callback.code;
       const replaced = () => new LinearError("Replaced by a newer Linear sign-in.", "cancelled");
       if (attempt.cancelled) throw replaced();
@@ -104,13 +109,14 @@ function createLinear({
     workspaces,
     /** Queries one workspace as its connected user. */
     query: (workspace, document, variables) => clientOf(workspace).query(document, variables),
-    async connect() {
+    /** `window`: sign in from the Mac app's own window with an empty session (Add workspace), not the browser. */
+    async connect({ window = false } = {}) {
       if (!clientId) throw new LinearError("Linear sign-in isn't set up in this build.", "not-configured");
       // A second Connect replaces the first: the user may have closed the browser tab, and the callback port is fixed.
       // Newest call wins: with several in a row, each one cancels whichever registered last, until none is left.
       while (pending) await cancelPending();
       const attempt = { cancelled: false, callback: null };
-      const done = signIn(attempt);
+      const done = signIn(attempt, { window });
       pending = {
         done,
         cancel() {
@@ -139,6 +145,10 @@ function createLinear({
       changed();
       await Promise.all(tokens.map(endGrant));
       return status();
+    },
+    /** Ends a waiting sign-in, e.g. when its window was closed. */
+    async cancel() {
+      while (pending) await cancelPending();
     },
     async dispose() {
       while (pending) await cancelPending();

@@ -21,6 +21,7 @@ const LOCAL_ONLY = [
   "accounts:remove",
   "agent:update-cli",
   "linear:connect",
+  "linear:cancel",
   "linear:disconnect",
 ];
 const LOCAL_ONLY_PREFIXES = [
@@ -120,7 +121,8 @@ function makeBridge(invoke, listen, send) {
     saveMainSyncDefault: (value) => invoke("main-sync:default:save", value),
     onMainSyncStatus: (callback) => listen("main-sync:status", callback),
     readLinearStatus: () => invoke("linear:status"),
-    connectLinear: () => invoke("linear:connect"),
+    connectLinear: (options) => invoke("linear:connect", { window: options?.window === true }),
+    cancelLinearSignIn: () => invoke("linear:cancel"),
     disconnectLinear: (workspace) => invoke("linear:disconnect", { workspace }),
     readLinearEnabled: () => invoke("linear:enabled:read"),
     saveLinearEnabled: (value) => invoke("linear:enabled:save", value),

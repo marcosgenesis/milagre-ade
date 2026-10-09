@@ -950,9 +950,16 @@ function createRuntime(options) {
     });
 
   // The Mac's Linear connections, one per workspace. Phones read them and the Experimental switch; only the Mac connects (mobile-bridge.cjs).
-  const linear = createLinear({ dataDir, ...options.linear, changed: () => emit("linear:status-changed", linear.status()) });
+  const linear = createLinear({
+    dataDir,
+    // The Mac app opens Add workspace's sign-in in a window of its own; the link reaches it as an event.
+    openWindow: (url) => emit("linear:sign-in-window", { url }),
+    ...options.linear,
+    changed: () => emit("linear:status-changed", linear.status()),
+  });
   commands.handle("linear:status", () => linear.status());
-  commands.handle("linear:connect", () => linear.connect());
+  commands.handle("linear:connect", (_event, value) => linear.connect({ window: value?.window === true }));
+  commands.handle("linear:cancel", () => linear.cancel());
   commands.handle("linear:disconnect", (_event, value) => linear.disconnect(value?.workspace));
   commands.handle("linear:enabled:read", () => ({ enabled: linear.enabled() }));
   commands.handle("linear:enabled:save", (_event, value) => {

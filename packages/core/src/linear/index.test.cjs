@@ -276,3 +276,39 @@ test("signing in to a connected workspace again keeps one entry and revokes its 
   assert.deepEqual(linear.revokes, [{ token: "r1", token_type_hint: "refresh_token" }]);
   assert.equal(changes(), 2);
 });
+
+test("a window sign-in hands the link to the Mac app's window, and falls back to the browser without one", async (t) => {
+  const linear = fakeLinear();
+  const viaWindow = [];
+  const viaBrowser = [];
+  const { service } = setup(t, {
+    openBrowser: (url) => {
+      viaBrowser.push(url);
+      linear.approve(url);
+    },
+    openWindow: (url) => {
+      viaWindow.push(url);
+      linear.approve(url);
+    },
+    fetchImpl: linear.fetchImpl,
+  });
+  await service.connect({ window: true });
+  assert.equal(viaWindow.length, 1);
+  assert.match(viaWindow[0], /^https:\/\/linear\.app\/oauth\/authorize\?/);
+  assert.equal(viaBrowser.length, 0);
+  await service.connect();
+  assert.equal(viaBrowser.length, 1, "Connect without a window still uses the browser");
+
+  const { service: windowless } = setup(t, { openBrowser: (url) => (viaBrowser.push(url), linear.approve(url)), fetchImpl: linear.fetchImpl });
+  await windowless.connect({ window: true });
+  assert.equal(viaBrowser.length, 2, "with no window to open, the browser signs in");
+});
+
+test("cancel ends a waiting sign-in and saves nothing", async (t) => {
+  const { service } = setup(t, { openBrowser: () => {} });
+  const waiting = service.connect();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await service.cancel();
+  await assert.rejects(waiting, { code: "cancelled" });
+  assert.equal(service.status().connected, false);
+});

@@ -245,7 +245,9 @@ export type MilagreBridge = {
   onMainSyncStatus: (callback: (status: MainSyncStatus) => void) => () => void;
   readLinearStatus: () => Promise<LinearStatus>;
   /** Opens Linear in the browser and resolves once the Mac is connected. A second call replaces a waiting one. */
-  connectLinear: () => Promise<LinearStatus>;
+  /** `window`: sign in from a window of its own with an empty session (Add workspace), not the browser. */
+  connectLinear: (options?: { window?: boolean }) => Promise<LinearStatus>;
+  cancelLinearSignIn: () => Promise<void>;
   disconnectLinear: (workspace: string) => Promise<LinearStatus>;
   readLinearEnabled: () => Promise<{ enabled: boolean }>;
   saveLinearEnabled: (value: boolean) => Promise<{ enabled: boolean }>;

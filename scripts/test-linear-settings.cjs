@@ -24,9 +24,12 @@ window.milagre = {
   readLinearEnabled: async () => ({ enabled }),
   saveLinearEnabled: async (value) => ({ enabled: (enabled = value) }),
   readLinearStatus: async () => status,
-  connectLinear: () =>
-    window.__hangConnect
-      ? new Promise((resolve, reject) => (window.__rejectConnect = () => reject(new Error('Linear sign-in timed out. Try again.'))))
+  connectLinear: (options) =>
+    (window.__connects.push(options?.window === true ? 'window' : 'browser'), window.__hangConnect)
+      ? new Promise((resolve, reject) => {
+          window.__rejectConnect = () => reject(new Error('Linear sign-in timed out. Try again.'));
+          window.__rejectReplaced = () => reject(new Error('Error invoking remote method: Replaced by a newer Linear sign-in.'));
+        })
       : new Promise((resolve) => setTimeout(() => {
           const list = status.workspaces ?? [];
           resolve((status = statusOf([...list, list.some((item) => item.id === 'acme') ? beta : acme])));
@@ -40,6 +43,7 @@ window.__emitLinear = (next) => {
   listeners.forEach((callback) => callback(next));
 };
 window.__connectedStatus = connected;
+window.__connects = [];
 function Fixture() {
   const [section, setSection] = useState('appearance');
   return (
@@ -98,6 +102,32 @@ async function browserChecks() {
     assert.match(await evaluate(text), /AcmeSigned in as Victor/);
     assert.equal(await evaluate(`!!${button("Add")}`), true, "a connected Mac can add another workspace");
     await screenshot("connected");
+    assert.deepEqual(await evaluate(`window.__connects`), ["browser"], "the first Connect keeps the browser's Linear login");
+    // Add signs in afresh in a window of its own, and offers the browser instead while it waits.
+    await evaluate(`window.__hangConnect = true`);
+    await evaluate(`${button("Add")}.click()`);
+    await waitFor(`${text}.includes('Finish signing in in the Linear window')`);
+    assert.equal(await evaluate(`window.__connects.at(-1)`), "window");
+    await evaluate(`document.querySelector('[data-linear-connect]').scrollIntoView({ block: 'center' })`);
+    await screenshot("adding-in-window");
+    await evaluate(`document.querySelector('[data-linear-use-browser]').click()`);
+    await waitFor(`window.__connects.length === 3`);
+    assert.equal(await evaluate(`window.__connects.at(-1)`), "browser");
+    assert.match(await evaluate(text), /Finish signing in to Linear in your browser\./);
+    assert.equal(await evaluate(`!!document.querySelector('[data-linear-use-browser]')`), false);
+    // Closing the window (or a newer sign-in) ends the waiting one quietly: the row goes back to Add, with no error.
+    await evaluate(`window.__rejectConnect = null; window.__hangConnect = false`);
+    await evaluate(`${button("Start again")}.click()`);
+    await waitFor(`document.querySelectorAll('[data-linear-workspace]').length === 2`);
+    await evaluate(`document.querySelector('[data-linear-workspace="beta"]').click()`);
+    await waitFor(`document.querySelectorAll('[data-linear-workspace]').length === 1`);
+    await evaluate(`window.__hangConnect = true`);
+    await evaluate(`${button("Add")}.click()`);
+    await waitFor(`typeof window.__rejectConnect === 'function'`);
+    await evaluate(`window.__rejectReplaced()`);
+    await waitFor(`!!${button("Add")}`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-linear-settings] .text-red')`), false, "a closed window shows no error");
+    await evaluate(`window.__hangConnect = false`);
     // Add signs in to a second workspace; both get a row of their own.
     await evaluate(`${button("Add")}.click()`);
     await waitFor(`document.querySelectorAll('[data-linear-workspace]').length === 2`);

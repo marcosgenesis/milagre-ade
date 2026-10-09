@@ -18,6 +18,7 @@ const LOCAL_ONLY = Object.freeze([
   "accounts:remove",
   "agent:update-cli",
   "linear:connect",
+  "linear:cancel",
   "linear:disconnect",
 ]);
 const LOCAL_ONLY_PREFIXES = Object.freeze([

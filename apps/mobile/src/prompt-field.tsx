@@ -5,7 +5,8 @@ import type { SkillCatalog } from "@milagre/shared/model";
 import { promptSkillAtSelection, promptSkillParts, promptSkillQuery } from "@milagre/shared/prompt-skills";
 import type { Client } from "./client";
 import { useRpc } from "./use-rpc";
-import { Field, ListRow, PageScroll, colors } from "./ui";
+import { Field, ListRow, PageScroll } from "./ui";
+import { useTheme } from "./theme";
 
 const OPEN_SKILLS = FadeInDown.duration(140)
   .easing(Easing.bezier(0.23, 1, 0.32, 1))
@@ -24,6 +25,7 @@ export function PromptField({
   draft: string;
   onChangeText: (value: string) => void;
 }) {
+  const { colors } = useTheme();
   const { data, loading, error, refresh } = useRpc<SkillCatalog>(projectPath ? client : null, "skills:list", [projectPath]);
   const skills = data?.skills;
   const parts = useMemo(

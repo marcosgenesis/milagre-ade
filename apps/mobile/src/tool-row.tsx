@@ -4,7 +4,7 @@ import type { ChatStep, StepKind } from "@milagre/shared/model";
 import type { IconData } from "./icons";
 import { ActivityItem } from "./activity-item";
 import { Markdown } from "./markdown";
-import { styles } from "./ui";
+import { useStyles } from "./ui";
 
 const icons: Record<StepKind, IconData> = {
   shell: CommandLineIcon,
@@ -20,6 +20,7 @@ const icons: Record<StepKind, IconData> = {
 
 /** Tool data adapted to the shared activity presentation; Chat taps open the sheet. */
 export function ToolRow({ step, live, waiting, onPress }: { step: ChatStep; live: boolean; waiting: boolean; onPress?: () => void }) {
+  const styles = useStyles();
   const running = live && step.status === "running";
   // The phone left this step's output out, and while its turn streams there is no saved message to fetch it from:
   // say so instead of offering a row that never fills. A saved message's step loads from the daemon.

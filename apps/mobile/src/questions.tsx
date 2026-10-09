@@ -3,7 +3,8 @@ import { Pressable, Text, TextInput, View } from "react-native";
 import { ArrowLeft01Icon, ArrowRight01Icon, ArrowUp01Icon, Cancel01Icon, PencilEdit02Icon, ShieldAlertIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { AgentQuestion, PermissionDecision, PermissionRequest, QuestionAnswers, QuestionRequest } from "@milagre/shared/model";
 import { Icon } from "./icons";
-import { IconButton, PillButton, colors, styles } from "./ui";
+import { IconButton, PillButton, useStyles } from "./ui";
+import { useTheme } from "./theme";
 
 const RECOMMENDED = /\s*\((recommended)\)\s*$/i;
 
@@ -20,6 +21,8 @@ export function Questions({
   busy: boolean;
   submit: (answers: QuestionAnswers | null, summary: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [page, setPage] = useState(0);
   const [picked, setPicked] = useState<QuestionAnswers>({});
   const [typed, setTyped] = useState<Record<string, string>>({});
@@ -203,6 +206,8 @@ export function Questions({
 
 /** Desktop's approval card: what the agent wants to run or change, then Deny, Always allow in this Chat, and Allow once. */
 export function Approval({ approval, busy, respond }: { approval: PermissionRequest; busy: boolean; respond: (decision: PermissionDecision) => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const detail = [approval.description, approval.command, approval.diff, approval.detail].filter(Boolean) as string[];
   return (
     <View

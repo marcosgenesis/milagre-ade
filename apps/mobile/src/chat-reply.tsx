@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Image, Pressable, Text, View, useColorScheme, type ImageSourcePropType } from "react-native";
+import { Image, Pressable, Text, View, type ImageSourcePropType } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { router } from "expo-router";
 import { Alert02Icon, ArrowRight01Icon, CheckmarkCircle02Icon, CircleIcon, Maximize01Icon } from "@hugeicons/core-free-icons";
@@ -18,9 +18,9 @@ import { AnswerCard } from "./answer-card";
 import { useMuriloMode } from "./murilo-mode";
 import { PullRequestActionCard } from "./pr-action-card";
 import { isPullRequestAction } from "@milagre/shared/pr-action";
-import { hex } from "./theme";
+import { useTheme } from "./theme";
+import { useStyles } from "./ui";
 import { showImages, type MediaValue, type ViewerImage } from "./viewer-store";
-import { colors, styles } from "./ui";
 
 /** Resolves a saved file on the computer to an authenticated image source, or a cached file once it is fetched. */
 export type MediaSource = (path: string) => MediaValue;
@@ -96,12 +96,14 @@ function Photos({ message, media }: { message: ChatMessage; media: MediaSource }
 }
 /** One photo tile; a relay image shows the empty tile until its file is ready. */
 function Thumbnail({ source, size }: { source: MediaValue; size: number }) {
+  const { colors } = useTheme();
   const ready = useMedia(source);
   const style = { width: size, height: size, borderRadius: 14, backgroundColor: colors.canvas };
   return ready ? <Image source={ready} resizeMode="cover" style={style} /> : <View style={style} />;
 }
 /** An image the agent generated, under its step, at most 240 wide; tap or expand for full screen. */
 function GeneratedImage({ step, media }: { step: ChatStep; media: MediaSource }) {
+  const { colors } = useTheme();
   const [ratio, setRatio] = useState(4 / 5);
   const thumb = useRef<View>(null);
   const shown = !!step.file && step.status === "done";
@@ -150,7 +152,7 @@ function GeneratedImage({ step, media }: { step: ChatStep; media: MediaSource })
 const SPARKLE = "M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z";
 /** Desktop's ActivityBlock header: a sparkle, the running step's shimmering title or the summary, and failures. */
 function ActivityRow({ steps, live, waiting, onPress }: { steps: ChatStep[]; live: boolean; waiting: boolean; onPress: () => void }) {
-  const palette = hex(useColorScheme());
+  const { colors } = useTheme();
   const current = live ? [...steps].reverse().find((step) => step.status === "running") : undefined;
   const summary = activitySummary(steps);
   const label = current ? current.title : summary.text || "Activity";
@@ -162,7 +164,7 @@ function ActivityRow({ steps, live, waiting, onPress }: { steps: ChatStep[]; liv
       style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 36, opacity: pressed ? 0.5 : 1 })}
     >
       <Svg width={16} height={16} viewBox="0 0 24 24">
-        <Path d={SPARKLE} fill={current ? palette.ink2 : palette.ink3} />
+        <Path d={SPARKLE} fill={current ? colors.ink2 : colors.ink3} />
       </Svg>
       <View style={{ flexShrink: 1 }}>
         {current ? (
@@ -207,6 +209,8 @@ export const ChatReply = memo(function ChatReply({
   /** How far the Chat has come (its message count), to read the agent's resolutions of comments again. */
   designsMoved?: number;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [muriloMode] = useMuriloMode();
   const savedMedia = useCallback((path: string) => media(message?.images?.find((image) => image.sourcePath === path)?.path || path), [media, message?.images]);
   const openActivity = () => onActivity(message ? String(message.id) : "run");

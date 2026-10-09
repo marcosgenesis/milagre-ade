@@ -9,7 +9,7 @@ import { agentCounts, MARK_LABEL, type ChatMark } from "./indicators";
 import { useSession } from "./session";
 import { readPullRequest } from "./pr-status";
 import { Icon, SpinnerRing } from "./icons";
-import { colors } from "./ui";
+import { useTheme } from "./theme";
 
 /** The open PR for a Worktree. Slow GitHub lookups are pooled and cached, and stop while the screen is hidden. */
 export function usePullRequest(worktree?: Worktree) {
@@ -43,6 +43,7 @@ export function usePullRequest(worktree?: Worktree) {
 
 /** Desktop's chat mark slot: a question bubble, an approval shield, a spinning ring, an unread dot, or a faint idle dot. */
 export function ChatMarkIcon({ mark }: { mark: ChatMark }) {
+  const { colors } = useTheme();
   const tone = chatMarkTone(mark);
   const body =
     mark === "question" ? (
@@ -76,6 +77,7 @@ export function ChatMarkIcon({ mark }: { mark: ChatMark }) {
 
 /** Desktop's pullRequestAction chip: the first blocker's fix, sent to the agent. */
 export function PullRequestAction({ pr, onRun, disabled }: { pr: PullRequest; onRun: () => void; disabled?: boolean }) {
+  const { colors } = useTheme();
   const blocker = pullRequestBlockers(pr)[0];
   if (!blocker) return null;
   const red = BLOCKERS[blocker].tone === "red";
@@ -105,6 +107,7 @@ export function PullRequestAction({ pr, onRun, disabled }: { pr: PullRequest; on
 
 /** Desktop's SubagentTrack trigger: a white chip with a ring while any agent works. */
 export function SubagentChip({ agents, onPress }: { agents: Subagent[]; onPress: () => void }) {
+  const { colors } = useTheme();
   const count = agentCounts(agents);
   if (!count.total) return null;
   return (

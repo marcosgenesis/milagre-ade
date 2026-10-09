@@ -6,7 +6,7 @@ export const isHex = (value: unknown): value is string => typeof value === "stri
 
 function parse(hex: string) {
   const match = HEX.exec(hex);
-  if (!match) throw Error(`Not a hex color: ${hex}`);
+  if (!match?.[1]) throw Error(`Not a hex color: ${hex}`);
   const n = parseInt(match[1], 16);
   return {
     r: (n >> 16) / 255,
@@ -73,6 +73,9 @@ export function luminance(hex: string) {
   return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
 }
 export function contrastRatio(a: string, b: string) {
-  const [x, y] = [luminance(a), luminance(b)].toSorted((p, q) => q - p);
-  return (x + 0.05) / (y + 0.05);
+  const la = luminance(a);
+  const lb = luminance(b);
+  const hi = Math.max(la, lb);
+  const lo = Math.min(la, lb);
+  return (hi + 0.05) / (lo + 0.05);
 }

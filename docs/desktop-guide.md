@@ -16,7 +16,7 @@ Restart Electron after updating to register the media protocol and file-search I
 
 ## Notifications
 
-Milagre can notify when a turn completes or fails while its chat is not focused, with a preview of the result. Clicking the notification opens that chat, including switching projects through the usual confirmation flow. The focused chat stays quiet; cancelled turns do not send completion alerts.
+Milagre can notify when a turn completes or fails while its chat is not focused, with a preview of the result. Clicking the notification opens that chat, including switching projects through the usual confirmation flow. The focused chat stays quiet; cancelled turns do not send completion alerts. A turn that ends while a subagent the chat runs in the background is still at work is not announced either: the turn that subagent's result wakes is, once nothing runs in the background. The same rule applies to the phone's push notifications.
 
 The Dock badge counts chats with unread replies or pending approvals/questions, counting each chat once. Reading a chat clears its unread status. **Settings > General** has separate switches for completion notifications, waiting notifications and the Dock badge.
 

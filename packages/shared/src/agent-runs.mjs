@@ -103,6 +103,11 @@ export function isTurnEnd(event) {
   return TURN_ENDS.has(event.type);
 }
 
+/** Whether a subagent is still at work: not ended yet, or waiting on an approval (see Subagent.status). */
+export function subagentActive(agent) {
+  return ["initializing", "running", "waiting"].includes(agent?.status);
+}
+
 /**
  * The run left once a steering message splits it: the streamed text and finished steps are saved
  * above the new message, and steps still running carry on at the start of the rest of the reply.

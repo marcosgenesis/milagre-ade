@@ -8,6 +8,7 @@ import { ipcErrorMessage } from "@milagre/shared/result";
 import { Select } from "./primitives/Select";
 import { ProjectAvatarStack } from "./ProjectAvatarStack";
 import { ProviderLogo } from "./ProviderLogo";
+import { bridgeForKey } from "../lib/computer-bridge";
 
 function AccountIcon({ plan }: { plan?: string }) {
   const type = accountType(plan);
@@ -34,7 +35,7 @@ function useProjectAccounts(scope: string) {
       if (!scope) return;
       const version = ++generation.current;
       try {
-        const next = await window.milagre.getProjectAccounts(scope, refresh);
+        const next = await bridgeForKey(scope).getProjectAccounts(scope, refresh);
         if (version === generation.current && currentScope.current === scope) {
           setSnapshot(next);
           setError("");
@@ -116,7 +117,7 @@ function ProjectAccountRows({ scope, empty }: { scope: string; empty?: string })
             value={group.accountId ?? ""}
             width={340}
             disabled={busy}
-            onChange={(id) => void act(() => window.milagre.assignProjectAccount(scope, group.provider as ModelProvider, id || null))}
+            onChange={(id) => void act(() => bridgeForKey(scope).assignProjectAccount(scope, group.provider as ModelProvider, id || null))}
             options={[
               {
                 value: "",

@@ -109,4 +109,4 @@ function writeMessages(projectPath, messages, saved, { durable = false } = {}) {
   );
 }
 
-module.exports = { MESSAGES_MARKER, isMarker, dbFile, readMessages, writeMessages };
+module.exports = { MESSAGES_MARKER, isMarker, dbFile, readMessages, writeMessages, database };

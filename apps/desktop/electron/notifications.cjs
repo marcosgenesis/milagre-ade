@@ -1,4 +1,5 @@
 const { isTurnEnd: isTerminal } = require("@milagre/shared/agent-runs");
+const { computerOfKey } = require("@milagre/shared/chat-scopes");
 
 const MAX_TITLE = 120;
 const MAX_BODY = 240;
@@ -13,6 +14,12 @@ const keyOf = (chatId, requestId) => `${chatId}\n${requestId}`;
 // System notifications for chats that wait on the user: an approval or a question. Every agent event
 // is observed, so the notifier knows which requests are still open, and notify names the chat. One shows only while no Milagre window has focus, once per
 // request, and closes when its request is answered or its turn ends. Clicking it opens the chat.
+/** A remote chat's subtitle, its computer first (spec "Routing": notifications labeled with the computer). */
+function labelFor(subtitle, computerName) {
+  if (!computerName) return subtitle;
+  return subtitle ? `${computerName} · ${subtitle}` : computerName;
+}
+
 class AttentionNotifier {
   /** @param {{ createNotification: (notice: {title: string; subtitle: string; body: string}) => Electron.Notification; isAppFocused: () => boolean; openChat: (chatId: string) => void; openPhoneSettings?: () => void; setBadge?: (badge: string) => void }} options */
   constructor({ createNotification, isAppFocused, openChat, openPhoneSettings = () => {}, setBadge = () => {} }) {
@@ -177,6 +184,20 @@ class AttentionNotifier {
     notification?.close();
   }
 
+  /** A computer was removed or switched off: what it waited on, and its unread chats, leave the badge. */
+  forgetComputer(computerId) {
+    const mine = (chatId) => computerOfKey(chatId) === computerId;
+    for (const key of [...this.open.keys()]) if (mine(key.slice(0, key.lastIndexOf("\n")))) this.close(key);
+    for (const chatId of [...this.unread]) if (mine(chatId)) this.unread.delete(chatId);
+    for (const [chatId, notification] of [...this.completionNotifications]) {
+      if (!mine(chatId)) continue;
+      notification.close();
+      this.completionNotifications.delete(chatId);
+    }
+    for (const map of [this.completed, this.previews]) for (const chatId of [...map.keys()]) if (mine(chatId)) map.delete(chatId);
+    this.updateBadge();
+  }
+
   closeAll() {
     for (const key of [...this.open.keys()]) this.close(key);
     for (const notification of this.completionNotifications.values()) notification.close();
@@ -189,4 +210,4 @@ class AttentionNotifier {
   }
 }
 
-module.exports = { AttentionNotifier };
+module.exports = { AttentionNotifier, labelFor };

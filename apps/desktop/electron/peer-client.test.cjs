@@ -85,7 +85,10 @@ function fakeMac({ hello = "accept", answer = echo } = {}) {
         if (!read) return;
         const reply = answer(read.frame);
         if (reply === "close") return socket.closeWith(1000);
-        if (reply) for (const text of writer.write(JSON.stringify(reply))) socket.deliver(channel.sealEncoded(text));
+        // A promise answers later, as a slow call does.
+        void Promise.resolve(reply).then((value) => {
+          if (value && !socket.closed) for (const text of writer.write(JSON.stringify(value))) socket.deliver(channel.sealEncoded(text));
+        });
       },
     };
     mac.sockets.push(socket);
@@ -248,4 +251,46 @@ test("a paged reply may not announce too many pages nor run past the cap", async
   const ok = await dial(fakeMac({ answer: fits }));
   t.after(() => ok.close());
   assert.deepEqual(await ok.call("fits"), { a: "b" });
+});
+
+test("closeWhenIdle lets calls and paged replies in flight finish, then closes; keepOpen takes it back", async () => {
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  const pages = ['{"a":', "1}"];
+  const mac = fakeMac({
+    answer: (frame) =>
+      frame.method === "slow"
+        ? held.then(() => echo(frame))
+        : frame.method === "big"
+          ? { v: 1, id: frame.id, pages: { pageId: "p", pageCount: 2 } }
+          : frame.method === "daemon:result-page"
+            ? delay(10).then(() => ({ v: 1, id: frame.id, result: pages[frame.args[1]] }))
+            : echo(frame),
+  });
+  const client = await dial(mac);
+  let closes = 0;
+  let before = 0;
+  client.on("close", () => closes++);
+  const slow = client.call("slow", [1]);
+  const big = client.call("big");
+  client.closeWhenIdle(() => before++);
+  release();
+  assert.deepEqual(await slow, { echo: [1] });
+  assert.equal(client.closed, false, "the paged reply is still being read");
+  assert.deepEqual(await big, { a: 1 });
+  await until(() => client.closed, "the close once idle");
+  assert.equal(before, 1);
+  assert.equal(closes, 1);
+
+  const idle = await dial(fakeMac());
+  idle.closeWhenIdle();
+  assert.equal(idle.closed, true, "nothing in flight: it closes at once");
+
+  const kept = await dial(fakeMac({ answer: (frame) => (frame.method === "never" ? new Promise(() => {}) : echo(frame)) }));
+  void kept.call("never").catch(() => {});
+  kept.closeWhenIdle();
+  kept.keepOpen();
+  assert.deepEqual(await kept.call("project:recent", [2]), { echo: [2] });
+  assert.equal(kept.closed, false);
+  kept.close();
 });

@@ -6,6 +6,7 @@ import { followTerminal, type TerminalFollower } from "@milagre/shared/terminal-
 import type { TerminalInfo } from "@milagre/shared/terminal";
 import { isMac } from "./shortcut-hints";
 import { removeTerminal, updateTerminal } from "./terminal-store";
+import { bridgeForKey } from "./computer-bridge";
 
 // One xterm per Terminal, kept while the Terminal runs. Switching Chats or tabs moves its element between panels
 // instead of building it again, so scrollback and selection survive and nothing is read twice.
@@ -119,7 +120,7 @@ function create(info: TerminalInfo): Session {
   element.dataset.terminalId = info.id;
   const follower = followTerminal({
     terminalId: info.id,
-    api: window.milagre.terminals,
+    api: bridgeForKey(info.chatId).terminals,
     // The next read waits for xterm to have parsed this one: a flood is read as fast as it can be drawn, and the host
     // resets a viewer that falls behind to the newest output instead of xterm queueing it past its own limit.
     write: (data) => new Promise<void>((resolve) => term.write(data, resolve)),

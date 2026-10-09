@@ -25,7 +25,7 @@ import { runKeys } from "../lib/sidebar-scopes";
 import { DraftChatComposer } from "./DraftChatComposer";
 import { createDraftStore, draftKey } from "../lib/draft-store";
 import { createScopeDrafts, linkChatRows, memberWorktreeForAction } from "../lib/link-scope";
-import { usePastedImages } from "./usePastedImages";
+import { REMOTE_FILES_NOTICE, usePastedImages } from "./usePastedImages";
 import type { useAgentRuns } from "./useAgentRuns";
 import { attachmentPrompt } from "../lib/media";
 import { modelForChat, sentDecision, sentReply } from "../lib/agent-runs";
@@ -42,6 +42,7 @@ import { lazyView } from "../lib/lazy-view";
 import type { LinkedWork } from "@milagre/shared/model";
 import { TerminalPanel } from "./terminal/TerminalPanel";
 import { CORNER_PITCH, PanelToggles } from "./agents/PanelToggles";
+import { BridgeContext, ScopeContext, bridgeForKey, isRemoteKey } from "../lib/computer-bridge";
 import { busyTerminals, newTerminal, useTerminalSync, type TerminalPlace } from "../lib/terminal-actions";
 const CanvasView = lazyView(() => import("./CanvasView").then((module) => module.CanvasView));
 const CANVAS_STATES = {};
@@ -74,6 +75,8 @@ export function LinkWorkspace({
   onSwitchProject,
   onSwitchLink,
   onLinkProject,
+  onAddComputer,
+  onOpenComputerSettings,
   onEditLink,
   onOpenProject,
   onSettings,
@@ -96,6 +99,8 @@ export function LinkWorkspace({
   onSwitchProject: (path: string) => void;
   onSwitchLink: (id: string) => void;
   onLinkProject: () => void;
+  onAddComputer?: () => void;
+  onOpenComputerSettings?: (id: string | null) => void;
   onEditLink: (id: string) => void;
   onOpenProject: () => void;
   onSettings: () => void;
@@ -106,6 +111,7 @@ export function LinkWorkspace({
 }) {
   const scope = { kind: "link" as const, linkId: opened.link.id },
     owner = scopeKey(scope);
+  const bridge = bridgeForKey(owner);
   const draftStore = useMemo(createDraftStore, [owner]);
   const saved = drafts.read(scope);
   const [sessionId, setSessionId] = useState<number | null>(
@@ -144,7 +150,7 @@ export function LinkWorkspace({
     [remoteCount, chatWindow.loadEarlier, chatWindow.loadAll],
   );
   const chatMessagesOf = (id: number) => (lean ? (id === sessionId ? messages : []) : state.messages.filter((message) => message.session_id === id));
-  const imageDraft = usePastedImages(`${owner}:${sessionId ?? "new"}`);
+  const imageDraft = usePastedImages(`${owner}:${sessionId ?? "new"}`, isRemoteKey(owner));
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -209,7 +215,7 @@ export function LinkWorkspace({
     [owner],
   );
   useEffect(() => {
-    void window.milagre.setOpenChat(chatId).catch((error) => setError(ipcErrorMessage(error)));
+    void bridge.setOpenChat(chatId).catch((error) => setError(ipcErrorMessage(error)));
   }, [chatId]);
   useEffect(() => {
     if (initialSessionId !== undefined) {
@@ -300,6 +306,11 @@ export function LinkWorkspace({
   }, [owner, chatId, state.sessions]);
   async function send(body = draftStore.get().trim(), preserve = false) {
     if (preparing || imageDraft.loading || (!body && !imageDraft.images.length && !imageDraft.files.length)) return;
+    // A file attached from this Mac is a path the other Mac can't read; pasted images travel as data and still go.
+    if (isRemoteKey(owner) && imageDraft.files.length) {
+      setError(REMOTE_FILES_NOTICE);
+      return;
+    }
     const selection = latest.current.selection;
     const operation = drafts.beginSend(scope, sessionId, JSON.stringify({ body, images: imageDraft.images, files: imageDraft.files }));
     setPreparing(true);
@@ -308,7 +319,7 @@ export function LinkWorkspace({
     // The picker decides the provider: a chat on another one hands off to it.
     const model = preferences.selectedModel;
     try {
-      const sent = await window.milagre.sendLinkMessage({
+      const sent = await bridge.sendLinkMessage({
         linkId: opened.link.id,
         sessionId,
         operationId: operation,
@@ -389,326 +400,337 @@ export function LinkWorkspace({
   }
   const root = session?.workspacePath ?? "";
   return (
-    <DotBackground>
-      {!hostConnection.connected && (
-        <div
-          role="status"
-          data-host-disconnected
-          className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-card border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]"
-        >
-          <p>Reconnecting to your computer</p>
-          <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
-        </div>
-      )}
-      <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
-      <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink">
-        <div className="flex min-h-0 shrink-0 pt-[60px] pb-3 pl-3">
-          <SidebarNav
-            fill
-            attentionPaths={attentionPaths}
-            workspaceName={opened.link.name}
-            selectedLink={{ id: opened.link.id, projects: opened.projects }}
-            onSwitchLink={onSwitchLink}
-            onLinkProject={onLinkProject}
-            onEditLink={onEditLink}
-            onSwitchProject={onSwitchProject}
-            onOpenProject={onOpenProject}
-            onOpenCommands={() => setCommandsOpen(true)}
-            onOpenSettings={onSettings}
-            canvasActive={canvasOpen}
-            onOpenCanvas={() => {
-              changes.closeDiff();
-              setCanvasOpen(true);
-            }}
-            onNewChat={() => pick(null)}
-            onPick={(id) => pick(Number(id))}
-            activeId={sessionId == null ? null : String(sessionId)}
-            recents={recents}
-            usage={usage}
-            runningKeys={sidebarRunKeys.running}
-            waitingKeys={sidebarRunKeys.waiting}
-            askingKeys={sidebarRunKeys.asking}
-            onOpenScopeChat={(key, id) => onCanvasChat(key, Number(id))}
-            onNewChatInScope={onNewChatInScope}
-            chatActions={{
-              onRename: (id, title) => void window.milagre.patchChat(owner, Number(id), { title }).catch((error) => setError(ipcErrorMessage(error))),
-              onMarkUnread: (id, unread) => void window.milagre.patchChat(owner, Number(id), { unread }),
-              onReveal: (id) => {
-                const target = state.sessions[id];
-                if (target) void window.milagre.revealInFolder(target.workspacePath);
-              },
-              onOpenInEditor: (id) => {
-                const target = state.sessions[id];
-                if (target) void openInEditor(target.workspacePath);
-              },
-              onCommit: (id) => {
-                setGitChoice(Number(id));
-                setGitMemberId("");
-              },
-              // A shared Chat keeps its Worktrees when archived; only its Terminals would end.
-              onArchiveCheck: async (id) => ({
-                milagreOwned: false,
-                shared: false,
-                status: null,
-                terminals: await busyTerminals(chatKeyForScope(scope, Number(id))),
-              }),
-              onArchive: (id) => {
-                const key = chatKeyForScope(scope, Number(id));
-                return agents
-                  .interrupt(key)
-                  .then(() => window.milagre.patchChat(owner, Number(id), { archived: true }))
-                  .then(() => {
-                    if (sessionId === Number(id)) pick(null);
-                  })
-                  .catch((error) => setError(ipcErrorMessage(error)));
-              },
-            }}
-          />
-        </div>
-        <main data-chat-pane className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pr-3 pb-3">
-          {canvasOpen ? (
-            <CanvasView
-              states={CANVAS_STATES}
-              runs={agents.runs}
-              linkedWork={linkedWork}
-              focusLink={opened.link}
-              onBack={() => setCanvasOpen(false)}
-              onOpenChat={(path, id) => {
-                if (path === owner && id === sessionId) setCanvasOpen(false);
-                else if (path === owner) pick(id);
-                else onCanvasChat(path, id);
-              }}
-            />
-          ) : (
-            <>
-              {error && session && (
-                <p
-                  role="alert"
-                  className="absolute inset-x-5 top-14 z-30 rounded-control border border-line bg-surface px-3 py-2 text-[13px] text-red shadow-overlay"
-                >
-                  {error}
-                </p>
-              )}
-
-              <DiffBar
-                open={changes.diffOpen}
-                onBack={changes.closeDiff}
-                send={{ count: comments.sendable.length, onSend: () => void sendComments() }}
-                trailing={<DiffToolbar changes={{ ...changes, refresh: refreshChanges }} prefs={diffPrefs} />}
+    <BridgeContext.Provider value={bridge}>
+      <ScopeContext.Provider value={owner}>
+        <DotBackground>
+          {!hostConnection.connected && (
+            <div
+              role="status"
+              data-host-disconnected
+              className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-card border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]"
+            >
+              <p>Reconnecting to your computer</p>
+              <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
+            </div>
+          )}
+          <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
+          <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink">
+            <div className="flex min-h-0 shrink-0 pt-[60px] pb-3 pl-3">
+              <SidebarNav
+                fill
+                attentionPaths={attentionPaths}
+                workspaceName={opened.link.name}
+                selectedLink={{ id: opened.link.id, projects: opened.projects }}
+                onSwitchLink={onSwitchLink}
+                onLinkProject={onLinkProject}
+                onAddComputer={onAddComputer}
+                onOpenComputerSettings={onOpenComputerSettings}
+                onEditLink={onEditLink}
+                onSwitchProject={onSwitchProject}
+                onOpenProject={onOpenProject}
+                onOpenCommands={() => setCommandsOpen(true)}
+                onOpenSettings={onSettings}
+                canvasActive={canvasOpen}
+                onOpenCanvas={() => {
+                  changes.closeDiff();
+                  setCanvasOpen(true);
+                }}
+                onNewChat={() => pick(null)}
+                onPick={(id) => pick(Number(id))}
+                activeId={sessionId == null ? null : String(sessionId)}
+                recents={recents}
+                usage={usage}
+                runningKeys={sidebarRunKeys.running}
+                waitingKeys={sidebarRunKeys.waiting}
+                askingKeys={sidebarRunKeys.asking}
+                onOpenScopeChat={(key, id) => onCanvasChat(key, Number(id))}
+                onNewChatInScope={onNewChatInScope}
+                chatActions={{
+                  onRename: (id, title) => void bridge.patchChat(owner, Number(id), { title }).catch((error) => setError(ipcErrorMessage(error))),
+                  onMarkUnread: (id, unread) => void bridge.patchChat(owner, Number(id), { unread }),
+                  remote: isRemoteKey(owner),
+                  onReveal: isRemoteKey(owner)
+                    ? undefined
+                    : (id) => {
+                        const target = state.sessions[id];
+                        if (target) void window.milagre.revealInFolder(target.workspacePath);
+                      },
+                  onOpenInEditor: isRemoteKey(owner)
+                    ? undefined
+                    : (id) => {
+                        const target = state.sessions[id];
+                        if (target) void openInEditor(target.workspacePath);
+                      },
+                  onCommit: (id) => {
+                    setGitChoice(Number(id));
+                    setGitMemberId("");
+                  },
+                  // A shared Chat keeps its Worktrees when archived; only its Terminals would end.
+                  onArchiveCheck: async (id) => ({
+                    milagreOwned: false,
+                    shared: false,
+                    status: null,
+                    terminals: await busyTerminals(chatKeyForScope(scope, Number(id))),
+                  }),
+                  onArchive: (id) => {
+                    const key = chatKeyForScope(scope, Number(id));
+                    return agents
+                      .interrupt(key)
+                      .then(() => bridge.patchChat(owner, Number(id), { archived: true }))
+                      .then(() => {
+                        if (sessionId === Number(id)) pick(null);
+                      })
+                      .catch((error) => setError(ipcErrorMessage(error)));
+                  },
+                }}
               />
-              {changes.diffOpen && <DiffView key={`${chatId}:${memberId}:${changes.mode}`} changes={changes} prefs={diffPrefs} comments={comments} />}
-              <div className={`min-h-0 flex-1 flex-col overflow-hidden ${changes.diffOpen ? "hidden" : "flex"}`}>
-                <EditorLinks root={root}>
-                  <DraftChatComposer
-                    {...preferences}
-                    scopeKind="link"
-                    store={draftStore}
-                    projectPath={root}
-                    messageScope={owner}
-                    earlier={earlierMessages}
-                    messages={messages}
-                    imageDraft={imageDraft}
-                    onSend={() => void send()}
-                    onStop={chatId && run ? () => void agents.interrupt(chatId) : undefined}
-                    isSending={Boolean(run && !approval && !question)}
-                    sendBlocked={preparing}
-                    streamingText={run?.text}
-                    streamingSteps={run?.steps}
-                    runStartedAt={run?.startedAt}
-                    runModelName={run?.model}
-                    sessionProvider={session?.provider}
-                    tasks={run?.tasks}
-                    contextUsage={run?.contextUsage ?? session?.contextUsage}
-                    subagents={session?.subagents?.filter((agent) => agent.id !== session.native_session_id)}
-                    ports={chatId ? ports[chatId] : undefined}
-                    agentChatId={chatId ?? undefined}
-                    waitingForSubagents={run?.waitingForSubagents}
-                    asking={Boolean(question)}
-                    waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
-                    resume={
-                      session?.resumeTurn
-                        ? { onContinue: () => void window.milagre.resumeChat(owner, session.id).catch((error) => setError(ipcErrorMessage(error))) }
-                        : undefined
-                    }
-                    onStopAdvisor={(id) => {
-                      if (chatId) void window.milagre.stopAdvisor(chatId, id).catch((error) => setError(ipcErrorMessage(error)));
-                    }}
-                    onRetryAdvisor={(id) => {
-                      if (chatId) void window.milagre.retryAdvisor(chatId, id).catch((error) => setError(ipcErrorMessage(error)));
-                    }}
-                    onArchiveSubagent={(id, archived) => {
-                      if (session) void window.milagre.archiveSubagent(owner, session.id, id, archived).catch((error) => setError(ipcErrorMessage(error)));
-                    }}
-                    onArchiveFinishedSubagents={() => {
-                      if (session) void window.milagre.archiveFinishedSubagents(owner, session.id).catch((error) => setError(ipcErrorMessage(error)));
-                    }}
-                    onPermissionModeChange={(mode) => {
-                      preferences.onPermissionModeChange(mode);
-                      if (chatId) void window.milagre.setAgentPermissionMode(chatId, mode);
-                    }}
-                    onRecommendationSelect={(option) => void send(option)}
-                    worktrees={[]}
-                    onWorktreeChange={() => {}}
-                    isolation="worktree"
-                    onIsolationChange={() => {}}
-                    branches={[]}
-                    baseBranch=""
-                    onBaseBranchChange={() => {}}
-                    newChatError={error}
-                    findOpen={findOpen}
-                    findSignal={findSignal}
-                    findSeed={findSeed}
-                    onFindClose={() => setFindOpen(false)}
-                    approval={
-                      approval && chatId ? (
-                        <PermissionCard
-                          request={approval}
-                          waiting={(run?.approvals.length ?? 1) - 1}
-                          answering={sentDecision(run, approval.requestId)}
-                          onAnswer={(decision) => void agents.respond(chatId, approval.requestId, decision)}
-                        />
-                      ) : question && chatId ? (
-                        <QuestionCard
-                          request={question}
-                          waiting={(run?.questions.length ?? 1) - 1}
-                          answering={sentReply(run, question.requestId)}
-                          onAnswer={(answer) => void agents.answerQuestion(chatId, question.requestId, answer)}
-                        />
-                      ) : undefined
-                    }
+            </div>
+            <main data-chat-pane className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pr-3 pb-3">
+              {canvasOpen ? (
+                <CanvasView
+                  states={CANVAS_STATES}
+                  runs={agents.runs}
+                  linkedWork={linkedWork}
+                  focusLink={opened.link}
+                  onBack={() => setCanvasOpen(false)}
+                  onOpenChat={(path, id) => {
+                    if (path === owner && id === sessionId) setCanvasOpen(false);
+                    else if (path === owner) pick(id);
+                    else onCanvasChat(path, id);
+                  }}
+                />
+              ) : (
+                <>
+                  {error && session && (
+                    <p
+                      role="alert"
+                      className="absolute inset-x-5 top-14 z-30 rounded-control border border-line bg-surface px-3 py-2 text-[13px] text-red shadow-overlay"
+                    >
+                      {error}
+                    </p>
+                  )}
+
+                  <DiffBar
+                    open={changes.diffOpen}
+                    onBack={changes.closeDiff}
+                    send={{ count: comments.sendable.length, onSend: () => void sendComments() }}
+                    trailing={<DiffToolbar changes={{ ...changes, refresh: refreshChanges }} prefs={diffPrefs} />}
                   />
-                </EditorLinks>
-                <TerminalPanel chatId={terminalChatId} places={terminalPlaces} notify={setError} />
-              </div>
-            </>
-          )}
-        </main>
-        <ChangesPanelSlot open={!canvasOpen && changes.open}>
-          {session && (
-            <LinkChangesPanel
-              key={chatId}
-              members={session.worktrees}
-              projects={opened.projects}
-              lists={groupChanges.lists}
-              loading={groupChanges.loading}
-              mode={changes.mode}
-              onModeChange={changes.setMode}
-              onRefresh={() => void refreshChanges()}
-              onSelectFile={(member, path) => {
-                setMemberId(member.projectId);
-                changes.selectFile(path);
-              }}
-              selectedProjectId={memberId}
-              activePath={changes.activePath}
-              commentCounts={comments.counts}
-              onCommit={(member) => setGitDialog({ sessionId: session.id, member: memberWorktreeForAction(state, session.id, member.projectId) })}
-              onOpenEditor={(member) => void openInEditor(member.worktreePath)}
-              onReveal={(member) => void window.milagre.revealInFolder(member.worktreePath)}
+                  {changes.diffOpen && <DiffView key={`${chatId}:${memberId}:${changes.mode}`} changes={changes} prefs={diffPrefs} comments={comments} />}
+                  <div className={`min-h-0 flex-1 flex-col overflow-hidden ${changes.diffOpen ? "hidden" : "flex"}`}>
+                    <EditorLinks root={root}>
+                      <DraftChatComposer
+                        {...preferences}
+                        scopeKind="link"
+                        store={draftStore}
+                        projectPath={root}
+                        messageScope={owner}
+                        earlier={earlierMessages}
+                        messages={messages}
+                        imageDraft={imageDraft}
+                        onSend={() => void send()}
+                        onStop={chatId && run ? () => void agents.interrupt(chatId) : undefined}
+                        isSending={Boolean(run && !approval && !question)}
+                        sendBlocked={preparing}
+                        streamingText={run?.text}
+                        streamingSteps={run?.steps}
+                        runStartedAt={run?.startedAt}
+                        runModelName={run?.model}
+                        sessionProvider={session?.provider}
+                        tasks={run?.tasks}
+                        contextUsage={run?.contextUsage ?? session?.contextUsage}
+                        subagents={session?.subagents?.filter((agent) => agent.id !== session.native_session_id)}
+                        ports={chatId ? ports[chatId] : undefined}
+                        agentChatId={chatId ?? undefined}
+                        waitingForSubagents={run?.waitingForSubagents}
+                        asking={Boolean(question)}
+                        waitingStepIds={run?.approvals.flatMap((request) => (request.stepId ? [request.stepId] : []))}
+                        resume={
+                          session?.resumeTurn
+                            ? { onContinue: () => void bridge.resumeChat(owner, session.id).catch((error) => setError(ipcErrorMessage(error))) }
+                            : undefined
+                        }
+                        onStopAdvisor={(id) => {
+                          if (chatId) void bridge.stopAdvisor(chatId, id).catch((error) => setError(ipcErrorMessage(error)));
+                        }}
+                        onRetryAdvisor={(id) => {
+                          if (chatId) void bridge.retryAdvisor(chatId, id).catch((error) => setError(ipcErrorMessage(error)));
+                        }}
+                        onArchiveSubagent={(id, archived) => {
+                          if (session) void bridge.archiveSubagent(owner, session.id, id, archived).catch((error) => setError(ipcErrorMessage(error)));
+                        }}
+                        onArchiveFinishedSubagents={() => {
+                          if (session) void bridge.archiveFinishedSubagents(owner, session.id).catch((error) => setError(ipcErrorMessage(error)));
+                        }}
+                        onPermissionModeChange={(mode) => {
+                          preferences.onPermissionModeChange(mode);
+                          if (chatId) void bridge.setAgentPermissionMode(chatId, mode);
+                        }}
+                        onRecommendationSelect={(option) => void send(option)}
+                        worktrees={[]}
+                        onWorktreeChange={() => {}}
+                        isolation="worktree"
+                        onIsolationChange={() => {}}
+                        branches={[]}
+                        baseBranch=""
+                        onBaseBranchChange={() => {}}
+                        newChatError={error}
+                        findOpen={findOpen}
+                        findSignal={findSignal}
+                        findSeed={findSeed}
+                        onFindClose={() => setFindOpen(false)}
+                        approval={
+                          approval && chatId ? (
+                            <PermissionCard
+                              request={approval}
+                              waiting={(run?.approvals.length ?? 1) - 1}
+                              answering={sentDecision(run, approval.requestId)}
+                              onAnswer={(decision) => void agents.respond(chatId, approval.requestId, decision)}
+                            />
+                          ) : question && chatId ? (
+                            <QuestionCard
+                              request={question}
+                              waiting={(run?.questions.length ?? 1) - 1}
+                              answering={sentReply(run, question.requestId)}
+                              onAnswer={(answer) => void agents.answerQuestion(chatId, question.requestId, answer)}
+                            />
+                          ) : undefined
+                        }
+                      />
+                    </EditorLinks>
+                    <TerminalPanel chatId={terminalChatId} places={terminalPlaces} notify={setError} />
+                  </div>
+                </>
+              )}
+            </main>
+            <ChangesPanelSlot open={!canvasOpen && changes.open}>
+              {session && (
+                <LinkChangesPanel
+                  key={chatId}
+                  members={session.worktrees}
+                  projects={opened.projects}
+                  lists={groupChanges.lists}
+                  loading={groupChanges.loading}
+                  mode={changes.mode}
+                  onModeChange={changes.setMode}
+                  onRefresh={() => void refreshChanges()}
+                  onSelectFile={(member, path) => {
+                    setMemberId(member.projectId);
+                    changes.selectFile(path);
+                  }}
+                  selectedProjectId={memberId}
+                  activePath={changes.activePath}
+                  commentCounts={comments.counts}
+                  onCommit={(member) => setGitDialog({ sessionId: session.id, member: memberWorktreeForAction(state, session.id, member.projectId) })}
+                  onOpenEditor={isRemoteKey(owner) ? undefined : (member) => void openInEditor(member.worktreePath)}
+                  onReveal={isRemoteKey(owner) ? undefined : (member) => void window.milagre.revealInFolder(member.worktreePath)}
+                />
+              )}
+            </ChangesPanelSlot>
+          </div>
+          {!canvasOpen && session && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+          <PanelToggles right={!canvasOpen && session ? 12 + CORNER_PITCH : 12} />
+          {showAttentionButton && attentionChats[0] && (
+            <AttentionButton
+              label={attentionLabel(attentionPaths.map((path) => path.split("/").pop() ?? path))}
+              items={attentionChats.map((key) => ({
+                key,
+                project: projectOfKey(key).split("/").pop() ?? key,
+                asking: !agents.runs[key]?.approvals.length,
+                waitingFor: waitingFor(agents.runs[key]),
+              }))}
+              offset={!canvasOpen && session ? 1 : 0}
+              onOpen={(key) => onCanvasChat(projectOfKey(key), sessionIdFromKey(key))}
             />
           )}
-        </ChangesPanelSlot>
-      </div>
-      {!canvasOpen && session && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
-      <PanelToggles right={!canvasOpen && session ? 12 + CORNER_PITCH : 12} />
-      {showAttentionButton && attentionChats[0] && (
-        <AttentionButton
-          label={attentionLabel(attentionPaths.map((path) => path.split("/").pop() ?? path))}
-          items={attentionChats.map((key) => ({
-            key,
-            project: projectOfKey(key).split("/").pop() ?? key,
-            asking: !agents.runs[key]?.approvals.length,
-            waitingFor: waitingFor(agents.runs[key]),
-          }))}
-          offset={!canvasOpen && session ? 1 : 0}
-          onOpen={(key) => onCanvasChat(projectOfKey(key), sessionIdFromKey(key))}
-        />
-      )}
-      {gitChoice !== null && (
-        <dialog
-          ref={memberDialog}
-          aria-label="Choose Project for Git"
-          onCancel={() => setGitChoice(null)}
-          className="m-auto w-[380px] rounded-card bg-surface p-0 text-ink shadow-overlay backdrop:bg-black/20 backdrop:backdrop-blur-overlay"
-        >
-          <div className="p-5" onClick={(event) => event.stopPropagation()}>
-            <h2 className="text-[16px] font-semibold">Choose a Project</h2>
-            <p className="mt-1 mb-4 text-[13px] text-ink-2">Git actions apply to one Worktree.</p>
-            <Select
-              label="Project"
-              value={gitMemberId}
-              onChange={setGitMemberId}
-              options={[
-                { value: "", label: "Choose Project" },
-                ...(state.sessions[gitChoice]?.worktrees ?? []).map((member) => ({
-                  value: member.projectId,
-                  label: opened.projects.find((project) => project.id === member.projectId)?.name ?? member.projectId,
-                  description: member.worktreePath,
+          {gitChoice !== null && (
+            <dialog
+              ref={memberDialog}
+              aria-label="Choose Project for Git"
+              onCancel={() => setGitChoice(null)}
+              className="m-auto w-[380px] rounded-card bg-surface p-0 text-ink shadow-overlay backdrop:bg-black/20 backdrop:backdrop-blur-overlay"
+            >
+              <div className="p-5" onClick={(event) => event.stopPropagation()}>
+                <h2 className="text-[16px] font-semibold">Choose a Project</h2>
+                <p className="mt-1 mb-4 text-[13px] text-ink-2">Git actions apply to one Worktree.</p>
+                <Select
+                  label="Project"
+                  value={gitMemberId}
+                  onChange={setGitMemberId}
+                  options={[
+                    { value: "", label: "Choose Project" },
+                    ...(state.sessions[gitChoice]?.worktrees ?? []).map((member) => ({
+                      value: member.projectId,
+                      label: opened.projects.find((project) => project.id === member.projectId)?.name ?? member.projectId,
+                      description: member.worktreePath,
+                    })),
+                  ]}
+                />
+                <div className="mt-4 flex justify-end gap-2">
+                  <button type="button" className="rounded-control px-3 py-2 text-sm hover:bg-hover-2" onClick={() => setGitChoice(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!gitMemberId}
+                    className="rounded-control bg-ink px-3 py-2 text-sm text-surface disabled:opacity-40"
+                    onClick={() => {
+                      setGitDialog({ sessionId: gitChoice, member: memberWorktreeForAction(state, gitChoice, gitMemberId) });
+                      setGitChoice(null);
+                    }}
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            </dialog>
+          )}
+          {commandsOpen && (
+            <CommandPalette
+              commands={[
+                { id: "new", label: "New Chat", group: "Actions", icon: "chat", run: () => pick(null) },
+                { id: "link", label: "Link projects…", group: "Actions", icon: "folder", run: onLinkProject },
+                { id: "edit-link", label: "Edit Link…", group: "Actions", icon: "folder", run: () => onEditLink(opened.link.id) },
+                ...recents.map((row) => ({ id: row.id, label: row.label, group: "Chats", icon: "chat" as const, run: () => pick(Number(row.id)) })),
+                ...opened.projects.map((project) => ({
+                  id: project.id,
+                  label: project.name,
+                  group: "Projects",
+                  icon: "folder" as const,
+                  run: () => onSwitchProject(project.path),
                 })),
               ]}
+              searchMessages={
+                lean ? undefined : (query) => messageCommands(state.messages, query, new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)
+              }
+              searchMessagesAsync={
+                lean
+                  ? async (query) =>
+                      messageCommandsFrom(await bridge.searchChats(owner, query), new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)
+                  : undefined
+              }
+              onClose={() => setCommandsOpen(false)}
+              onError={setError}
             />
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="rounded-control px-3 py-2 text-sm hover:bg-hover-2" onClick={() => setGitChoice(null)}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!gitMemberId}
-                className="rounded-control bg-ink px-3 py-2 text-sm text-surface disabled:opacity-40"
-                onClick={() => {
-                  setGitDialog({ sessionId: gitChoice, member: memberWorktreeForAction(state, gitChoice, gitMemberId) });
-                  setGitChoice(null);
-                }}
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        </dialog>
-      )}
-      {commandsOpen && (
-        <CommandPalette
-          commands={[
-            { id: "new", label: "New Chat", group: "Actions", icon: "chat", run: () => pick(null) },
-            { id: "link", label: "Link projects…", group: "Actions", icon: "folder", run: onLinkProject },
-            { id: "edit-link", label: "Edit Link…", group: "Actions", icon: "folder", run: () => onEditLink(opened.link.id) },
-            ...recents.map((row) => ({ id: row.id, label: row.label, group: "Chats", icon: "chat" as const, run: () => pick(Number(row.id)) })),
-            ...opened.projects.map((project) => ({
-              id: project.id,
-              label: project.name,
-              group: "Projects",
-              icon: "folder" as const,
-              run: () => onSwitchProject(project.path),
-            })),
-          ]}
-          searchMessages={
-            lean ? undefined : (query) => messageCommands(state.messages, query, new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)
-          }
-          searchMessagesAsync={
-            lean
-              ? async (query) =>
-                  messageCommandsFrom(await window.milagre.searchChats(owner, query), new Map(recents.map((row) => [Number(row.id), row.label])), openMessage)
-              : undefined
-          }
-          onClose={() => setCommandsOpen(false)}
-          onError={setError}
-        />
-      )}
-      {gitDialog && (
-        <GitActionsDialog
-          projectName={opened.projects.find((project) => project.id === gitDialog.member.projectId)?.name}
-          cwd={gitDialog.member.worktreePath}
-          base={gitDialog.member.base}
-          provider={state.sessions[gitDialog.sessionId]?.provider}
-          chat={gitChatContext(chatTitle(state.sessions[gitDialog.sessionId], chatMessagesOf(gitDialog.sessionId)), chatMessagesOf(gitDialog.sessionId))}
-          turnRunning={Boolean(agents.runs[chatKeyForScope(scope, gitDialog.sessionId)])}
-          onClose={() => setGitDialog(null)}
-          onSendToAgent={(text) => {
-            pick(gitDialog.sessionId);
-            draftStore.set(text);
-          }}
-          onRan={(note) => void window.milagre.addGitNote(chatKeyForScope(scope, gitDialog.sessionId), note)}
-        />
-      )}
-    </DotBackground>
+          )}
+          {gitDialog && (
+            <GitActionsDialog
+              projectName={opened.projects.find((project) => project.id === gitDialog.member.projectId)?.name}
+              cwd={gitDialog.member.worktreePath}
+              base={gitDialog.member.base}
+              provider={state.sessions[gitDialog.sessionId]?.provider}
+              chat={gitChatContext(chatTitle(state.sessions[gitDialog.sessionId], chatMessagesOf(gitDialog.sessionId)), chatMessagesOf(gitDialog.sessionId))}
+              turnRunning={Boolean(agents.runs[chatKeyForScope(scope, gitDialog.sessionId)])}
+              onClose={() => setGitDialog(null)}
+              onSendToAgent={(text) => {
+                pick(gitDialog.sessionId);
+                draftStore.set(text);
+              }}
+              onRan={(note) => void bridge.addGitNote(chatKeyForScope(scope, gitDialog.sessionId), note)}
+            />
+          )}
+        </DotBackground>
+      </ScopeContext.Provider>
+    </BridgeContext.Provider>
   );
 }

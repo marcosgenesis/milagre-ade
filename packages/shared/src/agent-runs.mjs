@@ -3,6 +3,9 @@
 // them as they stream. Types: agent-runs.d.mts.
 
 import { hasTranscriptTail } from "./subagent-transcript.mjs";
+import { qualifyKey } from "./chat-scopes.mjs";
+
+export { LOCAL_COMPUTER, computerOfKey, qualifyKey, unqualifyKey } from "./chat-scopes.mjs";
 
 export const MAX_OUTPUT = 20_000;
 
@@ -14,9 +17,10 @@ export function capOutput(text) {
 /**
  * Names a chat for the agent host. Session ids are counters per project, so every project has
  * a chat 2; the key carries the project path so chats in different projects never share a session.
+ * `computerId`: a paired computer's chat carries its id (`${computerId}|${path}#${id}`); this Mac's doesn't.
  */
-export function chatKey(projectPath, sessionId) {
-  return `${projectPath}#${sessionId}`;
+export function chatKey(projectPath, sessionId, computerId) {
+  return `${qualifyKey(computerId, projectPath)}#${sessionId}`;
 }
 
 /** The session id at the end of a chat key (after the last `#`), or NaN. */

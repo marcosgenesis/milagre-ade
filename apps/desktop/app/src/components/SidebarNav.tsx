@@ -44,7 +44,11 @@ import { shortcutModifier, useShortcutHints } from "../lib/shortcut-hints";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
 import { projectRows, stableOrder, type ProjectRow, type RecentProject } from "@/lib/project-list";
-import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
+import { ComputersButton } from "./sidebar/ComputersButton";
+import { ChatRow, type ChatRowActions, type RowComputer, type SidebarRecent } from "./sidebar/ChatRow";
+import { useComputers, isDimmed } from "../lib/computers";
+import { mergeScopes, useComputerScopes, withoutLocal } from "../lib/computer-scopes";
+import { LOCAL_COMPUTER, computerOfKey, unqualifyKey } from "@milagre/shared/chat-scopes";
 import { useDismiss } from "../lib/use-dismiss";
 import { dropIntent, pinOrderAt, type DropIntent, type DropZone } from "@/lib/chat-list";
 import type { ProjectLink } from "@/electron";
@@ -52,6 +56,7 @@ import { ipcErrorMessage } from "@milagre/shared/result";
 import { useSettings } from "../lib/settings";
 import { RECENT_PROJECTS_CHANGED } from "../lib/project-list";
 import { cachedProjectCopy, scopeChats, useScopeStates } from "../lib/sidebar-scopes";
+import { bridgeForKey, isRemoteKey } from "../lib/computer-bridge";
 
 type HugeIconProps = { size?: number; className?: string };
 type HugeIconData = Parameters<typeof HugeiconsIcon>[0]["icon"];
@@ -104,6 +109,10 @@ type SidebarNavProps = {
   selectedLink?: { id: string; projects: Array<{ path: string; name: string }> };
   onSwitchLink?: (id: string) => void;
   onLinkProject?: () => void;
+  /** Opens Add computer. */
+  onAddComputer?: () => void;
+  /** Opens a computer's settings; null for This Mac (Settings › Devices). */
+  onOpenComputerSettings?: (id: string | null) => void;
   /** Opens the dialog that renames a Link or changes its member Projects. */
   onEditLink?: (id: string) => void;
   workspaceName?: string;
@@ -637,7 +646,7 @@ function WorkspaceMenu({
   const copy = (text: string) => void navigator.clipboard.writeText(text).catch(() => {});
   const projectActions: Record<ProjectMenuKey, { run: () => void; disabled: boolean }> = {
     reveal: { run: () => void window.milagre?.revealInFolder(projectPath ?? "").catch(() => {}), disabled: !projectPath },
-    "copy-path": { run: () => copy(projectPath ?? ""), disabled: !projectPath },
+    "copy-path": { run: () => copy(unqualifyKey(projectPath ?? "")), disabled: !projectPath },
     "copy-name": { run: () => copy(workspace.name), disabled: false },
     settings: { run: () => onOpenProjectSettings?.(projectPath ?? ""), disabled: !onOpenProjectSettings || !projectPath },
   };
@@ -660,26 +669,28 @@ function WorkspaceMenu({
       <ScrollArea className="p-1.5">
         <GlideMenu className="flex flex-col gap-px" rowSelector="[data-menu-row]:not(:disabled)" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
           {!selectedLink &&
-            projectMenuActions(IS_MAC).map((item) => (
-              <button
-                key={item.key}
-                data-menu-row
-                data-project-action={item.key}
-                role="menuitem"
-                type="button"
-                disabled={projectActions[item.key].disabled}
-                onClick={() => {
-                  onClose();
-                  projectActions[item.key].run();
-                }}
-                className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40"
-              >
-                <span className="flex size-5 shrink-0 items-center justify-center text-ink-2">
-                  <HugeIcon icon={PROJECT_MENU_ICONS[item.key]} size={16} />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
-              </button>
-            ))}
+            projectMenuActions(IS_MAC)
+              .filter((item) => item.key !== "reveal" || !isRemoteKey(projectPath))
+              .map((item) => (
+                <button
+                  key={item.key}
+                  data-menu-row
+                  data-project-action={item.key}
+                  role="menuitem"
+                  type="button"
+                  disabled={projectActions[item.key].disabled}
+                  onClick={() => {
+                    onClose();
+                    projectActions[item.key].run();
+                  }}
+                  className="relative z-10 flex h-9 w-full items-center gap-1.5 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40"
+                >
+                  <span className="flex size-5 shrink-0 items-center justify-center text-ink-2">
+                    <HugeIcon icon={PROJECT_MENU_ICONS[item.key]} size={16} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{item.label}</span>
+                </button>
+              ))}
           {!selectedLink && <div className="my-1 h-px bg-line" />}
           <p className="px-2 py-1 text-[11px] font-medium text-ink-3">Projects</p>
           {projects.map((row) => {
@@ -813,6 +824,8 @@ export default memo(function SidebarNav({
   workspaceImage,
   selectedLink,
   onLinkProject,
+  onAddComputer,
+  onOpenComputerSettings,
   onEditLink,
   onOpenProject,
   onSwitchLink,
@@ -841,6 +854,24 @@ export default memo(function SidebarNav({
   onNewChatInScope,
 }: SidebarNavProps) {
   const { sidebarAllProjects, chatOrder } = useSettings();
+  // Other computers (Settings › Experimental): their Projects join the list, and every row says its computer.
+  const { thisMac, computers } = useComputers();
+  const remoteScopes = useComputerScopes(computers);
+  const multi = computers.length > 0;
+  const everyProject = sidebarAllProjects || multi;
+  // One object per computer and state, so memo'd rows keep their props.
+  const rowComputers = useRef(new Map<string, RowComputer>());
+  const rowComputer = (key: string): RowComputer | undefined => {
+    if (!multi) return undefined;
+    const id = computerOfKey(key);
+    const view = computers.find((computer) => computer.id === id);
+    const name = id === LOCAL_COMPUTER ? thisMac : (view?.name ?? "Computer");
+    const offline = id !== LOCAL_COMPUTER && isDimmed(view);
+    const cacheKey = `${id}\n${name}\n${offline}`;
+    let made = rowComputers.current.get(cacheKey);
+    if (!made) rowComputers.current.set(cacheKey, (made = { name, offline }));
+    return made;
+  };
   const [listsChanged, setListsChanged] = useState(0);
   const [collapsed, setCollapsed] = useState(() => window.matchMedia(AUTO_COLLAPSE_QUERY).matches);
   // True only while the sidebar is collapsed because the window got narrow, so widening it brings the sidebar back.
@@ -900,7 +931,7 @@ export default memo(function SidebarNav({
     return () => {
       live = false;
     };
-  }, [projectPath, workspaceOpen, selectedLink?.id, sidebarAllProjects, listsChanged]);
+  }, [projectPath, workspaceOpen, selectedLink?.id, everyProject, listsChanged]);
   useEffect(() => {
     const changed = () => setListsChanged((count) => count + 1);
     window.addEventListener(RECENT_PROJECTS_CHANGED, changed);
@@ -911,7 +942,7 @@ export default memo(function SidebarNav({
   const currentKey = selectedLink ? `milagre-link:${selectedLink.id}` : (projectPath ?? "");
   const projectScopes = projects
     .filter((row) => row.current || !recentProjects.find((project) => project.path === row.path)?.hidden)
-    .map((row) => ({ key: row.path, name: row.name, initial: row.initial, link: null as NamedProjectLink | null }));
+    .map((row) => ({ key: row.path, name: row.name, initial: row.initial, link: null as NamedProjectLink | null, computerId: computerOfKey(row.path) }));
   if (recentLoaded)
     scopeOrder.current = stableOrder(
       scopeOrder.current,
@@ -922,10 +953,23 @@ export default memo(function SidebarNav({
   useEffect(() => {
     Object.assign(lastLists, { links: namedLinks, registered: registeredProjects, recent: recentProjects, recentLoaded, order: scopeOrder.current });
   });
-  const scopes = [...orderedProjects, ...namedLinks.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link }))];
+  const localScopes = [
+    ...orderedProjects,
+    ...namedLinks.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link, computerId: LOCAL_COMPUTER })),
+  ];
+  // With other computers, one list by name (their order can't follow this Mac's open history); with this Mac alone, as before.
+  const scopes = multi
+    ? mergeScopes(
+        // The open Project of another computer is already among the local ones, under its qualified key.
+        [...localScopes, ...withoutLocal(remoteScopes, localScopes)],
+        computers.map((computer) => computer.id),
+      )
+    : localScopes;
   // Every Project, hidden ones too, since the project chooser lists them all.
-  const scopeImage = useProjectImages(sidebarAllProjects ? projects.map((row) => row.path) : NO_PATHS);
-  const showAll = sidebarAllProjects && !collapsed;
+  const scopeImage = useProjectImages(
+    everyProject ? [...projects.map((row) => row.path), ...remoteScopes.filter((scope) => !scope.link).map((scope) => scope.key)] : NO_PATHS,
+  );
+  const showAll = everyProject && !collapsed;
   const {
     states: scopeStates,
     failed: failedScopes,
@@ -949,8 +993,9 @@ export default memo(function SidebarNav({
     let actions = scopeActions.current.get(key);
     if (!actions) {
       actions = {
+        remote: isRemoteKey(key),
         onPin: (id, order) =>
-          void window.milagre
+          void bridgeForKey(key)
             .patchChat(key, Number(id), order == null ? { pinned: false, pin_order: undefined } : { pinned: true, pin_order: order })
             .catch(() => {}),
       };
@@ -983,9 +1028,26 @@ export default memo(function SidebarNav({
               showHints,
               onPick: pickChat,
               linkProjectId: !selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null,
+              computer: rowComputer(scope.key),
             }
-          : { isActive: NEVER_ACTIVE, collapsed: false, actions: actionsFor(scope.key), showHints: false, onPick: pickerFor(scope.key), linkProjectId: null };
-        return { scope, current, state, list, pinned: rows.filter((row) => row.pinned), rest: rows.filter((row) => !row.pinned) };
+          : {
+              isActive: NEVER_ACTIVE,
+              collapsed: false,
+              actions: actionsFor(scope.key),
+              showHints: false,
+              onPick: pickerFor(scope.key),
+              linkProjectId: null,
+              computer: rowComputer(scope.key),
+            };
+        return {
+          scope,
+          current,
+          state,
+          list,
+          dimmed: scope.computerId !== LOCAL_COMPUTER && isDimmed(computers.find((computer) => computer.id === scope.computerId)),
+          pinned: rows.filter((row) => row.pinned),
+          rest: rows.filter((row) => !row.pinned),
+        };
       })
     : [];
   const [closedScopes, setClosedScopes] = useState(readClosedScopes);
@@ -998,24 +1060,30 @@ export default memo(function SidebarNav({
 
   const forgetProject = (path: string) => {
     setRecentProjects((list) => list.filter((project) => project.path !== path));
-    window.milagre?.forgetProject?.(path).then(
-      (list) => {
-        if (Array.isArray(list)) setRecentProjects(list);
-      },
-      () => {},
-    );
+    bridgeForKey(path)
+      .forgetProject(path)
+      .then(
+        (list) => {
+          // A computer's answer is its own list; this Mac's list stays, and the computer's scopes read it again.
+          if (isRemoteKey(path)) window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
+          else if (Array.isArray(list)) setRecentProjects(list);
+        },
+        () => {},
+      );
   };
 
   // Checked in the project chooser; the flag lives with the Project, so the phone's list follows.
   const showProject = (path: string, show: boolean) => {
     setRecentProjects((list) => list.map((project) => (project.path === path ? { ...project, hidden: !show } : project)));
-    window.milagre?.setProjectHidden?.(path, !show).then(
-      (list) => {
-        if (Array.isArray(list)) setRecentProjects(list);
-        window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
-      },
-      () => setListsChanged((count) => count + 1),
-    );
+    bridgeForKey(path)
+      .setProjectHidden(path, !show)
+      .then(
+        (list) => {
+          if (!isRemoteKey(path) && Array.isArray(list)) setRecentProjects(list);
+          window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
+        },
+        () => setListsChanged((count) => count + 1),
+      );
   };
   // By name, like the phone's: the recent list reorders as Projects open, and a row must not move under the pointer.
   const pickerProjects = projects
@@ -1035,12 +1103,14 @@ export default memo(function SidebarNav({
       ];
     const actions: Record<ProjectMenuKey, Pick<ScopeMenuItem, "run" | "disabled">> = {
       reveal: { run: () => void window.milagre?.revealInFolder(scope.key).catch(() => {}) },
-      "copy-path": { run: () => copy(scope.key) },
+      "copy-path": { run: () => copy(unqualifyKey(scope.key)) },
       "copy-name": { run: () => copy(scope.name) },
       settings: { run: () => onOpenProjectSettings?.(scope.key), disabled: !onOpenProjectSettings },
     };
     return [
-      ...projectMenuActions(IS_MAC).map((item) => ({ key: item.key, label: item.label, icon: PROJECT_MENU_ICONS[item.key], ...actions[item.key] })),
+      ...projectMenuActions(IS_MAC)
+        .filter((item) => item.key !== "reveal" || !isRemoteKey(scope.key))
+        .map((item) => ({ key: item.key, label: item.label, icon: PROJECT_MENU_ICONS[item.key], ...actions[item.key] })),
       ...(current
         ? []
         : [{ key: "remove", label: "Remove from list", icon: Cancel01Icon, destructive: true, separatorBefore: true, run: () => forgetProject(scope.key) }]),
@@ -1184,7 +1254,7 @@ export default memo(function SidebarNav({
         }
       >
         <div className="flex min-h-0 w-full shrink-0 flex-col">
-          {!sidebarAllProjects && (
+          {!everyProject && (
             <div className="relative h-10 shrink-0">
               <button
                 ref={workspaceButtonRef}
@@ -1239,7 +1309,7 @@ export default memo(function SidebarNav({
               )}
             </div>
           )}
-          <ScrollArea className={`sidebar-scroll flex-1 overflow-x-hidden ${sidebarAllProjects ? "pt-2" : ""}`}>
+          <ScrollArea className={`sidebar-scroll flex-1 overflow-x-hidden ${everyProject ? "pt-2" : ""}`}>
             {onOpenCanvas && (
               <div className="mb-2">
                 <GlideGroup>
@@ -1271,15 +1341,22 @@ export default memo(function SidebarNav({
                       .filter((group) => group.pinned.length > 0)
                       .map((group) => (
                         <div key={group.scope.key} data-pinned-scope={group.scope.key}>
-                          <ChatList recents={group.pinned} {...group.list} pinnedHeader={false} header={null} />
+                          <ChatList recents={group.pinned} {...group.list} dimOffline pinnedHeader={false} header={null} />
                         </div>
                       ))}
                   </div>
                 )}
-                {groups.map(({ scope, current, state, rest, pinned, list }, index) => {
+                {groups.map(({ scope, current, state, rest, pinned, list, dimmed }, index) => {
                   const open = !closedScopes.includes(scope.key);
                   return (
-                    <section key={scope.key} data-sidebar-scope={scope.key} data-current={current || undefined} aria-label={scope.name} className="mb-2">
+                    <section
+                      key={scope.key}
+                      data-sidebar-scope={scope.key}
+                      data-current={current || undefined}
+                      aria-label={scope.name}
+                      data-offline={dimmed || undefined}
+                      className={`mb-2 ${dimmed ? "opacity-50" : ""}`}
+                    >
                       {scope.link && !scopes[index - 1]?.link && (
                         <p className="mx-2 mt-1 mb-1 h-6 pl-2 text-[12.5px] font-medium leading-6 text-ink-3">Links</p>
                       )}
@@ -1389,7 +1466,7 @@ export default memo(function SidebarNav({
                   <IconFolderAdd size={17} />
                 </button>
               </Tooltip>
-              {sidebarAllProjects && (
+              {everyProject && (
                 <ProjectPickerButton
                   projects={pickerProjects}
                   imageOf={scopeImage}
@@ -1398,7 +1475,7 @@ export default memo(function SidebarNav({
                   onShow={showProject}
                 />
               )}
-              {sidebarAllProjects && onLinkProject && (
+              {everyProject && onLinkProject && (
                 <Tooltip label="Link projects">
                   <button
                     type="button"
@@ -1410,6 +1487,14 @@ export default memo(function SidebarNav({
                     <HugeIcon icon={Link04Icon} size={17} />
                   </button>
                 </Tooltip>
+              )}
+              {onAddComputer && onOpenComputerSettings && (
+                <ComputersButton
+                  collapsed={collapsed}
+                  buttonClassName={BOTTOM_BAR_BUTTON}
+                  onAddComputer={onAddComputer}
+                  onOpenSettings={onOpenComputerSettings}
+                />
               )}
             </div>
             <Tooltip label="Settings" shortcut="⌘," align={collapsed ? "start" : "end"}>
@@ -1474,6 +1559,8 @@ function ChatList({
   showHints,
   onPick,
   linkProjectId,
+  computer,
+  dimOffline,
   header,
   pinnedHeader = true,
   hintOffset = 0,
@@ -1486,6 +1573,9 @@ function ChatList({
   onPick: (item: SidebarRecent) => void;
   /** The open Project's id on the canvas; null when its chats can't be linked from here. */
   linkProjectId: string | null;
+  computer?: RowComputer;
+  /** The rows dim themselves for an offline computer (the Pinned list; a dimmed section does it for the rest). */
+  dimOffline?: boolean;
   /** The "Chats" header, between the pinned chats and the rest. */
   header: ReactNode;
   /** False when the caller shows one Pinned heading over several lists (the all-Projects sidebar). */
@@ -1829,6 +1919,8 @@ function ChatList({
       actions={rowActions}
       shortcutHint={showHints && hintOffset + index < 9 ? `${shortcutModifier}${hintOffset + index + 1}` : undefined}
       onPick={onPick}
+      computer={computer}
+      dimOffline={dimOffline}
       dragging={drag?.id === item.id}
     />
   );

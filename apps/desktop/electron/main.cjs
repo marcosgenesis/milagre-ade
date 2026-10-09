@@ -14,6 +14,7 @@ const {
   Notification,
   shell,
   protocol,
+  safeStorage,
   powerMonitor,
   net,
 } = require("electron");
@@ -28,7 +29,7 @@ const { revealFolder } = require("./reveal.cjs");
 const { applyTranslucency, OPAQUE_BACKGROUND } = require("./window-translucency.cjs");
 const { guardNavigation } = require("./links.cjs");
 const { forwardAppShortcuts } = require("./app-shortcuts.cjs");
-const { AttentionNotifier } = require("./notifications.cjs");
+const { AttentionNotifier, labelFor } = require("./notifications.cjs");
 const { createMediaHandler } = require("./media.cjs");
 protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 async function startDesktop() {
@@ -217,6 +218,45 @@ async function startDesktop() {
   }
   registerHostMethods();
   ipcMain.handle("app:version", () => app.getVersion());
+
+  // Other Macs this window drives (Settings › Experimental › Other computers): nothing connects until the window turns
+  // the switch on (computers:set-enabled), which it does at launch when it is on.
+  const { createComputers } = require("./computers.cjs");
+  const { registerComputers } = require("./computers-ipc.cjs");
+  const { readOwnHostId } = require("./own-host.cjs");
+  const { computerName } = require("@milagre/daemon/mobile-pairing");
+  /** @type {string | null} */
+  let thisMacName = null;
+  /** @type {ReturnType<typeof registerComputers> | null} */
+  let computersIpc = null;
+  const computers = createComputers({
+    dataDir: app.getPath("userData"),
+    safeStorage,
+    ownHostId: () => readOwnHostId(app.getPath("userData")),
+    onChange: () => computersIpc?.changed(),
+    emit: (id, channel, payload) => computersIpc?.event(id, channel, payload),
+  });
+  const { createComputerCaches } = require("./computer-cache.cjs");
+  const computerCaches = createComputerCaches({ dir: path.join(app.getPath("userData"), "computers") });
+  computersIpc = registerComputers({
+    ipcMain,
+    computers,
+    cache: computerCaches,
+    // A computer's chats notify like this Mac's, named with the computer; its turns tell the notifier what completed.
+    onRemoteEvent: (id, channel, payload) => {
+      if (channel === "agent:event") notifier.observe(payload.chatId, payload.event);
+      if (channel === "notification:waiting" && notifyWhenWaiting && Notification.isSupported()) {
+        const name = computers.list().find((computer) => computer.id === id)?.name ?? null;
+        notifier.notify({ ...payload, subtitle: labelFor(payload.subtitle, name) });
+      }
+    },
+    onForget: (id) => notifier.forgetComputer(id),
+    thisMac: () => (thisMacName ??= computerName()),
+    send: (channel, payload) => {
+      for (const window of BrowserWindow.getAllWindows())
+        if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, payload);
+    },
+  });
   // An older host can't load very large Projects; the window offers to replace it with this desktop's own.
   ipcMain.handle("runtime:restart-host", async () => {
     await runtime.restartHost();
@@ -226,6 +266,8 @@ async function startDesktop() {
     const result = await dialog.showOpenDialog({ title: "Open project", properties: ["openDirectory", "createDirectory"] });
     return result.canceled || !result.filePaths[0] ? null : runtime.openProject(result.filePaths[0]);
   });
+  // This Mac's side of openProjectAt; a paired computer's goes through computers:invoke as project:open.
+  ipcMain.handle("project:open-at", (_event, folder) => runtime.openProject(String(folder)));
   const { getWindowState, manageWindowState } = require("./window-state.cjs");
   function createWindow() {
     const { state, statePath } = getWindowState();
@@ -289,9 +331,11 @@ async function startDesktop() {
     void runtime.resumeRecentProjects().catch((error) => console.warn(error.message));
     app.on("browser-window-focus", () => {
       void runtime.setFocused(true).catch(() => {});
+      computers.setFocused(true);
     });
     app.on("browser-window-blur", () => {
       void runtime.setFocused(false).catch(() => {});
+      computers.setFocused(false);
     });
     if (app.isPackaged) watchAppUpdates(updates, { app, powerMonitor });
     else void updates.check();
@@ -316,7 +360,12 @@ async function startDesktop() {
     quitting = true;
     quitPrepared ??= (async () => {
       notifier.closeAll();
-      await runtime.close();
+      // Each computer's channels close too; nothing on the other Macs stops.
+      try {
+        await Promise.all([runtime.close(), computers.close()]);
+      } finally {
+        computerCaches.close();
+      }
     })().catch((error) => {
       quitPrepared = null;
       quitting = false;

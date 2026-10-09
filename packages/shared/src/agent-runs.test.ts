@@ -7,6 +7,8 @@ import {
   capOutput,
   chatInProject,
   chatKey,
+  computerOfKey,
+  projectOfKey,
   recordAnswers,
   sessionIdFromKey,
   splitRunForSteer,
@@ -628,4 +630,16 @@ test("answers keep each question with what was picked or typed, in the request's
   assert.deepEqual(answeredQuestions(request, { b: ["Skip"] }), [{ header: "Token", question: "Your token?", answers: ["Skip"] }]);
   assert.equal(answeredQuestions(request, null), null);
   assert.equal(answeredQuestions(undefined, { a: ["Red"] }), null);
+});
+
+test("a chat key names its computer when it is another Mac's", () => {
+  const id = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+  assert.equal(chatKey("/p", 3), "/p#3");
+  assert.equal(chatKey("/p", 3, "local"), "/p#3");
+  const remote = chatKey("/p", 3, id);
+  assert.equal(remote, `${id}|/p#3`);
+  assert.equal(projectOfKey(remote), `${id}|/p`);
+  assert.equal(computerOfKey(remote), id);
+  assert.equal(chatInProject(`${id}|/p`, remote), true);
+  assert.equal(chatInProject("/p", remote), false, "this Mac's /p is another Project");
 });

@@ -4,6 +4,7 @@ const { sessionWithTranscriptTails, withTranscriptTail } = require("@milagre/sha
 const { preparePrivateDirectory } = require("@milagre/core/private-files");
 const { prepareToken, validToken, authenticationProof, authenticationNonce, validNonce } = require("./local-auth.cjs");
 const net = require("node:net");
+const os = require("node:os");
 const { randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
 const { once } = require("node:events");
@@ -14,6 +15,8 @@ const { createPhone } = require("./phone.cjs");
 const { createMobilePush } = require("./mobile-push.cjs");
 const { createExpoPush } = require("./expo-push.cjs");
 const { peerPolicy } = require("./peer-policy.cjs");
+const { listDirs } = require("./remote-files.cjs");
+const { readMedia, scopeRootsVia } = require("./media-access.cjs");
 const { attentionContext } = require("@milagre/shared/attention");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 
@@ -27,6 +30,9 @@ const DEVICE_METHODS = Object.freeze(["devices:list", "devices:remove", "devices
 const DESKTOP_PEER = "desktop-peer-v1";
 // Asked by a paired desktop, which has no phone:* methods: where it can reach this Mac (relay identity, LAN routes).
 const PEER_METHODS = Object.freeze(["peer:routes"]);
+// The remote folder picker and a remote chat's images (spec "Remote-only helpers"); paired desktops may call both.
+const REMOTE_FILES = "remote-files-v1";
+const FILE_METHODS = Object.freeze(["fs:list-dirs", "media:read"]);
 // A client that asks for them (daemon:state-patches) gets what changed in a state event, not the whole state; see
 // state-patch.mjs. state:read gives it a whole state and its version when it has none or missed one.
 const STATE_PATCHES = "state-patches-v1";
@@ -243,6 +249,7 @@ async function startDaemon({
   runtimeOptions = {},
   phoneOptions = {},
   pushOptions = {},
+  homeDir = os.homedir(),
   maxFrameBytes = MAX_FRAME_BYTES,
   pagesTtlMs,
   pagesBudgetChars,
@@ -526,8 +533,9 @@ async function startDaemon({
               CHAT_PAGES,
               SUBAGENT_TAILS,
               DESKTOP_PEER,
+              REMOTE_FILES,
             ],
-            methods: [...runtime.methods, ...PHONE_METHODS, ...DEVICE_METHODS, ...PUSH_METHODS, ...STATE_METHODS, ...PEER_METHODS].filter(
+            methods: [...runtime.methods, ...PHONE_METHODS, ...DEVICE_METHODS, ...PUSH_METHODS, ...STATE_METHODS, ...PEER_METHODS, ...FILE_METHODS].filter(
               (method) => !policy?.denies(method),
             ),
           };
@@ -557,6 +565,22 @@ async function startDaemon({
         else if (request.method === "push:register") result = await push.register(request.args[0]);
         else if (request.method === "push:unregister") result = await push.unregister(request.args[0]);
         else if (request.method === "push:focus") result = push.focus(request.args[0]);
+        else if (request.method === "fs:list-dirs")
+          result = await listDirs(request.args[0], {
+            home: homeDir,
+            // The Projects this Mac knows, by real path, so the picker can say "Added".
+            projectPaths: async () => {
+              const [registry, recent] = await Promise.all([runtime.invoke("project:registry", []), runtime.invoke("project:recent", [])]);
+              const paths = [...(Array.isArray(registry) ? registry : []), ...(Array.isArray(recent) ? recent : [])].map((project) => project.path);
+              return Promise.all(paths.map((folder) => fs.realpath(folder).catch(() => folder)));
+            },
+          });
+        else if (request.method === "media:read")
+          result = await readMedia(request.args[0], {
+            dataDir,
+            scopeRoots: scopeRootsVia({ dataDir, call: (method, args) => runtime.invoke(method, args) }),
+            chatImage: (scope, file) => runtime.invoke("project:chat-image", [scope, file]),
+          });
         else if (request.method === "daemon:snapshot") {
           const whole = runtime.snapshot();
           const snapshot = { ...leanResult(whole, patchClients.get(key)), eventSeq };

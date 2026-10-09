@@ -46,7 +46,8 @@ export type AppliedEvent<T = CoordinatorState> = { state: T; runs: AgentRuns; ch
 export const MAX_OUTPUT: number;
 export function capOutput(text: string): string;
 export function lastUserModel(state: TranscriptState, sessionId: number): string;
-export function chatKey(projectPath: string, sessionId: number): string;
+export function chatKey(projectPath: string, sessionId: number, computerId?: string): string;
+export { LOCAL_COMPUTER, computerOfKey, qualifyKey, unqualifyKey } from "./chat-scopes.mjs";
 export function sessionIdFromKey(key: string): number;
 export function projectOfKey(key: string): string;
 export function chatInProject(projectPath: string, key: string): boolean;

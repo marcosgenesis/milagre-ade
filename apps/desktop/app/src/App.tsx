@@ -1,10 +1,14 @@
 import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { ComputerAllowPrompt } from "./components/ComputerAllowPrompt";
 import { LinkWorkspace } from "./components/LinkWorkspace";
+import { AddComputerDialog } from "./components/AddComputerDialog";
+import { AddProjectDialog } from "./components/AddProjectDialog";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
 import type { LinkState, NamedProjectLink, OpenLink } from "@milagre/shared/model";
-import { scopeKey, isLinkScopeKey, scopeFromKey } from "@milagre/shared/chat-scopes";
+import { scopeKey, isLinkScopeKey, scopeFromKey, LOCAL_COMPUTER, computerOfKey } from "@milagre/shared/chat-scopes";
+import { BridgeContext, ScopeContext, bridgeFor, bridgeForKey, forgetBridge, isRemoteKey, onAnyAgentEvent } from "./lib/computer-bridge";
+import type { WorktreeRename } from "@milagre/shared/project-edits";
 import { reconcileState } from "@milagre/shared/reconcile";
 import { applyAgentEvent } from "@milagre/shared/agent-runs";
 import { attentionLabel, chatsNeedingAttention, waitingFor } from "@milagre/shared/attention";
@@ -77,7 +81,7 @@ import { useLinear } from "./components/useLinear";
 import { useWorktreeLinearIssues } from "./components/useWorktreeLinearIssues";
 import { issueFirstMessage, LINK_PR_HINT, restoredDraft, type LinearIssue } from "@milagre/shared/linear";
 import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
-import { usePastedImages } from "./components/usePastedImages";
+import { REMOTE_FILES_NOTICE, usePastedImages } from "./components/usePastedImages";
 import { DotBackground } from "./components/DotBackground";
 import { StartupSplash } from "./components/StartupSplash";
 import SidebarNav from "./components/SidebarNav";
@@ -96,6 +100,9 @@ import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
+import { startOfflineCache } from "./lib/offline-cache";
+import { isDimmed, isReadOnly, offlineBanner, useApplyOtherComputers, useComputers, withComputer } from "./lib/computers";
+import { OfflineBanner } from "./components/OfflineBanner";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import { messageCommands, messageCommandsFrom } from "./lib/message-commands";
@@ -240,7 +247,7 @@ function App() {
     const live = () => generation === accountGeneration.current && accountScopeRef.current === accountScope;
     // A refetch that changed nothing keeps the old objects, so opening the picker doesn't re-render the app or
     // re-apply anything that depends on the lists.
-    void window.milagre
+    void bridgeForKey(accountScope)
       .getCliStatus(accountScope)
       .then((next) => {
         if (live()) {
@@ -250,7 +257,7 @@ function App() {
         }
       })
       .catch(() => undefined);
-    void window.milagre
+    void bridgeForKey(accountScope)
       .getModels(accountScope)
       .then((next) => {
         if (live()) {
@@ -369,6 +376,9 @@ function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   // Which Project the Settings page shows; any recent Project can be picked there, the open one by default.
   const [settingsProject, setSettingsProject] = useState<{ path: string; name: string } | null>(null);
+  const [settingsComputer, setSettingsComputer] = useState<string | null>(null);
+  const [addComputerOpen, setAddComputerOpen] = useState(false);
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
   // A send may finish after the user opens another Chat. Its feedback and completion belong to the view that sent it.
   const chatView = useRef(0);
   const nextChatView = useRef(0);
@@ -400,6 +410,8 @@ function App() {
     chat: GitChatContext;
   } | null>(null);
   useApplyTheme();
+  useApplyOtherComputers();
+  useEffect(() => startOfflineCache(), []);
   useEffect(() => {
     const idle = window.requestIdleCallback ?? ((run: () => void) => window.setTimeout(run, 1000));
     idle(() => {
@@ -425,6 +437,33 @@ function App() {
   useEffect(() => {
     void loadInitialProject();
   }, []);
+  // The computer whose Project or Link is open was removed, or Other computers turned off: this Mac's Project comes back.
+  const { computers: pairedComputers } = useComputers();
+  // The Mac that was last told which chat is on screen (see the effect that sends it).
+  const openChatComputer = useRef<string>(LOCAL_COMPUTER);
+  const knownComputers = pairedComputers.map((computer) => computer.id).join("\n");
+  useEffect(() => {
+    const open = selectedLinkRef.current ? `milagre-link:${selectedLinkRef.current.link.id}` : projectRef.current?.path;
+    if (!open || !isRemoteKey(open)) return;
+    const computerId = computerOfKey(open);
+    if (knownComputers.split("\n").includes(computerId)) return;
+    forgetBridge(computerId);
+    // Its bridge must not be recreated to tell it nothing is open: this Mac's Project is about to open.
+    if (openChatComputer.current === computerId) openChatComputer.current = LOCAL_COMPUTER;
+    void loadInitialProject();
+  }, [knownComputers]);
+  // The open Project's computer, when it is another Mac: read-only while it isn't online, with the banner while it is away.
+  const openComputer = project && isRemoteKey(project.path) ? pairedComputers.find((computer) => computer.id === computerOfKey(project.path)) : undefined;
+  const readOnly = Boolean(project && isRemoteKey(project.path) && isReadOnly(openComputer));
+  const [bannerNow, setBannerNow] = useState(() => Date.now());
+  const away = Boolean(openComputer && isDimmed(openComputer));
+  useEffect(() => {
+    if (!away) return;
+    setBannerNow(Date.now());
+    const timer = setInterval(() => setBannerNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, [away, openComputer?.lastSeen]);
+  const awayBanner = openComputer && away ? offlineBanner(openComputer, bannerNow) : null;
   useEffect(() => stateEvents.onLinkState((update) => setLinkStates((previous) => ({ ...previous, [update.linkId]: update.state }))), []);
 
   useEffect(() => {
@@ -445,15 +484,25 @@ function App() {
       for (const next of snapshot.projects) receiveState(next.path, next.state);
       for (const next of snapshot.links ?? []) setLinkStates((previous) => ({ ...previous, [next.linkId]: next.state }));
     });
+    // A computer's runtime sends a snapshot after each reconnect, with its open Projects' and Links' states (keys name it).
+    const remoteSnapshotOff = window.milagre.onComputerEvent?.((event) => {
+      if (event.channel !== "runtime:snapshot" || !event.payload) return;
+      for (const next of event.payload.projects ?? []) receiveState(next.path, next.state);
+      for (const next of event.payload.links ?? []) setLinkStates((previous) => ({ ...previous, [next.linkId]: next.state }));
+    });
     return () => {
       updated = true;
       off?.();
       snapshotOff?.();
+      remoteSnapshotOff?.();
     };
   }, []);
 
   useEffect(() => {
-    if (project) void window.milagre.listBranches(project.path).then(setBranches);
+    if (project)
+      void bridgeForKey(project.path)
+        .listBranches(project.path)
+        .then(setBranches, () => {});
   }, [project?.path]);
 
   const worktrees = useMemo(() => (state ? sortedWorktrees(state) : []), [state]);
@@ -466,7 +515,7 @@ function App() {
   );
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   // Assigning a new Chat its persisted id keeps attachments for the next message; navigating away clears them.
-  const imageDraft = usePastedImages(`${project?.path ?? ""}:${chatView.current}`);
+  const imageDraft = usePastedImages(`${project?.path ?? ""}:${chatView.current}`, isRemoteKey(project?.path));
   useEffect(() => {
     if (!restoringSend) return;
     imageDraft.restore(restoringSend.message.images ?? [], restoringSend.message.files ?? []);
@@ -599,11 +648,18 @@ function App() {
   function changePermissionMode(mode: PermissionMode) {
     setPermissionMode(mode);
     updateSettings({ defaultPermissionMode: mode });
-    if (project && selectedSession) void window.milagre.setAgentPermissionMode(chatKey(project.path, selectedSession.id), mode).catch(() => {});
+    if (project && selectedSession)
+      void bridgeForKey(project.path)
+        .setAgentPermissionMode(chatKey(project.path, selectedSession.id), mode)
+        .catch(() => {});
   }
 
   function answerApproval(decision: PermissionDecision) {
     if (!project || !selectedSession || !pendingApproval) return;
+    if (readOnly) {
+      setNotice(`${openComputer?.name ?? "That computer"} is offline.`);
+      return;
+    }
     // The run keeps the answer; if it doesn't reach the agent, the card goes back to pending.
     void agentRuns.respond(chatKey(project.path, selectedSession.id), pendingApproval.requestId, decision).catch(() => {});
   }
@@ -611,6 +667,10 @@ function App() {
   /** Sends the answers to the open question, or dismisses it (null). */
   function answerQuestion(answers: QuestionAnswers | null) {
     if (!project || !selectedSession || !pendingQuestion) return;
+    if (readOnly) {
+      setNotice(`${openComputer?.name ?? "That computer"} is offline.`);
+      return;
+    }
     void agentRuns.answerQuestion(chatKey(project.path, selectedSession.id), pendingQuestion.requestId, answers).catch(() => {});
   }
 
@@ -768,15 +828,19 @@ function App() {
   // The main process applies chat row actions to the latest state, so a turn that finished since the last render isn't lost.
   function patchChat(sessionId: number, patch: SessionPatch) {
     const current = projectRef.current;
-    if (current) void reportChatAction(window.milagre.patchChat(current.path, sessionId, patch), "Could not update Chat", setNotice);
+    if (current) void reportChatAction(bridgeForKey(current.path).patchChat(current.path, sessionId, patch), "Could not update Chat", setNotice);
   }
 
   function controlAdvisor(action: "stop" | "retry", id: string) {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
+    if (readOnly) {
+      setNotice(`${openComputer?.name ?? "That computer"} is offline.`);
+      return;
+    }
     if (current && parentId !== null)
       void reportChatAction(
-        (action === "stop" ? window.milagre.stopAdvisor : window.milagre.retryAdvisor)(`${current.path}#${parentId}`, id),
+        (action === "stop" ? bridgeForKey(current.path).stopAdvisor : bridgeForKey(current.path).retryAdvisor)(`${current.path}#${parentId}`, id),
         `Could not ${action} advisor`,
         setNotice,
       );
@@ -785,14 +849,14 @@ function App() {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
     if (current && parentId !== null)
-      void reportChatAction(window.milagre.archiveSubagent(current.path, parentId, id, archived), "Could not update subagent", setNotice);
+      void reportChatAction(bridgeForKey(current.path).archiveSubagent(current.path, parentId, id, archived), "Could not update subagent", setNotice);
   }
 
   function archiveFinishedChildren() {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
     if (current && parentId !== null)
-      void reportChatAction(window.milagre.archiveFinishedSubagents(current.path, parentId), "Could not archive finished subagents", setNotice);
+      void reportChatAction(bridgeForKey(current.path).archiveFinishedSubagents(current.path, parentId), "Could not archive finished subagents", setNotice);
   }
 
   function openChat(sessionId: number) {
@@ -825,10 +889,27 @@ function App() {
   }
 
   // The main process reads the chat on screen (on opening it, and when the window regains focus over it),
-  // and leaves a chat unread when its turn ends anywhere else, or while no window has focus.
+  // and leaves a chat unread when its turn ends anywhere else, or while no window has focus. The Mac that had the
+  // chat on screen before hears there is none when the next one is on another Mac.
   useEffect(() => {
-    if (selectedLink) return;
-    void window.milagre.setOpenChat(view === "chat" && project && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null).catch(() => {});
+    // A Link on screen is no Project's chat: whichever Mac had one open hears there is none now.
+    if (selectedLink) {
+      void bridgeFor(openChatComputer.current)
+        .setOpenChat(null)
+        .catch(() => {});
+      openChatComputer.current = LOCAL_COMPUTER;
+      return;
+    }
+    const key = view === "chat" && project && selectedSessionId !== null ? chatKey(project.path, selectedSessionId) : null;
+    const computerId = project ? computerOfKey(project.path) : LOCAL_COMPUTER;
+    if (openChatComputer.current !== computerId)
+      void bridgeFor(openChatComputer.current)
+        .setOpenChat(null)
+        .catch(() => {});
+    openChatComputer.current = computerId;
+    void bridgeFor(computerId)
+      .setOpenChat(key)
+      .catch(() => {});
   }, [selectedSessionId, view, project?.path, selectedLink?.link.id]);
 
   // Archiving hides the chat for good; a turn still running in it is stopped first. The steps and their order
@@ -847,7 +928,7 @@ function App() {
         currentProjectPath: () => projectRef.current?.path,
         stop: () => (agentRuns.runs[key] ? agentRuns.interrupt(key).catch(() => {}) : undefined),
         hide: async () => {
-          await window.milagre.patchChat(projectPath, sessionId, { archived: true, unread: false });
+          await bridgeForKey(projectPath).patchChat(projectPath, sessionId, { archived: true, unread: false });
           if (projectRef.current?.path === projectPath && selectedSessionRef.current === sessionId) startNewChat();
         },
         // The worktree stays, so the chat comes back with it; it is reopened only if it was open and nothing else has been since.
@@ -855,7 +936,7 @@ function App() {
           patchChat(sessionId, { archived: false });
           if (wasOpen && selectedSessionRef.current === null) openChat(sessionId);
         },
-        remove: (worktree, options) => window.milagre.removeWorktree(worktree.path, options),
+        remove: (worktree, options) => bridgeForKey(options.projectPath).removeWorktree(worktree.path, options),
         // The main process has dropped the worktree and its chats; a removal that drops the open chat or the picked
         // worktree moves the selection on.
         applyRemoval: (removed) => {
@@ -864,7 +945,7 @@ function App() {
           setSelectedWorktreeId((current) => (current === removed.worktreeId ? null : current));
         },
         refreshBranches: () =>
-          void window.milagre
+          void bridgeForKey(projectPath)
             .listBranches(projectPath)
             .then(setBranches)
             .catch(() => {}),
@@ -890,10 +971,10 @@ function App() {
     const latest = openState();
     const worktree = latest ? latest.worktrees[latest.sessions[sessionId]?.worktree_id ?? -1] : undefined;
     const terminals = project ? await busyTerminals(chatKey(project.path, sessionId)) : [];
-    if (!latest || !isMilagreWorktree(worktree, await window.milagre.getWorktreeRoots()))
+    if (!latest || !isMilagreWorktree(worktree, await bridgeForKey(project?.path).getWorktreeRoots()))
       return { milagreOwned: false, shared: false, status: null, terminals };
     if (worktreeShared(latest, sessionId)) return { milagreOwned: true, shared: true, status: null, terminals };
-    return { milagreOwned: true, shared: false, status: await window.milagre.getWorktreeStatus(worktree.path, worktree.base!), terminals };
+    return { milagreOwned: true, shared: false, status: await bridgeForKey(project?.path).getWorktreeStatus(worktree.path, worktree.base!), terminals };
   }
 
   // "Commit and open PR…" opens the chat, with the dialog over it.
@@ -905,7 +986,11 @@ function App() {
     // The dialog reads the Chat's recent turns (its test commands, what was asked); a lean state has them on the host.
     const sessionMessages =
       isLean(latest) && project
-        ? (await window.milagre.readChatMessages(project.path, sessionId, { turns: 30 }).catch(() => ({ messages: [] as ChatMessage[] }))).messages
+        ? (
+            await bridgeForKey(project.path)
+              .readChatMessages(project.path, sessionId, { turns: 30 })
+              .catch(() => ({ messages: [] as ChatMessage[] }))
+          ).messages
         : latest.messages.filter((message) => message.session_id === sessionId);
     openChat(sessionId);
     setGitDialog({
@@ -922,11 +1007,14 @@ function App() {
   // chat's turn runs, so it lands after the reply instead of inside it.
   function recordGitNote(sessionId: number, body: string) {
     const current = projectRef.current;
-    if (current) void window.milagre.addGitNote(chatKey(current.path, sessionId), body).catch(() => {});
+    if (current)
+      void bridgeForKey(current.path)
+        .addGitNote(chatKey(current.path, sessionId), body)
+        .catch(() => {});
   }
 
   function revealChat(sessionId: number) {
-    if (!project) return;
+    if (!project || isRemoteKey(project.path)) return;
     void window.milagre.revealInFolder(chatRevealPath(openState() ?? null, sessionId, project.path)).catch(() => {});
   }
 
@@ -971,7 +1059,7 @@ function App() {
   // A turn that ends in the open project while Milagre is in the background gets a completion alert.
   useEffect(
     () =>
-      window.milagre.onAgentEvent(({ chatId, event }) => {
+      onAnyAgentEvent(({ chatId, event }) => {
         if (event.type === "subagent-update") {
           const path = projectOfKey(chatId);
           const linkId = isLinkScopeKey(path) ? path.slice("milagre-link:".length) : null;
@@ -992,9 +1080,12 @@ function App() {
               .notifyCompletion({
                 chatId,
                 title: link.link.name,
-                subtitle: chatTitle(
-                  session,
-                  latest.messages.filter((message) => message.session_id === session.id),
+                subtitle: withComputer(
+                  chatId,
+                  chatTitle(
+                    session,
+                    latest.messages.filter((message) => message.session_id === session.id),
+                  ),
                 ),
               })
               .catch(() => {});
@@ -1010,9 +1101,12 @@ function App() {
             .notifyCompletion({
               chatId,
               title: current.name,
-              subtitle: chatTitle(
-                session,
-                latest.messages.filter((message) => message.session_id === session.id),
+              subtitle: withComputer(
+                chatId,
+                chatTitle(
+                  session,
+                  latest.messages.filter((message) => message.session_id === session.id),
+                ),
               ),
             })
             .catch(() => {});
@@ -1021,14 +1115,23 @@ function App() {
     [],
   );
 
-  // A new worktree's branch is renamed a few seconds in, once its chat's name is picked; the main process saves the new name.
-  useEffect(
-    () =>
-      window.milagre.onWorktreeRenamed((rename) => {
-        if (projectRef.current?.path === rename.projectPath) void window.milagre.listBranches(rename.projectPath).then(setBranches);
-      }),
-    [],
-  );
+  // A new worktree's branch is renamed a few seconds in, once its chat's name is picked; its Mac saves the new name.
+  useEffect(() => {
+    const renamed = (rename: WorktreeRename) => {
+      if (projectRef.current?.path === rename.projectPath)
+        void bridgeForKey(rename.projectPath)
+          .listBranches(rename.projectPath)
+          .then(setBranches, () => {});
+    };
+    const offLocal = window.milagre.onWorktreeRenamed(renamed);
+    const offRemote = window.milagre.onComputerEvent?.((event) => {
+      if (event.channel === "worktree:renamed") renamed(event.payload);
+    });
+    return () => {
+      offLocal();
+      offRemote?.();
+    };
+  }, []);
 
   const pendingNotificationChat = useRef<string | null>(null);
   // Opens a chat by its key, in another project too: a notification's, or the one the attention button points at.
@@ -1139,12 +1242,13 @@ function App() {
     }
   }
 
-  const openProject = () => replaceProject(() => window.milagre.openProject());
-  const switchProject = (projectPath: string) => replaceProject(() => window.milagre.switchProject(projectPath), projectPath);
+  // With other computers, Add project asks which computer first; with this Mac alone, the folder dialog.
+  const openProject = () => (pairedComputers.length > 0 ? Promise.resolve(setAddProjectOpen(true)) : replaceProject(() => window.milagre.openProject()));
+  const switchProject = (projectPath: string) => replaceProject(() => bridgeForKey(projectPath).switchProject(projectPath), projectPath);
   async function selectLink(id: string, sessionId?: number) {
     const navigation = ++projectNavigation.current;
     try {
-      const next = await window.milagre.openNamedLink(id);
+      const next = await bridgeForKey(`milagre-link:${id}`).openNamedLink(id);
       if (navigation !== projectNavigation.current) return;
       if (!selectedLinkRef.current && projectRef.current)
         scopeDrafts.save({ kind: "project", projectPath: projectRef.current.path }, { text: draftStore.get(), sessionId: selectedSessionRef.current });
@@ -1178,7 +1282,7 @@ function App() {
     }
     const adopted = statesRef.current[projectPath];
     try {
-      const next = await window.milagre.openCanvasProject(projectPath);
+      const next = await (isRemoteKey(projectPath) ? bridgeForKey(projectPath).switchProject(projectPath) : window.milagre.openCanvasProject(projectPath));
       if (navigation !== projectNavigation.current) return;
       if (!instant || next.path !== projectRef.current?.path || selectedLinkRef.current) {
         adoptProject(next);
@@ -1205,7 +1309,7 @@ function App() {
     if (isolation === "local" && !issueKey) return { sessionId: null, worktreeId: selectedWorktree.id };
     setBaseBranch(effectiveBaseBranch);
     saveChatPreferences(localStorage, project.path, { baseBranch: effectiveBaseBranch });
-    const created = await window.milagre.createWorktree({
+    const created = await bridgeForKey(project.path).createWorktree({
       projectPath: project.path,
       baseBranch: effectiveBaseBranch,
       prompt: body,
@@ -1215,7 +1319,7 @@ function App() {
     const session = sessionForWorktree(created.project.state, created.worktreeId);
     if (!session) throw new Error(`No chat session was created for ${created.project.state.worktrees[created.worktreeId]?.name}.`);
     if (created.setupNote) setNotice(created.setupNote);
-    void window.milagre
+    void bridgeForKey(project.path)
       .listBranches(project.path)
       .then((next) => {
         // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
@@ -1235,6 +1339,15 @@ function App() {
     issueKey?: string,
   ): Promise<boolean> {
     if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
+    // A file attached from this Mac is a path the other Mac can't read; pasted images travel as data and still go.
+    if (isRemoteKey(project.path) && files.length) {
+      setNotice(REMOTE_FILES_NOTICE);
+      return false;
+    }
+    if (readOnly) {
+      setNotice(`${openComputer?.name ?? "That computer"} is offline.`);
+      return false;
+    }
     sendInFlight.current = true;
     const view = chatView.current;
     const stillHere = () => projectRef.current?.path === project.path && chatView.current === view;
@@ -1375,7 +1488,7 @@ function App() {
     const worktreeId = openState()?.sessions[sessionId]?.worktree_id;
     if (!path || worktreeId === undefined) return;
     const linked = async () => {
-      const result = await window.milagre.linkWorktreeIssue({ projectPath: path, worktreeId, key });
+      const result = await bridgeForKey(path).linkWorktreeIssue({ projectPath: path, worktreeId, key });
       receiveState(path, result.project.state);
       refreshLinearIssues();
       // A toast, as on the phone: the result needs no answer.
@@ -1389,7 +1502,7 @@ function App() {
     const worktreeId = openState()?.sessions[sessionId]?.worktree_id;
     if (!path || worktreeId === undefined) return;
     const unlinked = async () => {
-      const result = await window.milagre.unlinkWorktreeIssue({ projectPath: path, worktreeId });
+      const result = await bridgeForKey(path).unlinkWorktreeIssue({ projectPath: path, worktreeId });
       receiveState(path, result.project.state);
       refreshLinearIssues();
     };
@@ -1543,13 +1656,18 @@ function App() {
   // The sidebar is memo()'d: these keep one identity across renders (each runs the latest closure) so a streamed
   // batch or another pane's state change doesn't re-render it.
   const pickChat = useEvent((id: string) => openChat(Number(id)));
+  const remoteProject = isRemoteKey(project?.path);
   const chatActions = useMemo<ChatRowActions>(
     () => ({
       onRename: (id, title) => latest.current.patchChat(Number(id), { title }),
       onMarkUnread: (id, unread) => latest.current.patchChat(Number(id), { unread }),
       onPin: (id, order) => latest.current.patchChat(Number(id), order == null ? { pinned: false, pin_order: undefined } : { pinned: true, pin_order: order }),
-      onReveal: (id) => latest.current.revealChat(Number(id)),
-      onOpenInEditor: (id) => latest.current.openChatInEditor(Number(id)),
+      ...(remoteProject
+        ? { remote: true }
+        : {
+            onReveal: (id: string) => latest.current.revealChat(Number(id)),
+            onOpenInEditor: (id: string) => latest.current.openChatInEditor(Number(id)),
+          }),
       onCommit: (id) => latest.current.openGitDialog(Number(id)),
       onArchiveCheck: (id) => latest.current.checkArchive(Number(id)),
       // The row shows the progress until this settles.
@@ -1557,7 +1675,7 @@ function App() {
       onLinkIssue: (id, key) => void latest.current.linkChatIssue(Number(id), key),
       onUnlinkIssue: (id) => void latest.current.unlinkChatIssue(Number(id)),
     }),
-    [],
+    [remoteProject],
   );
   const startNewChatFromSidebar = useEvent(() => startNewChat());
   const openProjectFromSidebar = useEvent(() => void openProject());
@@ -1585,6 +1703,19 @@ function App() {
   const sidebarRunKeys = runKeys(agentRuns.runs);
   const openScopeChat = useEvent((scopeKey: string, id: string) => void openCanvasChat(scopeKey, Number(id)));
   const openSettings = useEvent(() => setView("settings"));
+  // The computers popover's gears: a computer's own section, or This Mac's devices.
+  const openComputerSettings = useEvent((id: string | null) => {
+    if (id === null) setSettingsSection("devices");
+    else {
+      setSettingsComputer(id);
+      setSettingsSection("computer");
+    }
+    setView("settings");
+  });
+  const selectSettingsComputer = (id: string) => {
+    setSettingsComputer(id);
+    setSettingsSection("computer");
+  };
   const openCanvas = useEvent(() => {
     changes.closeDiff();
     setView("canvas");
@@ -1653,7 +1784,7 @@ function App() {
 
   async function editLink(id: string) {
     try {
-      const link = (await window.milagre.listNamedLinks()).find((item) => item.id === id);
+      const link = (await bridgeForKey(`milagre-link:${id}`).listNamedLinks()).find((item) => item.id === id);
       if (!link) throw new Error("Link no longer exists");
       setLinkDialogOpen(link);
     } catch (error) {
@@ -1665,7 +1796,7 @@ function App() {
     window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
     if (selectedLinkRef.current?.link.id !== link.id) return;
     try {
-      const next = await window.milagre.openNamedLink(link.id);
+      const next = await bridgeForKey(`milagre-link:${link.id}`).openNamedLink(link.id);
       if (selectedLinkRef.current?.link.id === link.id) setSelectedLink(next);
     } catch (error) {
       setNotice(ipcErrorMessage(error));
@@ -1682,6 +1813,16 @@ function App() {
       }}
     />
   ) : null;
+  const addComputerDialog = addComputerOpen ? <AddComputerDialog onClose={() => setAddComputerOpen(false)} onAdded={() => setAddComputerOpen(false)} /> : null;
+  const addProjectDialog = addProjectOpen ? (
+    <AddProjectDialog
+      onClose={() => setAddProjectOpen(false)}
+      onOpened={(opened) => {
+        setAddProjectOpen(false);
+        void replaceProject(async () => opened);
+      }}
+    />
+  ) : null;
   if (selectedLink && view === "settings")
     return (
       <DotBackground>
@@ -1691,10 +1832,19 @@ function App() {
             section={settingsSection}
             onSelectProject={() => {}}
             onSelect={setSettingsSection}
+            computerId={settingsComputer ?? undefined}
+            onSelectComputer={selectSettingsComputer}
             onBack={() => setView("chat")}
           />
           <main className="min-w-0 flex-1">
-            <SettingsPanel section={settingsSection} accountScope={accountScope} models={models} update={update} onSectionChange={setSettingsSection} />
+            <SettingsPanel
+              section={settingsSection}
+              computerId={settingsComputer ?? undefined}
+              accountScope={accountScope}
+              models={models}
+              update={update}
+              onSectionChange={setSettingsSection}
+            />
           </main>
         </div>
       </DotBackground>
@@ -1732,6 +1882,8 @@ function App() {
           onSwitchProject={(path) => void switchProject(path)}
           onSwitchLink={(id) => void selectLink(id)}
           onLinkProject={() => setLinkDialogOpen(true)}
+          onAddComputer={() => setAddComputerOpen(true)}
+          onOpenComputerSettings={openComputerSettings}
           onEditLink={(id) => void editLink(id)}
           onOpenProject={() => void openProject()}
           onSettings={() => {
@@ -1744,6 +1896,8 @@ function App() {
           onNewChatInScope={newChatInScope}
         />
         {linkDialog}
+        {addComputerDialog}
+        {addProjectDialog}
       </>
     );
 
@@ -1842,15 +1996,26 @@ function App() {
           keywords: "git changes pull request push",
           run: () => openGitDialog(sessionId),
         },
-        {
-          id: "editor",
-          label: "Open in editor",
-          group: "Current chat",
-          icon: "editor",
-          keywords: "code vscode cursor",
-          run: () => openChatInEditor(sessionId),
-        },
-        { id: "reveal", label: "Reveal folder", group: "Current chat", icon: "folder", keywords: "finder explorer worktree", run: () => revealChat(sessionId) },
+        ...(isRemoteKey(project?.path)
+          ? []
+          : [
+              {
+                id: "editor",
+                label: "Open in editor",
+                group: "Current chat",
+                icon: "editor" as const,
+                keywords: "code vscode cursor",
+                run: () => openChatInEditor(sessionId),
+              },
+              {
+                id: "reveal",
+                label: "Reveal folder",
+                group: "Current chat",
+                icon: "folder" as const,
+                keywords: "finder explorer worktree",
+                run: () => revealChat(sessionId),
+              },
+            ]),
         ...(chatCount
           ? [
               {
@@ -1913,384 +2078,401 @@ function App() {
   }
 
   return (
-    <>
-      <DotBackground key="app">
-        {hostConnection.connected && hostConnection.hostOutdated && (
-          <div
-            role="status"
-            data-host-outdated
-            className="fixed inset-x-4 top-12 z-50 mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]"
-          >
-            <span>{hostConnection.message ?? "Restart Milagre's background host to load large projects."}</span>
-            <button
-              type="button"
-              disabled={restartingHost}
-              onClick={() => {
-                setRestartingHost(true);
-                void window.milagre
-                  .restartHost()
-                  .catch((error) => setNotice(`Couldn't restart the host: ${ipcErrorMessage(error)}`))
-                  .finally(() => setRestartingHost(false));
-              }}
-              className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40"
+    <BridgeContext.Provider value={bridgeForKey(project.path)}>
+      <ScopeContext.Provider value={project.path}>
+        <DotBackground key="app">
+          {hostConnection.connected && hostConnection.hostOutdated && (
+            <div
+              role="status"
+              data-host-outdated
+              className="fixed inset-x-4 top-12 z-50 mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-2.5 text-[13px] leading-snug text-ink shadow-overlay [-webkit-app-region:no-drag]"
             >
-              {restartingHost ? "Restarting…" : "Restart host"}
-            </button>
-          </div>
-        )}
-        {!hostConnection.connected && (
-          <div
-            role="status"
-            data-host-disconnected
-            className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]"
-          >
-            {hostConnection.failed ? (
-              <>
-                <p className="font-medium">Couldn't restart Milagre's background host</p>
-                <p className="mt-1 text-ink-2">{hostConnection.message} Your draft is kept here. Quit and reopen Milagre to try again.</p>
-              </>
-            ) : (
-              <>
-                <p className="font-medium">Reconnecting to your computer</p>
-                <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
-              </>
-            )}
-          </div>
-        )}
-        <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
-        {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
-        <PanelToggles right={changesAvailable ? 12 + CORNER_PITCH : 12} />
-        {showAttentionButton && attentionChats[0] && (
-          <AttentionButton
-            label={attentionLabel(attentionPaths.map(projectName))}
-            items={attentionTitles.map((item) => ({
-              ...item,
-              asking: !agentRuns.runs[item.key]?.approvals.length,
-              waitingFor: waitingFor(agentRuns.runs[item.key]),
-            }))}
-            offset={(changesAvailable ? 1 : 0) + sidePanelCount(sidePanels)}
-            onOpen={openChatByKey}
-          />
-        )}
-        <div
-          className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
-          onAnimationEnd={(event) => {
-            if (event.animationName === "app-enter-main") setAppEntered(true);
-          }}
-        >
-          <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" || view === "canvas" ? "flex" : "hidden"}`}>
-            <SidebarNav
-              fill
-              workspaceName={project.name}
-              workspaceImage={projectImage(project.path)}
-              onSwitchLink={(id) => void selectLink(id)}
-              onLinkProject={() => setLinkDialogOpen(true)}
-              onEditLink={(id) => void editLink(id)}
-              onOpenProject={openProjectFromSidebar}
-              recents={chats}
-              activeId={
-                view === "chat"
-                  ? pendingHere && pendingSend
-                    ? String(pendingCanonicalId ?? pendingSend.session.id)
-                    : selectedSession
-                      ? String(selectedSession.id)
-                      : null
-                  : null
-              }
-              onPick={pickChat}
-              chatActions={chatActions}
-              onNewChat={startNewChatFromSidebar}
-              onOpenSettings={openSettings}
-              onOpenCanvas={openCanvas}
-              canvasActive={view === "canvas"}
-              onOpenCommands={openCommandPalette}
-              hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
-              projectPath={project.path}
-              onSwitchProject={switchProjectFromSidebar}
-              attentionPaths={attentionPaths}
-              onOpenProjectSettings={openProjectSettings}
-              onNewChatInScope={newChatInScope}
-              usage={sidebarUsage}
-              runningKeys={sidebarRunKeys.running}
-              waitingKeys={sidebarRunKeys.waiting}
-              askingKeys={sidebarRunKeys.asking}
-              onOpenScopeChat={openScopeChat}
-            />
-          </div>
-          {view === "settings" && (
-            <div className="flex shrink-0 py-3 pl-3">
-              <SettingsNav
-                section={settingsSection}
-                project={settingsProject ?? project}
-                current={project}
-                onSelect={setSettingsSection}
-                onSelectProject={(picked) => {
-                  setSettingsProject(picked);
-                  setSettingsSection("project");
+              <span>{hostConnection.message ?? "Restart Milagre's background host to load large projects."}</span>
+              <button
+                type="button"
+                disabled={restartingHost}
+                onClick={() => {
+                  setRestartingHost(true);
+                  void window.milagre
+                    .restartHost()
+                    .catch((error) => setNotice(`Couldn't restart the host: ${ipcErrorMessage(error)}`))
+                    .finally(() => setRestartingHost(false));
                 }}
-                onBack={() => setView("chat")}
-              />
+                className="shrink-0 rounded-control bg-ink px-2.5 py-1 font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40"
+              >
+                {restartingHost ? "Restarting…" : "Restart host"}
+              </button>
             </div>
           )}
-
-          <main data-workspace-main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
-            <DiffBar
-              open={diffShowing}
-              onBack={changes.closeDiff}
-              send={{ count: diffComments.sendable.length, onSend: () => void sendDiffComments() }}
-              trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />}
+          {!hostConnection.connected && (
+            <div
+              role="status"
+              data-host-disconnected
+              className="fixed inset-x-4 top-12 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-overlay [-webkit-app-region:no-drag]"
+            >
+              {hostConnection.failed ? (
+                <>
+                  <p className="font-medium">Couldn't restart Milagre's background host</p>
+                  <p className="mt-1 text-ink-2">{hostConnection.message} Your draft is kept here. Quit and reopen Milagre to try again.</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium">Reconnecting to your computer</p>
+                  <p className="mt-1 text-ink-2">Your draft is kept here. Messages will be available when the host reconnects.</p>
+                </>
+              )}
+            </div>
+          )}
+          <div aria-hidden className="title-drag fixed inset-x-0 top-0 z-50 h-10" />
+          {changesAvailable && <ChangesToggle open={changes.open} onToggle={changes.toggle} />}
+          <PanelToggles right={changesAvailable ? 12 + CORNER_PITCH : 12} />
+          {showAttentionButton && attentionChats[0] && (
+            <AttentionButton
+              label={attentionLabel(attentionPaths.map(projectName))}
+              items={attentionTitles.map((item) => ({
+                ...item,
+                asking: !agentRuns.runs[item.key]?.approvals.length,
+                waitingFor: waitingFor(agentRuns.runs[item.key]),
+              }))}
+              offset={(changesAvailable ? 1 : 0) + sidePanelCount(sidePanels)}
+              onOpen={openChatByKey}
             />
-            <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
-              {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} comments={diffComments} />}
-            </AnimatePresence>
+          )}
+          <div
+            className={`flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden text-ink ${appEntered ? "" : "app-enter"}`}
+            onAnimationEnd={(event) => {
+              if (event.animationName === "app-enter-main") setAppEntered(true);
+            }}
+          >
+            <div className={`min-h-0 shrink-0 pt-[60px] pb-3 pl-3 ${view === "chat" || view === "canvas" ? "flex" : "hidden"}`}>
+              <SidebarNav
+                fill
+                workspaceName={project.name}
+                workspaceImage={projectImage(project.path)}
+                onSwitchLink={(id) => void selectLink(id)}
+                onLinkProject={() => setLinkDialogOpen(true)}
+                onAddComputer={() => setAddComputerOpen(true)}
+                onOpenComputerSettings={openComputerSettings}
+                onEditLink={(id) => void editLink(id)}
+                onOpenProject={openProjectFromSidebar}
+                recents={chats}
+                activeId={
+                  view === "chat"
+                    ? pendingHere && pendingSend
+                      ? String(pendingCanonicalId ?? pendingSend.session.id)
+                      : selectedSession
+                        ? String(selectedSession.id)
+                        : null
+                    : null
+                }
+                onPick={pickChat}
+                chatActions={chatActions}
+                onNewChat={startNewChatFromSidebar}
+                onOpenSettings={openSettings}
+                onOpenCanvas={openCanvas}
+                canvasActive={view === "canvas"}
+                onOpenCommands={openCommandPalette}
+                hintsEnabled={view === "chat" && !commandPaletteOpen && !gitDialog}
+                projectPath={project.path}
+                onSwitchProject={switchProjectFromSidebar}
+                attentionPaths={attentionPaths}
+                onOpenProjectSettings={openProjectSettings}
+                onNewChatInScope={newChatInScope}
+                usage={sidebarUsage}
+                runningKeys={sidebarRunKeys.running}
+                waitingKeys={sidebarRunKeys.waiting}
+                askingKeys={sidebarRunKeys.asking}
+                onOpenScopeChat={openScopeChat}
+              />
+            </div>
             {view === "settings" && (
-              <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-                {notice && (
-                  <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>
-                    {notice}
-                  </NoticeCard>
-                )}
-                <SettingsPanel
+              <div className="flex shrink-0 py-3 pl-3">
+                <SettingsNav
                   section={settingsSection}
                   project={settingsProject ?? project}
-                  models={models}
-                  update={update}
-                  onSectionChange={setSettingsSection}
+                  current={project}
+                  onSelect={setSettingsSection}
+                  computerId={settingsComputer ?? undefined}
+                  onSelectComputer={selectSettingsComputer}
+                  onSelectProject={(picked) => {
+                    setSettingsProject(picked);
+                    setSettingsSection("project");
+                  }}
+                  onBack={() => setView("chat")}
                 />
               </div>
             )}
-            {view === "canvas" && (
-              <CanvasView
-                states={states}
-                runs={agentRuns.runs}
-                linkedWork={linkedWork}
-                onOpenChat={(path, id) => void openCanvasChat(path, id)}
-                onBack={() => setView("chat")}
+
+            <main data-workspace-main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent pr-3 pb-3">
+              <DiffBar
+                open={diffShowing}
+                onBack={changes.closeDiff}
+                send={{ count: diffComments.sendable.length, onSend: () => void sendDiffComments() }}
+                trailing={<DiffToolbar changes={changes} prefs={diffPrefs} />}
               />
-            )}
-            {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
-            <div
-              data-chat-pane
-              className={`min-h-0 flex-1 flex-col overflow-hidden ${view === "chat" && !diffPresence.occupied ? "flex" : "hidden"}`}
-              style={{ animation: "fade-in 160ms ease-out" }}
-            >
-              <EditorLinks root={selectedWorktree?.path ?? project.path}>
-                <DraftChatComposer
-                  key={project.path}
-                  store={draftStore}
-                  messages={displayedMessages}
-                  pendingMessageId={pendingHere && pendingCanonicalId === null ? pendingSend?.message.id : undefined}
-                  imageDraft={imageDraft}
-                  projectPath={selectedWorktree?.path ?? project.path}
-                  messageScope={project.path}
-                  earlier={earlierMessages}
-                  onSend={() => void sendMessage()}
-                  onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
-                  linearActive={linear.active}
-                  onStartFromIssue={startFromIssue}
-                  onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
-                  pullRequestAction={
-                    selectedSession && selectedPullRequest && pullRequestBlocker && pullRequestActionRequest
-                      ? {
-                          label: BLOCKERS[pullRequestBlocker].action,
-                          tone: BLOCKERS[pullRequestBlocker].tone,
-                          onRun: () => {
-                            dismissBlockerAction(selectedPullRequest, pullRequestBlocker);
-                            void executeSend(pullRequestActionBody(pullRequestActionRequest), permissionMode, [], [], true, pullRequestActionRequest);
-                          },
-                        }
-                      : undefined
-                  }
-                  isSending={isSending}
-                  sendBlocked={preparing}
-                  runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
-                  streamingText={run?.text}
-                  streamingSteps={run?.steps}
-                  subagents={subagents}
-                  onArchiveFinishedSubagents={archiveFinishedChildren}
-                  onArchiveSubagent={archiveChild}
-                  onStopAdvisor={(id) => controlAdvisor("stop", id)}
-                  onRetryAdvisor={(id) => controlAdvisor("retry", id)}
-                  waitingForSubagents={run?.waitingForSubagents}
-                  tasks={run?.tasks}
-                  contextUsage={run?.contextUsage ?? selectedSession?.contextUsage}
-                  ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
-                  agentChatId={project && selectedSession ? chatKey(project.path, selectedSession.id) : undefined}
-                  onStopPort={project && selectedSession ? (pid) => window.milagre.stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined}
-                  waitingStepIds={waitingStepIds}
-                  asking={Boolean(run?.questions.length)}
-                  sessionProvider={selectedSession?.provider}
-                  runModelName={run ? (models.find((model) => model.id === run.model)?.name ?? run.model) : undefined}
-                  resume={
-                    project && selectedSession?.resumeTurn
-                      ? {
-                          onContinue: () =>
-                            void window.milagre
-                              .resumeChat(project.path, selectedSession.id)
-                              .catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)),
-                        }
-                      : undefined
-                  }
-                  onOpenLinkedChat={openLinkedChat}
-                  models={models}
-                  cliStatus={cliStatus}
-                  onModelPickerOpen={refreshCliStatus}
-                  onUpdateCli={handleUpdateCli}
-                  updatingCli={updatingCli}
-                  selectedModel={selectedModel}
-                  onModelChange={chooseModel}
-                  capability={selectedCapability}
-                  effort={effortFor(selectedCapability, effort)}
-                  onEffortChange={setEffort}
-                  ultracode={selectedCapability.ultracode && ultracode}
-                  onUltracodeChange={setUltracode}
-                  fastMode={fastMode}
-                  onFastModeChange={setFastMode}
-                  permissionMode={permissionMode}
-                  onPermissionModeChange={changePermissionMode}
-                  onRecommendationSelect={sendRecommendation}
-                  worktrees={composerWorktrees}
-                  selectedWorktreeId={selectedWorktree?.id}
-                  onWorktreeChange={(id) => {
-                    advanceChatView();
-                    setSelectedWorktreeId(id);
-                    saveChatPreferences(localStorage, project.path, { worktreePath: state.worktrees[id]?.path });
-                  }}
-                  isolation={isolation}
-                  onIsolationChange={(next) => {
-                    preparedTarget.current = null;
-                    setIsolation(next);
-                    saveChatPreferences(localStorage, project.path, { isolation: next });
-                    setNewChatError(null);
-                  }}
-                  branches={branches}
-                  baseBranch={effectiveBaseBranch}
-                  onBaseBranchChange={(branch) => {
-                    preparedTarget.current = null;
-                    setBaseBranch(branch);
-                    saveChatPreferences(localStorage, project.path, { baseBranch: branch });
-                  }}
-                  newChatError={newChatError}
-                  findOpen={findOpen}
-                  findSignal={findSignal}
-                  findSeed={findSeed}
-                  onFindClose={() => setFindOpen(false)}
-                  notice={notice}
-                  onDismissNotice={() => setNotice(null)}
-                  approval={
-                    pendingApproval ? (
-                      <PermissionCard
-                        key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}
-                        request={pendingApproval}
-                        waiting={(run?.approvals.length ?? 1) - 1}
-                        answering={sentDecision(run, pendingApproval.requestId)}
-                        onAnswer={answerApproval}
-                      />
-                    ) : pendingQuestion ? (
-                      <QuestionCard
-                        key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingQuestion.requestId}`}
-                        request={pendingQuestion}
-                        waiting={(run?.questions.length ?? 1) - 1}
-                        answering={sentReply(run, pendingQuestion.requestId)}
-                        onAnswer={answerQuestion}
-                      />
-                    ) : undefined
-                  }
+              <AnimatePresence initial={false} onExitComplete={diffPresence.onExitComplete}>
+                {diffShowing && <DiffView key="diff" changes={changes} prefs={diffPrefs} comments={diffComments} />}
+              </AnimatePresence>
+              {view === "settings" && (
+                <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+                  {notice && (
+                    <NoticeCard className="mx-auto mt-2 mb-1 max-w-2xl" onDismiss={() => setNotice(null)}>
+                      {notice}
+                    </NoticeCard>
+                  )}
+                  <SettingsPanel
+                    section={settingsSection}
+                    project={settingsProject ?? project}
+                    computerId={settingsComputer ?? undefined}
+                    models={models}
+                    update={update}
+                    onSectionChange={setSettingsSection}
+                  />
+                </div>
+              )}
+              {view === "canvas" && (
+                <CanvasView
+                  states={states}
+                  runs={agentRuns.runs}
+                  linkedWork={linkedWork}
+                  onOpenChat={(path, id) => void openCanvasChat(path, id)}
+                  onBack={() => setView("chat")}
                 />
-              </EditorLinks>
-              <TerminalPanel chatId={terminalChatId} notify={setNotice} />
-            </div>
-          </main>
-          <ChangesPanelSlot open={changes.open}>
-            <ChangesPanel
-              list={changes.list}
-              mode={changes.mode}
-              onModeChange={changes.setMode}
-              onRefresh={() => void changes.refresh()}
-              onSelectFile={changes.selectFile}
-              activePath={changes.activePath}
-              commentCounts={diffComments.counts}
-            />
-          </ChangesPanelSlot>
-        </div>
-        {linkDialog}
-        {commandPaletteOpen && (
-          <CommandPalette
-            commands={buildCommands(project)}
-            searchMessages={
-              lean
-                ? undefined
-                : (query) =>
-                    messageCommands(sidebarState?.messages ?? NO_MESSAGES, query, new Map(chats.map((chat) => [Number(chat.id), chat.label])), openMessage)
-            }
-            searchMessagesAsync={
-              lean && project
-                ? async (query) =>
-                    messageCommandsFrom(
-                      await window.milagre.searchChats(project.path, query),
-                      new Map(chats.map((chat) => [Number(chat.id), chat.label])),
-                      openMessage,
-                    )
-                : undefined
-            }
-            onClose={() => setCommandPaletteOpen(false)}
-            onError={setNotice}
-          />
-        )}
-        {gitDialog && (
-          <GitActionsDialog
-            key={gitDialog.sessionId}
-            cwd={gitDialog.cwd}
-            base={gitDialog.base}
-            provider={gitDialog.provider}
-            chat={gitDialog.chat}
-            turnRunning={Boolean(agentRuns.runs[chatKey(project.path, gitDialog.sessionId)])}
-            onClose={() => setGitDialog(null)}
-            // The dialog's chat is the open one; a message sent while its turn runs steers it.
-            onSendToAgent={(text) => {
-              if (selectedSession?.id === gitDialog.sessionId) void executeSend(text, permissionMode, []);
-              else {
-                openChat(gitDialog.sessionId);
-                setDraft(text);
-              }
-            }}
-            onRan={(note) => {
-              recordGitNote(gitDialog.sessionId, note);
-              void window.milagre.refreshDiffs(project.path, [gitDialog.worktreeId]).catch(() => {});
-            }}
-          />
-        )}
-        <Notice />
-      </DotBackground>
-      {splashOverlay(true)}
-      {quitError && (
-        <dialog
-          ref={(element) => {
-            if (element && !element.open) element.showModal();
-          }}
-          onCancel={(event) => event.preventDefault()}
-          className="fixed inset-0 m-0 h-screen w-screen max-w-none max-h-none items-center justify-center bg-black/40 backdrop-blur-overlay p-6 open:flex"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="save-failure-title"
-        >
-          <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 text-ink shadow-xl">
-            <h2 id="save-failure-title" className="text-lg font-semibold">
-              Chats could not be saved
-            </h2>
-            <p className="mt-3 text-sm">Keep Milagre open while you fix the storage problem, then retry saving.</p>
-            <p className="mt-3 break-words text-sm text-ink-2">{quitError}</p>
-            <button
-              autoFocus
-              className="mt-5 rounded-lg bg-ink px-4 py-2 text-sm text-surface"
-              onClick={() => void window.milagre.retryQuit().catch((error) => setQuitError(ipcErrorMessage(error)))}
-            >
-              Retry saving and quit
-            </button>
+              )}
+              {/* Fades back in when the diff has gone: a display:none element restarts its animation when shown. */}
+              <div
+                data-chat-pane
+                className={`min-h-0 flex-1 flex-col overflow-hidden ${view === "chat" && !diffPresence.occupied ? "flex" : "hidden"}`}
+                style={{ animation: "fade-in 160ms ease-out" }}
+              >
+                {awayBanner && (
+                  <OfflineBanner text={awayBanner} empty={Boolean(lean && selectedSession && !chatWindow.loading && chatWindow.messages.length === 0)} />
+                )}
+                <EditorLinks root={isRemoteKey(project.path) ? "" : (selectedWorktree?.path ?? project.path)}>
+                  <DraftChatComposer
+                    key={project.path}
+                    store={draftStore}
+                    messages={displayedMessages}
+                    pendingMessageId={pendingHere && pendingCanonicalId === null ? pendingSend?.message.id : undefined}
+                    imageDraft={imageDraft}
+                    projectPath={selectedWorktree?.path ?? project.path}
+                    messageScope={project.path}
+                    earlier={earlierMessages}
+                    onSend={() => void sendMessage()}
+                    onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
+                    linearActive={linear.active}
+                    onStartFromIssue={startFromIssue}
+                    onStop={run && selectedSession ? () => void agentRuns.interrupt(chatKey(project.path, selectedSession.id)) : undefined}
+                    pullRequestAction={
+                      selectedSession && selectedPullRequest && pullRequestBlocker && pullRequestActionRequest
+                        ? {
+                            label: BLOCKERS[pullRequestBlocker].action,
+                            tone: BLOCKERS[pullRequestBlocker].tone,
+                            onRun: () => {
+                              dismissBlockerAction(selectedPullRequest, pullRequestBlocker);
+                              void executeSend(pullRequestActionBody(pullRequestActionRequest), permissionMode, [], [], true, pullRequestActionRequest);
+                            },
+                          }
+                        : undefined
+                    }
+                    isSending={isSending}
+                    sendBlocked={preparing || readOnly}
+                    offlineName={readOnly ? (openComputer?.name ?? "That computer") : null}
+                    runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
+                    streamingText={run?.text}
+                    streamingSteps={run?.steps}
+                    subagents={subagents}
+                    onArchiveFinishedSubagents={archiveFinishedChildren}
+                    onArchiveSubagent={archiveChild}
+                    onStopAdvisor={(id) => controlAdvisor("stop", id)}
+                    onRetryAdvisor={(id) => controlAdvisor("retry", id)}
+                    waitingForSubagents={run?.waitingForSubagents}
+                    tasks={run?.tasks}
+                    contextUsage={run?.contextUsage ?? selectedSession?.contextUsage}
+                    ports={project && selectedSession ? agentPorts[chatKey(project.path, selectedSession.id)] : undefined}
+                    agentChatId={project && selectedSession ? chatKey(project.path, selectedSession.id) : undefined}
+                    onStopPort={
+                      project && selectedSession ? (pid) => bridgeForKey(project.path).stopAgentPort(chatKey(project.path, selectedSession.id), pid) : undefined
+                    }
+                    waitingStepIds={waitingStepIds}
+                    asking={Boolean(run?.questions.length)}
+                    sessionProvider={selectedSession?.provider}
+                    runModelName={run ? (models.find((model) => model.id === run.model)?.name ?? run.model) : undefined}
+                    resume={
+                      project && selectedSession?.resumeTurn
+                        ? {
+                            onContinue: () =>
+                              void bridgeForKey(project.path)
+                                .resumeChat(project.path, selectedSession.id)
+                                .catch((error) => setNotice(`Couldn't continue the chat: ${error instanceof Error ? error.message : String(error)}`)),
+                          }
+                        : undefined
+                    }
+                    onOpenLinkedChat={openLinkedChat}
+                    models={models}
+                    cliStatus={cliStatus}
+                    onModelPickerOpen={refreshCliStatus}
+                    onUpdateCli={handleUpdateCli}
+                    updatingCli={updatingCli}
+                    selectedModel={selectedModel}
+                    onModelChange={chooseModel}
+                    capability={selectedCapability}
+                    effort={effortFor(selectedCapability, effort)}
+                    onEffortChange={setEffort}
+                    ultracode={selectedCapability.ultracode && ultracode}
+                    onUltracodeChange={setUltracode}
+                    fastMode={fastMode}
+                    onFastModeChange={setFastMode}
+                    permissionMode={permissionMode}
+                    onPermissionModeChange={changePermissionMode}
+                    onRecommendationSelect={sendRecommendation}
+                    worktrees={composerWorktrees}
+                    selectedWorktreeId={selectedWorktree?.id}
+                    onWorktreeChange={(id) => {
+                      advanceChatView();
+                      setSelectedWorktreeId(id);
+                      saveChatPreferences(localStorage, project.path, { worktreePath: state.worktrees[id]?.path });
+                    }}
+                    isolation={isolation}
+                    onIsolationChange={(next) => {
+                      preparedTarget.current = null;
+                      setIsolation(next);
+                      saveChatPreferences(localStorage, project.path, { isolation: next });
+                      setNewChatError(null);
+                    }}
+                    branches={branches}
+                    baseBranch={effectiveBaseBranch}
+                    onBaseBranchChange={(branch) => {
+                      preparedTarget.current = null;
+                      setBaseBranch(branch);
+                      saveChatPreferences(localStorage, project.path, { baseBranch: branch });
+                    }}
+                    newChatError={newChatError}
+                    findOpen={findOpen}
+                    findSignal={findSignal}
+                    findSeed={findSeed}
+                    onFindClose={() => setFindOpen(false)}
+                    notice={notice}
+                    onDismissNotice={() => setNotice(null)}
+                    approval={
+                      pendingApproval ? (
+                        <PermissionCard
+                          key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingApproval.requestId}`}
+                          request={pendingApproval}
+                          waiting={(run?.approvals.length ?? 1) - 1}
+                          answering={sentDecision(run, pendingApproval.requestId)}
+                          onAnswer={answerApproval}
+                        />
+                      ) : pendingQuestion ? (
+                        <QuestionCard
+                          key={`${chatKey(project.path, selectedSession?.id ?? 0)}:${pendingQuestion.requestId}`}
+                          request={pendingQuestion}
+                          waiting={(run?.questions.length ?? 1) - 1}
+                          answering={sentReply(run, pendingQuestion.requestId)}
+                          onAnswer={answerQuestion}
+                        />
+                      ) : undefined
+                    }
+                  />
+                </EditorLinks>
+                <TerminalPanel chatId={terminalChatId} notify={setNotice} />
+              </div>
+            </main>
+            <ChangesPanelSlot open={changes.open}>
+              <ChangesPanel
+                list={changes.list}
+                mode={changes.mode}
+                onModeChange={changes.setMode}
+                onRefresh={() => void changes.refresh()}
+                onSelectFile={changes.selectFile}
+                activePath={changes.activePath}
+                commentCounts={diffComments.counts}
+              />
+            </ChangesPanelSlot>
           </div>
-        </dialog>
-      )}
-    </>
+          {linkDialog}
+          {addComputerDialog}
+          {addProjectDialog}
+          {commandPaletteOpen && (
+            <CommandPalette
+              commands={buildCommands(project)}
+              searchMessages={
+                lean
+                  ? undefined
+                  : (query) =>
+                      messageCommands(sidebarState?.messages ?? NO_MESSAGES, query, new Map(chats.map((chat) => [Number(chat.id), chat.label])), openMessage)
+              }
+              searchMessagesAsync={
+                lean && project
+                  ? async (query) =>
+                      messageCommandsFrom(
+                        await bridgeForKey(project.path).searchChats(project.path, query),
+                        new Map(chats.map((chat) => [Number(chat.id), chat.label])),
+                        openMessage,
+                      )
+                  : undefined
+              }
+              onClose={() => setCommandPaletteOpen(false)}
+              onError={setNotice}
+            />
+          )}
+          {gitDialog && (
+            <GitActionsDialog
+              key={gitDialog.sessionId}
+              cwd={gitDialog.cwd}
+              base={gitDialog.base}
+              provider={gitDialog.provider}
+              chat={gitDialog.chat}
+              turnRunning={Boolean(agentRuns.runs[chatKey(project.path, gitDialog.sessionId)])}
+              onClose={() => setGitDialog(null)}
+              // The dialog's chat is the open one; a message sent while its turn runs steers it.
+              onSendToAgent={(text) => {
+                if (selectedSession?.id === gitDialog.sessionId) void executeSend(text, permissionMode, []);
+                else {
+                  openChat(gitDialog.sessionId);
+                  setDraft(text);
+                }
+              }}
+              onRan={(note) => {
+                recordGitNote(gitDialog.sessionId, note);
+                void bridgeForKey(project.path)
+                  .refreshDiffs(project.path, [gitDialog.worktreeId])
+                  .catch(() => {});
+              }}
+            />
+          )}
+          <Notice />
+        </DotBackground>
+        {splashOverlay(true)}
+        {quitError && (
+          <dialog
+            ref={(element) => {
+              if (element && !element.open) element.showModal();
+            }}
+            onCancel={(event) => event.preventDefault()}
+            className="fixed inset-0 m-0 h-screen w-screen max-w-none max-h-none items-center justify-center bg-black/40 backdrop-blur-overlay p-6 open:flex"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="save-failure-title"
+          >
+            <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 text-ink shadow-xl">
+              <h2 id="save-failure-title" className="text-lg font-semibold">
+                Chats could not be saved
+              </h2>
+              <p className="mt-3 text-sm">Keep Milagre open while you fix the storage problem, then retry saving.</p>
+              <p className="mt-3 break-words text-sm text-ink-2">{quitError}</p>
+              <button
+                autoFocus
+                className="mt-5 rounded-lg bg-ink px-4 py-2 text-sm text-surface"
+                onClick={() => void window.milagre.retryQuit().catch((error) => setQuitError(ipcErrorMessage(error)))}
+              >
+                Retry saving and quit
+              </button>
+            </div>
+          </dialog>
+        )}
+      </ScopeContext.Provider>
+    </BridgeContext.Provider>
   );
 }
 

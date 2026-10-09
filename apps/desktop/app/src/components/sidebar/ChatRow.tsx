@@ -16,6 +16,7 @@ import {
   FileEditIcon,
   Folder01Icon,
   FolderOpenIcon,
+  LaptopIcon,
   GitBranchIcon,
   GitMergeIcon,
   GitPullRequestIcon,
@@ -37,7 +38,7 @@ import { folderName, formatLineCount, type ChatMark } from "@/lib/chat-list";
 import { rowPullRequests } from "@/lib/chat-pull-requests";
 import { useEditors } from "@/lib/editors";
 import type { AgentPort, DiffStat, PullRequest } from "@/model";
-import { portUrl } from "@/lib/ports";
+import { portComputer, portUrl } from "@/lib/ports";
 import { BLOCKERS, pullRequestBlockers, pullRequestPresentation } from "@/lib/pr-blockers";
 import { ScrollArea } from "../primitives/ScrollArea";
 import { useDismiss } from "../../lib/use-dismiss";
@@ -72,6 +73,9 @@ type ChatDetails = {
   ports?: AgentPort[];
 };
 
+/** The computer a row's chat lives on, shown on its second line once there are two or more computers. */
+export type RowComputer = { name: string; offline: boolean };
+
 export type SidebarRecent = {
   id: string;
   /** A local Chat preview can be opened, but cannot be edited until the host accepts it. */
@@ -96,6 +100,8 @@ export type ChatRowActions = {
   onPin?: (id: string, order?: number | null) => void;
   onReveal?: (id: string) => void;
   onOpenInEditor?: (id: string) => void;
+  /** The chat is on another Mac: the menu leaves out what only acts on this one (Finder, the editor). */
+  remote?: boolean;
   /** Opens the chat with its "Commit and open PR" dialog. */
   onCommit?: (id: string) => void;
   /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
@@ -193,6 +199,8 @@ export const ChatRow = memo(function ChatRow({
   onPick,
   actions,
   shortcutHint,
+  computer,
+  dimOffline = false,
   dragging = false,
 }: {
   item: SidebarRecent;
@@ -201,6 +209,9 @@ export const ChatRow = memo(function ChatRow({
   onPick: (item: SidebarRecent) => void;
   actions: ChatRowActions;
   shortcutHint?: string;
+  computer?: RowComputer;
+  /** Dim the row itself when its computer is offline; false inside a section that is already dimmed. */
+  dimOffline?: boolean;
   /** The row is being dragged to a new place. */
   dragging?: boolean;
 }) {
@@ -214,6 +225,9 @@ export const ChatRow = memo(function ChatRow({
   const hasChips = hasPullRequests || linearIssue !== undefined;
   const shownPullRequests = pullRequests.slice(0, ROW_PR_LIMIT);
   const hiddenPullRequests = pullRequests.length - shownPullRequests.length;
+  const twoLines = hasChips || item.worktreeCount !== undefined || Boolean(computer);
+  // This Mac alone keeps the single-Project placement; the computer line is what changes it.
+  const prLines = hasChips || Boolean(computer);
   const rowRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -265,7 +279,7 @@ export const ChatRow = memo(function ChatRow({
       <div
         ref={rowRef}
         data-chat-id={item.id}
-        className={`group/row relative ${dragging ? "opacity-50" : ""}`}
+        className={`group/row relative ${dragging ? "opacity-50" : ""} ${computer?.offline && dimOffline ? "opacity-50" : ""}`}
         onPointerEnter={showCardSoon}
         onPointerLeave={hideCardSoon}
         onPointerDown={hideCard}
@@ -294,7 +308,7 @@ export const ChatRow = memo(function ChatRow({
             aria-busy={archiving || undefined}
             aria-label={archiving ? `Archiving ${item.label}` : undefined}
             aria-current={active ? "page" : undefined}
-            className={`sidebar-row relative z-10 mx-2 flex ${hasChips || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
+            className={`sidebar-row relative z-10 mx-2 flex ${twoLines ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
               active ? "bg-hover-2" : "hover:bg-hover-2"
             } ${archiving ? "opacity-30" : ""}`}
           >
@@ -308,23 +322,39 @@ export const ChatRow = memo(function ChatRow({
                 mark !== "idle" && <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-surface" />
               )}
             </span>
-            <ChatMarkDot mark={mark} topAligned={hasChips || item.worktreeCount !== undefined} />
+            <ChatMarkDot mark={mark} topAligned={twoLines} />
             <span
-              className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasChips ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
+              className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${prLines ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
                 item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
               }`}
             >
               <ChatTitle label={item.label} />
-              {item.worktreeCount !== undefined && <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>}
+              {item.worktreeCount !== undefined && !computer && (
+                <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>
+              )}
             </span>
           </button>
         )}
 
-        {hasChips && !renaming && (
+        {(hasChips || computer) && !renaming && (
           <div
             data-chat-prs
             className={`sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2 ${archiving ? "opacity-30" : ""}`}
           >
+            {computer && (
+              <span data-chat-computer className="flex min-w-0 shrink items-center gap-1 truncate text-[12px] leading-4 text-ink-3">
+                <HugeiconsIcon icon={LaptopIcon} size={12} strokeWidth={2} color="currentColor" className="shrink-0" />
+                {computer.offline ? `${computer.name}, offline` : computer.name}
+              </span>
+            )}
+            {computer && item.worktreeCount !== undefined && (
+              <span className="shrink-0 text-[12px] leading-4 text-ink-3">· {item.worktreeCount} Worktrees</span>
+            )}
+            {computer && hasChips && (
+              <span aria-hidden className="text-[12px] leading-4 text-ink-3 opacity-60">
+                ·
+              </span>
+            )}
             {linearIssue && <LinearIssueChip issue={linearIssue} />}
             {shownPullRequests.map((pr) => (
               <PullRequestChip key={pr.url} pr={pr} labelled={pullRequests.length === 1} />
@@ -370,7 +400,7 @@ export const ChatRow = memo(function ChatRow({
               if (menu) setMenu(null);
               else openMenu(rect.left, rect.bottom + 4);
             }}
-            className={`absolute right-3 ${hasChips ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
+            className={`absolute right-3 ${prLines ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
               menu ? "bg-hover text-ink opacity-100" : "opacity-0"
             }`}
           >
@@ -629,20 +659,29 @@ function ChatHoverCard({
               <HugeIcon icon={EthernetPortIcon} size={14} />
             </span>
             <span className="flex min-w-0 flex-wrap gap-1">
-              {details.ports.map((port) => (
-                <a
-                  key={port.port}
-                  href={portUrl(port)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  data-chat-card-port
-                  title={`${port.command} · open ${portUrl(port)}`}
-                  onClick={onOpenLink}
-                  className="rounded-[6px] bg-hover px-1.5 py-0.5 font-mono text-[11.5px] tabular-nums text-ink-2 no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-                >
-                  :{port.port}
-                </a>
-              ))}
+              {details.ports.map((port) => {
+                const computer = portComputer(port);
+                const chip = "rounded-[6px] bg-hover px-1.5 py-0.5 font-mono text-[11.5px] tabular-nums text-ink-2";
+                // Another computer's port is not at this Mac's localhost: shown, not linked.
+                return computer ? (
+                  <span key={port.port} data-chat-card-port data-port-remote title={`${port.command} · listening on ${computer}`} className={chip}>
+                    :{port.port} <span className="font-sans text-ink-3">on {computer}</span>
+                  </span>
+                ) : (
+                  <a
+                    key={port.port}
+                    href={portUrl(port)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-chat-card-port
+                    title={`${port.command} · open ${portUrl(port)}`}
+                    onClick={onOpenLink}
+                    className={`${chip} no-underline hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
+                  >
+                    :{port.port}
+                  </a>
+                );
+              })}
             </span>
           </div>
         ) : null}
@@ -889,9 +928,9 @@ function ChatMenu({
     item.pinned
       ? { key: "unpin", label: "Unpin", icon: PinOffIcon, onSelect: run(() => actions.onPin?.(item.id, null)), disabled: !actions.onPin }
       : { key: "pin", label: "Pin", icon: PinIcon, onSelect: run(() => actions.onPin?.(item.id)), disabled: !actions.onPin },
-    "divider",
+    "divider" as const,
     ...archiveItems,
-  ];
+  ].filter((entry) => entry === "divider" || !actions.remote || (entry.key !== "reveal" && entry.key !== "editor"));
 
   const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>("[data-menu-row]:not(:disabled)") ?? [])];

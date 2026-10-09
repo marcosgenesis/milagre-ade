@@ -20,6 +20,7 @@ import { promptSkillParts } from "../lib/prompt-skills";
 import { PromptHighlights } from "./PromptHighlights";
 import { ContextRing } from "./ContextRing";
 import { contextWindowFor } from "../lib/model-options";
+import { offlinePlaceholder } from "../lib/computers";
 import { formatTokens } from "./usage/format";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
@@ -42,6 +43,8 @@ const COMMANDS = [
 ];
 
 interface PromptComposerProps {
+  /** The chat's computer is away: the field is disabled and its placeholder says so. */
+  offlineName?: string | null;
   imageDraft: ImageDraft;
   projectPath: string;
   draft: string;
@@ -107,6 +110,7 @@ function EffortMeter({ level, total }: { level: number; total: number }) {
 }
 
 export function PromptComposer({
+  offlineName,
   imageDraft,
   projectPath,
   draft,
@@ -683,13 +687,14 @@ export function PromptComposer({
                   setPlusOpen(false);
                 }}
                 onKeyDown={handleKeyDown}
+                disabled={Boolean(offlineName)}
                 placeholder={
-                  running
+                  (running
                     ? // Antigravity can't be steered mid-turn (ACP has no steering); a message waits for the next turn.
                       provider === "antigravity"
                       ? "Queue a message for the next turn…"
                       : "Steer the agent…"
-                    : "Prompt or mention a file with @"
+                    : "Prompt or mention a file with @") + (offlineName ? offlinePlaceholder(offlineName) : "")
                 }
                 aria-label="Prompt"
                 className={`${inputTextClass} ${expanded ? "" : "placeholder-shown:whitespace-nowrap placeholder:truncate"} ${hasSkill ? "prompt-input-highlighted" : "text-ink"} relative block min-w-0 w-full resize-none overflow-hidden bg-transparent caret-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3`}

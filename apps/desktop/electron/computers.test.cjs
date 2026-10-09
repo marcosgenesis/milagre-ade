@@ -108,6 +108,7 @@ function fakeMac({ lan = [], hello = "accept" } = {}) {
     urls: [],
     times: [],
     calls: [],
+    focus: [],
     accepts: [],
     held: [],
     hold: null,
@@ -121,6 +122,7 @@ function fakeMac({ lan = [], hello = "accept" } = {}) {
   mac.open = () => mac.sockets.filter((socket) => !socket.closed);
   const answer = (frame) => {
     mac.calls.push(frame.method);
+    if (frame.method === "daemon:focus") mac.focus.push(frame.args?.[0]?.focused);
     if (frame.method === mac.failing) return { v: 1, id: frame.id, error: { code: "EFAIL", message: "no" } };
     const result =
       frame.method === "daemon:status"
@@ -383,6 +385,8 @@ test("the LAN is used when the computer gave an address that answers, the relay 
   await until(() => state() === "online", "online");
   await until(() => computers.list()[0].route === "lan" && state() === "online", "on the LAN");
   assert.equal(computers.list()[0].lan, true);
+  assert.deepEqual(computers.list()[0].lanRoutes, [LAN]);
+  assert.equal(typeof computers.list()[0].addedAt, "number");
   assert.deepEqual(probed.slice(0, 1), [`${LAN.replace("ws:", "http:")}/v1/hello`]);
   assert.ok(mac.urls.some((url) => url.startsWith(`${LAN}/v1/phone`)));
   // Moving from the relay to the LAN is a switch, not an outage.
@@ -563,4 +567,72 @@ test("a keychain that can't be opened for a computer already here is shown and r
   await until(() => state() === "online", "online once the keychain opens");
   assert.equal(mac.urls.length, opened + 1);
   assert.equal(computers.list()[0].message, null);
+});
+
+test("a computer whose calls fail after its channel opens is dialed less and less often", async (t) => {
+  const mac = fakeMac();
+  const steps = [150, 300, 600];
+  const { computers, state } = await paired(t, mac, { backoffMs: steps, reconnectMs: 5, offlineAfterMs: 60_000 });
+  await computers.add(macLink(mac), { name: "studio" });
+  await computers.setEnabled(true);
+  await until(() => state() === "online", "online");
+  // Every hello is accepted, but the snapshot a reconnect reads fails each time.
+  mac.failing = "daemon:snapshot";
+  const from = mac.urls.length;
+  mac.drop();
+  await until(() => mac.urls.length >= from + 3, "three redials");
+  const [first, second, third] = mac.times.slice(from, from + 3);
+  assert.ok(second - first >= steps[0] - 10, `then it waits ${steps[0]}: ${second - first}ms`);
+  assert.ok(third - second >= steps[1] - 10, `then ${steps[1]}: ${third - second}ms`);
+  assert.equal(state(), "reconnecting");
+  mac.failing = null;
+  await until(() => state() === "online", "online again", 3000);
+});
+
+test("a call already on the relay when the LAN opens finishes there, and the runtime moves once it is answered", async (t) => {
+  const mac = fakeMac({ lan: [LAN] });
+  // The relay holds one answer back; the LAN address doesn't answer its probe until the test says so.
+  mac.hold = (socket, frame) => !socket.url.startsWith(LAN) && frame.method === "project:recent";
+  let lanAnswers = false;
+  const { computers, changes, state } = await paired(t, mac, {
+    checkEveryMs: 20,
+    fetch: async () => ({ ok: lanAnswers, json: async () => ({ v: 1, hostId: HOST }) }),
+  });
+  await computers.add(macLink(mac), { name: "studio" });
+  await computers.setEnabled(true);
+  await until(() => state() === "online", "online");
+  const id = computers.list()[0].id;
+  const slow = computers.invoke(id, "project:recent", ["slow"]);
+  await until(() => mac.held.length === 1, "the call to wait on the relay");
+  lanAnswers = true;
+  await until(() => mac.urls.some((url) => url.startsWith(LAN)), "the LAN channel to open");
+  await delay(60);
+  assert.equal(computers.list()[0].route, "relay", "no move while a call waits on the relay");
+  mac.hold = null;
+  mac.release();
+  assert.deepEqual(await slow, { echo: ["slow"] });
+  await until(() => computers.list()[0].route === "lan", "on the LAN once the relay is free");
+  assert.equal(
+    changes.some((list) => list[0]?.state === "reconnecting"),
+    false,
+  );
+});
+
+test("the window's focus reaches the computer's daemon, now and after every reconnect, and wins over the runtime's own replay", async (t) => {
+  const mac = fakeMac();
+  const { computers, state } = await paired(t, mac);
+  await computers.add(macLink(mac), { name: "studio" });
+  computers.setFocused(true);
+  await computers.setEnabled(true);
+  await until(() => state() === "online", "online");
+  await until(() => mac.focus.at(-1) === true, "focus told after connecting");
+  computers.setFocused(false);
+  await until(() => mac.focus.at(-1) === false, "blur told");
+  computers.setFocused(true);
+  await until(() => mac.focus.at(-1) === true, "focus told");
+  mac.drop();
+  const before = mac.calls.length;
+  await until(() => mac.calls.length > before && mac.calls.includes("daemon:snapshot-page") && mac.focus.length > 3, "replayed");
+  await delay(50);
+  assert.equal(mac.focus.at(-1), true, "the reconnect replays the window's state");
 });

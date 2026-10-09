@@ -371,6 +371,8 @@ const MessageTranscript = memo(function MessageTranscript({
 });
 
 interface ChatComposerProps {
+  /** The chat's computer is away: the composer is disabled and says so. */
+  offlineName?: string | null;
   /** Sends a comment on a design, or the design the user chose, to the agent; resolves whether it went. */
   onSendDesignMessage?: (text: string) => Promise<boolean>;
   scopeKind?: "project" | "link";
@@ -674,6 +676,7 @@ function NewChatHeader({
 const EMPTY_SUBAGENTS: Subagent[] = [];
 
 export function ChatComposer({
+  offlineName,
   scopeKind,
   imageDraft,
   projectPath,
@@ -926,7 +929,7 @@ export function ChatComposer({
           <div className={`relative mx-auto w-full max-w-3xl shrink-0 p-1.5 ${isNewChat ? "" : "z-20 -mt-1.5"}`}>
             {/* The update pill floats centred on the chip row's line, outside its flow. */}
             {!canvasOpened && <UpdatePillSlot className="bottom-full mb-2" />}
-            {isNewChat && scopeKind !== "link" && (
+            {isNewChat && scopeKind !== "link" && !offlineName && (
               <NewChatHeader
                 worktrees={worktrees}
                 selectedWorktreeId={selectedWorktreeId}
@@ -942,34 +945,37 @@ export function ChatComposer({
             )}
             {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
             {approval && <div className="mb-2 w-full">{approval}</div>}
-            <PromptComposer
-              imageDraft={imageDraft}
-              projectPath={projectPath}
-              draft={draft}
-              onDraftChange={onDraftChange}
-              onSend={onSend}
-              onStop={onStop}
-              sendBlocked={sendBlocked}
-              running={isSending}
-              models={models}
-              cliStatus={cliStatus}
-              onModelPickerOpen={onModelPickerOpen}
-              onUpdateCli={onUpdateCli}
-              updatingCli={updatingCli}
-              selectedModel={selectedModel}
-              onModelChange={onModelChange}
-              capability={capability}
-              effort={effort}
-              onEffortChange={onEffortChange}
-              ultracode={ultracode}
-              onUltracodeChange={onUltracodeChange}
-              fastMode={fastMode}
-              onFastModeChange={onFastModeChange}
-              permissionMode={permissionMode}
-              onPermissionModeChange={onPermissionModeChange}
-              alwaysExpanded={isNewChat}
-              contextUsage={contextUsage}
-            />
+            <div className={offlineName ? "pointer-events-none opacity-60" : undefined}>
+              <PromptComposer
+                offlineName={offlineName}
+                imageDraft={imageDraft}
+                projectPath={projectPath}
+                draft={draft}
+                onDraftChange={onDraftChange}
+                onSend={onSend}
+                onStop={onStop}
+                sendBlocked={sendBlocked}
+                running={isSending}
+                models={models}
+                cliStatus={cliStatus}
+                onModelPickerOpen={onModelPickerOpen}
+                onUpdateCli={onUpdateCli}
+                updatingCli={updatingCli}
+                selectedModel={selectedModel}
+                onModelChange={onModelChange}
+                capability={capability}
+                effort={effort}
+                onEffortChange={onEffortChange}
+                ultracode={ultracode}
+                onUltracodeChange={onUltracodeChange}
+                fastMode={fastMode}
+                onFastModeChange={onFastModeChange}
+                permissionMode={permissionMode}
+                onPermissionModeChange={onPermissionModeChange}
+                alwaysExpanded={isNewChat}
+                contextUsage={contextUsage}
+              />
+            </div>
             {newChatError && (
               <p role="alert" className="mt-2 px-1 text-[12px] text-red">
                 {newChatError}

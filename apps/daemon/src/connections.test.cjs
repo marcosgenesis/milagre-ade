@@ -197,3 +197,31 @@ test("daemon:status advertises desktop-peer-v1 and peer:routes, which a paired d
   const reply = await virtualClient(daemon, { policy: peerPolicy }).call("peer:routes");
   assert.deepEqual(reply.error, { code: "COMMAND_FAILED", message: "Phone access is starting. Try again." }, "phone access is off here");
 });
+
+test("a paired desktop may list folders in the daemon's home folder, and only there", async (t) => {
+  const homeDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-home-")));
+  t.after(() => fs.rm(homeDir, { recursive: true, force: true }));
+  await fs.mkdir(path.join(homeDir, "Code"));
+  const daemon = await daemonFixture(t, { homeDir });
+  const desktop = virtualClient(daemon, { policy: peerPolicy });
+  const status = (await desktop.call("daemon:status")).result;
+  assert.ok(status.capabilities.includes("remote-files-v1"));
+  assert.ok(status.methods.includes("fs:list-dirs"));
+  const listing = (await desktop.call("fs:list-dirs", [{}])).result;
+  assert.deepEqual(
+    listing.entries.map((entry) => entry.name),
+    ["Code"],
+  );
+  assert.deepEqual((await desktop.call("fs:list-dirs", [{ path: "/etc" }])).error, {
+    code: "OUTSIDE_HOME",
+    message: "Only folders in the home folder can be listed.",
+  });
+});
+
+test("a paired desktop may call media:read, which refuses a file outside the scope's roots", async (t) => {
+  const daemon = await daemonFixture(t);
+  const desktop = virtualClient(daemon, { policy: peerPolicy });
+  assert.ok((await desktop.call("daemon:status")).result.methods.includes("media:read"));
+  const reply = await desktop.call("media:read", [{ scope: "/nowhere", path: "/etc/hosts.png" }]);
+  assert.equal(reply.error?.code, "NOT_SERVED");
+});

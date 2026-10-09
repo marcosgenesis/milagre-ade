@@ -32,7 +32,7 @@ async function readIdentity(dataDir) {
       box = decode(value.box);
     return { hostId: hostIdOf(sign.publicKey), sign, box };
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    if (/** @type {any} */ (error).code !== "ENOENT") throw error;
   }
   return rotateIdentity(dataDir);
 }
@@ -44,6 +44,8 @@ const decode = (pair) => ({ publicKey: fromB64url(pair.publicKey), secretKey: fr
  * New sign and box key pairs, replacing any saved ones. Reset calls it, so a host id that leaked with an old link
  * no longer names this Mac on the relay. `retireUntil` (ms epoch) keeps the old signing key until then, so the old
  * room can still tell the phones that dial it that this Mac was reset (see readRetired).
+ * @param {string} dataDir
+ * @param {{ retireUntil?: number; now?: number }} [options]
  */
 async function rotateIdentity(dataDir, { retireUntil, now = Date.now() } = {}) {
   if (retireUntil) {

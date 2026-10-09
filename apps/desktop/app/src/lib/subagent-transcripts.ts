@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef } from "react";
 import { projectOfKey, sessionIdFromKey } from "@milagre/shared/agent-runs";
 import { hasTranscriptTail, mergeTranscript } from "@milagre/shared/subagent-transcript";
 import type { Subagent, SubagentTranscriptEntry } from "../model.ts";
+import { bridgeForKey } from "./computer-bridge";
 
 // The whole transcripts of the subagents a panel shows, from a host that sends each subagent with only the end of its
 // transcript (subagent-tails-v1): read once with readSubagent, then kept current from the tails each update brings.
@@ -36,7 +37,7 @@ function known(key: string, agent: Subagent): SubagentTranscriptEntry[] | null {
 function load(key: string, chatKey: string, latest: () => Subagent) {
   let loading = loads.get(key);
   if (!loading) {
-    loading = window.milagre
+    loading = bridgeForKey(chatKey)
       .readSubagent(projectOfKey(chatKey), sessionIdFromKey(chatKey), latest().id)
       .then(
         (read) => {

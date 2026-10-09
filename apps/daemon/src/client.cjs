@@ -30,7 +30,7 @@ async function connect({ dataDir, timeoutMs = 30000, requireAuthentication = pro
   } finally {
     clearTimeout(deadline);
   }
-  const client = new EventEmitter();
+  const client = /** @type {EventEmitter & { call: (method: string, args?: unknown[]) => Promise<any>; close: () => void }} */ (new EventEmitter());
   const pending = new Map();
   let nextId = 0;
   function fail(error) {

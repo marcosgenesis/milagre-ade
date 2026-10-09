@@ -72,7 +72,7 @@ function assertPrivate(file, { platform = process.platform } = {}) {
   const stat = fs.lstatSync(file);
   if (stat.isSymbolicLink()) throw new Error(`Private path must not be a symlink: ${file}`);
   if (platform === "win32") windowsAcl(file);
-  else if (stat.uid !== process.getuid() || (stat.mode & 0o777) !== (stat.isDirectory() ? 0o700 : 0o600))
+  else if (stat.uid !== /** @type {() => number} */ (process.getuid)() || (stat.mode & 0o777) !== (stat.isDirectory() ? 0o700 : 0o600))
     throw new Error(`Private path must be owned by you with permissions ${stat.isDirectory() ? "0700" : "0600"}: ${file}`);
 }
 function preparePrivateDirectory(directory) {

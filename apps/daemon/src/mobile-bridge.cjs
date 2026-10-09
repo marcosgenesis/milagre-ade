@@ -2,7 +2,6 @@ const http = require("node:http");
 const { once } = require("node:events");
 const { timingSafeEqual } = require("node:crypto");
 const fs = require("node:fs/promises");
-const os = require("node:os");
 const path = require("node:path");
 const { pipeline } = require("node:stream/promises");
 const { randomUUID, createHash } = require("node:crypto");
@@ -12,6 +11,7 @@ const { applyAgentEvent, chatInProject, projectOfKey } = require("@milagre/share
 const { applyStatePatch, diffState } = require("@milagre/shared/state-patch");
 const { reconcileState } = require("@milagre/shared/reconcile");
 const { isLinkScopeKey, scopeFromKey } = require("@milagre/shared/chat-scopes");
+const { openMedia } = require("./media-access.cjs");
 const { chatsNeedingAttention } = require("@milagre/shared/attention");
 const { pullRequestRefs } = require("@milagre/shared/chats");
 const { connect } = require("./client.cjs");
@@ -287,26 +287,6 @@ function runsForPhone(runs) {
     ),
   };
 }
-const MAX_MEDIA = 15 * MAX_BODY;
-const MEDIA_TYPES = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".heic": "image/heic",
-  ".heif": "image/heic",
-};
-const HEIC_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"]);
-const inside = (root, target) => target === root || target.startsWith(root + path.sep);
-// Decide by content too, so a renamed non-image never leaves the Mac as an image.
-function sniffsAs(type, head) {
-  if (type === "image/png") return head.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  if (type === "image/jpeg") return head[0] === 255 && head[1] === 216 && head[2] === 255;
-  if (type === "image/gif") return /^GIF8[79]a$/.test(head.subarray(0, 6).toString("latin1"));
-  if (type === "image/webp") return head.subarray(0, 4).toString("latin1") === "RIFF" && head.subarray(8, 12).toString("latin1") === "WEBP";
-  return head.subarray(4, 8).toString("latin1") === "ftyp" && HEIC_BRANDS.has(head.subarray(8, 12).toString("latin1"));
-}
 // React Native's WebSocket always sends an Origin (Android derives one from the URL, iOS's SocketRocket too) and only
 // lets the app replace it, so the phone sends this one. No web page has it, and a browser cannot set the bearer header
 // on a WebSocket anyway.
@@ -319,13 +299,6 @@ const projectRuns = ({ runs, seq }, projectPath) => ({
   runs: Object.fromEntries(Object.entries(runs ?? {}).filter(([key]) => chatInProject(projectPath, key))),
   seq,
 });
-const realOrNull = async (file) => {
-  try {
-    return await fs.realpath(file);
-  } catch {
-    return null;
-  }
-};
 const failure = (status, message) => Object.assign(new Error(message), { status });
 const ATTACHMENT_QUOTA = 200 * 1024 * 1024;
 /** Bytes of regular files under `folder`, symlinks not followed; 0 when it does not exist yet. */
@@ -534,58 +507,26 @@ async function startMobileBridge({
       }
     }
   });
-  // Images the paired app may show: the Project's Worktrees, its persisted attachments (<Project>/.milagre/images),
-  // files uploaded from mobile, and the folders where agents save generated images. Everything is checked after
-  // realpath, so a symlink cannot lead out.
+  // Images the paired app may show: the rules live in media-access.cjs, shared with media:read for paired desktops.
   async function serveMedia(target, res) {
-    const projectPath = target.searchParams.get("projectPath");
-    const requested = target.searchParams.get("path");
-    if (!validScope(projectPath) || !requested || !path.isAbsolute(requested)) throw failure(400, "Choose a valid Project or Link and absolute image path");
-    if (confine) {
-      await confine.check(projectPath);
-      await confine.check(requested, { uploads: true });
-    }
-    const type = MEDIA_TYPES[path.extname(requested).toLowerCase()];
-    if (!type) throw failure(415, "Only png, jpeg, gif, webp and heic images are served");
-    // Only the worktree folders: a big Project's whole state would be read in pages for every image.
-    const worktreePaths = await scopeRoots(projectPath);
-    const candidates = [
-      ...(Array.isArray(worktreePaths) ? worktreePaths : []),
-      path.join(projectPath, ".milagre", "images"),
-      path.join(dataDir, "mobile-attachments"),
-      path.join(os.tmpdir(), "milagre-generated-images"),
-      path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "generated_images"),
-    ].filter((candidate) => typeof candidate === "string" && path.isAbsolute(candidate));
-    const roots = (await Promise.all(candidates.map(realOrNull))).filter(Boolean);
-    let real = await realOrNull(requested);
-    if (!real || !roots.some((root) => inside(root, real))) {
-      // A screenshot in /tmp must be explicitly shared in this Project's assistant reply.
-      // The runtime validates that reference and returns a durable Project attachment, never arbitrary bytes.
-      const stored = await client.call("project:chat-image", [projectPath, requested]).catch(() => null);
-      if (stored) real = await realOrNull(stored);
-    }
-    if (!real) {
-      // Missing files are only reported as missing inside an allowed folder, so paths elsewhere are not probed.
-      const lexical = path.resolve(requested);
-      throw roots.some((root) => inside(root, lexical)) || candidates.some((root) => inside(path.resolve(root), lexical))
-        ? failure(404, "Image not found")
-        : failure(403, "This file is not available to the mobile app");
-    }
-    if (!roots.some((root) => inside(root, real))) throw failure(403, "This file is not available to the mobile app");
-    if (MEDIA_TYPES[path.extname(real).toLowerCase()] !== type) throw failure(415, "Only png, jpeg, gif, webp and heic images are served");
-    const handle = await fs.open(real, "r").catch((error) => {
-      throw failure(error.code === "ENOENT" ? 404 : 403, error.code === "ENOENT" ? "Image not found" : "This file is not available to the mobile app");
-    });
+    const { handle, type, size } = await openMedia(
+      { scope: target.searchParams.get("projectPath"), requested: target.searchParams.get("path") },
+      {
+        dataDir,
+        scopeRoots,
+        chatImage: (scope, file) => client.call("project:chat-image", [scope, file]),
+        check: confine
+          ? async (scope, file) => {
+              await confine.check(scope);
+              await confine.check(file, { uploads: true });
+            }
+          : undefined,
+      },
+    );
     try {
-      const info = await handle.stat();
-      if (!info.isFile()) throw failure(403, "This file is not available to the mobile app");
-      if (info.size > MAX_MEDIA) throw failure(413, "Images must be 15 MiB or smaller");
-      const head = Buffer.alloc(12);
-      const { bytesRead } = await handle.read(head, 0, 12, 0);
-      if (!sniffsAs(type, head.subarray(0, bytesRead))) throw failure(415, "The file is not a supported image");
-      res.writeHead(200, { "content-type": type, "content-length": info.size, "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" });
+      res.writeHead(200, { "content-type": type, "content-length": size, "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" });
       // Bounded by the size checked above, so a file that grows afterwards cannot exceed Content-Length.
-      await pipeline(handle.createReadStream({ start: 0, end: Math.max(info.size - 1, 0), autoClose: true }), res);
+      await pipeline(handle.createReadStream({ start: 0, end: Math.max(size - 1, 0), autoClose: true }), res);
     } catch (error) {
       await handle.close().catch(() => {});
       if (res.headersSent) {

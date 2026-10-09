@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mediaKind, mediaUrl, attachmentPrompt } from "./media.ts";
+import { mediaKind, mediaUrl, attachmentPrompt, canCopyImage } from "./media.ts";
 
 test("classifies disk media and preserves special characters in paths", () => {
   assert.equal(mediaKind("/tmp/Photo.JPG"), "image");
@@ -12,4 +12,12 @@ test("file-only messages and mixed messages deliver paths without changing visib
   assert.equal(attachmentPrompt("Review", ["/tmp/a b.txt", "/tmp/c.mp4"]), "Review\n\nAttached files:\n/tmp/a b.txt\n/tmp/c.mp4");
   assert.equal(attachmentPrompt("", ["/tmp/a.txt"]), "Please review the attached files.\n\nAttached files:\n/tmp/a.txt");
   assert.equal(attachmentPrompt("hello", []), "hello");
+});
+
+test("canCopyImage takes paths and the data URLs main decodes, not HEIC or AVIF", () => {
+  assert.equal(canCopyImage("/tmp/a.png"), true);
+  assert.equal(canCopyImage("data:image/png;base64,AAAA"), true);
+  assert.equal(canCopyImage("data:image/heic;base64,AAAA"), false);
+  assert.equal(canCopyImage("data:image/avif;base64,AAAA"), false);
+  assert.equal(canCopyImage(undefined), false);
 });

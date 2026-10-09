@@ -9,11 +9,13 @@ import { ScrollArea } from "../primitives/ScrollArea";
 import Tooltip from "../primitives/Tooltip";
 import { useAnchoredPopover } from "./useAnchoredPopover";
 import { viewerTheme } from "./viewerTheme";
+import { useBridge } from "../../lib/computer-bridge";
 
 /** Pages of browsers this Chat's agent started, or that were attached to this Chat. Never inferred from a URL. */
 export function BrowserTrack({ chatId }: { chatId?: string }) {
   // Read once: the bridge never changes while mounted, and a fresh reference each render would restart polling.
-  const [api] = useState(() => window.milagre?.browsers);
+  const bridge = useBridge();
+  const [api] = useState(() => bridge?.browsers);
   const trigger = useRef<HTMLButtonElement>(null),
     panel = useRef<HTMLDivElement>(null);
   const panelId = useId();

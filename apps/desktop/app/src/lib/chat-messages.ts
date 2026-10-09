@@ -1,3 +1,5 @@
+import { rememberChat } from "./offline-cache.ts";
+import { bridgeForKey } from "./computer-bridge.ts";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type { ChatMessage } from "../model.ts";
 import type { MessageChanges } from "../electron.d.ts";
@@ -34,6 +36,11 @@ function set(key: string, next: ChatWindow) {
   }
   // A copy: a listener can resubscribe while it is told, and a live Set would then be walked forever.
   for (const listener of [...(listeners.get(key) ?? [])]) listener();
+  // A remote chat's window is its computer's offline copy too.
+  if (!next.loading && !next.error) {
+    const at = key.lastIndexOf("#");
+    rememberChat(key.slice(0, at), Number(key.slice(at + 1)), next);
+  }
 }
 
 /** `messages` with `changes` for Chat `chatId` applied: a known message replaced, a new one placed after the one before it. */
@@ -65,7 +72,7 @@ function load(scope: string, chatId: number) {
   const key = keyOf(scope, chatId);
   let loading = loads.get(key);
   if (!loading) {
-    loading = window.milagre
+    loading = bridgeForKey(scope)
       .readChatMessages(scope, chatId, { turns: TURNS })
       .then(
         (page) => set(key, { messages: page.messages, hasMore: page.hasMore, total: page.total, loading: false }),
@@ -85,7 +92,7 @@ async function loadEarlier(scope: string, chatId: number, turns = TURNS) {
   const key = keyOf(scope, chatId);
   const current = windows.get(key);
   if (!current?.hasMore || !current.messages.length) return;
-  const page = await window.milagre.readChatMessages(scope, chatId, { before: current.messages[0].id, turns });
+  const page = await bridgeForKey(scope).readChatMessages(scope, chatId, { before: current.messages[0].id, turns });
   const latest = windows.get(key) ?? current;
   const known = new Set(latest.messages.map((message) => message.id));
   set(key, { ...latest, messages: [...page.messages.filter((message) => !known.has(message.id)), ...latest.messages], hasMore: page.hasMore });

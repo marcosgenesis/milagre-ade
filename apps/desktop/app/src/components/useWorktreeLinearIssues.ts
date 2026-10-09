@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LinearIssue } from "@milagre/shared/linear";
 import { pollWhileActive } from "./useWorktreePullRequests";
+import { bridgeForKey } from "../lib/computer-bridge";
 
 const NO_ISSUES: Record<string, LinearIssue> = {};
 
@@ -39,7 +40,7 @@ export function useWorktreeLinearIssues(projectPath: string, active: boolean): {
 // Never throws: a failed read shows no chips.
 async function readIssues(projectPath: string): Promise<Record<string, LinearIssue>> {
   try {
-    return (await window.milagre.readWorktreeLinearIssues(projectPath)) ?? NO_ISSUES;
+    return (await bridgeForKey(projectPath).readWorktreeLinearIssues(projectPath)) ?? NO_ISSUES;
   } catch {
     return NO_ISSUES;
   }

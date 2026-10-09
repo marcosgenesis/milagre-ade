@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
+import { MODEL_CATALOG, PERMISSION_MODES } from "../model.ts";
 import type { PermissionMode } from "../model";
 import type { ChatOrder } from "./chat-list";
 
@@ -35,6 +35,8 @@ export interface AppSettings {
   sidebarAllProjects: boolean;
   /** Experimental: a reply's tool calls and the text between them show in the chat, one row each, instead of folding into one line. */
   muriloMode: boolean;
+  /** Experimental: drive the chats of other Macs running Milagre from this window (Add computer, the computers popover). */
+  otherComputers: boolean;
   /** Let the blurred desktop show through the window (macOS). */
   windowTranslucent: boolean;
   /** How much of the desktop shows through the window's own background, 10 to 100. */
@@ -72,6 +74,7 @@ const DEFAULTS: AppSettings = {
   chatOrder: "created",
   sidebarAllProjects: false,
   muriloMode: false,
+  otherComputers: false,
   windowTranslucent: false,
   windowTranslucency: 80,
   panelTranslucency: 40,
@@ -104,6 +107,7 @@ function load(): AppSettings {
       chatOrder: CHAT_ORDERS.includes(saved.chatOrder as ChatOrder) ? saved.chatOrder! : DEFAULTS.chatOrder,
       sidebarAllProjects: typeof saved.sidebarAllProjects === "boolean" ? saved.sidebarAllProjects : DEFAULTS.sidebarAllProjects,
       muriloMode: typeof saved.muriloMode === "boolean" ? saved.muriloMode : DEFAULTS.muriloMode,
+      otherComputers: typeof saved.otherComputers === "boolean" ? saved.otherComputers : DEFAULTS.otherComputers,
       windowTranslucent: typeof saved.windowTranslucent === "boolean" ? saved.windowTranslucent : DEFAULTS.windowTranslucent,
       windowTranslucency: clampTo(saved.windowTranslucency, WINDOW_TRANSLUCENCY_RANGE, DEFAULTS.windowTranslucency),
       panelTranslucency: clampTo(saved.panelTranslucency, PANEL_TRANSLUCENCY_RANGE, DEFAULTS.panelTranslucency),

@@ -2,8 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FileCode } from "./FileCode";
 import { ScrollArea } from "./primitives/ScrollArea";
+import { useBridge } from "../lib/computer-bridge";
 
 export function AttachmentPreview({ path, name, file, close }: { file?: File; path: string; name: string; close: () => void }) {
+  const bridge = useBridge();
   const dialog = useRef<HTMLDialogElement>(null);
   const [result, setResult] = useState<{ text: string; binary: boolean; truncated: boolean } | null>(null);
   const [error, setError] = useState("");
@@ -35,7 +37,7 @@ export function AttachmentPreview({ path, name, file, close }: { file?: File; pa
               return { text: "", binary: true, truncated: false };
             }
           })
-      : window.milagre.readAttachment(path);
+      : bridge.readAttachment(path);
     read.then(
       (value) => {
         if (current) setResult(value);
@@ -47,7 +49,7 @@ export function AttachmentPreview({ path, name, file, close }: { file?: File; pa
     return () => {
       current = false;
     };
-  }, [path, file]);
+  }, [path, file, bridge]);
   return createPortal(
     <dialog
       ref={dialog}

@@ -46,8 +46,9 @@ export function LinkChangesPanel({
   activePath?: string;
   commentCounts?: Record<string, number>;
   onCommit: (member: WorktreeBinding) => void;
-  onOpenEditor: (member: WorktreeBinding) => void;
-  onReveal: (member: WorktreeBinding) => void;
+  /** Left out for a Link on another Mac: these only act on this one. */
+  onOpenEditor?: (member: WorktreeBinding) => void;
+  onReveal?: (member: WorktreeBinding) => void;
 }) {
   const totals = members.reduce(
     (sum, member) => {
@@ -76,8 +77,8 @@ export function LinkChangesPanel({
             activePath={selectedProjectId === member.projectId ? activePath : undefined}
             commentCounts={selectedProjectId === member.projectId ? commentCounts : undefined}
             onCommit={() => onCommit(member)}
-            onOpenEditor={() => onOpenEditor(member)}
-            onReveal={() => onReveal(member)}
+            onOpenEditor={onOpenEditor && (() => onOpenEditor(member))}
+            onReveal={onReveal && (() => onReveal(member))}
           />
         ))}
       </ScrollArea>
@@ -105,8 +106,8 @@ function ProjectChanges({
   activePath?: string;
   commentCounts?: Record<string, number>;
   onCommit: () => void;
-  onOpenEditor: () => void;
-  onReveal: () => void;
+  onOpenEditor?: () => void;
+  onReveal?: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -169,8 +170,8 @@ function ProjectActions({
   name: string;
   onOpenChange: (open: boolean) => void;
   onCommit: () => void;
-  onOpenEditor: () => void;
-  onReveal: () => void;
+  onOpenEditor?: () => void;
+  onReveal?: () => void;
 }) {
   const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const trigger = useRef<HTMLButtonElement>(null),
@@ -238,8 +239,12 @@ function ProjectActions({
               }}
             >
               <PickerRow label="Commit and open PR…" icon={<HugeiconsIcon icon={GitPullRequestIcon} size={15} />} selected={false} onClick={choose(onCommit)} />
-              <PickerRow label="Open in editor" icon={<HugeiconsIcon icon={SourceCodeIcon} size={15} />} selected={false} onClick={choose(onOpenEditor)} />
-              <PickerRow label="Reveal Worktree" icon={<HugeiconsIcon icon={FolderOpenIcon} size={15} />} selected={false} onClick={choose(onReveal)} />
+              {onOpenEditor && (
+                <PickerRow label="Open in editor" icon={<HugeiconsIcon icon={SourceCodeIcon} size={15} />} selected={false} onClick={choose(onOpenEditor)} />
+              )}
+              {onReveal && (
+                <PickerRow label="Reveal Worktree" icon={<HugeiconsIcon icon={FolderOpenIcon} size={15} />} selected={false} onClick={choose(onReveal)} />
+              )}
             </PickerPanel>
           </div>,
           document.body,

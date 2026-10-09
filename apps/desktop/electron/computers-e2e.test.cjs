@@ -170,3 +170,97 @@ test("a computer whose relay drops reads Reconnecting, comes back by itself and 
   await until(() => first(computers).state === "online" && snapshots() > before, "back online with a fresh snapshot", 10_000);
   assert.equal(first(computers).route, "relay");
 });
+
+test("the window's routing drives a real Mac: its Project and chats named by computer, events, and its cache once away", async (t) => {
+  const { registerComputers } = require("./computers-ipc.cjs");
+  const { createComputerCaches } = require("./computer-cache.cjs");
+  const forwarded = [];
+  // computers.cjs emits into the IPC once it exists; desk() builds computers first, so the hook reads a late binding.
+  let ipc = null;
+  const { computers, dataDir } = await desk(t, { emit: (id, channel, payload) => ipc?.event(id, channel, payload) });
+  const cache = createComputerCaches({ dir: path.join(dataDir, "computers") });
+  t.after(() => cache.close());
+  const handlers = new Map();
+  ipc = registerComputers({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    computers,
+    thisMac: () => "desk",
+    send: (channel, payload) => forwarded.push({ channel, payload }),
+    cache,
+  });
+  const call = (channel, ...args) => within(handlers.get(channel)({ sender: { isDestroyed: () => false, send() {} } }, ...args), channel);
+  const mac = await startTestMac(t, { lan: false });
+  const added = await within(computers.add(await linkOf(mac), { name: "studio" }), "the computer to be added");
+  await until(() => first(computers)?.state === "online", "online");
+  const id = added.id;
+  const projectKey = `${id}|${mac.project}`;
+
+  const opened = await call("computers:invoke", id, "project:open-at", [projectKey]);
+  assert.equal(opened.path, projectKey, "the Project's path names its computer");
+  const recent = await call("computers:invoke", id, "project:recent", []);
+  assert.ok(recent.some((project) => project.path === projectKey));
+  const chatId = Object.values(opened.state.sessions)[0].id;
+
+  await call("computers:invoke", id, "chat:patch", [projectKey, chatId, { title: "Named from the desk" }]);
+  const onMac = await within(mac.client.call("project:open", [mac.project]), "project:open on the Mac");
+  assert.equal(onMac.state.sessions[chatId].title, "Named from the desk", "the patch reached the Mac with its own path");
+  await until(
+    () =>
+      forwarded.some(
+        ({ channel, payload }) =>
+          channel === "computers:event" && payload.computerId === id && payload.channel === "project:state" && payload.payload?.path === projectKey,
+      ),
+    "a state event naming the computer",
+  );
+  const reread = await call("computers:invoke", id, "project:read", [projectKey]);
+  assert.equal(reread.state.sessions[chatId].title, "Named from the desk");
+  // The window forwards the scope's whole state as it changes (offline-cache.ts); that is what the cache keeps.
+  const remembered = structuredClone(reread.state);
+  remembered.sessions[chatId].title = "Remembered by the window";
+  await call("computers:remember", id, { kind: "state", scope: projectKey, state: remembered });
+  const page = await call("computers:invoke", id, "chat:messages", [projectKey, chatId, { turns: 20 }]);
+  assert.ok(Array.isArray(page.messages));
+  await call("computers:remember", id, {
+    kind: "chat",
+    scope: projectKey,
+    chatId,
+    window: { messages: [{ id: 1, session_id: chatId, role: "user", body: "kept here" }], hasMore: false, total: 1 },
+  });
+
+  // Its folders, from its own home: the Project's folder is listed and already a Project.
+  const listing = await within(call("computers:invoke", id, "fs:list-dirs", [{}]), "fs:list-dirs");
+  assert.equal(listing.path, mac.home);
+  assert.ok(
+    listing.entries.some((entry) => entry.name === "project" && entry.project),
+    "the opened Project reads as Added",
+  );
+  await assert.rejects(call("computers:invoke", id, "fs:list-dirs", [{ path: "/etc" }]), /Only folders in the home folder/);
+
+  // An image the chat shows, read through media:read; one outside the Project's roots is refused.
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82]);
+  const shot = path.join(mac.project, ".milagre", "images", "shot.png");
+  await fs.mkdir(path.dirname(shot), { recursive: true });
+  await fs.writeFile(shot, png);
+  const media = await within(call("computers:invoke", id, "media:read", [{ scope: projectKey, path: shot }]), "media:read");
+  assert.equal(media.type, "image/png");
+  assert.deepEqual(Buffer.from(media.base64, "base64"), png);
+  await fs.writeFile(path.join(mac.home, "secret.png"), png);
+  await assert.rejects(call("computers:invoke", id, "media:read", [{ scope: projectKey, path: path.join(mac.home, "secret.png") }]), /not available/);
+
+  // Away: not online is all the cache asks, so turning the computer off stands in for it going offline.
+  await within(computers.setEnabled(false), "setEnabled(false)");
+  assert.ok((await call("computers:invoke", id, "project:recent", [])).some((project) => project.path === projectKey));
+  const kept = await call("computers:invoke", id, "project:switch", [projectKey]);
+  assert.equal(kept.path, projectKey);
+  assert.equal(kept.state.sessions[chatId].title, "Remembered by the window");
+  assert.equal((await call("computers:invoke", id, "chat:messages", [projectKey, chatId, { turns: 20 }])).messages[0].body, "kept here");
+  const started = Date.now();
+  const uncached = await call("computers:invoke", id, "chat:messages", [projectKey, chatId + 99, { turns: 20 }]);
+  assert.deepEqual(uncached.messages, [], "a chat with no copy reads empty");
+  assert.ok(Date.now() - started < 8000, "and promptly, without waiting on the offline computer");
+  await assert.rejects(call("computers:invoke", id, "chat:patch", [projectKey, chatId, { title: "x" }]), { message: "studio is offline." });
+  // Opening a remote Project goes only to the computer: this Mac's own recent-projects list is written by its own host.
+  await assert.rejects(fs.stat(path.join(dataDir, "recent-projects.json")), { code: "ENOENT" });
+  await call("computers:remove", id);
+  await assert.rejects(fs.stat(path.join(dataDir, "computers", id)), { code: "ENOENT" });
+});

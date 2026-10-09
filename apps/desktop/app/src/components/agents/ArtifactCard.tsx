@@ -28,6 +28,7 @@ import { DESIGNS_EXPANDED, dockLayer, useDockArea, useSidePanelRoom } from "./do
 import { useSidePanel } from "./PanelToggles";
 import { DockSlide } from "./DockSlide";
 import { ArtifactCanvas, ArtifactFrame, useArtifact, type CanvasHandle, type CanvasView, type DesignPin, type PinControls } from "./ArtifactCanvas";
+import { bridgeForKey } from "../../lib/computer-bridge";
 
 // Docked width plus the 12px gap to the chat. The chat panes reserve it through --artifact-dock.
 const DOCK_WIDTH = 560;
@@ -76,7 +77,7 @@ const Artifacts = createContext<ArtifactsValue>({
 function useResolutions(chatId: string | null, moved: number) {
   const [resolutions, setResolutions] = useState<Map<string, string>>(() => new Map());
   useEffect(() => {
-    const comments = window.milagre?.artifacts?.comments;
+    const comments = chatId && window.milagre ? bridgeForKey(chatId).artifacts?.comments : undefined;
     if (!chatId || !comments) return;
     let live = true;
     comments({ chatId })
@@ -536,7 +537,10 @@ function ArtifactDock({
       // message went, so a send that fails records none.
       const comments: DesignComment[] = written.map(({ key, design, x, y, text }) => ({ id: key, design, x, y, text }));
       if (await onSend(designFeedbackMessage({ choice, comments }))) {
-        if (comments.length) void window.milagre.artifacts.addComments?.({ chatId, comments }).catch(() => {});
+        if (comments.length)
+          void bridgeForKey(chatId)
+            .artifacts.addComments?.({ chatId, comments })
+            .catch(() => {});
         setPins([]);
         setOpenPin(null);
         setChoice(null);

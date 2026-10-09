@@ -3,6 +3,7 @@ import type { TerminalInfo } from "@milagre/shared/terminal";
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { dispose, pruneTerminals } from "./terminal-sessions";
 import { addTerminal, applyTerminalList, chatTerminals, setTerminalPanelOpen, setTerminalPicking } from "./terminal-store";
+import { bridgeForKey } from "./computer-bridge";
 
 /** A Worktree a new Terminal can start in; a shared Chat offers one per member Project. */
 export type TerminalPlace = { path: string; label: string };
@@ -16,13 +17,13 @@ export function takeFocusRequest(id: string) {
 }
 
 async function refreshTerminals(chatId: string) {
-  const { terminals } = await window.milagre.terminals.list({ chatId });
+  const { terminals } = await bridgeForKey(chatId).terminals.list({ chatId });
   pruneTerminals(chatId, new Set(terminals.map((terminal) => terminal.id)));
   applyTerminalList(chatId, terminals);
 }
 
 export async function openTerminal(chatId: string, cwd?: string): Promise<TerminalInfo> {
-  const terminal = await window.milagre.terminals.open({ chatId, ...(cwd ? { cwd } : {}) });
+  const terminal = await bridgeForKey(chatId).terminals.open({ chatId, ...(cwd ? { cwd } : {}) });
   focusNext = terminal.id;
   addTerminal(terminal);
   return terminal;
@@ -50,7 +51,7 @@ export function toggleTerminalPanel(chatId: string, places: TerminalPlace[] | un
 /** What the Chat's Terminals run that archiving would end; none when the host can't say. */
 export async function busyTerminals(chatId: string): Promise<string[]> {
   try {
-    const { terminals } = await window.milagre.terminals.list({ chatId });
+    const { terminals } = await bridgeForKey(chatId).terminals.list({ chatId });
     return terminals.filter((terminal) => terminal.busy).map((terminal) => terminal.title);
   } catch {
     return [];
@@ -59,7 +60,9 @@ export async function busyTerminals(chatId: string): Promise<string[]> {
 
 export async function closeTerminal(terminal: TerminalInfo) {
   dispose(terminal.id);
-  await window.milagre.terminals.close({ terminalId: terminal.id }).catch(() => {});
+  await bridgeForKey(terminal.chatId)
+    .terminals.close({ terminalId: terminal.id })
+    .catch(() => {});
   await refreshTerminals(terminal.chatId).catch(() => {});
 }
 
@@ -68,8 +71,16 @@ export function useTerminalSync(chatId: string | null) {
   useEffect(() => {
     if (!chatId) return;
     void refreshTerminals(chatId).catch(() => {});
-    return window.milagre.onTerminalsChanged((payload) => {
+    const changed = (payload: { chatId: string }) => {
       if (payload?.chatId === chatId) void refreshTerminals(chatId).catch(() => {});
+    };
+    const offLocal = window.milagre.onTerminalsChanged(changed);
+    const offRemote = window.milagre.onComputerEvent?.((event) => {
+      if (event.channel === "terminal:changed") changed(event.payload);
     });
+    return () => {
+      offLocal();
+      offRemote?.();
+    };
   }, [chatId]);
 }

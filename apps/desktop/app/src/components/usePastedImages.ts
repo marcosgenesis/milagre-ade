@@ -18,7 +18,10 @@ function readImage(file: File): Promise<ImageAttachment> {
   });
 }
 
-export function usePastedImages(scope: string) {
+export const REMOTE_FILES_NOTICE = "Files from this Mac can't be attached to a chat on another computer. Paste images instead.";
+
+/** `remote`: the chat is on another Mac, so files from this one are refused (pasted images travel as data and still go). */
+export function usePastedImages(scope: string, remote = false) {
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const localFiles = useRef(new Map<string, File>());
   const [files, setFiles] = useState<string[]>([]);
@@ -90,6 +93,10 @@ export function usePastedImages(scope: string) {
   }
 
   async function attachFiles(selected: File[]) {
+    if (remote) {
+      if (selected.length) setError(REMOTE_FILES_NOTICE);
+      return;
+    }
     if (reading.current) {
       setError("Wait for the current attachment to finish loading, then try again.");
       return;
@@ -130,6 +137,10 @@ export function usePastedImages(scope: string) {
   }
 
   function attachPath(path: string) {
+    if (remote) {
+      setError(REMOTE_FILES_NOTICE);
+      return;
+    }
     setFiles((current) => (current.includes(path) ? current : [...current, path]));
     setError("");
   }

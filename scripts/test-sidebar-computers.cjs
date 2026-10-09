@@ -195,6 +195,12 @@ async function browserChecks() {
       `no local-only entry on a remote chat: ${remoteMenu}`,
     );
     assert.ok(remoteMenu.includes("Commit and open PR…"), "git works on the other Mac");
+    const otherRemoteMenu = await menuOf("c-studio|/Users/s/homelab", "Backup rotation");
+    assert.equal(
+      otherRemoteMenu.some((label) => /Finder|editor|Open in/.test(label)),
+      false,
+      `no local-only entry on a remote chat that is not the open one: ${otherRemoteMenu}`,
+    );
     const localMenu = await menuOf("/work/milagre-ade", "Desktop connect sidebar");
     assert.ok(
       localMenu.some((label) => /Finder|file manager/.test(label)),

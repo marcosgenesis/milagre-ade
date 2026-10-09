@@ -77,7 +77,7 @@ import { useChanges } from "./components/changes/useChanges";
 import { gitChatContext, type GitChatContext } from "./lib/git-dialog";
 import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
-import { usePastedImages } from "./components/usePastedImages";
+import { REMOTE_FILES_NOTICE, usePastedImages } from "./components/usePastedImages";
 import { DotBackground } from "./components/DotBackground";
 import { StartupSplash } from "./components/StartupSplash";
 import SidebarNav from "./components/SidebarNav";
@@ -472,7 +472,7 @@ function App() {
   );
   const selectedWorktree = worktrees.find((worktree) => worktree.id === (selectedSession?.worktree_id ?? selectedWorktreeId)) ?? firstWorktree;
   // Assigning a new Chat its persisted id keeps attachments for the next message; navigating away clears them.
-  const imageDraft = usePastedImages(`${project?.path ?? ""}:${chatView.current}`);
+  const imageDraft = usePastedImages(`${project?.path ?? ""}:${chatView.current}`, isRemoteKey(project?.path));
   useEffect(() => {
     if (!restoringSend) return;
     imageDraft.restore(restoringSend.message.images ?? [], restoringSend.message.files ?? []);
@@ -1254,7 +1254,7 @@ function App() {
     if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
     // A file attached from this Mac is a path the other Mac can't read; pasted images travel as data and still go.
     if (isRemoteKey(project.path) && files.length) {
-      setNotice("Files from this Mac can't be attached to a chat on another computer. Paste images instead.");
+      setNotice(REMOTE_FILES_NOTICE);
       return false;
     }
     sendInFlight.current = true;

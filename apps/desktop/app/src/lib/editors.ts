@@ -1,7 +1,6 @@
 import { ipcErrorMessage } from "@milagre/shared/result";
 import { useSyncExternalStore } from "react";
 import type { EditorInfo } from "../model";
-import { isRemoteKey } from "./computer-bridge";
 import { showNotice } from "./notice";
 import { getSettings, useSettings } from "./settings";
 
@@ -38,8 +37,6 @@ export function useEditors(): { editors: EditorInfo[] | null; editor: EditorInfo
 
 /** Opens a file (or, with no path, the folder) in the chosen editor; a failure shows as a small notice. */
 export async function openInEditor(root: string, target: { path?: string; line?: number } = {}) {
-  // This Mac's editor can't open another Mac's folder.
-  if (isRemoteKey(root)) return;
   try {
     const result = await window.milagre.openInEditor({ root, ...target, editor: getSettings().editorId || undefined });
     if (!result.ok) showNotice(result.error.message);

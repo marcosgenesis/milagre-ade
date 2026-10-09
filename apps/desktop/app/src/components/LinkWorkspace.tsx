@@ -25,7 +25,7 @@ import { runKeys } from "../lib/sidebar-scopes";
 import { DraftChatComposer } from "./DraftChatComposer";
 import { createDraftStore, draftKey } from "../lib/draft-store";
 import { createScopeDrafts, linkChatRows, memberWorktreeForAction } from "../lib/link-scope";
-import { usePastedImages } from "./usePastedImages";
+import { REMOTE_FILES_NOTICE, usePastedImages } from "./usePastedImages";
 import type { useAgentRuns } from "./useAgentRuns";
 import { attachmentPrompt } from "../lib/media";
 import { modelForChat, sentDecision, sentReply } from "../lib/agent-runs";
@@ -150,7 +150,7 @@ export function LinkWorkspace({
     [remoteCount, chatWindow.loadEarlier, chatWindow.loadAll],
   );
   const chatMessagesOf = (id: number) => (lean ? (id === sessionId ? messages : []) : state.messages.filter((message) => message.session_id === id));
-  const imageDraft = usePastedImages(`${owner}:${sessionId ?? "new"}`);
+  const imageDraft = usePastedImages(`${owner}:${sessionId ?? "new"}`, isRemoteKey(owner));
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -306,6 +306,11 @@ export function LinkWorkspace({
   }, [owner, chatId, state.sessions]);
   async function send(body = draftStore.get().trim(), preserve = false) {
     if (preparing || imageDraft.loading || (!body && !imageDraft.images.length && !imageDraft.files.length)) return;
+    // A file attached from this Mac is a path the other Mac can't read; pasted images travel as data and still go.
+    if (isRemoteKey(owner) && imageDraft.files.length) {
+      setError(REMOTE_FILES_NOTICE);
+      return;
+    }
     const selection = latest.current.selection;
     const operation = drafts.beginSend(scope, sessionId, JSON.stringify({ body, images: imageDraft.images, files: imageDraft.files }));
     setPreparing(true);

@@ -984,6 +984,7 @@ export default memo(function SidebarNav({
     let actions = scopeActions.current.get(key);
     if (!actions) {
       actions = {
+        remote: isRemoteKey(key),
         onPin: (id, order) =>
           void bridgeForKey(key)
             .patchChat(key, Number(id), order == null ? { pinned: false, pin_order: undefined } : { pinned: true, pin_order: order })

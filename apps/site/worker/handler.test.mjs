@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { RELEASES_API, RELEASES_PAGE, handleRequest, latestDownload } from "./handler.mjs";
+import { RELEASES_API, RELEASES_PAGE, REPO_API, handleRequest, latestDownload, repoStars } from "./handler.mjs";
 
 const release = {
   tag_name: "v0.92.0",
@@ -22,7 +22,7 @@ function github(body, status = 200) {
   return { fetchImpl, calls };
 }
 
-const assets = { fetch: async request => new Response(`asset ${new URL(request.url).pathname}`) };
+const assets = { fetch: async (request) => new Response(`asset ${new URL(request.url).pathname}`) };
 
 test("resolves the Apple Silicon DMG, never its blockmap or zip", async () => {
   const { fetchImpl, calls } = github(release);
@@ -43,7 +43,9 @@ test("gives the GitHub request an abort signal so a stalled API cannot hang the 
 });
 
 test("falls back to the releases page when the GitHub request is aborted", async () => {
-  const aborted = async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); };
+  const aborted = async () => {
+    throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  };
   assert.equal(await latestDownload("mac-arm64", aborted, { timeoutMs: 1 }), RELEASES_PAGE);
 });
 
@@ -77,7 +79,12 @@ test("falls back to the releases page when GitHub rate-limits", async () => {
 });
 
 test("falls back to the releases page when the fetch throws", async () => {
-  assert.equal(await latestDownload("mac-arm64", async () => { throw new Error("offline"); }), RELEASES_PAGE);
+  assert.equal(
+    await latestDownload("mac-arm64", async () => {
+      throw new Error("offline");
+    }),
+    RELEASES_PAGE,
+  );
 });
 
 test("falls back to the releases page when the release has no DMG for that arch", async () => {
@@ -111,4 +118,24 @@ test("every other path is served from static assets", async () => {
   const response = await handleRequest(new Request("https://milagre.cloud/"), { assets, fetchImpl });
   assert.equal(await response.text(), "asset /");
   assert.equal(calls.length, 0);
+});
+
+test("reads the star count from the repository", async () => {
+  const { fetchImpl, calls } = github({ stargazers_count: 1234 });
+  assert.equal(await repoStars(fetchImpl), 1234);
+  assert.equal(calls[0].url, REPO_API);
+});
+
+test("serves the star count as JSON and caches it", async () => {
+  const { fetchImpl } = github({ stargazers_count: 42 });
+  const response = await handleRequest(new Request("https://milagre.cloud/api/stars"), { assets, fetchImpl });
+  assert.deepEqual(await response.json(), { stars: 42 });
+  assert.equal(response.headers.get("cache-control"), "public, max-age=600");
+});
+
+test("serves null stars without caching when GitHub fails", async () => {
+  const { fetchImpl } = github({ message: "rate limited" }, 403);
+  const response = await handleRequest(new Request("https://milagre.cloud/api/stars"), { assets, fetchImpl });
+  assert.deepEqual(await response.json(), { stars: null });
+  assert.equal(response.headers.get("cache-control"), "no-store");
 });

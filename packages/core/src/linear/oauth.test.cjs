@@ -12,14 +12,14 @@ test("the PKCE challenge is the base64url SHA-256 of the verifier", () => {
   assert.match(verifier, /^[A-Za-z0-9_-]{43}$/);
 });
 
-test("the authorize URL asks for read access with PKCE", () => {
+test("the authorize URL asks for read and write access with PKCE", () => {
   const url = new URL(authorizeUrl({ clientId: "cid", redirectUri: "http://127.0.0.1:1/linear/callback", state: "s", challenge: "c" }));
   assert.equal(url.origin + url.pathname, "https://linear.app/oauth/authorize");
   assert.deepEqual(Object.fromEntries(url.searchParams), {
     client_id: "cid",
     redirect_uri: "http://127.0.0.1:1/linear/callback",
     response_type: "code",
-    scope: "read",
+    scope: "read,write",
     state: "s",
     code_challenge: "c",
     code_challenge_method: "S256",
@@ -97,7 +97,7 @@ test("the code exchange posts the verifier and returns when the token expires", 
     verifier: "v",
     now: 1000,
   });
-  assert.deepEqual(tokens, { accessToken: "a1", refreshToken: "r1", expiresAt: 1000 + 86_400_000 });
+  assert.deepEqual(tokens, { accessToken: "a1", refreshToken: "r1", expiresAt: 1000 + 86_400_000, scope: ["read"] });
   assert.equal(sent.url, "https://api.test/oauth/token");
   assert.deepEqual(Object.fromEntries(new URLSearchParams(sent.init.body)), {
     grant_type: "authorization_code",
@@ -201,4 +201,21 @@ test("revoking reports whether Linear accepted it, and never throws", async () =
     }),
     false,
   );
+});
+
+test("the granted scopes are kept whether Linear sends a list or a string, and left out when it sends none", async () => {
+  const exchange = (scope) =>
+    exchangeCode({
+      fetchImpl: async () => json(200, { access_token: "a", refresh_token: "r", expires_in: 1, ...(scope === undefined ? {} : { scope }) }),
+      apiBase: "https://api.test",
+      clientId: "cid",
+      code: "abc",
+      redirectUri: "http://127.0.0.1:1/linear/callback",
+      verifier: "v",
+      now: 0,
+    });
+  assert.deepEqual((await exchange(["read", "write"])).scope, ["read", "write"]);
+  assert.deepEqual((await exchange("read,write")).scope, ["read", "write"]);
+  assert.deepEqual((await exchange("read write")).scope, ["read", "write"]);
+  assert.equal("scope" in (await exchange(undefined)), false);
 });

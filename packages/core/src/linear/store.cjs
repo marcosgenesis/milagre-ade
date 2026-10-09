@@ -17,7 +17,7 @@ const validToken = (token) =>
 const WORKSPACE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 const isWorkspaceId = (id) => typeof id === "string" && WORKSPACE_ID.test(id);
 
-// The Mac's Linear sign-ins, one file per workspace, and the Experimental switch; owner-only like the provider accounts
+// The Mac's Linear sign-ins, one file per workspace, and its switches; owner-only like the provider accounts
 // (accounts.cjs). A sign-in saved before workspaces (linear/token.json) moves into the list the first time it is read.
 function createLinearStore({ dataDir }) {
   const root = path.join(dataDir, "linear");
@@ -74,7 +74,13 @@ function createLinearStore({ dataDir }) {
     },
     readEnabled: () => read(settingsFile)?.enabled === true,
     saveEnabled(value) {
-      write(settingsFile, { enabled: value === true });
+      write(settingsFile, { ...read(settingsFile), enabled: value === true });
+      return value === true;
+    },
+    // On unless turned off: a Chat started from an issue moves it to In Progress.
+    readMoveToStarted: () => read(settingsFile)?.moveToStarted !== false,
+    saveMoveToStarted(value) {
+      write(settingsFile, { ...read(settingsFile), moveToStarted: value === true });
       return value === true;
     },
   };

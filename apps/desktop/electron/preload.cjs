@@ -126,6 +126,7 @@ function makeBridge(invoke, listen, send) {
     disconnectLinear: (workspace) => invoke("linear:disconnect", { workspace }),
     readLinearEnabled: () => invoke("linear:enabled:read"),
     saveLinearEnabled: (value) => invoke("linear:enabled:save", value),
+    saveLinearMoveToStarted: (value) => invoke("linear:move-to-started:save", value),
     onLinearStatusChanged: (callback) => listen("linear:status-changed", callback),
     onLinearEnabledChanged: (callback) => listen("linear:enabled-changed", callback),
     listLinearIssues: (query, options) => invoke("linear:issues", { query, fresh: options?.fresh === true, workspace: options?.workspace }),

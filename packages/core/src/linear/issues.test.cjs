@@ -308,3 +308,69 @@ test("worktrees read their stored workspace, and match a branch against each wor
   const reads = linear.calls.filter((call) => call.document.includes("i0:"));
   assert.deepEqual(reads.map((call) => call.workspace).sort(), ["acme", "beta"]);
 });
+
+// Answers the started-states query for an issue in `type`, and records the move.
+function startable(
+  type,
+  states = [
+    { id: "s2", position: 2 },
+    { id: "s1", position: 1 },
+  ],
+  { success = true } = {},
+) {
+  return fakeLinear({
+    answer: (document) => {
+      if (document.includes("mutation Move")) return { issueUpdate: { success } };
+      return { issue: { id: "uuid-1", state: { type }, team: { states: { nodes: states } } } };
+    },
+  });
+}
+
+test("an issue not yet started moves to its team's first started status", async () => {
+  for (const type of ["triage", "backlog", "unstarted"]) {
+    const linear = startable(type);
+    assert.equal(await createLinearIssues({ linear }).markStarted("ENG-1", "acme"), "moved");
+    const move = linear.calls.find((call) => call.document.includes("mutation Move"));
+    assert.deepEqual(move.variables, { id: "uuid-1", stateId: "s1" });
+    assert.equal(move.workspace, "acme");
+  }
+});
+
+test("an issue already started, done or canceled keeps its status", async () => {
+  for (const type of ["started", "completed", "canceled"]) {
+    const linear = startable(type);
+    assert.equal(await createLinearIssues({ linear }).markStarted("ENG-1", "acme"), "kept");
+    assert.equal(linear.calls.length, 1, "No move");
+  }
+  const noStarted = startable("unstarted", []);
+  assert.equal(await createLinearIssues({ linear: noStarted }).markStarted("ENG-1", "acme"), "kept");
+});
+
+test("a move Linear refuses or can't reach says failed instead of throwing", async () => {
+  assert.equal(await createLinearIssues({ linear: startable("unstarted", undefined, { success: false }) }).markStarted("ENG-1", "acme"), "failed");
+  const offline = fakeLinear({
+    answer: () => {
+      throw new LinearError("Couldn't reach Linear: down", "offline");
+    },
+  });
+  assert.equal(await createLinearIssues({ linear: offline }).markStarted("ENG-1", "acme"), "failed");
+});
+
+test("a moved issue is read again instead of from the cache", async () => {
+  let type = "unstarted";
+  const linear = fakeLinear({
+    answer: (document) => {
+      if (document.includes("mutation Move")) {
+        type = "started";
+        return { issueUpdate: { success: true } };
+      }
+      if (document.includes("query Started")) return { issue: { id: "uuid-1", state: { type }, team: { states: { nodes: [{ id: "s1", position: 1 }] } } } };
+      return { i0: node("ENG-1", { state: { name: type === "started" ? "In Progress" : "Todo", type, color: "#aaa" } }) };
+    },
+  });
+  const issues = createLinearIssues({ linear });
+  const worktree = [{ path: "/w", name: "x", linearIssue: "ENG-1", linearWorkspace: "acme" }];
+  assert.equal((await issues.worktreeIssues(worktree))["/w"].state.name, "Todo");
+  await issues.markStarted("ENG-1", "acme");
+  assert.equal((await issues.worktreeIssues(worktree))["/w"].state.name, "In Progress");
+});

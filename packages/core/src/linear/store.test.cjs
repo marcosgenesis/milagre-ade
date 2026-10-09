@@ -84,3 +84,16 @@ test("the Experimental switch is off until saved on", (t) => {
   assert.equal(createLinearStore({ dataDir }).readEnabled(), true);
   assert.equal(store.saveEnabled("yes"), false);
 });
+
+test("moving issues to In Progress is on until saved off, and keeps the Experimental switch", (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "milagre-linear-"));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const store = createLinearStore({ dataDir });
+  assert.equal(store.readMoveToStarted(), true);
+  store.saveEnabled(true);
+  assert.equal(store.saveMoveToStarted(false), false);
+  assert.equal(createLinearStore({ dataDir }).readMoveToStarted(), false);
+  assert.equal(store.readEnabled(), true);
+  store.saveEnabled(false);
+  assert.equal(store.readMoveToStarted(), false);
+});

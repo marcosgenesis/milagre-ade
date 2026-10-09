@@ -55,6 +55,7 @@ const ALLOWED: Record<string, string[]> = {
     "readLinearStatus",
     "onLinearStatusChanged",
     "saveLinearEnabled",
+    "saveLinearMoveToStarted",
     "connectLinear",
     "disconnectLinear",
     "onMainSyncStatus",

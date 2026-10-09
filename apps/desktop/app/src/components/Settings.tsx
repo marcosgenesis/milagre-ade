@@ -9,9 +9,12 @@ import {
   LINEAR_CONNECTING,
   LINEAR_CONNECTING_WINDOW,
   LINEAR_HINT,
+  LINEAR_MOVE_TO_STARTED_HINT,
+  LINEAR_MOVE_TO_STARTED_TITLE,
   LINEAR_SIGN_IN_REPLACED,
   LINEAR_USE_BROWSER,
   LINEAR_TITLE,
+  linearReadOnlyHint,
   linearStatusLine,
   linearWorkspaces,
   type LinearStatus,
@@ -1498,6 +1501,8 @@ export function MainSyncDefaultSetting() {
 // Experimental > Linear: the daemon keeps the switch (phones share it) and the Mac's connections, one per workspace.
 function LinearSettings() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  // null until read; a Mac that predates the switch sends none and has it on.
+  const [moveToStarted, setMoveToStarted] = useState<boolean | null>(null);
   const [status, setStatus] = useState<LinearStatus | null>(null);
   // "window": Add workspace's own sign-in window; "browser": the first Connect, or the fallback from the window.
   const [connecting, setConnecting] = useState<false | "window" | "browser">(false);
@@ -1512,7 +1517,11 @@ function LinearSettings() {
     Promise.resolve()
       .then(() => window.milagre.readLinearEnabled())
       .then(
-        (value) => live && setEnabled(value?.enabled === true),
+        (value) => {
+          if (!live) return;
+          setEnabled(value?.enabled === true);
+          setMoveToStarted(value?.moveToStarted !== false);
+        },
         () => live && setEnabled(false),
       );
     Promise.resolve()
@@ -1547,6 +1556,16 @@ function LinearSettings() {
       setError(ipcErrorMessage(failure));
     }
   }
+  async function changeMoveToStarted(next: boolean) {
+    setError(null);
+    setMoveToStarted(next);
+    try {
+      setMoveToStarted((await window.milagre.saveLinearMoveToStarted(next)).moveToStarted);
+    } catch (failure) {
+      setMoveToStarted(!next);
+      setError(ipcErrorMessage(failure));
+    }
+  }
   async function connect(inWindow: boolean) {
     const id = ++attempt.current;
     setError(null);
@@ -1577,12 +1596,21 @@ function LinearSettings() {
       </Row>
       {enabled &&
         linearWorkspaces(status).map((workspace) => (
-          <Row key={workspace.id} label={workspace.organization.name} description={`Signed in as ${workspace.viewer.name}`}>
+          <Row
+            key={workspace.id}
+            label={workspace.organization.name}
+            description={`Signed in as ${workspace.viewer.name}` + (moveToStarted && workspace.canWrite === false ? `. ${linearReadOnlyHint("mac")}` : "")}
+          >
             <button type="button" data-linear-workspace={workspace.id} className={SECONDARY_BUTTON} onClick={() => void disconnect(workspace.id)}>
               Disconnect
             </button>
           </Row>
         ))}
+      {enabled && status?.connected && moveToStarted !== null && (
+        <Row label={LINEAR_MOVE_TO_STARTED_TITLE} description={LINEAR_MOVE_TO_STARTED_HINT}>
+          <Switch label={LINEAR_MOVE_TO_STARTED_TITLE} checked={moveToStarted} onChange={(next) => void changeMoveToStarted(next)} />
+        </Row>
+      )}
       {enabled && status && (
         <Row
           label={status.connected ? LINEAR_ADD_WORKSPACE : linearStatusLine(status, "mac")}

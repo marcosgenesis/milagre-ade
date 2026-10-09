@@ -249,7 +249,9 @@ export type MilagreBridge = {
   connectLinear: (options?: { window?: boolean }) => Promise<LinearStatus>;
   cancelLinearSignIn: () => Promise<void>;
   disconnectLinear: (workspace: string) => Promise<LinearStatus>;
-  readLinearEnabled: () => Promise<{ enabled: boolean }>;
+  /** `moveToStarted`: a Chat started from an issue moves it to In Progress. A Mac that predates it sends none (on). */
+  readLinearEnabled: () => Promise<{ enabled: boolean; moveToStarted?: boolean }>;
+  saveLinearMoveToStarted: (value: boolean) => Promise<{ moveToStarted: boolean }>;
   saveLinearEnabled: (value: boolean) => Promise<{ enabled: boolean }>;
   onLinearStatusChanged: (callback: (status: LinearStatus) => void) => () => void;
   /** The Experimental Linear switch changed, on this Mac or from a phone. */

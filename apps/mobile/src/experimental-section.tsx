@@ -1,5 +1,15 @@
 import { useCallback, useState } from "react";
-import { LINEAR_HINT, LINEAR_TITLE, linearStatusLine, linearWorkspaceLine, linearWorkspaces, type LinearStatus } from "@milagre/shared/linear";
+import {
+  LINEAR_HINT,
+  LINEAR_MOVE_TO_STARTED_HINT,
+  LINEAR_MOVE_TO_STARTED_TITLE,
+  LINEAR_TITLE,
+  linearReadOnlyHint,
+  linearStatusLine,
+  linearWorkspaceLine,
+  linearWorkspaces,
+  type LinearStatus,
+} from "@milagre/shared/linear";
 import { Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { DEFAULT_THEME_ID, seedsFrom } from "@milagre/shared/themes";
@@ -28,16 +38,18 @@ export function ExperimentalSection() {
   }
   // The Mac's Linear switch and connection; null until the Mac answers (an older Mac never does). Re-read on focus:
   // the phone gets no event when the Mac connects or disconnects.
-  const [linear, setLinear] = useState<{ enabled: boolean; status: LinearStatus } | null>(null);
+  // `moveToStarted` is on when a Mac that predates the switch sends none.
+  const [linear, setLinear] = useState<{ enabled: boolean; moveToStarted: boolean; status: LinearStatus } | null>(null);
   const [linearError, setLinearError] = useState("");
   useFocusEffect(
     useCallback(() => {
       const client = session.client;
       if (!client) return;
       let live = true;
-      Promise.all([client.call<{ enabled: boolean }>("linear:enabled:read", []), client.call<LinearStatus>("linear:status", [])]).then(
+      Promise.all([client.call<{ enabled: boolean; moveToStarted?: boolean }>("linear:enabled:read", []), client.call<LinearStatus>("linear:status", [])]).then(
         // An older Mac answers null for commands it lacks: no Linear card.
-        ([value, status]) => live && setLinear(value && status ? { enabled: value.enabled === true, status } : null),
+        ([value, status]) =>
+          live && setLinear(value && status ? { enabled: value.enabled === true, moveToStarted: value.moveToStarted !== false, status } : null),
         () => live && setLinear(null),
       );
       return () => {
@@ -55,6 +67,19 @@ export function ExperimentalSection() {
       setLinear((current) => current && { ...current, enabled });
     } catch (failure) {
       setLinear((current) => current && { ...current, enabled: !next });
+      setLinearError(failure instanceof Error ? failure.message : "Could not change this setting.");
+    }
+  }
+  async function changeMoveToStarted(next: boolean) {
+    const client = session.client;
+    if (!client || !linear) return;
+    setLinearError("");
+    setLinear({ ...linear, moveToStarted: next });
+    try {
+      const { moveToStarted } = await client.call<{ moveToStarted: boolean }>("linear:move-to-started:save", [next]);
+      setLinear((current) => current && { ...current, moveToStarted });
+    } catch (failure) {
+      setLinear((current) => current && { ...current, moveToStarted: !next });
       setLinearError(failure instanceof Error ? failure.message : "Could not change this setting.");
     }
   }
@@ -87,12 +112,19 @@ export function ExperimentalSection() {
             (linearWorkspaces(linear.status).length ? (
               linearWorkspaces(linear.status).map((workspace) => (
                 <Text key={workspace.id} style={styles.caption}>
-                  {`Connected to ${linearWorkspaceLine(workspace)}`}
+                  {`Connected to ${linearWorkspaceLine(workspace)}` +
+                    (linear.moveToStarted && workspace.canWrite === false ? `. ${linearReadOnlyHint("phone")}` : "")}
                 </Text>
               ))
             ) : (
               <Text style={styles.caption}>{linearStatusLine(linear.status, "phone")}</Text>
             ))}
+          {linear.enabled && linear.status.connected && (
+            <>
+              <Toggle title={LINEAR_MOVE_TO_STARTED_TITLE} selected={linear.moveToStarted} onPress={() => void changeMoveToStarted(!linear.moveToStarted)} />
+              <Text style={styles.caption}>{LINEAR_MOVE_TO_STARTED_HINT}</Text>
+            </>
+          )}
           {linearError ? <ErrorNotice message={linearError} /> : null}
         </View>
       )}

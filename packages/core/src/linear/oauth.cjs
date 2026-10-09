@@ -16,7 +16,8 @@ function authorizeUrl({ clientId, redirectUri, state, challenge }) {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: "read",
+    // write: moving an issue to its team's started status when a Chat starts from it (Settings › Experimental › Linear).
+    scope: "read,write",
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -118,7 +119,14 @@ async function tokenRequest({ fetchImpl, apiBase, params, now }) {
   }
   // A refresh answer without a new refresh token leaves the old one in place.
   const refreshToken = typeof body.refresh_token === "string" ? body.refresh_token : params.refresh_token;
-  return { accessToken: body.access_token, refreshToken, expiresAt: now + Number(body.expires_in ?? 86_400) * 1000 };
+  const scope = grantedScopes(body.scope);
+  return { accessToken: body.access_token, refreshToken, expiresAt: now + Number(body.expires_in ?? 86_400) * 1000, ...(scope ? { scope } : {}) };
+}
+
+// Linear sends the granted scopes as a list or a comma or space separated string; null when it sends none.
+function grantedScopes(value) {
+  const list = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[\s,]+/) : null;
+  return list ? list.filter((item) => typeof item === "string" && item) : null;
 }
 
 function exchangeCode({ fetchImpl, apiBase, clientId, code, redirectUri, verifier, now }) {

@@ -42,6 +42,7 @@ const METHODS = new Set([
   "linear:status",
   "linear:enabled:read",
   "linear:enabled:save",
+  "linear:move-to-started:save",
   "linear:issues",
   "linear:worktree-issues",
   "chat:runs",

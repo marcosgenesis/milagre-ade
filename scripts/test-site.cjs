@@ -15,6 +15,8 @@ const types = {
   ".js": "text/javascript",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".mp4": "video/mp4",
   ".webp": "image/webp",
   ".ico": "image/x-icon",
   ".xml": "application/xml",
@@ -64,7 +66,7 @@ async function assertOneScreen(evaluate, window) {
   assert.ok(size.sh <= size.h, `scrollHeight ${size.sh} > ${size.h}`);
   const box = await evaluate(
     window,
-    `(() => { const r = document.querySelector(".scene").getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; })()`,
+    `(() => { const r = document.querySelector(".demo").getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; })()`,
   );
   assert.ok(box.top >= 0 && box.left >= 0 && box.bottom <= size.h + 1 && box.right <= size.w + 1, `scene outside the viewport: ${JSON.stringify(box)}`);
 }
@@ -116,23 +118,34 @@ const checks = [
     },
   },
   {
-    name: "hero scene animates when motion is allowed",
-    async run(open, evaluate) {
+    name: "both recordings play, and the phone keeps time with the desktop",
+    async run(open, evaluate, shot) {
       const window = await open({ width: 1440, height: 900 });
-      assert.equal(await evaluate(window, `document.querySelector(".scene").getAttribute("aria-hidden")`), "true");
-      assert.ok(await evaluate(window, `document.querySelector(".scene").getAnimations({ subtree: true }).length > 0`), "animations running");
+      assert.equal(await evaluate(window, `document.querySelector(".demo").getAttribute("aria-hidden")`), "true");
+      assert.ok(
+        await evaluate(window, `document.querySelector(".demo-description").textContent.includes("approved on the iPhone")`),
+        "described for screen readers",
+      );
+      await waitFor(evaluate, window, `[...document.querySelectorAll(".demo video")].every((v) => !v.paused && v.currentTime > 1.5)`, "videos playing");
+      const drift = await evaluate(
+        window,
+        `Math.abs(document.querySelector("[data-desktop]").currentTime - document.querySelector("[data-phone]").currentTime)`,
+      );
+      assert.ok(drift < 0.3, `phone drifts ${drift}s from the desktop`);
+      await shot(window, "desktop-playing.png");
       window.destroy();
     },
   },
   {
-    name: "reduced motion shows the approval on both devices, without animation",
-    async run(open, evaluate, shot) {
+    name: "reduced motion leaves both recordings on their first frame",
+    async run(open, evaluate) {
       const window = await open({ width: 1440, height: 900, reducedMotion: true });
-      assert.equal(await evaluate(window, `document.querySelector(".scene").getAnimations({ subtree: true }).length`), 0);
-      const opacities = await evaluate(window, `[...document.querySelectorAll('.scene [data-frame="approval"]')].map(el => getComputedStyle(el).opacity)`);
-      assert.deepEqual(opacities, ["1", "1"]);
-      assert.ok(await evaluate(window, `!!document.querySelector(".scene-description")?.textContent.includes("approval")`), "described for screen readers");
-      await shot(window, "desktop-reduced-motion.png");
+      await delay(800);
+      assert.deepEqual(await evaluate(window, `[...document.querySelectorAll(".demo video")].map((v) => v.paused)`), [true, true]);
+      assert.deepEqual(await evaluate(window, `[...document.querySelectorAll(".demo video")].map((v) => v.poster.replace(location.origin, ""))`), [
+        "/demo/desktop.jpg",
+        "/demo/phone.jpg",
+      ]);
       window.destroy();
     },
   },

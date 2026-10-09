@@ -289,7 +289,8 @@ const checks = [
         card: document.querySelector('meta[name="twitter:card"]')?.content,
       })`,
       );
-      assert.equal(meta.canonical, "https://milagre.cloud/");
+      // The canonical URL and og:image follow astro.config.mjs `site` (milagre.dev since #365); milagre.cloud serves the same pages.
+      assert.equal(meta.canonical, "https://milagre.dev/");
       assert.ok(meta.description.length >= 120 && meta.description.length <= 160, `description is ${meta.description.length} characters`);
       assert.ok(meta.description.includes("Claude Code"));
       const extra = await evaluate(
@@ -309,7 +310,7 @@ const checks = [
       assert.ok(extra.summary.includes("open-source"), "a crawlable summary of what Milagre is");
       for (const file of ["sitemap.xml", "llms.txt"]) assert.ok(fs.existsSync(path.join(dist, file)), `${file} is built`);
       assert.match(fs.readFileSync(path.join(dist, "robots.txt"), "utf8"), /Sitemap: https:\/\/milagre\.cloud\/sitemap\.xml/);
-      assert.equal(meta.image, "https://milagre.cloud/og.png");
+      assert.equal(meta.image, "https://milagre.dev/og.png");
       assert.equal(meta.card, "summary_large_image");
       assert.ok(fs.existsSync(path.join(dist, "og.png")), "og.png is built");
       assert.ok(fs.existsSync(path.join(dist, "robots.txt")), "robots.txt is built");

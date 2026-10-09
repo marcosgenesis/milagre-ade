@@ -50,7 +50,8 @@ export function buildPalette(source: ThemeSource, scheme: Scheme): ThemePalette 
     cursor: ink,
     selection: withAlpha(accent, 0.3),
   };
-  return { ...derived, ...source } as ThemePalette;
+  const given = Object.fromEntries(Object.entries(source).filter(([, value]) => value !== undefined));
+  return { ...derived, ...given } as ThemePalette;
 }
 
 export function ansi(c: {

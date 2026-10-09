@@ -1,22 +1,27 @@
 import { buildPalette } from "./build.ts";
-import { milagreThemes } from "./palettes/milagre.ts";
-import { catppuccinThemes } from "./palettes/catppuccin.ts";
-import { popularThemes } from "./palettes/popular.ts";
-import type { CustomTheme, Scheme, ThemeChoice, ThemeDefinition, ThemeId, ThemePalette } from "./types.ts";
+import { customSource } from "./custom.ts";
+import { byId, DEFAULT_THEME_ID, getTheme } from "./registry.ts";
+import type { CustomTheme, Scheme, ThemeChoice, ThemePalette } from "./types.ts";
 export * from "./types.ts";
 export * from "./color.ts";
 export { buildPalette } from "./build.ts";
+export * from "./custom.ts";
+export { DEFAULT_THEME_ID, getTheme, themes } from "./registry.ts";
 
-export const DEFAULT_THEME_ID: ThemeId = "milagre-blue";
-export const themes: readonly ThemeDefinition[] = [...milagreThemes, ...catppuccinThemes, ...popularThemes];
-const byId = new Map<string, ThemeDefinition>(themes.map((theme) => [theme.id, theme]));
 const cache = new Map<string, ThemePalette>();
-
-export const getTheme = (id: string) => byId.get(id);
 export const isThemeChoice = (value: unknown): value is ThemeChoice => value === "custom" || (typeof value === "string" && byId.has(value));
 
 /** The palette to show. `custom` without a custom theme, or an unknown id, falls back to Milagre Blue. */
-export function resolvePalette(choice: string, scheme: Scheme, _custom?: CustomTheme | null): ThemePalette {
+export function resolvePalette(choice: string, scheme: Scheme, custom?: CustomTheme | null): ThemePalette {
+  if (choice === "custom" && custom) {
+    const key = `custom:${scheme}:${JSON.stringify(custom[scheme])}`;
+    let palette = cache.get(key);
+    if (!palette) {
+      if (cache.size > 64) cache.clear();
+      cache.set(key, (palette = buildPalette(customSource(custom[scheme], scheme), scheme)));
+    }
+    return palette;
+  }
   const theme = getTheme(choice) ?? byId.get(DEFAULT_THEME_ID)!;
   const key = `${theme.id}:${scheme}`;
   let palette = cache.get(key);

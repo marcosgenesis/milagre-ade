@@ -58,16 +58,17 @@ function fontFamily() {
   return mono || 'ui-monospace, "SF Mono", Menlo, monospace';
 }
 
-let themeWatch: MutationObserver | null = null;
+function reapplyTheme() {
+  const theme = terminalTheme();
+  for (const session of sessions.values()) session.term.options.theme = theme;
+}
+
+// applyPalette runs on every class change and then dispatches THEME_EVENT, so this one listener covers both.
+let themeWatched = false;
 function watchTheme() {
-  if (themeWatch) return;
-  const reapply = () => {
-    const theme = terminalTheme();
-    for (const session of sessions.values()) session.term.options.theme = theme;
-  };
-  themeWatch = new MutationObserver(reapply);
-  themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-  window.addEventListener(THEME_EVENT, reapply);
+  if (themeWatched) return;
+  themeWatched = true;
+  window.addEventListener(THEME_EVENT, reapplyTheme);
 }
 
 function create(info: TerminalInfo): Session {

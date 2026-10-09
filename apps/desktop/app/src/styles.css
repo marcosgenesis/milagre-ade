@@ -87,7 +87,7 @@
   --grid-line: color-mix(in srgb, var(--line) 78%, transparent);
   --field: #f5f5f5;
   --stripe: oklch(0.405 0 0 / 0.075);
-  --stripe-bg: oklch(0.97 0 0);
+  --stripe-bg: var(--page);
 
   /* accent */
   --accent: #007df3;
@@ -146,7 +146,7 @@
   --line-soft: #212c3c;
   --field: #212c3c;
   --stripe: oklch(1 0 0 / 0.055);
-  --stripe-bg: oklch(0.226 0.004 264.485);
+  --stripe-bg: var(--page);
 
   --accent: #3e9afd;
   --accent-ink: #80b9fd;

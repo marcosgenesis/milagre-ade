@@ -35,6 +35,8 @@ async function browserChecks() {
   app.setPath("userData", fs.mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-theming-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 1100, height: 700, show: false, webPreferences: { backgroundThrottling: false } });
+  window.webContents.session.setPermissionRequestHandler((_, __, callback) => callback(true));
+  window.webContents.session.setPermissionCheckHandler(() => true);
   const evaluate = (source) => window.webContents.executeJavaScript(source);
   const errors = [];
   window.webContents.on("console-message", (details) => {
@@ -90,6 +92,32 @@ async function browserChecks() {
     assert.notEqual(blueDark, "#17181a", "Milagre Blue dark is not Gray dark");
     assert.equal(await evaluate(`document.querySelectorAll('#milagre-theme').length`), 1, "one theme stylesheet is reused");
     await screenshot("gray-light");
+    // Custom theme editor in Experimental
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Experimental').click()`);
+    const custom = `document.querySelector('[role="switch"][aria-label="Custom theme"]')`;
+    await waitFor(`!!${custom}`);
+    await evaluate(`${custom}.click()`);
+    await waitFor(`!!document.querySelector('input[aria-label="Accent hex"]')`);
+    assert.ok(await evaluate(`!!document.querySelector('[role="radiogroup"][aria-label="Editing"]')`), "Editing control");
+    assert.ok(await evaluate(`!!document.querySelector('[data-contrast]')`), "contrast line");
+    await evaluate(`(() => { const input = document.querySelector('input[aria-label="Accent hex"]');
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(input, '#e85d9a');
+      input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); input.dispatchEvent(new Event('blur', { bubbles: true })); })()`);
+    await waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#e85d9a'`);
+    await screenshot("custom-editor");
+    require("electron").clipboard.writeText('{"light":1}');
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Paste JSON').click()`);
+    await waitFor(`document.body.innerText.includes("That isn't a Milagre theme")`);
+    assert.equal(await evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`), "#e85d9a");
+    await screenshot("custom-editor-bad-paste");
+    window.webContents.focus();
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Copy as JSON').click()`);
+    const clipboard = require("electron").clipboard;
+    for (let i = 0; i < 100 && !/#e85d9a/.test(await clipboard.readText()); i++) await delay(25);
+    assert.match(await clipboard.readText(), /#e85d9a/, "Copy as JSON writes the seeds");
+    await evaluate(`${custom}.click()`);
+    await waitFor(`JSON.parse(localStorage.getItem('milagre-settings')).colorTheme === 'milagre-blue'`);
+    assert.equal(await evaluate(`JSON.parse(localStorage.getItem('milagre-settings')).customTheme.light.accent`), "#e85d9a");
     assert.deepEqual(errors, []);
     console.log(
       "PASS: Appearance defaults to Milagre Blue; picking a theme and a mode recolors the page, body and code, translucency keeps the theme, one stylesheet is reused, and the choice is saved",

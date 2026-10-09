@@ -26,7 +26,7 @@ function Tile({ id, label, name, detail }: { id: ThemeChoice; label: string; nam
         set({ colorTheme: id });
       }}
       style={({ pressed }) => ({
-        width: "48.5%",
+        width: "48%",
         flexDirection: "row",
         alignItems: "center",
         gap: 10,
@@ -45,7 +45,7 @@ function Tile({ id, label, name, detail }: { id: ThemeChoice; label: string; nam
         <Text numberOfLines={1} style={[styles.text, { fontSize: 14, fontWeight: "500", lineHeight: 18 }]}>
           {name}
         </Text>
-        <Text numberOfLines={1} style={styles.caption}>
+        <Text numberOfLines={2} style={styles.caption}>
           {detail}
         </Text>
       </View>
@@ -66,7 +66,7 @@ export function AppearanceSection() {
       {GROUPS.map((group) => (
         <View key={group} style={{ gap: 8 }} accessibilityRole="radiogroup" accessibilityLabel={group}>
           <Text style={styles.section}>{group}</Text>
-          <View style={[styles.card, { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 8 }]}>
+          <View style={[styles.card, { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", columnGap: 0, rowGap: 8 }]}>
             {themes
               .filter((theme) => theme.group === group)
               .map((theme) => (

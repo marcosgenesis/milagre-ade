@@ -63,8 +63,6 @@ jobs:
         run: npm run typecheck:site
       - name: Build site
         run: npm run build:site
-      - name: Lint mobile
-        run: npm run lint --workspace @milagre/mobile
       - name: Build renderer
         run: npm run build:renderer --workspace milagre
   supply-chain:

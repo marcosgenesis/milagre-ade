@@ -141,10 +141,16 @@ test("Electron checks run on Ubuntu under xvfb, one shard per matrix leg, with s
   assert.equal(upload.with.path, "${{ runner.temp }}/electron-screenshots");
 });
 
-test("CI lints every workspace with oxlint and keeps the mobile ESLint rules", () => {
+test("CI lints every workspace with oxlint, which carries the Expo rules for mobile", () => {
   const steps = new Set(runs(ci.jobs.static));
   assert.ok(steps.has("npm run lint"));
-  assert.ok(steps.has("npm run lint --workspace @milagre/mobile"));
+  assert.ok(!steps.has("npm run lint --workspace @milagre/mobile"));
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, "../.oxlintrc.json"), "utf8"));
+  const mobile = config.overrides.find((override) => override.files.includes("apps/mobile/**"));
+  assert.deepEqual(mobile.jsPlugins, ["./apps/mobile/lint/expo-env.mjs"]);
+  for (const rule of ["react/refs", "react/set-state-in-effect", "react/purity", "expo/no-env-var-destructuring", "expo/no-dynamic-env-var"]) {
+    assert.equal(mobile.rules[rule], "error", rule);
+  }
 });
 
 test("CI checks formatting right after linting", () => {

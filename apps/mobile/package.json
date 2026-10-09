@@ -13,7 +13,6 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test src/*.test.ts",
     "export:ios": "expo export --platform ios",
-    "lint": "eslint .",
     "update:testflight": "npx eas-cli@latest update --channel testflight --environment production --platform all --non-interactive"
   },
   "dependencies": {
@@ -60,8 +59,6 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "eslint": "^9.0.0",
-    "eslint-config-expo": "~57.0.2",
     "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
   }

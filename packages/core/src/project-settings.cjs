@@ -7,11 +7,20 @@ const path = require("node:path");
 
 function normalizeFilesToCopy(value) {
   if (!Array.isArray(value)) return [];
-  return value.filter((line) => typeof line === "string").map((line) => line.trim()).filter(Boolean);
+  return value
+    .filter((line) => typeof line === "string")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function normalizeSetupCommand(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+// A chosen Project icon: a small image data URL, kept under the size the phone accepts.
+const MAX_ICON = 600_000;
+function normalizeIcon(value) {
+  return typeof value === "string" && value.length <= MAX_ICON && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(value) ? value : null;
 }
 
 function createProjectSettings(file) {
@@ -39,18 +48,20 @@ function createProjectSettings(file) {
 
   // Saves run one at a time. `change` edits the project's entry; an entry left empty is removed.
   function update(projectPath, change) {
-    const save = queue.catch(() => {}).then(async () => {
-      const data = await read({ strict: true });
-      const key = path.resolve(projectPath);
-      const entry = { ...(data.projects[key] ?? {}) };
-      change(entry);
-      if (Object.keys(entry).length > 0) data.projects[key] = entry;
-      else delete data.projects[key];
-      await fs.mkdir(path.dirname(file), { recursive: true });
-      const temporary = `${file}.${process.pid}.tmp`;
-      await fs.writeFile(temporary, JSON.stringify(data, null, 2));
-      await fs.rename(temporary, file);
-    });
+    const save = queue
+      .catch(() => {})
+      .then(async () => {
+        const data = await read({ strict: true });
+        const key = path.resolve(projectPath);
+        const entry = { ...data.projects[key] };
+        change(entry);
+        if (Object.keys(entry).length > 0) data.projects[key] = entry;
+        else delete data.projects[key];
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        const temporary = `${file}.${process.pid}.tmp`;
+        await fs.writeFile(temporary, JSON.stringify(data, null, 2));
+        await fs.rename(temporary, file);
+      });
     queue = save;
     return save;
   }
@@ -58,7 +69,19 @@ function createProjectSettings(file) {
   return {
     async get(projectPath) {
       const entry = (await read({ strict: false })).projects[path.resolve(projectPath)] ?? {};
-      return { filesToCopy: normalizeFilesToCopy(entry.filesToCopy), setupCommand: normalizeSetupCommand(entry.setupCommand) };
+      return { filesToCopy: normalizeFilesToCopy(entry.filesToCopy), setupCommand: normalizeSetupCommand(entry.setupCommand), icon: normalizeIcon(entry.icon) };
+    },
+    // The Projects kept out of the desktop sidebar and the phone's Projects list.
+    async hiddenPaths() {
+      const { projects } = await read({ strict: false });
+      return new Set(Object.keys(projects).filter((key) => projects[key]?.hidden === true));
+    },
+    async setHidden(projectPath, hidden) {
+      await update(projectPath, (entry) => {
+        if (hidden === true) entry.hidden = true;
+        else delete entry.hidden;
+      });
+      return { hidden: hidden === true };
     },
     // An empty list removes the setting, which brings the default back.
     async setFilesToCopy(projectPath, filesToCopy) {
@@ -77,6 +100,16 @@ function createProjectSettings(file) {
         else delete entry.setupCommand;
       });
       return { setupCommand: command };
+    },
+    // null removes the chosen icon, which brings the repository's own back.
+    async setIcon(projectPath, icon) {
+      const value = icon === null ? null : normalizeIcon(icon);
+      if (icon !== null && !value) throw new Error("Choose a PNG, JPEG, WebP or GIF image under 450 KB.");
+      await update(projectPath, (entry) => {
+        if (value) entry.icon = value;
+        else delete entry.icon;
+      });
+      return { icon: value };
     },
   };
 }

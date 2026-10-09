@@ -3,44 +3,93 @@ import type { UsageSnapshot } from "../../model";
 import { mergeSnapshot, seedSnapshot } from "./format";
 
 const POLL_MS = 5 * 60_000;
+// Each scope's last numbers, so switching Projects shows them at once instead of an empty usage row.
+const lastSnapshots = new Map<string, UsageSnapshot>();
 
-export function useUsage() {
+export function useUsage(scopeKey?: string) {
+  const currentScope = useRef(scopeKey);
+  currentScope.current = scopeKey;
+  const [snapshotScope, setSnapshotScope] = useState(scopeKey);
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const lastReadAt = useRef(0);
+  const generation = useRef(0);
   const inFlight = useRef<Promise<void> | null>(null);
 
   const refresh = useCallback(() => {
     if (inFlight.current) return inFlight.current;
     setLoading(true);
-    inFlight.current = window.milagre.readUsage()
+    const version = generation.current;
+    inFlight.current = window.milagre
+      .readUsage(scopeKey)
       .then((next) => {
+        if (version !== generation.current || currentScope.current !== scopeKey) return;
+        setSnapshotScope(scopeKey);
         lastReadAt.current = Date.now();
-        setSnapshot((previous) => mergeSnapshot(previous, next, Date.now()));
+        setSnapshot((previous) => {
+          const merged = mergeSnapshot(previous, next, Date.now());
+          if (scopeKey && merged) lastSnapshots.set(scopeKey, merged);
+          return merged;
+        });
       })
       .catch(() => {})
       .finally(() => {
-        inFlight.current = null;
-        setLoading(false);
+        if (version === generation.current) {
+          inFlight.current = null;
+          setLoading(false);
+        }
       });
     return inFlight.current;
-  }, []);
+  }, [scopeKey]);
 
-  const refreshIfStale = useCallback((maxAgeMs: number) => {
-    if (Date.now() - lastReadAt.current > maxAgeMs) void refresh();
-  }, [refresh]);
+  const refreshIfStale = useCallback(
+    (maxAgeMs: number) => {
+      if (Date.now() - lastReadAt.current > maxAgeMs) void refresh();
+    },
+    [refresh],
+  );
 
   useEffect(() => {
+    generation.current++;
+    inFlight.current = null;
+    lastReadAt.current = 0;
+    const last = scopeKey ? lastSnapshots.get(scopeKey) : undefined;
+    setSnapshotScope(scopeKey);
+    setSnapshot(last ?? null);
+    setLoading(false);
     // Saved numbers first, so the sidebar isn't empty while the first read runs.
-    window.milagre.getCachedUsage()
-      .then((cached) => setSnapshot((current) => seedSnapshot(current, cached)))
+    const version = generation.current;
+    window.milagre
+      .getCachedUsage(scopeKey)
+      .then((cached) => {
+        if (version === generation.current && currentScope.current === scopeKey) {
+          setSnapshotScope(scopeKey);
+          setSnapshot((current) => {
+            const seeded = seedSnapshot(current, cached);
+            if (scopeKey && seeded) lastSnapshots.set(scopeKey, seeded);
+            return seeded;
+          });
+        }
+      })
       .catch(() => {});
     void refresh();
     const timer = window.setInterval(() => void refresh(), POLL_MS);
-    return () => window.clearInterval(timer);
+    const off = window.milagre.onAccountsChanged?.(() => {
+      generation.current++;
+      inFlight.current = null;
+      lastReadAt.current = 0;
+      lastSnapshots.clear();
+      setSnapshot(null);
+      void refresh();
+    });
+    return () => {
+      generation.current++;
+      window.clearInterval(timer);
+      off?.();
+    };
   }, [refresh]);
 
-  return { snapshot, loading, refresh, refreshIfStale };
+  return { snapshot: snapshotScope === scopeKey ? snapshot : null, loading, refresh, refreshIfStale };
 }
 
 export type UsageState = ReturnType<typeof useUsage>;

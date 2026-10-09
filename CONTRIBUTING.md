@@ -15,9 +15,9 @@ npm install
 npm run dev
 npm run typecheck
 npm run build
-npm run test:agent
-npm run test:ui
-npm run test:monorepo
+npm test
+npm test -- --unit
+npm test -- --only <name>
 ```
 
 Use `npm run dev` for visual work. Keep the renderer and Electron process boundaries explicit:
@@ -29,6 +29,8 @@ Use `npm run dev` for visual work. Keep the renderer and Electron process bounda
 - `scripts/` contains root development, integration-test and release helpers.
 
 Install dependencies from the repository root with `npm ci`. Add package dependencies to their workspace. Root commands still work; `npm run build --workspace milagre` and `npm run test --workspace @milagre/shared` target individual packages. Electron packaging and semantic-release run at root, with installers in `release/`.
+
+Run `npm run format` before pushing; CI fails on unformatted files. After cloning, run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once so `git blame` skips the repository-wide formatting commit.
 
 When changing the UI, include a short description of the interaction and, when practical, a screenshot or recording in the pull request.
 

@@ -1,239 +1,403 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { mapClaudeMessage, mapCodexNotification } = require('./events.cjs');
-const child = events => events.find(e => e.type === 'subagent-update')?.agent;
-const launch = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'spawn', name: 'Agent', input: { description: 'Review auth', prompt: 'Check authentication' } }] } };
-test('Claude tracks background completion after the launch tool returns and isolates child output', () => {
- const state = {};
- assert.equal(child(mapClaudeMessage(launch, state)).status, 'running');
- mapClaudeMessage({ type:'system', subtype:'task_started', task_id:'task', tool_use_id:'spawn', task_type:'local_agent', description:'Review auth' }, state);
- const background = mapClaudeMessage({ type:'user', parent_tool_use_id:null, message:{content:[{type:'tool_result', tool_use_id:'spawn', content:'launched'}]}, tool_use_result:{status:'async_launched'} }, state);
- assert.notEqual(child(background)?.status, 'completed');
- const nested = mapClaudeMessage({type:'assistant', parent_tool_use_id:'spawn', message:{id:'m1',content:[{type:'text',text:'Found an auth issue'}]}}, state);
- assert.equal(child(nested).transcript[0].text, 'Found an auth issue');
- assert.equal(nested.some(e=>e.type==='text-delta'), false);
- const done = child(mapClaudeMessage({type:'system',subtype:'task_notification',task_id:'task',status:'failed',summary:'Review crashed'},state));
- assert.equal(done.id, 'spawn');
- assert.equal(done.status, 'failed');
- assert.equal(done.transcript[0].text, 'Found an auth issue');
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { mapClaudeMessage, mapCodexNotification } = require("./events.cjs");
+const child = (events) => events.find((e) => e.type === "subagent-update")?.agent;
+const launch = {
+  type: "assistant",
+  parent_tool_use_id: null,
+  message: { content: [{ type: "tool_use", id: "spawn", name: "Agent", input: { description: "Review auth", prompt: "Check authentication" } }] },
+};
+test("Claude tracks background completion after the launch tool returns and isolates child output", () => {
+  const state = {};
+  assert.equal(child(mapClaudeMessage(launch, state)).status, "running");
+  mapClaudeMessage(
+    { type: "system", subtype: "task_started", task_id: "task", tool_use_id: "spawn", task_type: "local_agent", description: "Review auth" },
+    state,
+  );
+  const background = mapClaudeMessage(
+    {
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "spawn", content: "launched" }] },
+      tool_use_result: { status: "async_launched" },
+    },
+    state,
+  );
+  assert.notEqual(child(background)?.status, "completed");
+  const nested = mapClaudeMessage(
+    { type: "assistant", parent_tool_use_id: "spawn", message: { id: "m1", content: [{ type: "text", text: "Found an auth issue" }] } },
+    state,
+  );
+  assert.equal(child(nested).transcript[0].text, "Found an auth issue");
+  assert.equal(
+    nested.some((e) => e.type === "text-delta"),
+    false,
+  );
+  const done = child(mapClaudeMessage({ type: "system", subtype: "task_notification", task_id: "task", status: "failed", summary: "Review crashed" }, state));
+  assert.equal(done.id, "spawn");
+  assert.equal(done.status, "failed");
+  assert.equal(done.transcript[0].text, "Found an auth issue");
 });
-test('Claude excludes shell tasks and handles foreground results', () => {
- const state = {};
- assert.equal(child(mapClaudeMessage({type:'system',subtype:'task_started',task_id:'bash',task_type:'local_bash',description:'sleep'},state)), undefined);
- mapClaudeMessage(launch,state);
- assert.equal(child(mapClaudeMessage({type:'user',parent_tool_use_id:null,message:{content:[{type:'tool_result',tool_use_id:'spawn',content:'All good'}]}},state)).status,'completed');
+test("Claude excludes shell tasks and handles foreground results", () => {
+  const state = {};
+  assert.equal(
+    child(mapClaudeMessage({ type: "system", subtype: "task_started", task_id: "bash", task_type: "local_bash", description: "sleep" }, state)),
+    undefined,
+  );
+  mapClaudeMessage(launch, state);
+  assert.equal(
+    child(
+      mapClaudeMessage(
+        { type: "user", parent_tool_use_id: null, message: { content: [{ type: "tool_result", tool_use_id: "spawn", content: "All good" }] } },
+        state,
+      ),
+    ).status,
+    "completed",
+  );
 });
-test('Codex tracks each receiver, explicit waits, and never leaks unrelated threads', () => {
- const state = {threadId:'root',turnId:'turn'};
- const item = {id:'spawn',type:'collabAgentToolCall',tool:'spawnAgent',status:'completed',senderThreadId:'root',receiverThreadIds:['child'],prompt:'Review auth',agentsStates:{child:{status:'running',message:null}}};
- assert.equal(child(mapCodexNotification('item/completed',{threadId:'root',turnId:'turn',item},state)).status,'running');
- const waiting = mapCodexNotification('item/started',{threadId:'root',turnId:'turn',item:{...item,id:'wait',tool:'wait'}},state);
- assert.ok(waiting.some(e=>e.type==='subagents-waiting' && e.waiting));
- assert.deepEqual(mapCodexNotification('item/agentMessage/delta',{threadId:'stranger',delta:'secret'},state),[]);
- const output = mapCodexNotification('item/completed',{threadId:'child',item:{id:'reply',type:'agentMessage',text:'Found issue'}},state);
- assert.equal(child(output).transcript[0].text,'Found issue');
- assert.equal(output.some(e=>e.type==='turn-completed'),false);
- const done = mapCodexNotification('item/completed',{threadId:'root',turnId:'turn',item:{...item,id:'wait',tool:'wait',agentsStates:{child:{status:'completed',message:'Found issue'}}}},state);
- assert.equal(child(done).status,'completed');
- assert.ok(done.some(e=>e.type==='subagents-waiting' && !e.waiting));
+test("Codex tracks each receiver, explicit waits, and never leaks unrelated threads", () => {
+  const state = { threadId: "root", turnId: "turn" };
+  const item = {
+    id: "spawn",
+    type: "collabAgentToolCall",
+    tool: "spawnAgent",
+    status: "completed",
+    senderThreadId: "root",
+    receiverThreadIds: ["child"],
+    prompt: "Review auth",
+    agentsStates: { child: { status: "running", message: null } },
+  };
+  assert.equal(child(mapCodexNotification("item/completed", { threadId: "root", turnId: "turn", item }, state)).status, "running");
+  const waiting = mapCodexNotification("item/started", { threadId: "root", turnId: "turn", item: { ...item, id: "wait", tool: "wait" } }, state);
+  assert.ok(waiting.some((e) => e.type === "subagents-waiting" && e.waiting));
+  assert.deepEqual(mapCodexNotification("item/agentMessage/delta", { threadId: "stranger", delta: "secret" }, state), []);
+  const output = mapCodexNotification("item/completed", { threadId: "child", item: { id: "reply", type: "agentMessage", text: "Found issue" } }, state);
+  assert.equal(child(output).transcript[0].text, "Found issue");
+  assert.equal(
+    output.some((e) => e.type === "turn-completed"),
+    false,
+  );
+  const done = mapCodexNotification(
+    "item/completed",
+    { threadId: "root", turnId: "turn", item: { ...item, id: "wait", tool: "wait", agentsStates: { child: { status: "completed", message: "Found issue" } } } },
+    state,
+  );
+  assert.equal(child(done).status, "completed");
+  assert.ok(done.some((e) => e.type === "subagents-waiting" && !e.waiting));
 });
-test('Codex native activity records expose children even without a collab tool call', () => {
- const state={threadId:'root'};
- const events=mapCodexNotification('item/completed',{threadId:'root',item:{type:'subAgentActivity',id:'activity',kind:'started',agentThreadId:'native-child',agentPath:'/root/review'}},state);
- assert.equal(child(events).id,'native-child');
- assert.equal(child(events).status,'running');
- assert.equal(child(mapCodexNotification('thread/status/changed',{threadId:'native-child',status:{type:'systemError'}},state)).status,'failed');
+test("Codex native activity records expose children even without a collab tool call", () => {
+  const state = { threadId: "root" };
+  const events = mapCodexNotification(
+    "item/completed",
+    { threadId: "root", item: { type: "subAgentActivity", id: "activity", kind: "started", agentThreadId: "native-child", agentPath: "/root/review" } },
+    state,
+  );
+  assert.equal(child(events).id, "native-child");
+  assert.equal(child(events).status, "running");
+  assert.equal(child(mapCodexNotification("thread/status/changed", { threadId: "native-child", status: { type: "systemError" } }, state)).status, "failed");
 });
-test('canceling the parent settles children without claiming successful completion', () => {
- const {settleSubagents}=require('./subagents.cjs');
- const state={};
- mapClaudeMessage(launch,state);
- assert.equal(child(settleSubagents(state,'cancelled')).status,'cancelled');
- assert.deepEqual(settleSubagents(state,'cancelled'),[]);
+test("canceling the parent settles children without claiming successful completion", () => {
+  const { settleSubagents } = require("./subagents.cjs");
+  const state = {};
+  mapClaudeMessage(launch, state);
+  assert.equal(child(settleSubagents(state, "cancelled")).status, "cancelled");
+  assert.deepEqual(settleSubagents(state, "cancelled"), []);
 });
-test('a resumed Codex parent can rediscover a child through wait results', () => {
- const agent=child(mapCodexNotification('item/completed',{threadId:'root',item:{type:'collabAgentToolCall',id:'wait',tool:'wait',receiverThreadIds:['existing'],agentsStates:{existing:{status:'completed',message:'Saved result'}}}},{threadId:'root'}));
- assert.equal(agent.id,'existing');
- assert.equal(agent.transcript[0].text,'Saved result');
+test("a resumed Codex parent can rediscover a child through wait results", () => {
+  const agent = child(
+    mapCodexNotification(
+      "item/completed",
+      {
+        threadId: "root",
+        item: {
+          type: "collabAgentToolCall",
+          id: "wait",
+          tool: "wait",
+          receiverThreadIds: ["existing"],
+          agentsStates: { existing: { status: "completed", message: "Saved result" } },
+        },
+      },
+      { threadId: "root" },
+    ),
+  );
+  assert.equal(agent.id, "existing");
+  assert.equal(agent.transcript[0].text, "Saved result");
 });
-test('Claude waits until all foreground children have returned', () => {
- const state={};
- mapClaudeMessage(launch,state);
- mapClaudeMessage({...launch,message:{content:[{...launch.message.content[0],id:'second'}]}},state);
- const first=mapClaudeMessage({type:'user',parent_tool_use_id:null,message:{content:[{type:'tool_result',tool_use_id:'spawn',content:'Done'}]}},state);
- assert.equal(first.find(e=>e.type==='subagents-waiting').waiting,true);
-});
-
-test('Codex peer messages keep the spawning parent and record the real sender and receiver once', () => {
- const state = {threadId:'root'};
- const call = (threadId, item) => mapCodexNotification('item/completed',{threadId,item:{type:'collabAgentToolCall',status:'completed',...item}},state);
- call('root',{id:'spawn-a',tool:'spawnAgent',receiverThreadIds:['a'],prompt:'Review auth'});
- call('a',{id:'spawn-b',tool:'spawnAgent',receiverThreadIds:['b'],prompt:'Check tests'});
- call('root',{id:'spawn-c',tool:'spawnAgent',receiverThreadIds:['c'],prompt:'Check types'});
- const message = {id:'peer',tool:'sendInput',receiverThreadIds:['b'],prompt:'The auth tests need an update.'};
- call('c',message);
- call('c',message);
- const agent = state.subagents.get('b');
- assert.equal(agent.parentId,'a');
- assert.equal(agent.communications.filter(entry=>entry.id==='peer:b').length,1);
- assert.deepEqual(agent.communications.at(-1),{id:'peer:b',fromId:'c',toId:'b',text:message.prompt,at:agent.communications.at(-1).at});
- assert.equal(typeof agent.communications.at(-1).at,'number');
- call('b',{id:'to-main',tool:'sendInput',receiverThreadIds:['root'],prompt:'The fix is ready.'});
- assert.equal(state.subagents.has('root'),false);
- assert.equal(state.subagents.get('b').communications.at(-1).toId,null);
-});
-
-test('Claude task prompts and returned results become directed communications, not child thinking', () => {
- const state = {};
- mapClaudeMessage(launch,state);
- assert.equal(state.subagents.get('spawn').communications[0].fromId,null);
- assert.equal(state.subagents.get('spawn').communications[0].text,'Check authentication');
- mapClaudeMessage({type:'assistant',parent_tool_use_id:'spawn',message:{id:'thought',content:[{type:'thinking',thinking:'Checking carefully'}]}},state);
- assert.equal(state.subagents.get('spawn').communications.length,1);
- mapClaudeMessage({type:'user',parent_tool_use_id:null,message:{content:[{type:'tool_result',tool_use_id:'spawn',content:'All good'}]}},state);
- const reply = state.subagents.get('spawn').communications.at(-1);
- assert.equal(reply.fromId,'spawn');
- assert.equal(reply.toId,null);
- assert.equal(reply.text,'All good');
-});
-
-test('Codex native peer activity records direction without turning the main thread into a child', () => {
- const state = {threadId:'root'};
- const activity = (threadId, id, kind, target, path) => mapCodexNotification('item/completed',{threadId,item:{type:'subAgentActivity',id,kind,agentThreadId:target,agentPath:path}},state);
- activity('root','spawn-a','started','a','/root/a');
- activity('a','spawn-b','started','b','/root/a/b');
- activity('root','spawn-c','started','c','/root/c');
- activity('c','peer','interacted','b','/root/a/b');
- const receiver = state.subagents.get('b');
- assert.equal(receiver.parentId,'a');
- assert.equal(receiver.communications?.length,1);
- assert.deepEqual(receiver.communications.map(({fromId,toId,text})=>({fromId,toId,text})),[{fromId:'c',toId:'b',text:'Message sent'}]);
- activity('b','to-main','interacted','root','/root');
- assert.equal(state.subagents.has('root'),false);
- assert.deepEqual(state.subagents.get('b').communications.at(-1),{id:'activity:b:to-main:interacted',fromId:'b',toId:null,text:'Message sent',at:state.subagents.get('b').communications.at(-1).at});
-});
-
-test('Codex native history replay preserves terminal lifecycle and original communication times', t => {
- let time = 100;
- t.mock.method(Date,'now',()=>++time);
- const state = {threadId:'root'};
- const items = [
-  {type:'subAgentActivity',id:'spawn',kind:'started',agentThreadId:'a',agentPath:'/root/a'},
-  {type:'subAgentActivity',id:'message',kind:'interacted',agentThreadId:'a',agentPath:'/root/a'},
-  {type:'subAgentActivity',id:'done',kind:'completed',agentThreadId:'a',agentPath:'/root/a'},
- ];
- for (const item of items) mapCodexNotification('item/completed',{threadId:'root',item},state);
- const original = structuredClone(state.subagents.get('a'));
- assert.equal(original.communications?.length,1);
- for (const item of items) {
-  assert.deepEqual(mapCodexNotification('item/started',{threadId:'root',item},state),[]);
-  assert.deepEqual(mapCodexNotification('item/completed',{threadId:'root',item},state),[]);
- }
- assert.deepEqual(state.subagents.get('a'),original);
-});
-
-test('Codex native interactions do not invent unknown agents or restart completed receivers', () => {
- const state = {threadId:'root'};
- const activity = (id,kind,target) => mapCodexNotification('item/completed',{threadId:'root',item:{type:'subAgentActivity',id,kind,agentThreadId:target,agentPath:`/root/${target}`}},state);
- activity('unknown','interacted','stranger');
- assert.equal(state.subagents?.has('stranger') ?? false,false);
- activity('spawn','started','a');
- activity('done','completed','a');
- activity('message','interacted','a');
- assert.equal(state.subagents.get('a').status,'completed');
- assert.equal(state.subagents.get('a').communications?.length,1);
+test("Claude waits until all foreground children have returned", () => {
+  const state = {};
+  mapClaudeMessage(launch, state);
+  mapClaudeMessage({ ...launch, message: { content: [{ ...launch.message.content[0], id: "second" }] } }, state);
+  const first = mapClaudeMessage(
+    { type: "user", parent_tool_use_id: null, message: { content: [{ type: "tool_result", tool_use_id: "spawn", content: "Done" }] } },
+    state,
+  );
+  assert.equal(first.find((e) => e.type === "subagents-waiting").waiting, true);
 });
 
-test('Codex repeated waits retain one reply until the reported result changes', t => {
- let time = 100;
- t.mock.method(Date,'now',()=>++time);
- const state = {threadId:'root'};
- const wait = (id,status,message) => mapCodexNotification('item/completed',{threadId:'root',item:{type:'collabAgentToolCall',id,tool:'wait',status:'completed',senderThreadId:'root',receiverThreadIds:['a'],agentsStates:{a:{status,message}}}},state);
- wait('wait-1','completed','Auth is valid');
- const original = structuredClone(state.subagents.get('a'));
- wait('wait-2','completed','Auth is valid');
- assert.deepEqual(state.subagents.get('a'),original);
- wait('wait-3','completed','Found another issue');
- assert.equal(state.subagents.get('a').communications.length,2);
- assert.equal(state.subagents.get('a').communications.at(-1).text,'Found another issue');
+test("Codex peer messages keep the spawning parent and record the real sender and receiver once", () => {
+  const state = { threadId: "root" };
+  const call = (threadId, item) =>
+    mapCodexNotification("item/completed", { threadId, item: { type: "collabAgentToolCall", status: "completed", ...item } }, state);
+  call("root", { id: "spawn-a", tool: "spawnAgent", receiverThreadIds: ["a"], prompt: "Review auth" });
+  call("a", { id: "spawn-b", tool: "spawnAgent", receiverThreadIds: ["b"], prompt: "Check tests" });
+  call("root", { id: "spawn-c", tool: "spawnAgent", receiverThreadIds: ["c"], prompt: "Check types" });
+  const message = { id: "peer", tool: "sendInput", receiverThreadIds: ["b"], prompt: "The auth tests need an update." };
+  call("c", message);
+  call("c", message);
+  const agent = state.subagents.get("b");
+  assert.equal(agent.parentId, "a");
+  assert.equal(agent.communications.filter((entry) => entry.id === "peer:b").length, 1);
+  assert.deepEqual(agent.communications.at(-1), { id: "peer:b", fromId: "c", toId: "b", text: message.prompt, at: agent.communications.at(-1).at });
+  assert.equal(typeof agent.communications.at(-1).at, "number");
+  call("b", { id: "to-main", tool: "sendInput", receiverThreadIds: ["root"], prompt: "The fix is ready." });
+  assert.equal(state.subagents.has("root"), false);
+  assert.equal(state.subagents.get("b").communications.at(-1).toId, null);
 });
 
-test('Codex historical messages remain deduplicated after the visible history cap', () => {
- const state = {threadId:'root'};
- const call = (id,prompt) => mapCodexNotification('item/completed',{threadId:'root',item:{type:'collabAgentToolCall',id,tool:'sendInput',status:'completed',receiverThreadIds:['a'],prompt}},state);
- mapCodexNotification('item/completed',{threadId:'root',item:{type:'subAgentActivity',id:'spawn',kind:'started',agentThreadId:'a',agentPath:'/root/a'}},state);
- for (let index=0;index<25;index++) call(`message-${index}`,`Update ${index}`);
- const original = structuredClone(state.subagents.get('a').communications);
- assert.equal(original.length,20);
- call('message-0','Update 0');
- assert.deepEqual(state.subagents.get('a').communications,original);
+test("Claude task prompts and returned results become directed communications, not child thinking", () => {
+  const state = {};
+  mapClaudeMessage(launch, state);
+  assert.equal(state.subagents.get("spawn").communications[0].fromId, null);
+  assert.equal(state.subagents.get("spawn").communications[0].text, "Check authentication");
+  mapClaudeMessage(
+    { type: "assistant", parent_tool_use_id: "spawn", message: { id: "thought", content: [{ type: "thinking", thinking: "Checking carefully" }] } },
+    state,
+  );
+  assert.equal(state.subagents.get("spawn").communications.length, 1);
+  mapClaudeMessage(
+    { type: "user", parent_tool_use_id: null, message: { content: [{ type: "tool_result", tool_use_id: "spawn", content: "All good" }] } },
+    state,
+  );
+  const reply = state.subagents.get("spawn").communications.at(-1);
+  assert.equal(reply.fromId, "spawn");
+  assert.equal(reply.toId, null);
+  assert.equal(reply.text, "All good");
 });
 
-const claudeCall = (state,id,input,parent=null) => mapClaudeMessage({type:'assistant',parent_tool_use_id:parent,message:{id:`assistant-${id}`,content:[{type:'tool_use',id,name:'SendMessage',input}]}},state);
-const claudeResult = (state,id,parent=null,extra={}) => mapClaudeMessage({type:'user',parent_tool_use_id:parent,message:{content:[{type:'tool_result',tool_use_id:id,content:'Message delivered',...extra}]}},state);
-const namedClaudeChild = (state,id,name,parent=null) => mapClaudeMessage({type:'assistant',parent_tool_use_id:parent,message:{content:[{type:'tool_use',id,name:'Agent',input:{description:`Review ${name}`,prompt:'Review the code',name,run_in_background:true}}]}},state);
-
-test('Claude records SendMessage by name only after successful delivery', () => {
- const state = {};
- namedClaudeChild(state,'a','reviewer');
- namedClaudeChild(state,'b','tester');
- claudeCall(state,'send',{to:'tester',message:'The auth test needs updating'},'a');
- assert.equal(state.subagents.get('b').communications.length,1);
- claudeResult(state,'send','a');
- const communication = state.subagents.get('b').communications.at(-1);
- assert.equal(communication.fromId,'a');
- assert.equal(communication.toId,'b');
- assert.equal(communication.text,'The auth test needs updating');
- const original = structuredClone(state.subagents.get('b').communications);
- claudeResult(state,'send','a');
- assert.deepEqual(state.subagents.get('b').communications,original);
+test("Codex native peer activity records direction without turning the main thread into a child", () => {
+  const state = { threadId: "root" };
+  const activity = (threadId, id, kind, target, path) =>
+    mapCodexNotification("item/completed", { threadId, item: { type: "subAgentActivity", id, kind, agentThreadId: target, agentPath: path } }, state);
+  activity("root", "spawn-a", "started", "a", "/root/a");
+  activity("a", "spawn-b", "started", "b", "/root/a/b");
+  activity("root", "spawn-c", "started", "c", "/root/c");
+  activity("c", "peer", "interacted", "b", "/root/a/b");
+  const receiver = state.subagents.get("b");
+  assert.equal(receiver.parentId, "a");
+  assert.equal(receiver.communications?.length, 1);
+  assert.deepEqual(
+    receiver.communications.map(({ fromId, toId, text }) => ({ fromId, toId, text })),
+    [{ fromId: "c", toId: "b", text: "Message sent" }],
+  );
+  activity("b", "to-main", "interacted", "root", "/root");
+  assert.equal(state.subagents.has("root"), false);
+  assert.deepEqual(state.subagents.get("b").communications.at(-1), {
+    id: "activity:b:to-main:interacted",
+    fromId: "b",
+    toId: null,
+    text: "Message sent",
+    at: state.subagents.get("b").communications.at(-1).at,
+  });
 });
 
-test('Claude resolves legacy SendMessage task IDs without creating unknown recipients or reporting rejected messages', () => {
- const state = {};
- namedClaudeChild(state,'a','reviewer');
- mapClaudeMessage({type:'system',subtype:'task_started',task_id:'task-a',tool_use_id:'a',task_type:'local_agent'},state);
- claudeCall(state,'legacy',{type:'message',recipient:'task-a',content:'Check the edge case'});
- claudeResult(state,'legacy');
- assert.deepEqual(state.subagents.get('a').communications.map(({fromId,toId,text})=>({fromId,toId,text})),[
-  {fromId:null,toId:'a',text:'Review the code'},
-  {fromId:null,toId:'a',text:'Check the edge case'},
- ]);
- claudeCall(state,'failed',{to:'reviewer',message:'Never delivered'});
- claudeResult(state,'failed',null,{is_error:true});
- claudeCall(state,'unknown',{to:'stranger',message:'Not part of this chat'});
- claudeResult(state,'unknown');
- claudeCall(state,'shutdown',{type:'shutdown_request',recipient:'reviewer',content:'Stop'});
- claudeResult(state,'shutdown');
- assert.equal(state.subagents.size,1);
- assert.equal(state.subagents.get('a').communications.length,2);
+test("Codex native history replay preserves terminal lifecycle and original communication times", (t) => {
+  let time = 100;
+  t.mock.method(Date, "now", () => ++time);
+  const state = { threadId: "root" };
+  const items = [
+    { type: "subAgentActivity", id: "spawn", kind: "started", agentThreadId: "a", agentPath: "/root/a" },
+    { type: "subAgentActivity", id: "message", kind: "interacted", agentThreadId: "a", agentPath: "/root/a" },
+    { type: "subAgentActivity", id: "done", kind: "completed", agentThreadId: "a", agentPath: "/root/a" },
+  ];
+  for (const item of items) mapCodexNotification("item/completed", { threadId: "root", item }, state);
+  const original = structuredClone(state.subagents.get("a"));
+  assert.equal(original.communications?.length, 1);
+  for (const item of items) {
+    assert.deepEqual(mapCodexNotification("item/started", { threadId: "root", item }, state), []);
+    assert.deepEqual(mapCodexNotification("item/completed", { threadId: "root", item }, state), []);
+  }
+  assert.deepEqual(state.subagents.get("a"), original);
 });
 
-test('unloading a Codex child preserves a known terminal outcome and its timestamps', t => {
- let time = 100;
- t.mock.method(Date,'now',()=>++time);
- for (const [turnStatus,expected] of [['completed','completed'],['failed','failed'],['interrupted','cancelled']]) {
-  const state = {threadId:'root'};
-  mapCodexNotification('item/completed',{threadId:'root',item:{type:'subAgentActivity',id:'spawn',kind:'started',agentThreadId:'child',agentPath:'/root/review'}},state);
-  mapCodexNotification('turn/completed',{threadId:'child',turn:{id:'review',status:turnStatus,items:[]}},state);
-  const terminal = state.subagents.get('child');
-  assert.equal(terminal.status,expected);
-  const events = mapCodexNotification('thread/status/changed',{threadId:'child',status:{type:'notLoaded'}},state);
-  assert.equal(state.subagents.get('child'),terminal);
-  assert.deepEqual(events,[]);
-  mapCodexNotification('thread/status/changed',{threadId:'child',status:{type:'active',activeFlags:[]}},state);
-  assert.equal(state.subagents.get('child').status,'running');
- }
+test("Codex native interactions do not invent unknown agents or restart completed receivers", () => {
+  const state = { threadId: "root" };
+  const activity = (id, kind, target) =>
+    mapCodexNotification(
+      "item/completed",
+      { threadId: "root", item: { type: "subAgentActivity", id, kind, agentThreadId: target, agentPath: `/root/${target}` } },
+      state,
+    );
+  activity("unknown", "interacted", "stranger");
+  assert.equal(state.subagents?.has("stranger") ?? false, false);
+  activity("spawn", "started", "a");
+  activity("done", "completed", "a");
+  activity("message", "interacted", "a");
+  assert.equal(state.subagents.get("a").status, "completed");
+  assert.equal(state.subagents.get("a").communications?.length, 1);
 });
 
-test('unloading a Codex child without a known outcome keeps its status unknown', () => {
- const state = {threadId:'root'};
- mapCodexNotification('item/completed',{threadId:'root',item:{type:'subAgentActivity',id:'spawn',kind:'started',agentThreadId:'child',agentPath:'/root/review'}},state);
- assert.equal(state.subagents.get('child').status,'running');
- mapCodexNotification('thread/status/changed',{threadId:'child',status:{type:'notLoaded'}},state);
- assert.equal(state.subagents.get('child').status,'unknown');
- mapCodexNotification('thread/status/changed',{threadId:'child',status:{type:'notLoaded'}},state);
- assert.equal(state.subagents.get('child').status,'unknown');
- assert.deepEqual(mapCodexNotification('thread/status/changed',{threadId:'stranger',status:{type:'notLoaded'}},state),[]);
- assert.equal(state.subagents.has('stranger'),false);
+test("Codex repeated waits retain one reply until the reported result changes", (t) => {
+  let time = 100;
+  t.mock.method(Date, "now", () => ++time);
+  const state = { threadId: "root" };
+  const wait = (id, status, message) =>
+    mapCodexNotification(
+      "item/completed",
+      {
+        threadId: "root",
+        item: {
+          type: "collabAgentToolCall",
+          id,
+          tool: "wait",
+          status: "completed",
+          senderThreadId: "root",
+          receiverThreadIds: ["a"],
+          agentsStates: { a: { status, message } },
+        },
+      },
+      state,
+    );
+  wait("wait-1", "completed", "Auth is valid");
+  const original = structuredClone(state.subagents.get("a"));
+  wait("wait-2", "completed", "Auth is valid");
+  assert.deepEqual(state.subagents.get("a"), original);
+  wait("wait-3", "completed", "Found another issue");
+  assert.equal(state.subagents.get("a").communications.length, 2);
+  assert.equal(state.subagents.get("a").communications.at(-1).text, "Found another issue");
+});
+
+test("Codex historical messages remain deduplicated after the visible history cap", () => {
+  const state = { threadId: "root" };
+  const call = (id, prompt) =>
+    mapCodexNotification(
+      "item/completed",
+      { threadId: "root", item: { type: "collabAgentToolCall", id, tool: "sendInput", status: "completed", receiverThreadIds: ["a"], prompt } },
+      state,
+    );
+  mapCodexNotification(
+    "item/completed",
+    { threadId: "root", item: { type: "subAgentActivity", id: "spawn", kind: "started", agentThreadId: "a", agentPath: "/root/a" } },
+    state,
+  );
+  for (let index = 0; index < 25; index++) call(`message-${index}`, `Update ${index}`);
+  const original = structuredClone(state.subagents.get("a").communications);
+  assert.equal(original.length, 20);
+  call("message-0", "Update 0");
+  assert.deepEqual(state.subagents.get("a").communications, original);
+});
+
+const claudeCall = (state, id, input, parent = null) =>
+  mapClaudeMessage(
+    { type: "assistant", parent_tool_use_id: parent, message: { id: `assistant-${id}`, content: [{ type: "tool_use", id, name: "SendMessage", input }] } },
+    state,
+  );
+const claudeResult = (state, id, parent = null, extra = {}) =>
+  mapClaudeMessage(
+    { type: "user", parent_tool_use_id: parent, message: { content: [{ type: "tool_result", tool_use_id: id, content: "Message delivered", ...extra }] } },
+    state,
+  );
+const namedClaudeChild = (state, id, name, parent = null) =>
+  mapClaudeMessage(
+    {
+      type: "assistant",
+      parent_tool_use_id: parent,
+      message: {
+        content: [{ type: "tool_use", id, name: "Agent", input: { description: `Review ${name}`, prompt: "Review the code", name, run_in_background: true } }],
+      },
+    },
+    state,
+  );
+
+test("Claude records SendMessage by name only after successful delivery", () => {
+  const state = {};
+  namedClaudeChild(state, "a", "reviewer");
+  namedClaudeChild(state, "b", "tester");
+  claudeCall(state, "send", { to: "tester", message: "The auth test needs updating" }, "a");
+  assert.equal(state.subagents.get("b").communications.length, 1);
+  claudeResult(state, "send", "a");
+  const communication = state.subagents.get("b").communications.at(-1);
+  assert.equal(communication.fromId, "a");
+  assert.equal(communication.toId, "b");
+  assert.equal(communication.text, "The auth test needs updating");
+  const original = structuredClone(state.subagents.get("b").communications);
+  claudeResult(state, "send", "a");
+  assert.deepEqual(state.subagents.get("b").communications, original);
+});
+
+test("Claude resolves legacy SendMessage task IDs without creating unknown recipients or reporting rejected messages", () => {
+  const state = {};
+  namedClaudeChild(state, "a", "reviewer");
+  mapClaudeMessage({ type: "system", subtype: "task_started", task_id: "task-a", tool_use_id: "a", task_type: "local_agent" }, state);
+  claudeCall(state, "legacy", { type: "message", recipient: "task-a", content: "Check the edge case" });
+  claudeResult(state, "legacy");
+  assert.deepEqual(
+    state.subagents.get("a").communications.map(({ fromId, toId, text }) => ({ fromId, toId, text })),
+    [
+      { fromId: null, toId: "a", text: "Review the code" },
+      { fromId: null, toId: "a", text: "Check the edge case" },
+    ],
+  );
+  claudeCall(state, "failed", { to: "reviewer", message: "Never delivered" });
+  claudeResult(state, "failed", null, { is_error: true });
+  claudeCall(state, "unknown", { to: "stranger", message: "Not part of this chat" });
+  claudeResult(state, "unknown");
+  claudeCall(state, "shutdown", { type: "shutdown_request", recipient: "reviewer", content: "Stop" });
+  claudeResult(state, "shutdown");
+  assert.equal(state.subagents.size, 1);
+  assert.equal(state.subagents.get("a").communications.length, 2);
+});
+
+test("unloading a Codex child preserves a known terminal outcome and its timestamps", (t) => {
+  let time = 100;
+  t.mock.method(Date, "now", () => ++time);
+  for (const [turnStatus, expected] of [
+    ["completed", "completed"],
+    ["failed", "failed"],
+    ["interrupted", "cancelled"],
+  ]) {
+    const state = { threadId: "root" };
+    mapCodexNotification(
+      "item/completed",
+      { threadId: "root", item: { type: "subAgentActivity", id: "spawn", kind: "started", agentThreadId: "child", agentPath: "/root/review" } },
+      state,
+    );
+    mapCodexNotification("turn/completed", { threadId: "child", turn: { id: "review", status: turnStatus, items: [] } }, state);
+    const terminal = state.subagents.get("child");
+    assert.equal(terminal.status, expected);
+    const events = mapCodexNotification("thread/status/changed", { threadId: "child", status: { type: "notLoaded" } }, state);
+    assert.equal(state.subagents.get("child"), terminal);
+    assert.deepEqual(events, []);
+    mapCodexNotification("thread/status/changed", { threadId: "child", status: { type: "active", activeFlags: [] } }, state);
+    assert.equal(state.subagents.get("child").status, "running");
+  }
+});
+
+test("unloading a Codex child without a known outcome keeps its status unknown", () => {
+  const state = { threadId: "root" };
+  mapCodexNotification(
+    "item/completed",
+    { threadId: "root", item: { type: "subAgentActivity", id: "spawn", kind: "started", agentThreadId: "child", agentPath: "/root/review" } },
+    state,
+  );
+  assert.equal(state.subagents.get("child").status, "running");
+  mapCodexNotification("thread/status/changed", { threadId: "child", status: { type: "notLoaded" } }, state);
+  assert.equal(state.subagents.get("child").status, "unknown");
+  mapCodexNotification("thread/status/changed", { threadId: "child", status: { type: "notLoaded" } }, state);
+  assert.equal(state.subagents.get("child").status, "unknown");
+  assert.deepEqual(mapCodexNotification("thread/status/changed", { threadId: "stranger", status: { type: "notLoaded" } }, state), []);
+  assert.equal(state.subagents.has("stranger"), false);
+});
+
+test("Codex publishes current subagent activity when work starts", () => {
+  const state = { threadId: "root", subagents: new Map([["child", { id: "child", title: "Review", status: "running", transcript: [] }]]) };
+  const start = (item) => child(mapCodexNotification("item/started", { threadId: "child", item }, state));
+  const testing = start({ id: "test", type: "commandExecution", command: "npm test" });
+  assert.equal(testing.latestActivity, "Ran `npm test`");
+  assert.equal(testing.transcript.length, 0);
+  assert.equal(
+    start({ id: "edit", type: "fileChange", changes: [{ path: "auth.ts", kind: { type: "update" }, diff: "" }] }).latestActivity,
+    "Edited `auth.ts`",
+  );
+  assert.equal(start({ id: "reason", type: "reasoning" }).latestActivity, "Thinking");
+  assert.equal(start({ id: "reply", type: "agentMessage" }).latestActivity, "Responding");
 });

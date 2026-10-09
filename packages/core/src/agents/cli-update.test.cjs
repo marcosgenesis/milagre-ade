@@ -61,10 +61,7 @@ test("runCliUpdate: claude falls back to install.sh latest", async () => {
   const result = await runCliUpdate("claude", { execImpl, inspect, linkVersion });
   assert.equal(result.ok, true);
   assert.equal(result.version, "2.1.287");
-  assert.deepEqual(executed, [
-    "claude install --force latest",
-    "curl -fsSL https://claude.ai/install.sh | bash -s latest",
-  ]);
+  assert.deepEqual(executed, ["claude install --force latest", "curl -fsSL https://claude.ai/install.sh | bash -s latest"]);
 });
 
 test("runCliUpdate: codex update succeeds", async () => {
@@ -104,4 +101,41 @@ test("linkNewestClaudeVersion: symlinks highest compliant version", () => {
   assert.equal(fs.readlinkSync(targetBin), path.join(versionsDir, "2.1.289"));
 
   fs.rmSync(tempHome, { recursive: true, force: true });
+});
+
+test("runCliUpdate: antigravity installs the pinned Antigravity release when nothing, or another version, is active", async () => {
+  const progress = [];
+  const antigravity = (current, update) => ({
+    resolve: () => current,
+    updateAvailable: () => update,
+    install: async ({ onProgress }) => {
+      onProgress?.({ phase: "download", received: 1, total: 2 });
+      return { version: "1.3.0", changed: true };
+    },
+  });
+  assert.deepEqual(await runCliUpdate("antigravity", { antigravity: antigravity(null, true), onProgress: (event) => progress.push(event) }), {
+    ok: true,
+    version: "1.3.0",
+  });
+  assert.deepEqual(progress, [{ phase: "download", received: 1, total: 2 }]);
+  assert.deepEqual(await runCliUpdate("antigravity", { antigravity: antigravity({ version: "1.2.0" }, true) }), { ok: true, version: "1.3.0" });
+  // Already on the pinned release: nothing to download.
+  const current = { ...antigravity({ version: "1.3.0" }, false), install: async () => assert.fail("not installed again") };
+  assert.deepEqual(await runCliUpdate("antigravity", { antigravity: current }), { ok: true, version: "1.3.0" });
+});
+
+test("runCliUpdate: a failed Antigravity install reports its message and the version still active", async () => {
+  const antigravity = {
+    resolve: () => ({ version: "1.2.0" }),
+    updateAvailable: () => true,
+    install: async () => {
+      throw new Error("The Antigravity download doesn't match its checksum, so it was discarded.");
+    },
+  };
+  assert.deepEqual(await runCliUpdate("antigravity", { antigravity }), {
+    ok: false,
+    version: "1.2.0",
+    error: "The Antigravity download doesn't match its checksum, so it was discarded.",
+  });
+  assert.equal((await runCliUpdate("antigravity", {})).ok, false);
 });

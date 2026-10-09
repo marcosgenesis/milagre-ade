@@ -46,7 +46,7 @@ function Fixture() {
   return <div style={{ height: "100%", padding: 12 }}>
     <ChatComposer messages={messages}
       imageDraft={{ images: [], files: [], attachFiles: noop, attachPath: noop, removeFile: noop, loading: false, error: "", onPaste: noop, clear: noop, remove: noop }}
-      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} tasks={tasks} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
+      projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false} tasks={tasks} contextUsage={{ used: 366000, size: 1000000 }} streamingText="" streamingSteps={[{ id: "c-1", kind: "other", title: "Compacting context", status: "running", offset: 0 }]} subagents={children} onArchiveFinishedSubagents={archiveFinished} onArchiveSubagent={archive} waitingForSubagents={true}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
       capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
@@ -63,12 +63,18 @@ async function browserChecks() {
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-task-track-ui-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 800, height: 600, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
-  window.webContents.on("console-message", details => { if (details.level === "error") console.error(details.message); });
+  window.webContents.on("console-message", (details) => {
+    if (details.level === "error") console.error(details.message);
+  });
   const evaluate = async (source) => {
-    try { return await window.webContents.executeJavaScript(source); }
-    catch (error) { throw new Error(`${source}: ${error.message}`); }
+    try {
+      return await window.webContents.executeJavaScript(source);
+    } catch (error) {
+      throw new Error(`${source}: ${error.message}`);
+    }
   };
-  const clickLabel = label => evaluate(`[...document.querySelectorAll("button")].find(button => button.getAttribute("aria-label") === ${JSON.stringify(label)}).click()`);
+  const clickLabel = (label) =>
+    evaluate(`[...document.querySelectorAll("button")].find(button => button.getAttribute("aria-label") === ${JSON.stringify(label)}).click()`);
   const screenshotDir = process.env.MILAGRE_SCREENSHOT_DIR;
   async function screenshot(name) {
     if (!screenshotDir) return;
@@ -84,14 +90,44 @@ async function browserChecks() {
     }
     throw new Error(`Timed out: ${source}`);
   }
-  const pill = '[data-slot=task-track] > span > button';
+  const pill = "[data-slot=task-track] > span > button";
   try {
     await window.loadURL(process.argv[2]);
     await waitFor('!!document.querySelector("[data-slot=task-track]")');
     assert.equal(await evaluate(`document.querySelector("${pill}").textContent`), "2/7");
+    // The context ring sits beside Send, on the same row.
+    const ring = "button[aria-label^=Context]";
+    assert.equal(await evaluate(`document.querySelector("${ring}").getAttribute("aria-label")`), "Context: 37% used (366k of 1M tokens)");
+    assert.ok(
+      await evaluate(
+        `(() => {const r=document.querySelector("${ring}").getBoundingClientRect(), s=document.querySelector("button[aria-label=Send]").getBoundingClientRect();return r.right<=s.left && Math.abs(r.top-s.top)<1})()`,
+      ),
+    );
+    // A click opens the context card above the ring, right-aligned with it; Escape closes it.
+    for (const theme of ["dark", "light"]) {
+      await evaluate(`window.setDark(${theme === "dark"})`);
+      await evaluate(`document.querySelector("${ring}").click()`);
+      await waitFor('!!document.querySelector("[data-context-card]")');
+      assert.equal(await evaluate(`document.querySelector("${ring}").getAttribute("aria-expanded")`), "true");
+      assert.equal(
+        await evaluate('document.querySelector("[data-context-card]").textContent'),
+        "Context37% used366k of 1M tokens634k left. The agent compacts the conversation when it gets close to full.",
+      );
+      assert.ok(
+        await evaluate(
+          `(() => {const c=document.querySelector("[data-context-card]").getBoundingClientRect(), r=document.querySelector("${ring}").getBoundingClientRect();return c.bottom<=r.top && Math.abs(c.right-r.right)<1})()`,
+        ),
+      );
+      await delay(220);
+      await screenshot(`context-card-${theme}`);
+      await evaluate('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))');
+      await waitFor('!document.querySelector("[data-context-card]")');
+    }
     assert.ok(await evaluate(`document.querySelector("${pill}").getBoundingClientRect().height <= 24`));
     // The pill sits right next to Subagents, on the same row.
-    const gap = await evaluate(`(() => {const a=document.querySelector("${pill}").getBoundingClientRect(), b=document.querySelector("[data-slot=subagent-track] > button").getBoundingClientRect();return {gap:b.left-a.right,dy:Math.abs(a.top-b.top)}})()`);
+    const gap = await evaluate(
+      `(() => {const a=document.querySelector("${pill}").getBoundingClientRect(), b=document.querySelector("[data-slot=subagent-track] > button").getBoundingClientRect();return {gap:b.left-a.right,dy:Math.abs(a.top-b.top)}})()`,
+    );
     assert.ok(gap.gap >= 0 && gap.gap <= 12 && gap.dy < 1, `Pill is not beside Subagents: ${JSON.stringify(gap)}`);
     for (const theme of ["dark", "light"]) {
       await evaluate(`window.setDark(${theme === "dark"})`);
@@ -101,10 +137,19 @@ async function browserChecks() {
       assert.equal(await evaluate(`document.querySelector("${pill}").getAttribute("aria-expanded")`), "true");
       assert.equal(await evaluate('document.querySelectorAll("dialog[open], [aria-modal=true]").length'), 0);
       assert.equal(await evaluate('document.querySelectorAll("[data-task-row]").length'), 7);
-      assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-task-row]")].slice(0,3).map(row => row.dataset.status + ":" + row.textContent)'), ["completed:Completed: Read the composer", "in_progress:In progress: Adding the task pill", "pending:Pending: Write tests"]);
+      assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-task-row]")].slice(0,3).map(row => row.dataset.status + ":" + row.textContent)'), [
+        "completed:Completed: Read the composer",
+        "in_progress:In progress: Adding the task pill",
+        "pending:Pending: Write tests",
+      ]);
       assert.equal(await evaluate('document.querySelectorAll("[data-task-row][data-status=in_progress] svg").length'), 1);
-      const bounds = await evaluate('(() => {const r=document.querySelector("[data-slot=task-popover]").getBoundingClientRect(), t=document.querySelector("[data-slot=task-track] button").getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,w:innerWidth,h:innerHeight,gap:t.top-r.bottom}})()');
-      assert.ok(bounds.left >= 0 && bounds.right <= bounds.w && bounds.top >= 0 && bounds.gap >= 0 && bounds.gap < 16, `Popover is misplaced: ${JSON.stringify(bounds)}`);
+      const bounds = await evaluate(
+        '(() => {const r=document.querySelector("[data-slot=task-popover]").getBoundingClientRect(), t=document.querySelector("[data-slot=task-track] button").getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,w:innerWidth,h:innerHeight,gap:t.top-r.bottom}})()',
+      );
+      assert.ok(
+        bounds.left >= 0 && bounds.right <= bounds.w && bounds.top >= 0 && bounds.gap >= 0 && bounds.gap < 16,
+        `Popover is misplaced: ${JSON.stringify(bounds)}`,
+      );
       await screenshot(`task-popover-${theme}`);
       window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
       window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
@@ -119,15 +164,22 @@ async function browserChecks() {
     await delay(200);
     await evaluate(`document.querySelector("${pill}").click()`);
     await waitFor('!!document.querySelector("[data-slot=task-popover]")');
-    assert.ok(await evaluate('(() => {const r=document.querySelector("[data-slot=task-popover]").getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0})()'), "Popover escapes the narrow viewport");
+    assert.ok(
+      await evaluate(
+        '(() => {const r=document.querySelector("[data-slot=task-popover]").getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0})()',
+      ),
+      "Popover escapes the narrow viewport",
+    );
     await screenshot("task-popover-narrow");
     window.setContentSize(800, 600);
     await evaluate('window.setTasks(items => items.map(task => ({...task, status: "completed"})))');
     await waitFor(`document.querySelector("${pill}").textContent === "7/7"`);
-    await evaluate('window.setTasks([])');
+    await evaluate("window.setTasks([])");
     await waitFor('!document.querySelector("[data-slot=task-track]") && !document.querySelector("[data-slot=task-popover]")');
     assert.ok(await evaluate('!!document.querySelector("[data-slot=subagent-track] > button")'));
-    console.log("PASS: pill label, placement beside Subagents, rows and statuses, light and dark, Escape and outside click, focus return, narrow layout, hidden when empty");
+    console.log(
+      "PASS: pill label, placement beside Subagents, rows and statuses, light and dark, Escape and outside click, focus return, narrow layout, hidden when empty",
+    );
     app.exit(0);
   } catch (error) {
     console.error(error);
@@ -140,19 +192,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "task-track-fixture",
-      resolveId(id) { if (id === "/__task_track_fixture.tsx") return id; },
-      load(id) { if (id === "/__task_track_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__task_track__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__task_track_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "task-track-fixture",
+        resolveId(id) {
+          if (id === "/__task_track_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__task_track_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__task_track__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__task_track_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -161,14 +222,14 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__task_track__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
 
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

@@ -70,6 +70,8 @@ window.interrupts = [];
 window.agentListeners = new Set();
 window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
+  getRuns: async () => ({ seq: 0, runs: {} }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
   getCurrentProject: async () => ({ path: "/fixture", name: "Fixture", state }),
@@ -98,10 +100,15 @@ async function browserChecks() {
   app.setPath("userData", require("node:fs").mkdtempSync(path.join(require("node:os").tmpdir(), "milagre-find-ui-")));
   await app.whenReady();
   const window = new BrowserWindow({ width: 900, height: 640, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
-  window.webContents.on("console-message", details => { if (details.level === "error") console.error(details.message); });
+  window.webContents.on("console-message", (details) => {
+    if (details.level === "error") console.error(details.message);
+  });
   const evaluate = async (source) => {
-    try { return await window.webContents.executeJavaScript(source); }
-    catch (error) { throw new Error(`${source}: ${error.message}`); }
+    try {
+      return await window.webContents.executeJavaScript(source);
+    } catch (error) {
+      throw new Error(`${source}: ${error.message}`);
+    }
   };
   async function screenshot(name) {
     if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
@@ -123,8 +130,14 @@ async function browserChecks() {
   };
   const count = () => evaluate('document.querySelector("[data-find-count]")?.textContent ?? null');
   const activeTop = () => evaluate('(() => { const r = [...CSS.highlights.get("find-active")][0].getBoundingClientRect(); return Math.round(r.top); })()');
-  const activeOffset = () => evaluate('(() => { const range = [...CSS.highlights.get("find-active")][0]; return range.startContainer.data.slice(0, range.startOffset).length + range.startContainer.data.length * 1000; })()');
-  const inView = () => evaluate('(() => { const v = document.querySelector("section"); const vr = v.getBoundingClientRect(); const r = [...CSS.highlights.get("find-active")][0].getBoundingClientRect(); return r.top >= vr.top && r.bottom <= vr.bottom; })()');
+  const activeOffset = () =>
+    evaluate(
+      '(() => { const range = [...CSS.highlights.get("find-active")][0]; return range.startContainer.data.slice(0, range.startOffset).length + range.startContainer.data.length * 1000; })()',
+    );
+  const inView = () =>
+    evaluate(
+      '(() => { const v = document.querySelector("section"); const vr = v.getBoundingClientRect(); const r = [...CSS.highlights.get("find-active")][0].getBoundingClientRect(); return r.top >= vr.top && r.bottom <= vr.bottom; })()',
+    );
   const setTheme = (dark) => evaluate(`document.documentElement.classList.toggle("dark", ${dark})`);
   // The same keys and shortcuts through the real App: its state, shortcut handlers and command palette.
   async function appPhase() {
@@ -147,7 +160,7 @@ async function browserChecks() {
     await evaluate('window.openChatWith("Chat two needle")');
     await waitFor('document.querySelector("[aria-label=Conversation]").textContent.includes("Chat two needle")');
     await waitFor(`!(${bar})`);
-    assert.equal(await evaluate('CSS.highlights.size'), 0);
+    assert.equal(await evaluate("CSS.highlights.size"), 0);
 
     // A new, empty chat has nothing to search.
     await evaluate('document.querySelector("[aria-label=\\"New chat\\"]").click()');
@@ -171,22 +184,26 @@ async function browserChecks() {
     assert.equal(await evaluate('document.activeElement === document.querySelector("textarea[aria-label=Prompt]")'), true);
 
     // Escape closes the bar first; the stop-agent handler only gets the next one.
-    await evaluate('window.interrupts.length = 0');
-    await evaluate('(() => { const i = document.querySelector("textarea[aria-label=Prompt]"); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(i, "go"); i.dispatchEvent(new Event("input", { bubbles: true })); })()');
+    await evaluate("window.interrupts.length = 0");
+    await evaluate(
+      '(() => { const i = document.querySelector("textarea[aria-label=Prompt]"); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(i, "go"); i.dispatchEvent(new Event("input", { bubbles: true })); })()',
+    );
     await waitFor('!document.querySelector("[aria-label=Send]").disabled');
     await evaluate('document.querySelector("[aria-label=Send]").click()');
     // The working indicator names the model only to screen readers.
-    await waitFor('!!document.querySelector(\'[role=status][aria-label^="Working with"]\')');
+    await waitFor("!!document.querySelector('[role=status][aria-label^=\"Working with\"]')");
     key("F", ["meta"]);
     await waitFor(bar);
     await evaluate('document.querySelector("textarea[aria-label=Prompt]").focus()');
     key("Escape");
     await waitFor(`!(${bar})`);
     await delay(200);
-    assert.equal(await evaluate('window.interrupts.length'), 0, "Escape that closes the bar must not stop the agent");
+    assert.equal(await evaluate("window.interrupts.length"), 0, "Escape that closes the bar must not stop the agent");
     key("Escape");
-    await waitFor('window.interrupts.length === 1');
-    console.log("PASS: real App: opens on a chat, ignores an empty new chat, closes on chat switch, palette command, Escape closes the bar before stopping the agent");
+    await waitFor("window.interrupts.length === 1");
+    console.log(
+      "PASS: real App: opens on a chat, ignores an empty new chat, closes on chat switch, palette command, Escape closes the bar before stopping the agent",
+    );
   }
 
   try {
@@ -236,7 +253,12 @@ async function browserChecks() {
     await evaluate('document.querySelector("[data-find-bar] input").select()');
     window.webContents.insertText("across bold text and inline");
     await waitFor('document.querySelector("[data-find-count]").textContent === "1 of 1"');
-    assert.equal(await evaluate('(() => { const r = [...CSS.highlights.get("find-active")][0]; return r.startContainer !== r.endContainer && r.toString() === "across bold text and inline"; })()'), true);
+    assert.equal(
+      await evaluate(
+        '(() => { const r = [...CSS.highlights.get("find-active")][0]; return r.startContainer !== r.endContainer && r.toString() === "across bold text and inline"; })()',
+      ),
+      true,
+    );
     await evaluate('document.querySelector("[data-find-bar] input").select()');
     window.webContents.insertText("needle");
     await waitFor('document.querySelector("[data-find-count]").textContent === "1 of 5"');
@@ -247,7 +269,12 @@ async function browserChecks() {
     await evaluate('document.querySelector("textarea[aria-label=Prompt]").focus()');
     key("F", ["meta"]);
     await waitFor('document.activeElement === document.querySelector("[data-find-bar] input")');
-    assert.equal(await evaluate('(() => { const i = document.querySelector("[data-find-bar] input"); return i.selectionStart === 0 && i.selectionEnd === i.value.length; })()'), true);
+    assert.equal(
+      await evaluate(
+        '(() => { const i = document.querySelector("[data-find-bar] input"); return i.selectionStart === 0 && i.selectionEnd === i.value.length; })()',
+      ),
+      true,
+    );
 
     await setTheme(true);
     await screenshot("find-dark");
@@ -262,7 +289,7 @@ async function browserChecks() {
 
     key("Escape");
     await waitFor('!document.querySelector("[data-find-bar]")');
-    assert.equal(await evaluate('CSS.highlights.size'), 0);
+    assert.equal(await evaluate("CSS.highlights.size"), 0);
     assert.equal(await evaluate('document.activeElement === document.querySelector("textarea[aria-label=Prompt]")'), true);
     console.log("PASS: opens with the shortcut, live count, Enter and Shift+Enter step and scroll, wrap, reopen selects, Esc clears and restores focus");
     await appPhase();
@@ -278,36 +305,50 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "find-fixture",
-      resolveId(id) { if (id.startsWith("/__find_")) return id; },
-      load(id) { if (id === "/__find_fixture.tsx") return fixture; if (id === "/__find_app_fixture.tsx") return appFixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          const entry = { "/__find__": "/__find_fixture.tsx", "/__find_app__": "/__find_app_fixture.tsx" }[request.url];
-          if (!entry) return next();
-          const html = await server.transformIndexHtml(request.url, `<html><body><div id="root"></div><script type="module" src="${entry}"></script></body></html>`);
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "find-fixture",
+        resolveId(id) {
+          if (id.startsWith("/__find_")) return id;
+        },
+        load(id) {
+          if (id === "/__find_fixture.tsx") return fixture;
+          if (id === "/__find_app_fixture.tsx") return appFixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            const entry = { "/__find__": "/__find_fixture.tsx", "/__find_app__": "/__find_app_fixture.tsx" }[request.url];
+            if (!entry) return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              `<html><body><div id="root"></div><script type="module" src="${entry}"></script></body></html>`,
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
-    const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__find__`, `${server.resolvedUrls.local[0]}__find_app__`], { env, stdio: "inherit" });
+    const child = spawn(
+      require("electron"),
+      [path.resolve(__filename), `${server.resolvedUrls.local[0]}__find__`, `${server.resolvedUrls.local[0]}__find_app__`],
+      { env, stdio: "inherit" },
+    );
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
 
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

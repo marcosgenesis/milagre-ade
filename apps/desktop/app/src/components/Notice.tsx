@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
 
 /** A dismissable notice card, above the composer or over a view: a line of text, or a list. `className` sets its outer spacing and width. */
-export function Notice({ children, onDismiss, className = "mb-2", ...data }: { children: ReactNode; onDismiss?: () => void; className?: string } & { [key: `data-${string}`]: string | boolean | undefined }) {
+export function Notice({
+  children,
+  onDismiss,
+  className = "mb-2",
+  ...data
+}: { children: ReactNode; onDismiss?: () => void; className?: string } & { [key: `data-${string}`]: string | boolean | undefined }) {
   return (
     <div
       role="status"
@@ -11,12 +16,7 @@ export function Notice({ children, onDismiss, className = "mb-2", ...data }: { c
       style={{ animation: "fade-up 250ms cubic-bezier(0.23,1,0.32,1) both" }}
     >
       <div className="min-w-0 flex-1 break-words">{children}</div>
-      <button
-        type="button"
-        data-notice-dismiss
-        onClick={onDismiss}
-        className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink"
-      >
+      <button type="button" data-notice-dismiss onClick={onDismiss} className="shrink-0 text-xs font-medium text-ink-3 transition-colors hover:text-ink">
         Dismiss
       </button>
     </div>

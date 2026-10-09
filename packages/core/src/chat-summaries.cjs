@@ -1,0 +1,43 @@
+const { summarizeChat, sameSummary } = require("@milagre/shared/chat-summary");
+
+// Keeps each Chat's summary (session.summary) current with its messages, in the change that touches them, so the chat
+// lists, titles and handoff recovery read the summary instead of walking every message of every Chat (#300).
+
+const EMPTY = Object.freeze([]);
+// Messages grouped by Chat, once per messages array (states are replaced, never changed in place).
+const groupings = new WeakMap();
+function byChat(messages) {
+  let grouped = groupings.get(messages);
+  if (!grouped) {
+    grouped = new Map();
+    for (const message of messages) {
+      const key = String(message.session_id);
+      const list = grouped.get(key);
+      if (list) list.push(message);
+      else grouped.set(key, [message]);
+    }
+    groupings.set(messages, grouped);
+  }
+  return grouped;
+}
+const sameList = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
+
+/** `next` with the summary of every Chat whose messages changed since `previous` (all of them without one) brought up to date. */
+function withChatSummaries(next, previous) {
+  if (!next?.sessions || !Array.isArray(next.messages)) return next;
+  if (previous && next.messages === previous.messages && next.sessions === previous.sessions) return next;
+  const now = byChat(next.messages);
+  const before = previous && Array.isArray(previous.messages) && previous.messages !== next.messages ? byChat(previous.messages) : null;
+  const messagesKept = previous && previous.messages === next.messages;
+  let sessions;
+  for (const [id, session] of Object.entries(next.sessions)) {
+    const list = now.get(String(id)) ?? EMPTY;
+    if (session.summary && (messagesKept || (before && sameList(list, before.get(String(id)) ?? EMPTY)))) continue;
+    const summary = summarizeChat(list);
+    if (sameSummary(session.summary, summary)) continue;
+    (sessions ??= { ...next.sessions })[id] = { ...session, summary };
+  }
+  return sessions ? { ...next, sessions } : next;
+}
+
+module.exports = { withChatSummaries };

@@ -32,17 +32,19 @@ async function exists(fs, target) {
 // The installed editors: an .app in /Applications or ~/Applications, or its CLI on PATH.
 // Each is { id, name, appPath, cli }, with null for what's missing.
 async function detectEditors({ fs = fsp, which = resolveExecutable, home = os.homedir(), platform = process.platform } = {}) {
-  const found = await Promise.all(EDITORS.map(async (editor) => {
-    let appPath = null;
-    for (const dir of platform === "darwin" ? ["/Applications", path.join(home, "Applications")] : []) {
-      const candidate = path.join(dir, editor.app);
-      if (!appPath && await exists(fs, candidate)) appPath = candidate;
-    }
-    let cli = (await which(editor.cli)) || null;
-    // Launched from Finder, PATH may lack the CLI; the app bundle carries its own.
-    if (!cli && appPath && await exists(fs, path.join(appPath, editor.bundleCli))) cli = path.join(appPath, editor.bundleCli);
-    return appPath || cli ? { id: editor.id, name: editor.name, appPath, cli } : null;
-  }));
+  const found = await Promise.all(
+    EDITORS.map(async (editor) => {
+      let appPath = null;
+      for (const dir of platform === "darwin" ? ["/Applications", path.join(home, "Applications")] : []) {
+        const candidate = path.join(dir, editor.app);
+        if (!appPath && (await exists(fs, candidate))) appPath = candidate;
+      }
+      let cli = (await which(editor.cli)) || null;
+      // Launched from Finder, PATH may lack the CLI; the app bundle carries its own.
+      if (!cli && appPath && (await exists(fs, path.join(appPath, editor.bundleCli)))) cli = path.join(appPath, editor.bundleCli);
+      return appPath || cli ? { id: editor.id, name: editor.name, appPath, cli } : null;
+    }),
+  );
   return found.filter(Boolean);
 }
 
@@ -62,7 +64,7 @@ const notFound = () => new Error("File not found");
 
 // `requested` (relative to root, or absolute) as a real path inside root, or an error. A symlink that
 // leaves root is refused after realpath; with no `requested` the root folder itself is the target.
-async function resolveInside(root, requested) {
+async function resolveInside(root, requested, additionalRoots = []) {
   let realRoot;
   try {
     realRoot = await fsp.realpath(root);
@@ -81,7 +83,16 @@ async function resolveInside(root, requested) {
     throw notFound();
   }
   const relative = path.relative(realRoot, real);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw outside();
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    const permitted = await Promise.all(
+      additionalRoots.map(async (owned) => {
+        const resolved = await fsp.realpath(owned);
+        const within = path.relative(resolved, real);
+        return within !== ".." && !within.startsWith(`..${path.sep}`) && !path.isAbsolute(within);
+      }),
+    );
+    if (!permitted.some(Boolean)) throw outside();
+  }
   return { target: real, isDirectory: (await fsp.stat(real)).isDirectory() };
 }
 
@@ -104,7 +115,12 @@ async function gitTopLevel(directory) {
 function runProgram(file, args) {
   return new Promise((resolve, reject) => {
     const invocation = editorInvocation(file, args);
-    execCommand(invocation?.file ?? file, invocation?.args ?? args, { timeout: 10_000, windowsHide: true, ...(invocation && { env: { ...process.env, ...invocation.env } }) }, (error) => (error ? reject(error) : resolve()));
+    execCommand(
+      invocation?.file ?? file,
+      invocation?.args ?? args,
+      { timeout: 10_000, windowsHide: true, ...(invocation && { env: { ...process.env, ...invocation.env } }) },
+      (error) => (error ? reject(error) : resolve()),
+    );
   });
 }
 
@@ -114,8 +130,8 @@ async function openInEditor({ root, path: requested, line, editor: editorId }, {
   if (!editor) return "No editor found";
   let resolved;
   try {
-    await checkRoot(root);
-    resolved = await resolveInside(root, requested);
+    const ownedRoots = await checkRoot(root);
+    resolved = await resolveInside(root, requested, Array.isArray(ownedRoots) ? ownedRoots : []);
   } catch (error) {
     return error.message;
   }

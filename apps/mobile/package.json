@@ -1,15 +1,28 @@
 {
   "name": "@milagre/mobile",
   "version": "0.1.0",
+  "private": true,
+  "type": "module",
   "main": "expo-router/entry",
+  "scripts": {
+    "postinstall": "cd ../.. && patch-package --patch-dir apps/mobile/patches",
+    "start": "node ../../scripts/start-mobile.cjs",
+    "android": "node ../../scripts/start-mobile.cjs --android",
+    "ios": "node ../../scripts/start-mobile.cjs --ios",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/*.test.ts",
+    "export:ios": "expo export --platform ios",
+    "lint": "eslint .",
+    "update:testflight": "npx eas-cli@latest update --channel testflight --environment production --platform all --non-interactive"
+  },
   "dependencies": {
     "@expo/ui": "~57.0.21",
     "@hugeicons/core-free-icons": "^4.3.5",
     "@hugeicons/react-native": "^1.0.16",
     "@milagre/shared": "0.1.0",
     "@react-native-masked-view/masked-view": "0.3.2",
+    "@sbaiahmed1/react-native-blur": "6.0.2",
     "expo": "~57.0.26",
-    "expo-blur": "~57.0.3",
     "expo-build-properties": "~57.0.22",
     "expo-camera": "~57.0.6",
     "expo-clipboard": "~57.0.2",
@@ -23,6 +36,7 @@
     "expo-image-picker": "~57.0.20",
     "expo-linear-gradient": "~57.0.2",
     "expo-linking": "~57.0.11",
+    "expo-network": "~57.0.2",
     "expo-notifications": "~57.0.21",
     "expo-router": "~57.0.24",
     "expo-secure-store": "~57.0.4",
@@ -38,8 +52,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
-    "react-native-worklets": "0.10.1",
-    "tweetnacl": "1.0.3"
+    "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
@@ -47,18 +60,5 @@
     "eslint-config-expo": "~57.0.2",
     "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
-  },
-  "scripts": {
-    "postinstall": "cd ../.. && patch-package --patch-dir apps/mobile/patches",
-    "start": "node ../../scripts/start-mobile.cjs",
-    "android": "node ../../scripts/start-mobile.cjs --android",
-    "ios": "node ../../scripts/start-mobile.cjs --ios",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test src/*.test.ts",
-    "export:ios": "expo export --platform ios",
-    "lint": "eslint .",
-    "update:testflight": "npx eas-cli@latest update --channel testflight --environment production --platform all --non-interactive"
-  },
-  "private": true,
-  "type": "module"
+  }
 }

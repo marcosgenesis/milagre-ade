@@ -16,10 +16,19 @@ test("sameData reads nested objects and arrays by value", () => {
 });
 
 test("reuseRows keeps unchanged rows and the list itself", () => {
-  const first = [{ id: "1", label: "a", details: { ports: [1] } }, { id: "2", label: "b" }];
-  const same = reuseRows(first, [{ id: "1", label: "a", details: { ports: [1] } }, { id: "2", label: "b" }]);
+  const first = [
+    { id: "1", label: "a", details: { ports: [1] } },
+    { id: "2", label: "b" },
+  ];
+  const same = reuseRows(first, [
+    { id: "1", label: "a", details: { ports: [1] } },
+    { id: "2", label: "b" },
+  ]);
   assert.equal(same, first);
-  const changed = reuseRows(first, [{ id: "1", label: "a", details: { ports: [1] } }, { id: "2", label: "c" }]);
+  const changed = reuseRows(first, [
+    { id: "1", label: "a", details: { ports: [1] } },
+    { id: "2", label: "c" },
+  ]);
   assert.notEqual(changed, first);
   assert.equal(changed[0], first[0]);
   assert.notEqual(changed[1], first[1]);

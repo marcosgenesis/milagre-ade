@@ -1,3 +1,10 @@
+const { createAccountRouting } = require("./account-routing.cjs");
+const { createAccounts } = require("./accounts.cjs");
+const { createLinkStore } = require("./link-store.cjs");
+const { createLinkWorkspaces } = require("./link-workspaces.cjs");
+const { createChatScopes } = require("./chat-scopes.cjs");
+const { registerLinkRuntime } = require("./link-runtime.cjs");
+const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { PROVIDERS } = require("@milagre/shared/providers");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { createGit } = require("./git/client.cjs");
@@ -5,22 +12,24 @@ const fs = require("node:fs/promises");
 const { acquireOwnership } = require("./ownership.cjs");
 const { mkdirSync, realpathSync } = require("node:fs");
 const path = require("node:path");
-const { migrateImages } = require("./project-content.cjs");
+const { migrateImages, withDetails } = require("./project-content.cjs");
 const { decodeImages } = require("./image-input.cjs");
 const { KeepAwake } = require("./keep-awake.cjs");
 const { ClaudeSession } = require("./agents/claude-provider.cjs");
 const { CodexSession, recoverCodexSubagents } = require("./agents/codex-provider.cjs");
+const { AcpSession } = require("./agents/acp-session.cjs");
+const { antigravityAcp, sweepTempDirs } = require("./agents/antigravity-acp.cjs");
 const { createCliCache, inspectCli } = require("./agents/cli.cjs");
 const { runCliUpdate, linkNewestClaudeVersion } = require("./agents/cli-update.cjs");
+const { createAntigravity } = require("./agents/antigravity-install.cjs");
+const { recoverAntigravitySubagents } = require("./agents/antigravity-subagents.cjs");
 const { loadLoginEnvironment, refreshInstallPath } = require("./agents/environment.cjs");
 const { failedWith, loginMessage } = require("./agents/events.cjs");
-const { createModelCache } = require("./agents/models.cjs");
-const { cliWhenLoggedIn, createCliStatus } = require("./agents/status.cjs");
 const { SessionManager } = require("./agents/session-manager.cjs");
 const { PortWatcher } = require("./agents/ports.cjs");
 const { ChatHost } = require("./agents/chat-host.cjs");
 const { writeTranscript, generateBrief, createHandoverModels } = require("./agents/handover.cjs");
-const { discoverSkills, expandSkillPrompt } = require("./skills.cjs");
+const { discoverSkills, expandSkillPrompt, readDiscoveredSkill } = require("./skills.cjs");
 const { DEFAULT_WORKTREE_ROOT, createWorktree, listBranches, renameWorktreeBranch } = require("./worktrees.cjs");
 const { suggestWorktreeName } = require("./worktree-name.cjs");
 const { removeWorktree, worktreeStatus } = require("./worktree-cleanup.cjs");
@@ -39,12 +48,12 @@ const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree 
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
 const { createProjectFinder } = require("./project-finder.cjs");
-const { saveProjectState, readProjectState, stateFile } = require("./project-store.cjs");
+const { saveProjectState, readProjectState, compactProjectState, stateFile } = require("./project-store.cjs");
 const { createRecentProjects, launchProject, rememberProject, switchTarget } = require("./recent-projects.cjs");
 const { activeWorktrees, resolveProject } = require("./project-identity.cjs");
 const { createProjectRegistry } = require("./project-registry.cjs");
 const { createLinkedWorktrees } = require("./linked-worktrees.cjs");
-const { createUsageReader } = require("./usage.cjs");
+const { createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage, readAntigravityUsage } = require("./usage.cjs");
 const { createUsageStore, cachedSnapshot } = require("./usage-cache.cjs");
 
 const { createFileSearch } = require("./project-files.cjs");
@@ -64,10 +73,15 @@ function createRuntime(options) {
   const background = new Set();
   let closing = false;
   let closed;
+  let advisors;
+  let advisorDelivery;
   function track(work, set = active) {
     const task = Promise.resolve().then(work);
     set.add(task);
-    task.then(() => set.delete(task), () => set.delete(task));
+    task.then(
+      () => set.delete(task),
+      () => set.delete(task),
+    );
     return task;
   }
   function accept(work) {
@@ -77,10 +91,13 @@ function createRuntime(options) {
   async function ownProject(projectPath) {
     if (typeof projectPath !== "string" || !path.isAbsolute(projectPath)) throw new Error("An absolute Project path is required");
     const real = realpathSync(projectPath);
-    const checkAlias = existing => {
+    const checkAlias = (existing) => {
       if (existing.openedAs !== projectPath) throw new Error(`Project is already open as ${existing.openedAs}`);
     };
-    if (projectOwners.has(real)) { checkAlias(projectOwners.get(real)); return; }
+    if (projectOwners.has(real)) {
+      checkAlias(projectOwners.get(real));
+      return;
+    }
     let common;
     try {
       common = await git.commonDir(real);
@@ -88,7 +105,10 @@ function createRuntime(options) {
       if (error.code !== 128 || !/not a git repository/i.test(error.stderr ?? "")) throw error;
     }
     // Another open of this path may have finished while git was running.
-    if (projectOwners.has(real)) { checkAlias(projectOwners.get(real)); return; }
+    if (projectOwners.has(real)) {
+      checkAlias(projectOwners.get(real));
+      return;
+    }
     let repositoryOwner;
     if (common && !repositoryOwners.has(common)) repositoryOwner = acquireOwnership(path.join(common, "milagre-runtime.lock"));
     try {
@@ -101,17 +121,113 @@ function createRuntime(options) {
     }
   }
   const handlers = new Map();
-  const commands = { handle(name, handler) {
-    if (handlers.has(name)) throw new Error(`Duplicate command: ${name}`);
-    handlers.set(name, handler);
-  } };
+  const commands = {
+    handle(name, handler) {
+      if (handlers.has(name)) throw new Error(`Duplicate command: ${name}`);
+      handlers.set(name, handler);
+    },
+  };
+  const { createChatSimulators, simulatorToolDefinitions } = require("./chat-simulators.cjs");
+  const existingChat = (action) => async (chatId) => {
+    const scope = projectOfKey(chatId),
+      id = sessionIdFromKey(chatId);
+    if (!scope || !Number.isSafeInteger(id) || id < 1 || !scopeStates.has(scope) || !(await scopeStates.get(scope)).sessions[id])
+      throw new Error(`Open an existing Chat before ${action}.`);
+  };
+  const simulators = createChatSimulators({
+    simulators: options.simulators ?? require("./simulators.cjs").createSimulators(),
+    file: path.join(dataDir, "simulator-attachments.json"),
+    validateChat: existingChat("attaching a simulator"),
+  });
+  const { createChatArtifacts, artifactToolDefinitions } = require("./chat-artifacts.cjs");
+  const artifacts = createChatArtifacts({ directory: path.join(dataDir, "artifacts"), validateChat: existingChat("showing a design") });
+  commands.handle("artifact:get", (_context, request) => artifacts.get(request));
+  commands.handle("artifact:list", (_context, request) => artifacts.list(request));
+  commands.handle("artifact:add-comments", (_context, request) => artifacts.addComments(request));
+  commands.handle("artifact:comments", (_context, request) => artifacts.comments(request));
+  for (const method of ["list", "attach", "detach"])
+    commands.handle(`simulator:${method}`, (context, request) => {
+      if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
+      return simulators[method](request);
+    });
+  for (const method of ["open", "offer", "status", "control", "input", "close"]) {
+    commands.handle(`simulator:${method}`, (context, request) => {
+      if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
+      return simulators[method === "close" ? "closeViewer" : method](request, context.clientId);
+    });
+  }
+  // `agents` is created below; ownership roots are read only once the service polls.
+  const browsers = options.browsers ?? require("./browsers.cjs").createBrowsers({ roots: () => agents.processes() });
+  commands.handle("browser:list", (_context, request) => browsers.list(request));
+  commands.handle("browser:attach", (_context, request) => browsers.attach(request));
+  for (const method of ["open", "frame", "status", "control", "input", "close"]) {
+    commands.handle(`browser:${method}`, (context, request) => {
+      if (!context?.clientId) throw new Error("Browser access requires an authenticated connection");
+      return browsers[method === "close" ? "closeViewer" : method](request, context.clientId);
+    });
+  }
   const searchFiles = createFileSearch();
-  const environmentReady = options.environmentReady ?? loadLoginEnvironment().then(({ source }) => {
-    if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
-  }, (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message));
+  const environmentReady =
+    options.environmentReady ??
+    loadLoginEnvironment().then(
+      ({ source }) => {
+        if (source === "fallback") console.warn("Milagre couldn't read your login shell's environment; looking for agents in common install folders.");
+      },
+      (error) => console.warn("Milagre couldn't read your login shell's environment:", error.message),
+    );
   const usageStore = createUsageStore({ file: path.join(dataDir, "usage-cache.json") });
   // A host may bring its own usage, models and CLI status (the review demo, which runs no real agent).
-  const readUsage = options.readUsage ?? createUsageReader({ ready: () => environmentReady, store: usageStore });
+  const accountUsage = new Map();
+  // Tests replace single readers. Claude's and Codex's are called with no arguments; Antigravity's gets the Account's environment.
+  const readers = options.usageReaders ?? {};
+  function usageForAccounts(scope) {
+    const claude = accounts.selected("claude", scope),
+      codex = accounts.selected("codex", scope),
+      antigravity = accounts.selected("antigravity", scope);
+    // The default Antigravity Account adds nothing to the key, so existing cache files keep their names.
+    const key = `${claude}-${codex}${antigravity === "default" ? "" : `-${antigravity}`}`;
+    if (!accountUsage.has(key)) {
+      const store =
+        claude === "default" && codex === "default" && antigravity === "default"
+          ? usageStore
+          : createUsageStore({ file: path.join(dataDir, `usage-${key}.json`) });
+      accountUsage.set(key, {
+        key,
+        accountIds: { claude, codex, antigravity },
+        store,
+        read: createUsageReader({
+          ready: () => environmentReady,
+          store,
+          readClaude:
+            readers.claude ??
+            (async () => {
+              const env = accounts.environment("claude", claude);
+              return env.CLAUDE_CONFIG_DIR ? readClaudeProfileUsage({ command: (await baseCli("claude")).command, env }) : readClaudeUsage();
+            }),
+          readCodex: readers.codex ?? (() => readCodexUsage({ env: accounts.environment("codex", codex) })),
+          readAntigravity: () => (readers.antigravity ?? readAntigravityUsage)({ env: accounts.environment("antigravity", antigravity) }),
+        }),
+      });
+    }
+    return accountUsage.get(key);
+  }
+
+  async function usageWithAccounts(usage, snapshot) {
+    const identities = await accounts.list();
+    return {
+      ...snapshot,
+      accountKey: usage.key,
+      providers: snapshot.providers.map((provider) => {
+        // Use the IDs captured for this read, even if a selection changed while it was pending.
+        const id = usage.accountIds[provider.provider];
+        const account = identities.providers.find((group) => group.provider === provider.provider)?.accounts.find((entry) => entry.id === id);
+        return {
+          ...provider,
+          account: { id, label: account?.label || "Removed account", ...(account?.email ? { email: account.email } : {}) },
+        };
+      }),
+    };
+  }
 
   async function discoverWorktrees(projectPath) {
     // A failed read is not evidence that every Worktree was removed.
@@ -149,7 +265,7 @@ function createRuntime(options) {
   // Bringing chats back never stops a repository from opening: any failure leaves the files and keeps the stored state.
   async function withWorktreeChats(projectPath, stored, discovered) {
     try {
-      if (discovered.length < 2 || await fs.realpath(discovered[0].path).catch(() => null) !== projectPath) return stored;
+      if (discovered.length < 2 || (await fs.realpath(discovered[0].path).catch(() => null)) !== projectPath) return stored;
       const { state, restored } = await migrateWorktreeChats({
         projectPath,
         state: stored ?? emptyState(projectName(projectPath)),
@@ -167,22 +283,36 @@ function createRuntime(options) {
   }
 
   // Every project's state goes through here: this runtime is its only writer (see ADR-0001 and ADR-0003).
+  const linkStore = createLinkStore({ dataDir });
   const states = new ProjectStates({
     read: async (projectPath) => {
       const stored = await readStoredState(projectPath);
       const discovered = await discoverWorktrees(projectPath);
-      return reconcileState(await withWorktreeChats(projectPath, stored, discovered), projectName(projectPath), discovered);
+      return reconcileState(await withWorktreeChats(projectPath, stored, discovered), projectName(projectPath), discovered, await linkStore.ownedWorktrees());
     },
     save: saveProjectState,
+    compact: compactProjectState,
   });
 
+  const scopeStates = createChatScopes({
+    projects: states,
+    links: linkStore,
+    validateLink: async (id) => {
+      const members = await linkWorkspaces.membersAvailable(await linkRuntime.definition(id));
+      for (const member of members) await ownProject(member.path);
+    },
+  });
   function broadcastProjectState(projectPath, state) {
+    if (isLinkScopeKey(projectPath)) {
+      emit("link:state", { linkId: scopeFromKey(projectPath).linkId, state });
+      return;
+    }
     emit("project:state", { path: projectPath, state });
   }
 
   /** Applies a change to a project's state and tells the windows when it changed. */
   async function updateProject(projectPath, change) {
-    const result = await states.update(projectPath, change);
+    const result = await scopeStates.update(projectPath, change);
     if (result.changed) broadcastProjectState(projectPath, result.state);
     return result.state;
   }
@@ -190,9 +320,9 @@ function createRuntime(options) {
   // Explicit user edits keep their existing error contract. The flush waits outside
   // the mutation queue, so other Chats continue receiving streaming events.
   async function editProject(projectPath, change) {
-    const result = await states.update(projectPath, change);
+    const result = await scopeStates.update(projectPath, change);
     if (result.changed) broadcastProjectState(projectPath, result.state);
-    await states.flush(projectPath);
+    await scopeStates.flush(projectPath);
   }
 
   const diffs = new DiffRefresher({ states, readDiffStat, update: updateProject });
@@ -208,37 +338,66 @@ function createRuntime(options) {
       return Boolean(entry && !entry.session.closed);
     };
     let state = await updateProject(projectPath, async (current) => {
-      const next = reconcileState(current, projectName(projectPath), discovered);
+      const next = reconcileState(current, projectName(projectPath), discovered, await linkStore.ownedWorktrees());
       return migrateImages(projectPath, markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live))));
     });
     // A chat a quit stopped continues now; its message is saved before the project is returned, so the window shows it.
     await chats.resumeInterrupted(projectPath, state).catch((error) => console.warn("Milagre couldn't resume a chat:", error.message));
     state = await states.get(projectPath);
     chatTitles.resume(projectPath, state);
-    void chats.recoverHandovers(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handover:", error.message));
+    void chats.recoverHandoffs(projectPath, state).catch((error) => console.warn("Milagre couldn't recover a handoff:", error.message));
     void diffs.refresh(projectPath).catch(() => {});
     return { path: projectPath, name: projectName(projectPath), state };
   }
 
+  commands.handle("attachment:preview", async (_event, file) => {
+    const snapshots = await Promise.all(scopeStates.projects().map((project) => scopeStates.get(project)));
+    const attached = snapshots.flatMap((state) => (state.messages || []).flatMap((message) => message.files || []));
+    return require("./attachment-preview.cjs").readAttachment(file, scopeStates.worktreePaths(), attached);
+  });
   commands.handle("project:files", async (_event, root, query) => {
-    if (!states.worktreePaths().includes(root)) throw new Error("Choose an open project's worktree.");
+    if (!scopeStates.worktreePaths().includes(root) && !scopeStates.workspacePaths().includes(root)) throw new Error("Choose an open project's worktree.");
+    if (scopeStates.workspacePaths().includes(root)) {
+      const roots = await linkRuntime.workspace(root);
+      return (await Promise.all(roots.map(async (member) => (await searchFiles(member.worktreePath, query)).map((file) => `${member.alias}/${file}`)))).flat();
+    }
     return searchFiles(root, query);
   });
   // Path-taking commands only serve folders the user opened: an open project, one of its worktrees, or a recent
   // project (the switcher shows their avatars). Any renderer or paired phone script otherwise reaches any folder.
   async function knownFolder(folder) {
     if (typeof folder !== "string" || !path.isAbsolute(folder)) throw new Error("An absolute Project path is required");
-    if (states.has(folder) || states.worktreePaths().includes(folder)) return;
-    if ((await recentProjects().list()).some(item => item.path === folder)) return;
+    if (states.has(folder) || scopeStates.worktreePaths().includes(folder) || scopeStates.workspacePaths().includes(folder)) return;
+    if ((await recentProjects().list()).some((item) => item.path === folder)) return;
     throw new Error("Open this project in Milagre first.");
   }
-  commands.handle("skills:list", async (_event, projectPath) => { await knownFolder(projectPath); return discoverSkills(projectPath); });
-  commands.handle("project:branches", async (_event, projectPath) => { await knownFolder(projectPath); return listBranches(projectPath); });
-  // The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
-  commands.handle("project:image", async (_event, projectPath) => {
+  // A null Project lists the user's skills only.
+  commands.handle("skills:list", async (_event, projectPath) => {
+    if (projectPath !== null) await knownFolder(projectPath);
+    return discoverSkills(projectPath);
+  });
+  commands.handle("skills:read", async (_event, projectPath, file) => {
+    if (projectPath !== null) await knownFolder(projectPath);
+    return readDiscoveredSkill(projectPath, file);
+  });
+  commands.handle("project:branches", async (_event, projectPath) => {
     await knownFolder(projectPath);
+    return listBranches(projectPath);
+  });
+  // The avatar lookup runs `gh`, which a Finder launch only finds once the login environment is applied.
+  async function projectImage(projectPath) {
+    await knownFolder(projectPath);
+    const { icon } = await projectSettings().get(projectPath);
+    if (icon) return icon;
     await environmentReady;
     return resolveProjectImage(projectPath);
+  }
+  commands.handle("project:image", (_event, projectPath) => projectImage(projectPath));
+  // The icon the user chose in Settings, or null to go back to the repository's own.
+  commands.handle("project:set-icon", async (_event, projectPath, icon) => {
+    await knownFolder(projectPath);
+    await projectSettings().setIcon(projectPath, icon ?? null);
+    return projectImage(projectPath);
   });
   // Packaged builds get their release version from electron-builder metadata, not the source package.json.
   commands.handle("app:version", () => version);
@@ -269,6 +428,7 @@ function createRuntime(options) {
   // chat uses it. Two removals of one worktree take turns: the second finds it gone and says so instead of failing.
   const removals = new Map();
   commands.handle("worktree:remove", async (_event, worktreePath, options) => {
+    if ((await linkStore.ownedWorktrees()).has(worktreePath)) throw new Error("This Worktree belongs to a shared Link Chat. Archive the Chat to hide it.");
     const { force, projectPath, chatId, seen } = options && typeof options === "object" ? options : {};
     if (typeof projectPath !== "string" || !states.has(projectPath)) throw new Error("Open this project in Milagre first.");
     if (typeof worktreePath !== "string" || !path.isAbsolute(worktreePath)) throw new Error("An absolute worktree path is required.");
@@ -277,7 +437,8 @@ function createRuntime(options) {
     const earlier = removals.get(key);
     const removal = (async () => {
       const before = earlier ? await earlier.catch(() => null) : null;
-      if (before?.removed && !worktreeAt(await states.get(projectPath), worktreePath)) return { removed: false, alreadyRemoved: true, branch: before.branch, branchDeleted: false };
+      if (before?.removed && !worktreeAt(await states.get(projectPath), worktreePath))
+        return { removed: false, alreadyRemoved: true, branch: before.branch, branchDeleted: false };
       return removeOwnWorktree({ worktreePath, projectPath, chatId, seen, force: Boolean(force) });
     })();
     removals.set(key, removal);
@@ -307,10 +468,16 @@ function createRuntime(options) {
         const own = typeof chatId === "string" && projectOfKey(chatId) === projectPath ? state.sessions[sessionIdFromKey(chatId)] : undefined;
         if (!own || own.worktree_id !== worktree.id) throw new Error("That chat isn't on this worktree, so the worktree is kept.");
       }
-      const others = Object.values(state.sessions).filter((session) => session.worktree_id === worktree.id && !session.archived && `${projectPath}#${session.id}` !== chatId);
+      const others = Object.values(state.sessions).filter(
+        (session) => session.worktree_id === worktree.id && !session.archived && `${projectPath}#${session.id}` !== chatId,
+      );
       if (others.length) throw new Error("Another chat uses this worktree now, so it is kept.");
     };
     inUse(await states.get(projectPath));
+    // The chats on this worktree go with it, and so do their designs.
+    const goneChats = Object.values((await states.get(projectPath)).sessions)
+      .filter((session) => session.worktree_id === worktree.id)
+      .map((session) => `${projectPath}#${session.id}`);
     await environmentReady;
     const result = await removeWorktree({
       path: worktreePath,
@@ -320,6 +487,10 @@ function createRuntime(options) {
       seen,
       force,
       closeSession: async () => {
+        for (const gone of goneChats) {
+          await advisorDelivery.stop(gone);
+          await advisors.stopChat(gone);
+        }
         if (typeof chatId === "string") {
           await worktreeSetups.cancel(chatId);
           worktreeSetups.forget(worktreePath);
@@ -330,7 +501,10 @@ function createRuntime(options) {
     });
     // Read again, the project drops the worktree git no longer lists, with its chats.
     if (states.has(projectPath)) await readProject(projectPath);
-    if (result.removed) await pruneLinks();
+    if (result.removed) {
+      await Promise.all(goneChats.map((id) => artifacts.removeChat(id).catch(() => {})));
+      await pruneLinks();
+    }
     return result;
   }
   commands.handle("files-to-copy:read", async (_event, projectPath) => {
@@ -355,7 +529,10 @@ function createRuntime(options) {
     const { setupCommand } = await projectSettings().get(projectPath);
     return { setupCommand, ...(await resolveSetupCommand(projectPath, setupCommand)) };
   }
-  commands.handle("worktree-setup:read", async (_event, projectPath) => { await knownFolder(projectPath); return readSetupCommand(projectPath); });
+  commands.handle("worktree-setup:read", async (_event, projectPath) => {
+    await knownFolder(projectPath);
+    return readSetupCommand(projectPath);
+  });
   commands.handle("worktree-setup:save", async (_event, projectPath, command) => {
     await knownFolder(projectPath);
     await projectSettings().setSetupCommand(projectPath, typeof command === "string" ? command : "");
@@ -367,8 +544,8 @@ function createRuntime(options) {
   async function nameWorktree(projectPath, created, prompt) {
     // The CLI check waits for the login environment and resolves the path the SDK starts directly (no shell). A
     // missing or broken Claude has no command, and the name stays the prompt's first words.
-    const cli = await agentCli("claude");
-    const slug = await suggestWorktreeName(prompt, { command: cli.problem ? null : cli.command, timeoutMs: 15_000 });
+    const cli = await agentCli("claude", projectPath);
+    const slug = await suggestWorktreeName(prompt, { command: cli.problem ? null : cli.command, env: cli.env, timeoutMs: 15_000 });
     if (closing) return;
     const name = await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug });
     if (!name) return;
@@ -401,7 +578,10 @@ function createRuntime(options) {
   // Re-reads some worktrees' diff stats at once, e.g. after a commit from the "Commit and open PR" dialog.
   commands.handle("worktree:refresh-diffs", (_event, projectPath, worktreeIds) => {
     if (!states.has(projectPath) || !Array.isArray(worktreeIds)) return undefined;
-    return diffs.refresh(projectPath, worktreeIds.filter((id) => Number.isInteger(id)));
+    return diffs.refresh(
+      projectPath,
+      worktreeIds.filter((id) => Number.isInteger(id)),
+    );
   });
   const readPullRequest = options.readPullRequest ?? createPullRequestReader();
   commands.handle("worktree:pull-request", async (_event, worktreePath) => {
@@ -410,7 +590,7 @@ function createRuntime(options) {
   });
   commands.handle("worktree:pull-requests", async (_event, worktreePath, refs) => {
     await environmentReady;
-    return readPullRequests(worktreePath, refs);
+    return (options.readPullRequests ?? readPullRequests)(worktreePath, refs);
   });
   // While any chat's turn or a new worktree's setup runs the Mac stays awake (the screen can still sleep).
   // On until the renderer pushes the saved setting.
@@ -421,43 +601,47 @@ function createRuntime(options) {
     options.observeAgentEvent?.(chatId, event);
     keepAwake.observe(chatId, event);
     void notifyIfWaiting(chatId, event).catch(() => {});
-    diffs.observe(chatId, event);
-    void linked.observe(chatId, event).catch((error) => console.warn("Milagre couldn't follow a Delegation:", error.message));
+    if (!isLinkScopeKey(projectOfKey(chatId))) diffs.observe(chatId, event);
+    if (!isLinkScopeKey(projectOfKey(chatId)))
+      void track(() => linked.observe(chatId, event), background).catch((error) => console.warn("Milagre couldn't follow a Delegation:", error.message));
     // A turn that just failed on a login problem makes a "ready" picker status out of date.
     if (event.type === "turn-failed" && event.login) {
       for (const name of PROVIDERS) if (event.message === loginMessage(name)) agentCliStatus.invalidate(name);
     }
+    if (["turn-completed", "turn-failed", "turn-cancelled", "permission-resolved", "question-resolved"].includes(event.type))
+      void advisorDelivery?.drain(chatId).catch((error) => console.warn("Advisor delivery failed:", error.message));
     emit("agent:event", { chatId, event, ...(state ? { state } : {}), ...(seq ? { seq } : {}) });
   }
 
   const agents = new SessionManager({
-    createSession: options.createSession ?? ((provider, options) => (provider === "codex"
-      ? new CodexSession({ ...options, clientVersion: version })
-      : new ClaudeSession(options))),
+    createSession:
+      options.createSession ??
+      ((provider, options) =>
+        provider === "codex"
+          ? new CodexSession({ ...options, clientVersion: version })
+          : provider === "antigravity"
+            ? new AcpSession({ ...options, clientVersion: version, config: antigravityAcp })
+            : new ClaudeSession(options)),
     linkedFor: (chatId) => linked.forChat(chatId),
     onSessionClosed: (chatId) => keepAwake.chatClosed(chatId),
     onTurnStarted: () => ports.wake(),
     send: (chatId, event) => void chats.receive(chatId, event),
   });
 
-  // lsof reports real paths (/private/var for /var).
-  function realCwd(cwd) {
-    try {
-      return realpathSync(cwd);
-    } catch {
-      return cwd;
-    }
-  }
-
   // The ports each chat's commands listen on, polled while any agent runs or anything it started still does.
   const ports = new PortWatcher({
-    isRunning: () => [...agents.sessions.values()].some(entry => entry.session.turnActive),
-    roots: () => new Map([...agents.processes()].map(([chatId, root]) => [chatId, { ...root, cwd: realCwd(root.cwd) }])),
+    isRunning: () => [...agents.sessions.values()].some((entry) => entry.session.turnActive),
+    roots: () => agents.processes(),
     publish: (next) => {
       emit("agent:ports", next);
     },
   });
   commands.handle("agent:ports", () => ports.snapshot());
+  commands.handle("chat:ports", (_event, chatId) => {
+    if (typeof chatId !== "string" || !chatId) throw new Error("A Chat is required to list ports.");
+    const snapshot = ports.snapshot();
+    return { chatId, ports: Object.hasOwn(snapshot, chatId) ? snapshot[chatId] : [] };
+  });
   // The renderer is untrusted: only a pid the chat's port list shows can be stopped.
   commands.handle("agent:stop-port", (_event, chatId, pid) => (typeof chatId === "string" && Number.isInteger(pid) ? ports.stopPort(chatId, pid) : false));
 
@@ -470,7 +654,7 @@ function createRuntime(options) {
     const images = decodeImages(request.images);
     // expandSkills: false (the review demo) sends `/skill` as typed: the skills on this Mac are the owner's own.
     const prompt = options.expandSkills === false ? request.prompt : await expandSkillPrompt(request.cwd, request.prompt);
-    const cli = await agentCli(request.provider === "codex" ? "codex" : "claude");
+    const cli = agents.activeAccount(request.chatId, request.provider) ?? (await agentCli(request.provider, projectOfKey(request.chatId)));
     // A CLI that is missing, too old or doesn't start fails the turn like any other failure, with its own message.
     if (cli.problem) {
       await chats.receive(request.chatId, failedWith(cli.problem));
@@ -488,7 +672,16 @@ function createRuntime(options) {
     const context = agents.isTurnActive(request.chatId) ? "" : await linkedContext;
     const text = [prompt, setup.note, context].filter(Boolean).join("\n\n");
     try {
-      return await agents.startTurn({ ...request, prompt: text, images, command: cli.command });
+      return await agents.startTurn({
+        ...request,
+        prompt: text,
+        images,
+        command: cli.command,
+        env: cli.env,
+        harness: cli.harness,
+        args: cli.args,
+        accountId: cli.accountId,
+      });
     } catch (error) {
       // A start that throws sends no event, so the hold a setup handed to this turn would never be released.
       keepAwake.turnNotStarted(request.chatId);
@@ -496,15 +689,23 @@ function createRuntime(options) {
     }
   }
 
-  // Built on the first handover: agentCli is declared after the chats.
-  let handoverModels;
-
   const chats = new ChatHost({
-    states,
-    startTurn: request => track(() => startAgentTurn(request), starting),
-    readSubagents: async ({ cwd, agents }) => {
-      const cli = await agentCli("codex");
-      return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, clientVersion: version });
+    beforeSend: async (request) => {
+      if (request.context?.kind !== "advisor-result" && request.sessionId != null) await advisorDelivery?.resume(`${request.projectPath}#${request.sessionId}`);
+    },
+    onUnblocked: (chatId) => {
+      void advisorDelivery?.drain(chatId).catch((error) => console.warn("Advisor delivery failed:", error.message));
+    },
+    states: scopeStates,
+    startTurn: (request) => track(() => startAgentTurn(request), starting),
+    readSubagents: async ({ cwd, agents, projectPath, provider = "codex", nativeSessionId }) => {
+      // Antigravity's children are read from its transcripts in the chat's Account profile: no process starts.
+      if (provider === "antigravity") {
+        const cli = await agentCli("antigravity", projectPath).catch(() => null);
+        return recoverAntigravitySubagents({ home: cli?.env?.GEMINI_HOME, parentId: nativeSessionId, agents });
+      }
+      const cli = await agentCli("codex", projectPath);
+      return cli.problem ? [] : recoverCodexSubagents({ cwd, agents, command: cli.command, env: cli.env, clientVersion: version });
     },
     nameChat: (projectPath, sessionId) => chatTitles.name(projectPath, sessionId),
     publish: publishAgentEvent,
@@ -513,10 +714,29 @@ function createRuntime(options) {
     isChatFocused: options.isChatFocused,
     handoverTools: {
       writeTranscript: (input) => track(() => writeTranscript({ ...input, dir: path.join(dataDir, "handovers") }), background),
-      brief: ({ cwd, ...input }) => generateBrief({
-        ...input,
-        changedFiles: async () => (await git.text(cwd, ["status", "--porcelain"])).split("\n").filter(Boolean).map((line) => line.slice(3)),
-      }, { models: (handoverModels ??= createHandoverModels({ cli: agentCli, clientVersion: version })) }),
+      brief: ({ cwd, worktrees, projectPath, ...input }) =>
+        generateBrief(
+          {
+            ...input,
+            changedFiles: async () =>
+              worktrees
+                ? (
+                    await Promise.all(
+                      worktrees.map(async (member) =>
+                        (await git.text(member.worktreePath, ["status", "--porcelain"]))
+                          .split("\n")
+                          .filter(Boolean)
+                          .map((line) => `${member.alias}/${line.slice(3)}`),
+                      ),
+                    )
+                  ).flat()
+                : (await git.text(cwd, ["status", "--porcelain"]))
+                    .split("\n")
+                    .filter(Boolean)
+                    .map((line) => line.slice(3)),
+          },
+          { models: createHandoverModels({ cli: (provider) => agentCli(provider, projectPath), clientVersion: version }) },
+        ),
     },
   });
 
@@ -524,54 +744,104 @@ function createRuntime(options) {
   const worktreeSetups = new WorktreeSetups({ send: (chatId, event) => void chats.receive(chatId, event), keepAwake });
 
   // Each CLI is found and its version checked once per run; a missing or outdated one is checked again on the next message.
-  const agentCli = options.agentCli ?? createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath() });
+  // Antigravity is downloaded by Milagre into the data directory, not found on PATH.
+  const antigravity = options.antigravity ?? createAntigravity({ dataDir });
+  // Clears what Antigravity unpacked for Milagre processes that have since exited (crashes, kills).
+  void sweepTempDirs(options.antigravityTempRoot ?? antigravityAcp.tempRoot);
+  const baseCli = options.agentCli ?? createCliCache({ ready: () => environmentReady, refresh: () => refreshInstallPath(), antigravity });
+  const accounts = createAccounts({
+    dataDir,
+    cli: baseCli,
+    ready: () => environmentReady,
+    changed(provider) {
+      routing.invalidate(provider);
+      options.agentCliStatus?.invalidate?.(provider);
+      options.agentModels?.invalidate?.(provider);
+      emit("accounts:changed", {});
+    },
+  });
+  const routing = createAccountRouting({ accounts, cli: baseCli, clientVersion: version });
+  const agentCli = routing.cli;
+  agentCli.invalidate = (provider) => baseCli.invalidate?.(provider);
+  commands.handle("accounts:list", (_event, refresh) => accounts.list(refresh === true));
+  let accountMutation = Promise.resolve();
+  for (const method of ["add", "select", "login", "cancel", "remove"])
+    commands.handle(`accounts:${method}`, (_event, provider, value) => {
+      const pending = accountMutation.then(() => accounts[method](provider, value));
+      accountMutation = pending.catch(() => {});
+      return pending;
+    });
 
-  const titleModels = options.titleModels ?? createChatTitleModels({ cli: agentCli, clientVersion: version });
-  const chatTitles = new ChatTitles({ states, update: updateProject, generate: request => generateChatTitle(request, { models: titleModels }) });
+  const chatTitles = new ChatTitles({
+    states: scopeStates,
+    update: updateProject,
+    generate: (request) =>
+      generateChatTitle(request, {
+        models: options.titleModels ?? createChatTitleModels({ cli: (provider) => agentCli(provider, request.projectPath), clientVersion: version }),
+      }),
+  });
 
-  commands.handle("usage:read", () => readUsage());
-  commands.handle("usage:cached", () => cachedSnapshot(usageStore, Date.now()));
+  commands.handle("usage:read", async (_event, scope) => {
+    scope = await validateAccountScope(scope, true);
+    if (options.readUsage) return options.readUsage();
+    await environmentReady;
+    const usage = usageForAccounts(scope);
+    return usageWithAccounts(usage, await usage.read());
+  });
+  commands.handle("usage:cached", async (_event, scope) => {
+    scope = await validateAccountScope(scope, true);
+    const usage = usageForAccounts(scope);
+    return usageWithAccounts(usage, cachedSnapshot(usage.store, Date.now()));
+  });
 
   // The "Commit and open PR" dialog: Milagre runs git and gh itself, in the chat's folder, once the login
   // environment is in (gh from a Finder launch). Its one-shot text call starts the CLI agentCli found.
   registerGitHandlers(commands, {
-    cli: (name) => agentCli(name),
+    cli: async (name, cwd) => agentCli(name, await accountScopeForFolder(cwd)),
     ready: () => environmentReady,
     clientVersion: version,
-    knownFolders: () => states.worktreePaths(),
+    knownFolders: () => scopeStates.worktreePaths(),
   });
 
   commands.handle("chat:send", (_event, request) => {
-    if (!states.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
+    if (isLinkScopeKey(request?.projectPath) || !scopeStates.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
     // Only Milagre marks a message as coming from another Chat.
     return chats.send({ ...request, context: undefined }).then(({ sessionId }) => ({ sessionId }));
   });
   commands.handle("chat:resume", (_event, projectPath, sessionId) => {
-    if (!states.has(projectPath)) throw new Error("Open the project before continuing its chats.");
+    if (!scopeStates.has(projectPath)) throw new Error("Open the project before continuing its chats.");
     return chats.resumeChat(projectPath, Number(sessionId));
   });
-  commands.handle("chat:handover", (_event, request) => {
-    if (!states.has(request?.projectPath)) throw new Error("Open the project before handing over its chats.");
-    return chats.handover(request);
+  commands.handle("chat:patch", async (_event, projectPath, sessionId, patch) => {
+    if (!scopeStates.has(projectPath)) return;
+    if (patch?.archived) {
+      await advisorDelivery.stop(`${projectPath}#${sessionId}`);
+      await advisors.stopChat(`${projectPath}#${sessionId}`);
+    }
+    await editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {}));
   });
-  commands.handle("chat:handover-draft", (_event, projectPath, sessionId, text) => {
-    if (!states.has(projectPath) || typeof sessionId !== "number" || typeof text !== "string") return undefined;
-    return chats.setHandoverDraft(projectPath, sessionId, text).then(() => {});
-  });
-  commands.handle("chat:patch", (_event, projectPath, sessionId, patch) => (states.has(projectPath) ? editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {})).then(() => {}) : undefined));
   // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
-  commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) => (states.has(projectPath) ? editProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {}) : undefined));
-  commands.handle("chat:archive-finished-subagents", (_event, projectPath, sessionId) => (states.has(projectPath) ? editProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId)).then(() => {}) : undefined));
+  commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) =>
+    scopeStates.has(projectPath)
+      ? editProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {})
+      : undefined,
+  );
+  commands.handle("chat:archive-finished-subagents", (_event, projectPath, sessionId) =>
+    scopeStates.has(projectPath) ? editProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId)).then(() => {}) : undefined,
+  );
   // What the "Commit and open PR" dialog did, as a line in its chat.
   commands.handle("chat:git-note", (_event, chatId, body) => {
-    if (typeof chatId !== "string" || typeof body !== "string" || !states.has(projectOfKey(chatId))) return undefined;
+    if (typeof chatId !== "string" || typeof body !== "string" || !scopeStates.has(projectOfKey(chatId))) return undefined;
     return chats.addNote(chatId, { body, context: { kind: "git-action" } });
   });
   /** Reads the chat on screen: on opening it, and when a window regains focus over it. */
   async function readOpenChat(chatId = chats.openChat) {
-    if (chatId && states.has(projectOfKey(chatId))) {
+    if (chatId && scopeStates.has(projectOfKey(chatId))) {
       await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
-      void track(() => chats.recoverSubagents(chatId), background).catch((error) => console.warn("Milagre couldn't refresh subagent outcomes:", error.message));
+      void track(async () => {
+        await advisors.reconcile(chatId);
+        await chats.recoverSubagents(chatId);
+      }, background).catch((error) => console.warn("Milagre couldn't refresh subagent outcomes:", error.message));
     }
   }
   commands.handle("chat:set-open", (_event, chatId) => {
@@ -583,20 +853,32 @@ function createRuntime(options) {
 
   // What the model picker flags per agent: missing, outdated, broken or logged out. A ready CLI is looked at again
   // after 5 minutes, a problem on every call.
-  const agentCliStatus = options.agentCliStatus ?? createCliStatus({ cli: agentCli, cwd: require("node:os").homedir(), clientVersion: version });
-  commands.handle("agent:cli-status", () => agentCliStatus());
+  const agentCliStatus = (scope) => (options.agentCliStatus ? options.agentCliStatus() : routing.services(scope).status());
+  agentCliStatus.invalidate = (provider) => {
+    routing.invalidate(provider);
+    options.agentCliStatus?.invalidate?.(provider);
+  };
+  commands.handle("agent:cli-status", async (_event, scope) => agentCliStatus(await validateAccountScope(scope, true)));
   commands.handle("agent:update-cli", async (_event, provider) => {
-    const result = await runCliUpdate(provider);
+    // Antigravity's download takes a while; its phases go out as they happen.
+    const result = await runCliUpdate(provider, { antigravity, onProgress: (progress) => emit("agent:cli-progress", { provider, ...progress }) });
     agentCli.invalidate(provider);
     agentCliStatus.invalidate(provider);
     const status = await agentCliStatus();
     return { ...result, status: status[provider] };
   });
 
-  const agentModels = options.agentModels ?? createModelCache({ cli: cliWhenLoggedIn(agentCli, agentCliStatus), cwd: require("node:os").homedir(), clientVersion: version });
-  commands.handle("agent:models", () => agentModels());
+  commands.handle("agent:models", async (_event, scope) => {
+    scope = await validateAccountScope(scope, true);
+    return options.agentModels ? options.agentModels() : routing.services(scope).models();
+  });
 
   commands.handle("agent:interrupt", async (_event, chatId) => {
+    await existingChat("stopping advisors")(chatId);
+    await advisorDelivery.stop(chatId);
+    await advisors.stopChat(chatId);
+    // A handoff still writing its brief has no agent to stop: cancelling it is the whole interrupt.
+    if (await chats.cancelHandoff(chatId)) return;
     await worktreeSetups.cancel(chatId);
     await linked.stop({ chatKey: chatId });
     await agents.interrupt(chatId);
@@ -606,7 +888,10 @@ function createRuntime(options) {
 
   // The answers show in the chat as the user's message (`summary`), and are taken back if they don't reach the agent.
   commands.handle("agent:answer-question", async (_event, { chatId, requestId, answers, summary } = {}) => {
-    const messageId = answers && typeof summary === "string" && summary && typeof chatId === "string" && states.has(projectOfKey(chatId)) ? await chats.recordAnswers(chatId, summary) : null;
+    const messageId =
+      answers && typeof summary === "string" && summary && typeof chatId === "string" && scopeStates.has(projectOfKey(chatId))
+        ? await chats.recordAnswers(chatId, summary)
+        : null;
     try {
       const accepted = await agents.answerQuestion(chatId, requestId, answers);
       if (!accepted && messageId !== null) await chats.takeBack(chatId, messageId);
@@ -619,11 +904,17 @@ function createRuntime(options) {
 
   commands.handle("agent:set-permission-mode", (_event, { chatId, mode }) => agents.setPermissionMode(chatId, mode));
 
-
   async function notifyIfWaiting(chatId, event) {
     const projectPath = projectOfKey(chatId);
-    if (!options.notifyWaiting || !states.has(projectPath) || !("requestId" in event)) return;
-    const notice = attentionNotice(event, attentionContext(await states.get(projectPath), projectName(projectPath), sessionIdFromKey(chatId)));
+    if (!options.notifyWaiting || !scopeStates.has(projectPath) || !("requestId" in event)) return;
+    const notice = attentionNotice(
+      event,
+      attentionContext(
+        await scopeStates.get(projectPath),
+        isLinkScopeKey(projectPath) ? (await linkRuntime.definition(scopeFromKey(projectPath).linkId)).name : projectName(projectPath),
+        sessionIdFromKey(chatId),
+      ),
+    );
     if (notice) options.notifyWaiting({ chatId, requestId: event.requestId, ...notice });
   }
 
@@ -631,24 +922,190 @@ function createRuntime(options) {
   let recentStore = null;
   const recentProjects = () => (recentStore ??= createRecentProjects(path.join(dataDir, "recent-projects.json")));
   let registryStore = null;
-  const projectRegistry = () => (registryStore ??= createProjectRegistry(path.join(dataDir, "project-registry.json"), options.registryRoots ? { roots: options.registryRoots } : {}));
+  const projectRegistry = () =>
+    (registryStore ??= createProjectRegistry(path.join(dataDir, "project-registry.json"), options.registryRoots ? { roots: options.registryRoots } : {}));
   async function canvasActiveWorktrees() {
     const projects = await projectRegistry().list();
-    return Object.fromEntries(await Promise.all(projects.map(async project => [
-      project.id,
-      (await activeWorktrees(project.path)).map(worktree => worktree.path),
-    ])));
+    return Object.fromEntries(
+      await Promise.all(projects.map(async (project) => [project.id, (await activeWorktrees(project.path)).map((worktree) => worktree.path)])),
+    );
   }
   // Links whose Worktree endpoint went away are dropped, with what was waiting to travel along them.
   async function pruneLinks(active) {
-    for (const link of await projectRegistry().pruneLinks(active ?? await canvasActiveWorktrees())) await linked.linkRemoved(link.id);
+    for (const link of await projectRegistry().pruneLinks(active ?? (await canvasActiveWorktrees()))) await linked.linkRemoved(link.id);
   }
   // A linked Project not open yet is opened here (ownership, reconciled Worktrees, interrupted turns), as the
   // canvas opens every Project it shows.
   async function linkedState(projectPath) {
-    return states.has(projectPath) ? states.get(projectPath) : (await readProject(projectPath)).state;
+    if (isLinkScopeKey(projectPath)) return linkStore.get(projectPath.slice("milagre-link:".length));
+    if (states.has(projectPath)) {
+      const cached = await states.get(projectPath);
+      const known = new Set(Object.values(cached.worktrees).map((worktree) => worktree.path));
+      const missingReference = linkStore
+        .ids()
+        .some((id) =>
+          Object.values(linkStore.cached(id)?.sessions ?? {}).some((session) =>
+            session.worktrees.some((member) => member.projectPath === projectPath && !known.has(member.worktreePath)),
+          ),
+        );
+      if (!missingReference) return cached;
+    }
+    return (await readProject(projectPath)).state;
   }
-  const linked = createLinkedWorktrees({ dataDir, registry: projectRegistry, project: linkedState, chats, agents, emit });
+  const linked = createLinkedWorktrees({
+    dataDir,
+    registry: projectRegistry,
+    project: linkedState,
+    chats,
+    agents,
+    emit,
+    extraTools: (chatId) => [
+      ...simulatorToolDefinitions(chatId, simulators),
+      ...artifactToolDefinitions(chatId, artifacts),
+      ...require("./advisor-tools.cjs").advisorToolDefinitions(chatId, advisors),
+    ],
+  });
+  const advisorStore = require("./advisor-store.cjs").createAdvisorStore({ dataDir });
+  const advisorTransports = new Map();
+  const advisorMcp = require("./linked-mcp-server.cjs").createLinkedMcpServer({ toolsFor: (id) => advisorTransports.get(id) ?? [] });
+  async function advisorContext(chatId) {
+    await existingChat("using advisors")(chatId);
+    const scope = projectOfKey(chatId);
+    const id = sessionIdFromKey(chatId);
+    const state = await scopeStates.get(scope);
+    const session = state.sessions[id];
+    if (session.archived) throw new Error("This Chat is archived.");
+    const execution = await scopeStates.executionContext(scope, id);
+    if (!execution.cwd) throw new Error("This Chat's Worktree is unavailable.");
+    const roots = [...new Set([execution.cwd, ...(execution.workspaceRoots ?? [])])];
+    const identities = await Promise.all(
+      roots.map(async (root) => {
+        const real = await fs.realpath(root);
+        if (real !== root) throw new Error("The advisor Worktree identity changed.");
+        const stat = await fs.stat(real);
+        return [real, stat.dev, stat.ino];
+      }),
+    );
+    const settings = chats.turnSettings(chatId) ?? {};
+    const provider = session.provider ?? settings.provider ?? "claude";
+    return {
+      ...execution,
+      roots,
+      scopeIdentity: JSON.stringify([scope, id, session.worktree_id, identities]),
+      parentProvider: provider,
+      provider,
+      model: chats.runs[chatId]?.model || require("@milagre/shared/agent-runs").lastUserModel(state, id) || settings.model,
+      settings: { ...settings, provider },
+      scope,
+      sessionId: id,
+    };
+  }
+  async function advisorProviders(chatId, pinned) {
+    const scope = projectOfKey(chatId);
+    const ids = routing.selection(scope);
+    if (pinned) ids[pinned.provider] = pinned.accountId;
+    const services = routing.services(scope, ids);
+    const [status, models, claude, codex] = await Promise.all([
+      options.agentCliStatus ? options.agentCliStatus() : services.status(),
+      options.agentModels ? options.agentModels() : services.models(),
+      routing.forAccount("claude", ids.claude),
+      routing.forAccount("codex", ids.codex),
+    ]);
+    return Object.fromEntries(
+      PROVIDERS.map((provider) => {
+        const cli = provider === "claude" ? claude : codex;
+        return [
+          provider,
+          {
+            ...cli,
+            available: !cli.problem && Boolean(cli.command) && status[provider]?.state === "ready" && Boolean(models[provider]?.length),
+            models: models[provider] ?? [],
+            problem: cli.problem ?? status[provider]?.message,
+          },
+        ];
+      }),
+    );
+  }
+  advisorDelivery = require("./advisor-delivery.cjs").createAdvisorDelivery({
+    store: advisorStore,
+    contextFor: advisorContext,
+    isBlocked: (chatId) => closing || chats.preparing.has(chatId) || Boolean(chats.runs[chatId]?.approvals.length || chats.runs[chatId]?.questions.length),
+    send: async (chatId, message, ctx) => {
+      const sent = await chats.send({
+        ...ctx.settings,
+        projectPath: ctx.scope,
+        sessionId: ctx.sessionId,
+        provider: ctx.provider,
+        model: ctx.model,
+        permissionMode: ctx.settings.permissionMode ?? "auto",
+        ...message,
+      });
+      return sent.started;
+    },
+  });
+  advisors = require("./advisors.cjs").createAdvisors({
+    store: advisorStore,
+    contextFor: advisorContext,
+    providersFor: advisorProviders,
+    publish: async (chatId, agent) => {
+      if (["initializing", "running", "waiting"].includes(agent.status)) keepAwake.turnStarted(agent.id);
+      else keepAwake.turnEnded(agent.id);
+      await chats.receive(chatId, { type: "subagent-update", agent });
+    },
+    completed: (chatId, result) => advisorDelivery.enqueue(chatId, result),
+    launch: async ({ record, context, provider, emit: send }) => {
+      const { skills } = await discoverSkills(context.cwd);
+      const referenceRoots = [...new Set(skills.map((skill) => path.dirname(skill.path)))];
+      const canvasReads = linked
+        .forChat(record.chatId)
+        .tools.filter((tool) => ["linked_overview", "read_linked_chat", "linked_git", "read_linked_file", "search_linked_files"].includes(tool.name));
+      const tools = [...require("./advisor-reads.cjs").createAdvisorReads({ roots: context.roots, referenceRoots }), ...canvasReads];
+      advisorTransports.set(record.id, tools);
+      const sessionOptions = {
+        cwd: context.cwd,
+        workspaceRoots: context.workspaceRoots,
+        workspaceInstructions: context.workspaceInstructions,
+        analysisOnly: true,
+        resumeId: record.nativeId,
+        command: provider.command,
+        env: provider.env,
+        linked: { tools, url: () => advisorMcp.url(record.id) },
+        emit: send,
+      };
+      const session = options.createSession
+        ? options.createSession(record.provider, sessionOptions)
+        : record.provider === "codex"
+          ? new CodexSession({ ...sessionOptions, clientVersion: version })
+          : new ClaudeSession(sessionOptions);
+      const close = session.close.bind(session);
+      session.close = async () => {
+        advisorTransports.delete(record.id);
+        await close();
+      };
+      return session;
+    },
+  });
+  for (const method of ["stop", "retry"])
+    commands.handle(`advisor:${method}`, async (_event, chatId, advisorId) => {
+      await existingChat("controlling advisors")(chatId);
+      return advisors[method](chatId, String(advisorId));
+    });
+  const linkWorkspaces = createLinkWorkspaces({
+    store: linkStore,
+    registry: projectRegistry(),
+    ownProject,
+    root: options.worktreeRoot ?? DEFAULT_WORKTREE_ROOT,
+    getSettings: (projectPath) => projectSettings().get(projectPath),
+  });
+  const linkRuntime = registerLinkRuntime({
+    commands,
+    registry: projectRegistry,
+    store: linkStore,
+    workspaces: linkWorkspaces,
+    chats,
+    broadcast: broadcastProjectState,
+    titles: chatTitles,
+  });
   commands.handle("linked:snapshot", () => linked.snapshot());
   commands.handle("linked:stop-negotiation", (_event, id) => (typeof id === "string" ? linked.stop({ negotiationId: id }) : undefined));
   // Each way a project opens (launch, the folder dialog, a switch) puts it at the top of the recent list.
@@ -684,16 +1141,64 @@ function createRuntime(options) {
         const stored = states.has(projectPath) ? null : await readRawState(projectPath);
         if (!Object.values(stored?.sessions ?? {}).some((session) => session.resumeTurn)) continue;
         await readProject(projectPath);
-      } catch (error) { console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message); }
+      } catch (error) {
+        console.warn(`Milagre couldn't resume the chats of ${projectPath}:`, error.message);
+      }
     }
   }
+  async function accountScopes() {
+    const projects = await projectRegistry().list();
+    const registry = await projectRegistry().snapshot();
+    return [
+      ...projects.map((p) => ({
+        key: p.path,
+        name: p.name || projectName(p.path),
+        kind: "project",
+        projects: [{ id: p.id, path: p.path, name: p.name || projectName(p.path) }],
+      })),
+      ...(registry.projectGroups ?? []).map((link) => ({
+        key: scopeKey({ kind: "link", linkId: link.id }),
+        name: link.name,
+        kind: "link",
+        projects: link.projectIds
+          .map((id) => projects.find((p) => p.id === id))
+          .filter(Boolean)
+          .map(({ id, path, name }) => ({ id, path, name })),
+      })),
+    ];
+  }
+  async function validateAccountScope(key, optional = false) {
+    if (key === undefined || key === null) {
+      if (optional) return undefined;
+      throw new Error("Choose a Project or Link.");
+    }
+    if (typeof key !== "string" || !key) throw new Error("Choose a valid Project or Link.");
+    const scopes = await accountScopes();
+    if (scopes.some((scope) => scope.key === key)) return key;
+    throw new Error("Project or Link is no longer available. Refresh and choose another.");
+  }
+  async function accountScopeForFolder(cwd) {
+    if (!cwd) throw new Error("Choose a Chat folder.");
+    for (const key of scopeStates.projects().filter(isLinkScopeKey)) {
+      const state = await scopeStates.get(key);
+      if (Object.values(state.sessions).some((s) => s.workspacePath === cwd || s.worktrees?.some((m) => m.worktreePath === cwd))) return key;
+    }
+    return (await resolveProject(cwd)).path;
+  }
+  commands.handle("accounts:scopes", () => accountScopes());
+  commands.handle("accounts:scope", async (_event, key, refresh) => accounts.scope(await validateAccountScope(key), refresh === true));
+  commands.handle("accounts:assign", (_event, key, provider, id) => {
+    const pending = accountMutation.then(async () => accounts.assign(await validateAccountScope(key), provider, id));
+    accountMutation = pending.catch(() => {});
+    return pending;
+  });
   commands.handle("project:registry", () => projectRegistry().list());
   commands.handle("project:position", (_event, id, position) => projectRegistry().setPosition(id, position));
   commands.handle("canvas:snapshot", async () => {
     const projects = await projectRegistry().list();
     await pruneLinks(await canvasActiveWorktrees());
     const registry = await projectRegistry().snapshot();
-    const statesByPath = await Promise.all(projects.map(async project => ({ path: project.path, state: (await readProject(project.path)).state })));
+    const statesByPath = await Promise.all(projects.map(async (project) => ({ path: project.path, state: (await readProject(project.path)).state })));
     return { ...registry, states: statesByPath };
   });
   commands.handle("canvas:link-add", async (_event, a, b) => {
@@ -707,13 +1212,36 @@ function createRuntime(options) {
   });
   commands.handle("canvas:worktree-position", (_event, id, worktreePath, position) => projectRegistry().setWorktreePosition(id, worktreePath, position));
   commands.handle("canvas:open-project", async (_event, requested) => {
-    if (!(await projectRegistry().list()).some(project => project.path === requested)) throw new Error("Project is not in the registry.");
+    if (!(await projectRegistry().list()).some((project) => project.path === requested)) throw new Error("Project is not in the registry.");
     return openProject(requested);
   });
-  commands.handle("project:recent", () => recentProjects().list());
+  // Each recent Project says whether the user hid it from the sidebar and the phone's list.
+  async function withHidden(list) {
+    const hidden = await projectSettings().hiddenPaths();
+    return list.map((project) => (hidden.has(project.path) ? { ...project, hidden: true } : project));
+  }
+  commands.handle("project:recent", async () => withHidden(await recentProjects().list()));
+  commands.handle("project:set-hidden", async (_event, projectPath, hidden) => {
+    await knownFolder(projectPath);
+    await projectSettings().setHidden(projectPath, hidden === true);
+    return withHidden(await recentProjects().list());
+  });
+  // Reads a recent Project's chats for the all-Projects sidebar without making it the open one or reordering the list.
+  commands.handle("project:read", async (_event, projectPath) => {
+    if (!(await recentProjects().list()).some((item) => item.path === projectPath)) throw new Error("Open this project in Milagre first.");
+    return readProject(projectPath);
+  });
   commands.handle("project:snapshot", async (_event, projectPath) => {
     if (!states.has(projectPath)) throw new Error("Open the project before reading its snapshot.");
     return { path: projectPath, name: projectName(projectPath), state: await states.get(projectPath) };
+  });
+  // One saved message with the tool output its steps keep in a sidecar (see compactDetails), for a step opened on the
+  // desktop or the phone. A Project, open already, or a Link (read like link:snapshot does), by scope key.
+  commands.handle("chat:message", async (_event, scope, id) => {
+    if (typeof scope !== "string" || (!isLinkScopeKey(scope) && !states.has(scope))) throw new Error("Open the Project before reading its messages.");
+    const message = (await scopeStates.get(scope)).messages.find((item) => item.id === id);
+    if (!message) throw new Error("That message is no longer in this Project.");
+    return withDetails(scopeStates.storageDirectory(scope), message);
   });
   // What the phone's media check needs, without the whole state.
   commands.handle("project:chat-image", (_event, projectPath, requested) => chats.images.resolve(projectPath, requested));
@@ -722,16 +1250,21 @@ function createRuntime(options) {
     return Object.values((await states.get(projectPath)).worktrees ?? {}).map((worktree) => worktree.path);
   });
   commands.handle("project:switch", async (_event, requested) => openProject(await switchTarget(recentProjects(), requested)));
-  commands.handle("project:forget", (_event, projectPath) => recentProjects().forget(projectPath));
+  commands.handle("project:forget", async (_event, projectPath) => withHidden(await recentProjects().forget(projectPath)));
   // The phone's project search: Git repositories under the home folder, matched by name (see project-finder.cjs).
   const projectFinder = createProjectFinder(options.projectSearchRoot || require("node:os").homedir());
   commands.handle("project:find", (_event, query) => projectFinder.search(typeof query === "string" ? query.slice(0, 200) : ""));
 
-
   function close() {
     closing = true;
     closed ??= (async () => {
+      await advisorDelivery.close();
+      await advisors.close();
+      await advisorMcp.close();
+      await advisorStore.close();
+      await Promise.all([simulators.close(), browsers.close(), artifacts.close()]);
       await Promise.allSettled([...active]);
+      accounts.close();
       keepAwake.quit();
       ports.close();
       diffs.close();
@@ -739,19 +1272,21 @@ function createRuntime(options) {
         await chats.suspendRunning();
         // A failed early save must not leave provider processes running. The
         // final flush retries after their cancellation events have been recorded.
-        await states.flush().catch(() => {});
+        await scopeStates.flush().catch(() => {});
         await Promise.allSettled([worktreeSetups.cancelAll(), agents.closeAll()]);
         await Promise.allSettled([...starting]);
         await agents.closeAll();
-        await Promise.allSettled([...background, ...chatTitles.pending.values(), ...chats.pendingHandovers.values()]);
+        await Promise.allSettled([...background, ...chatTitles.pending.values()]);
       }
+      while (background.size) await Promise.allSettled([...background]);
       await states.close();
+      await linkStore.close();
       await linked.close();
-      await usageStore.idle();
+      await Promise.all([usageStore.idle(), ...[...accountUsage.values()].map((item) => item.store.idle())]);
       for (const { owner } of projectOwners.values()) owner.release();
       for (const owner of repositoryOwners.values()) owner.release();
       dataOwner.release();
-    })().catch(error => {
+    })().catch((error) => {
       // Retain ownership and unsaved memory until the host reports the error and
       // retries. A rejected Promise must not permanently disable that retry.
       closed = undefined;
@@ -762,21 +1297,35 @@ function createRuntime(options) {
 
   return {
     methods: Object.freeze([...handlers.keys()]),
-    invoke(method, args = []) {
+    invoke(method, args = [], context = null) {
       return accept(() => {
         if (!handlers.has(method)) throw new Error(`Unknown command: ${method}`);
         if (!Array.isArray(args)) throw new Error("Command arguments must be an array");
-        return handlers.get(method)(null, ...args);
+        return handlers.get(method)(context, ...args);
       });
     },
+    disconnect: (clientId) => Promise.all([simulators.disconnect(clientId), browsers.disconnect(clientId)]).then(() => undefined),
     openProject: (projectPath, options) => accept(() => openProject(projectPath, options)),
     resumeRecentProjects: () => accept(resumeRecentProjects),
     environmentReady,
     // Synchronous capture: the socket serializes this before another event can
     // mutate state, so its event watermark and run sequence describe one instant.
-    snapshot: () => ({ projects: states.projects().map(projectPath => ({ path: projectPath, name: projectName(projectPath), state: states.states.get(projectPath) })), runs: chats.snapshot(), ports: ports.snapshot() }),
-    focused: (view) => accept(() => { diffs.focused(view ? view.projectPath : shownProjectPath); return readOpenChat(view ? view.chatId : chats.openChat); }),
-    flush: async () => { await Promise.allSettled([...active]); await states.flush(); await usageStore.idle(); },
+    snapshot: () => ({
+      links: linkStore.ids().map((linkId) => ({ linkId, state: linkStore.has(linkId) ? linkStore.cached(linkId) : undefined })),
+      projects: states.projects().map((projectPath) => ({ path: projectPath, name: projectName(projectPath), state: states.states.get(projectPath) })),
+      runs: chats.snapshot(),
+      ports: ports.snapshot(),
+    }),
+    focused: (view) =>
+      accept(() => {
+        diffs.focused(view ? view.projectPath : shownProjectPath);
+        return readOpenChat(view ? view.chatId : chats.openChat);
+      }),
+    flush: async () => {
+      await Promise.allSettled([...active]);
+      await scopeStates.flush();
+      await usageStore.idle();
+    },
     close,
   };
 }

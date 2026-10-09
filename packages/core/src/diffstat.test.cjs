@@ -11,7 +11,8 @@ async function fixture(t) {
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const project = path.join(root, "shop");
   await fs.mkdir(project);
-  const git = (...args) => execFileSync("git", ["-C", project, "-c", "user.name=Milagre", "-c", "user.email=milagre@example.com", ...args], { encoding: "utf8" });
+  const git = (...args) =>
+    execFileSync("git", ["-C", project, "-c", "user.name=Milagre", "-c", "user.email=milagre@example.com", ...args], { encoding: "utf8" });
   git("init", "-b", "main");
   await fs.writeFile(path.join(project, "README.md"), "one\ntwo\nthree\n");
   git("add", ".");
@@ -55,14 +56,13 @@ test("readDiffStat returns null outside a repository", async (t) => {
   assert.equal(await readDiffStat(root, "main"), null);
 });
 
-
-test("sidebar totals include branch commits when its upstream is the feature branch", async t => {
+test("sidebar totals include branch commits when its upstream is the feature branch", async (t) => {
   const { project, git } = await fixture(t);
-  git('checkout', '-b', 'feature');
-  await fs.appendFile(path.join(project, 'README.md'), 'four\n');
-  git('commit', '-am', 'feature work');
-  git('branch', 'upstream-feature');
-  git('branch', '--set-upstream-to=upstream-feature');
+  git("checkout", "-b", "feature");
+  await fs.appendFile(path.join(project, "README.md"), "four\n");
+  git("commit", "-am", "feature work");
+  git("branch", "upstream-feature");
+  git("branch", "--set-upstream-to=upstream-feature");
   assert.deepEqual(await readDiffStat(project), { added: 1, removed: 0 });
 });
 

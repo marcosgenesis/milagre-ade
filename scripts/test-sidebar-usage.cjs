@@ -18,8 +18,12 @@ function Fixture() {
   window.setSession = setSession;
   window.setCollapsed = setCollapsed;
   const snapshot = { providers: [
-    { provider: "claude", status: "ok", windows: [{ ...session, usedPercent: 0 }, { ...weekly, usedPercent: 82 }] },
-    { provider: "codex", status: "ok", windows: hasSession ? [session, weekly] : [weekly], bankedResets: 3 },
+    { provider: "claude", account: { id: "work", label: "Work" }, status: "ok", windows: [{ ...session, usedPercent: 0 }, { ...weekly, usedPercent: 82 }] },
+    { provider: "codex", account: { id: "personal", label: "Personal", email: "victor@example.test" }, status: "ok", windows: hasSession ? [session, weekly] : [weekly], bankedResets: 3 },
+    { provider: "antigravity", account: { id: "default", label: "Default account" }, status: "ok", windows: [
+      { id: "gemini:5h", label: "Gemini 5-hour", shortLabel: "5h", usedPercent: 3, resetsAt: null },
+      { id: "gemini:weekly", label: "Gemini weekly", shortLabel: "wk", usedPercent: 25, resetsAt: null },
+    ] },
   ] };
   return <aside className="bg-surface rounded-[8px]" data-sidebar-collapsed={collapsed} style={{ width: collapsed ? 44 : 224, padding: 8, margin: 24 }}>
     <SidebarUsage usage={{ snapshot, loading: false, refresh: async () => {}, refreshIfStale: () => {} }} />
@@ -33,7 +37,7 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   await app.whenReady();
   const window = new BrowserWindow({ width: 320, height: 180, show: false, webPreferences: { backgroundThrottling: false } });
-  const evaluate = source => window.webContents.executeJavaScript(source);
+  const evaluate = (source) => window.webContents.executeJavaScript(source);
   async function waitFor(source) {
     for (let i = 0; i < 200; i++) {
       if (await evaluate(source)) return;
@@ -41,39 +45,64 @@ async function browserChecks() {
     }
     throw new Error(`Timed out: ${source}`);
   }
-  const geometry = () => evaluate(`(() => [...document.querySelectorAll('.sidebar-usage-row')].map(row =>
+  const geometry = () =>
+    evaluate(`(() => [...document.querySelectorAll('.sidebar-usage-row')].map(row =>
     [...row.querySelectorAll('.sidebar-copy .overflow-hidden')].map(bar => {
       const rect = bar.getBoundingClientRect();
       return { left: rect.left, right: rect.right, width: rect.width, fill: bar.firstElementChild.style.width };
     })
   ))()`);
-  const screenshot = async name => {
+  const screenshot = async (name) => {
     await delay(350);
     const image = await window.webContents.capturePage();
-    require("node:fs").writeFileSync(path.join(require("node:os").tmpdir(), `milagre-usage-${name}.png`), image.toPNG());
+    if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
+    require("node:fs").mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
+    require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, `${name}.png`), image.toPNG());
   };
   try {
     await window.loadURL(process.argv[2]);
-    await waitFor('document.querySelectorAll(".sidebar-usage-row").length === 2');
-    const [claude, codex] = await geometry();
+    await waitFor('document.querySelectorAll(".sidebar-usage-row").length === 3');
+    const [claude, codex, antigravity] = await geometry();
+    assert.equal(antigravity.length, 2, "Antigravity shows its Gemini 5-hour and weekly windows");
+    assert.deepEqual(
+      antigravity.map((bar) => bar.fill),
+      ["3%", "25%"],
+    );
+    assert.equal(await evaluate('document.querySelectorAll(".sidebar-usage-row")[2].textContent'), "Antigravity3%5h25%wk");
+    assert.equal(
+      await evaluate(
+        '(() => { const name = document.querySelectorAll(".sidebar-usage-row")[2].querySelector(".truncate"); const range = document.createRange(); range.selectNodeContents(name); return range.getBoundingClientRect().width <= name.getBoundingClientRect().width; })()',
+      ),
+      true,
+      "The longest provider name fits beside two windows",
+    );
     assert.equal(codex.length, 1);
-    assert.equal(codex[0].width, 116, "Weekly-only meter spans both window columns");
+    assert.equal(codex[0].width, 104, "Weekly-only meter spans both window columns");
     assert.equal(codex[0].left, claude[0].left);
     assert.equal(codex[0].right, claude[1].right);
     assert.equal(codex[0].fill, "96%", "Full-width track preserves actual usage");
     await screenshot("weekly-only-dark");
-    await evaluate('window.setSession(true)');
+    await evaluate("window.setSession(true)");
     await waitFor('document.querySelectorAll(".sidebar-usage-row")[1].textContent.includes("5h")');
     const [twoClaude, twoCodex] = await geometry();
-    assert.deepEqual(twoCodex.map(({ left, right, width }) => ({ left, right, width })), twoClaude.map(({ left, right, width }) => ({ left, right, width })));
-    assert.deepEqual(twoCodex.map(bar => bar.width), [52, 52]);
-    assert.deepEqual(twoCodex.map(bar => bar.fill), ["32%", "96%"]);
+    assert.deepEqual(
+      twoCodex.map(({ left, right, width }) => ({ left, right, width })),
+      twoClaude.map(({ left, right, width }) => ({ left, right, width })),
+    );
+    assert.deepEqual(
+      twoCodex.map((bar) => bar.width),
+      [48, 48],
+    );
+    assert.deepEqual(
+      twoCodex.map((bar) => bar.fill),
+      ["32%", "96%"],
+    );
     await screenshot("5h-dark");
     await evaluate('document.documentElement.classList.remove("dark")');
     await screenshot("5h-light");
     await evaluate('window.setSession(false); window.setDisplay("remaining")');
     await waitFor('document.querySelectorAll(".sidebar-usage-row")[1].textContent.includes("4%")');
-    assert.equal((await geometry())[1][0].width, 116);
+    assert.equal((await geometry())[1][0].width, 104);
     assert.equal((await geometry())[1][0].fill, "4%");
     await evaluate('window.setDisplay("used")');
     await waitFor('document.querySelectorAll(".sidebar-usage-row")[1].textContent.includes("96%")');
@@ -82,18 +111,33 @@ async function browserChecks() {
     await evaluate('document.querySelector("aside").style.marginTop = "300px"');
     const cardText = '(document.querySelector("[data-usage-card]")?.textContent ?? "")';
     await evaluate('document.querySelectorAll(".sidebar-usage-row")[1].click()');
-    await waitFor(`${cardText}.includes("Codex")`);
+    await waitFor(`${cardText}.includes("victor@example.test")`);
+    assert.doesNotMatch(await evaluate(cardText), /Codex/);
     assert.match(await evaluate(cardText), /Banked resets3 left/);
+    assert.equal(await evaluate('document.querySelector("[data-usage-account]").textContent'), "victor@example.test");
+    assert.match(await evaluate('document.querySelectorAll(".sidebar-usage-row")[1].getAttribute("aria-label")'), /victor@example.test/);
     await screenshot("codex-card-banked");
+    await evaluate('document.documentElement.classList.add("dark")');
+    await screenshot("codex-account-dark");
     await evaluate('document.querySelectorAll(".sidebar-usage-row")[0].click()');
-    await waitFor(`${cardText}.includes("Claude")`);
+    await waitFor(`${cardText}.includes("Work")`);
+    assert.doesNotMatch(await evaluate(cardText), /Claude/);
+    assert.equal(await evaluate('document.querySelector("[data-usage-account]").textContent'), "Work");
+    await screenshot("claude-account-name");
     assert.doesNotMatch(await evaluate(cardText), /Banked/, "No banked row when the account has none");
+    await evaluate('document.querySelectorAll(".sidebar-usage-row")[2].click()');
+    await waitFor(`${cardText}.includes("Default account")`);
+    assert.match(await evaluate(cardText), /Gemini 5-hour/);
+    assert.match(await evaluate(cardText), /Gemini weekly/);
+    await screenshot("antigravity-card");
     await evaluate('document.querySelector("aside").style.marginTop = ""');
-    await evaluate('window.setCollapsed(true)');
+    await evaluate("window.setCollapsed(true)");
     await waitFor('document.querySelector("aside").dataset.sidebarCollapsed === "true"');
     assert.equal(await evaluate('getComputedStyle(document.querySelectorAll(".sidebar-usage-row")[1].querySelector(".sidebar-copy")).display'), "none");
     assert.equal(await evaluate('document.querySelectorAll(".sidebar-usage-rail")[1].firstElementChild.getBoundingClientRect().width'), 16);
-    console.log("PASS: weekly-only width, 5h column alignment, actual percentages, remaining mode, banked resets row, collapsed rail; five screenshots saved to the temp directory");
+    console.log(
+      "PASS: weekly-only width, 5h column alignment, actual percentages, remaining mode, banked resets row, Antigravity Gemini windows, collapsed rail, account email and name fallback",
+    );
     app.exit(0);
   } catch (error) {
     console.error(error);
@@ -106,19 +150,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "sidebar-usage-fixture",
-      resolveId(id) { if (id === "/__sidebar_usage_fixture.tsx") return id; },
-      load(id) { if (id === "/__sidebar_usage_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__sidebar_usage__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__sidebar_usage_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "sidebar-usage-fixture",
+        resolveId(id) {
+          if (id === "/__sidebar_usage_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__sidebar_usage_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__sidebar_usage__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__sidebar_usage_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();
@@ -127,13 +180,13 @@ async function main() {
     const child = spawn(require("electron"), [path.resolve(__filename), `${server.resolvedUrls.local[0]}__sidebar_usage__`], { env, stdio: "inherit" });
     process.exitCode = await new Promise((resolve, reject) => {
       child.on("error", reject);
-      child.on("exit", code => resolve(code ?? 1));
+      child.on("exit", (code) => resolve(code ?? 1));
     });
   } finally {
     await server.close();
   }
 }
-(process.versions.electron ? browserChecks() : main()).catch(error => {
+(process.versions.electron ? browserChecks() : main()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

@@ -1,21 +1,35 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
 export function useProjectFiles(root: string, query: string, enabled: boolean) {
-  const [result, setResult] = useState({ root: '', query: '', files: [] as string[], error: '' });
+  const [result, setResult] = useState({ root: "", query: "", files: [] as string[], error: "" });
   const [loading, setLoading] = useState(false);
   useEffect(() => {
-    if (!enabled) { setLoading(false); return; }
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     let current = true;
     setLoading(true);
     const timer = setTimeout(() => {
-      window.milagre.searchProjectFiles(root, query).then(files => {
-        if (current) setResult({ root, query, files, error: '' });
-      }, () => {
-        if (current) setResult({ root, query, files: [], error: 'Could not search files. Check that the worktree still exists.' });
-      }).finally(() => { if (current) setLoading(false); });
+      window.milagre
+        .searchProjectFiles(root, query)
+        .then(
+          (files) => {
+            if (current) setResult({ root, query, files, error: "" });
+          },
+          () => {
+            if (current) setResult({ root, query, files: [], error: "Could not search files. Check that the worktree still exists." });
+          },
+        )
+        .finally(() => {
+          if (current) setLoading(false);
+        });
     }, 100);
-    return () => { current = false; clearTimeout(timer); };
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
   }, [root, query, enabled]);
   const matches = result.root === root && result.query === query;
-  return { files: matches ? result.files : [], error: matches ? result.error : '', loading };
+  return { files: matches ? result.files : [], error: matches ? result.error : "", loading };
 }

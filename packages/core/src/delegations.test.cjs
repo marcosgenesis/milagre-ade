@@ -28,8 +28,12 @@ class FakeSession {
       },
     };
   }
-  get nativeId() { return null; }
-  get pid() { return null; }
+  get nativeId() {
+    return null;
+  }
+  get pid() {
+    return null;
+  }
   async startTurn(request) {
     if (request.permissionMode) this.permissions.mode = request.permissionMode;
     this.prompts.push(request.prompt);
@@ -40,7 +44,12 @@ class FakeSession {
     setImmediate(() => this.script(this, request.prompt));
     return { turnId: this.turnId, steered: false };
   }
-  call(name, args) { return runTool(this.options.linked.tools.find(tool => tool.name === name), args); }
+  call(name, args) {
+    return runTool(
+      this.options.linked.tools.find((tool) => tool.name === name),
+      args,
+    );
+  }
   finish(text) {
     if (!this.turnActive) return;
     this.emit({ type: "text-delta", messageId: "m", text });
@@ -49,7 +58,7 @@ class FakeSession {
   }
   ask(requestId) {
     this.emit({ type: "permission-request", requestId, kind: "command", tool: "Bash", title: "Run?", allowForChat: false });
-    return new Promise(resolve => this.pending.set(requestId, resolve));
+    return new Promise((resolve) => this.pending.set(requestId, resolve));
   }
   respondToPermission(requestId, decision) {
     const resolve = this.pending.get(requestId);
@@ -59,14 +68,20 @@ class FakeSession {
     this.emit({ type: "permission-resolved", requestId, decision });
     return true;
   }
-  answerQuestion() { return false; }
-  setPermissionMode(mode) { this.permissions.mode = mode; }
+  answerQuestion() {
+    return false;
+  }
+  setPermissionMode(mode) {
+    this.permissions.mode = mode;
+  }
   async interrupt() {
     if (!this.turnActive) return;
     this.turnActive = false;
     this.emit({ type: "turn-cancelled" });
   }
-  async close() { this.closed = true; }
+  async close() {
+    this.closed = true;
+  }
 }
 
 const git = (...args) => execFileSync("git", args, { stdio: "ignore" });
@@ -89,11 +104,16 @@ async function linkedProjects(t, { link = true } = {}) {
   const scripts = { api: async (session) => session.finish("api done"), web: async (session) => session.finish("web done") };
   const events = [];
   const runtime = createRuntime({
-    dataDir: path.join(dir, "profile"), cwd: folders.api, version: "1.0.0", environmentReady: Promise.resolve(), registryRoots: [], titleModels: {},
+    dataDir: path.join(dir, "profile"),
+    cwd: folders.api,
+    version: "1.0.0",
+    environmentReady: Promise.resolve(),
+    registryRoots: [],
+    titleModels: {},
     agentCli: async () => ({ command: "/fake/agent" }),
     emit: (channel, payload) => events.push({ channel, payload }),
     createSession: (_provider, options) => {
-      const name = Object.keys(folders).find(key => options.cwd === folders[key]);
+      const name = Object.keys(folders).find((key) => options.cwd === folders[key]);
       const session = new FakeSession(options, (...args) => scripts[name](...args));
       session.name = name;
       sessions.push(session);
@@ -104,24 +124,43 @@ async function linkedProjects(t, { link = true } = {}) {
   const opened = {};
   for (const name of ["api", "web"]) opened[name] = await runtime.openProject(folders[name]);
   const snapshot = await runtime.invoke("canvas:snapshot");
-  const ids = Object.fromEntries(Object.keys(folders).map(name => [name, snapshot.projects.find(project => project.path === folders[name]).id]));
+  const ids = Object.fromEntries(Object.keys(folders).map((name) => [name, snapshot.projects.find((project) => project.path === folders[name]).id]));
   let links = [];
   if (link) links = await runtime.invoke("canvas:link-add", [{ project_id: ids.api }, { project_id: ids.web }]);
-  const chatOf = name => `${folders[name]}#${Object.values(opened[name].state.sessions)[0].id}`;
-  const state = name => runtime.invoke("project:snapshot", [folders[name]]).then(project => project.state);
-  const messages = async (key) => (await state(path.basename(key.split("#")[0]))).messages.filter(message => message.session_id === Number(key.split("#").at(-1)));
+  const chatOf = (name) => `${folders[name]}#${Object.values(opened[name].state.sessions)[0].id}`;
+  const state = (name) => runtime.invoke("project:snapshot", [folders[name]]).then((project) => project.state);
+  const messages = async (key) =>
+    (await state(path.basename(key.split("#")[0]))).messages.filter((message) => message.session_id === Number(key.split("#").at(-1)));
   const send = (name, body, permissionMode = "full") => {
     const session = Object.values(opened[name].state.sessions)[0];
-    return runtime.invoke("chat:send", [{ projectPath: folders[name], sessionId: session.id, worktreeId: session.worktree_id, body, images: [], files: [], prompt: body, provider: "claude", model: "claude-test", permissionMode }]);
+    return runtime.invoke("chat:send", [
+      {
+        projectPath: folders[name],
+        sessionId: session.id,
+        worktreeId: session.worktree_id,
+        body,
+        images: [],
+        files: [],
+        prompt: body,
+        provider: "claude",
+        model: "claude-test",
+        permissionMode,
+      },
+    ]);
   };
-  const sessionOf = name => sessions.filter(session => session.name === name).at(-1);
+  const sessionOf = (name) => sessions.filter((session) => session.name === name).at(-1);
   return { runtime, folders, scripts, sessions, sessionOf, chatOf, messages, send, events, links, ids };
 }
 
-const delegation = (fixture, extra = {}) => ({ worktree: fixture.folders.web, chat: fixture.chatOf("web"), message: "Add the /health endpoint to the client", ...extra });
+const delegation = (fixture, extra = {}) => ({
+  worktree: fixture.folders.web,
+  chat: fixture.chatOf("web"),
+  message: "Add the /health endpoint to the client",
+  ...extra,
+});
 
 async function settled() {
-  await new Promise(resolve => setTimeout(resolve, 150));
+  await new Promise((resolve) => setTimeout(resolve, 150));
 }
 
 async function waitFor(check, timeoutMs = 15000) {
@@ -130,11 +169,12 @@ async function waitFor(check, timeoutMs = 15000) {
     const value = await check();
     if (value) return value;
     if (Date.now() > deadline) throw new Error("Timed out waiting for condition");
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
 
-const findMessage = (fixture, name, kind) => waitFor(async () => (await fixture.messages(fixture.chatOf(name))).find(message => message.context?.kind === kind));
+const findMessage = (fixture, name, kind) =>
+  waitFor(async () => (await fixture.messages(fixture.chatOf(name))).find((message) => message.context?.kind === kind));
 
 test("an idle Chat starts a turn for the Delegation, and the report reaches the requester without a turn", async (t) => {
   const fixture = await linkedProjects(t);
@@ -152,7 +192,7 @@ test("an idle Chat starts a turn for the Delegation, and the report reaches the 
   await waitFor(() => result);
   assert.equal(result.isError, false, result.text);
   const posted = await findMessage(fixture, "api", "delegation-report");
-  const received = (await fixture.messages(fixture.chatOf("web"))).find(message => message.context?.kind === "delegation");
+  const received = (await fixture.messages(fixture.chatOf("web"))).find((message) => message.context?.kind === "delegation");
   assert.equal(received.role, "user");
   assert.equal(received.body, "Add the /health endpoint to the client");
   assert.equal(received.context.from, fixture.chatOf("api"));
@@ -167,11 +207,19 @@ test("a working Chat is steered by the Delegation; a Chat waiting on the user re
   const fixture = await linkedProjects(t);
   let release;
   fixture.scripts.web = async (session) => {
-    if (session.prompts.length === 1) { await new Promise(resolve => { release = resolve; }); session.finish("web finished both"); }
+    if (session.prompts.length === 1) {
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+      session.finish("web finished both");
+    }
   };
   await fixture.send("web", "Long user task", "full");
   await waitFor(() => release);
-  fixture.scripts.api = async (session) => { await session.call("delegate", delegation(fixture)); session.finish("sent"); };
+  fixture.scripts.api = async (session) => {
+    await session.call("delegate", delegation(fixture));
+    session.finish("sent");
+  };
   await fixture.send("api", "Ask web");
   const web = fixture.sessionOf("web");
   await waitFor(() => web.prompts.length === 2);
@@ -182,33 +230,47 @@ test("a working Chat is steered by the Delegation; a Chat waiting on the user re
   // Waiting on the user: the Delegation waits for the answer.
   let asked;
   fixture.scripts.web = async (session) => {
-    if (session.prompts.length === 3) { asked = true; await session.ask("perm-1"); return; }
+    if (session.prompts.length === 3) {
+      asked = true;
+      await session.ask("perm-1");
+      return;
+    }
     session.finish("web after approval");
   };
   await fixture.send("web", "Needs approval", "ask");
   await waitFor(() => asked);
-  fixture.scripts.api = async (session) => { await session.call("delegate", delegation(fixture, { message: "Second request" })); session.finish("sent again"); };
+  fixture.scripts.api = async (session) => {
+    await session.call("delegate", delegation(fixture, { message: "Second request" }));
+    session.finish("sent again");
+  };
   await fixture.send("api", "Ask web again");
-  await settled();
+  await waitFor(() =>
+    fixture.events.some(
+      ({ channel, payload }) =>
+        channel === "linked:changed" && payload.delegations.some((item) => item.status === "queued" && item.message === "Second request"),
+    ),
+  );
   assert.equal(web.prompts.length, 3, "nothing reaches a Chat waiting on the user");
-  assert.ok(fixture.events.some(({ channel, payload }) => channel === "linked:changed" && payload.delegations.some(item => item.status === "queued" && item.message === "Second request")));
   await fixture.runtime.invoke("agent:respond-permission", [{ chatId: fixture.chatOf("web"), requestId: "perm-1", decision: "allow" }]);
   await waitFor(() => web.prompts.length === 4);
   assert.match(web.prompts[3], /Second request/);
 });
 
-test("\"new\" opens a Chat in the linked Worktree on the Project's last used agent", async (t) => {
+test('"new" opens a Chat in the linked Worktree on the Project\'s last used agent', async (t) => {
   const fixture = await linkedProjects(t);
   await fixture.send("web", "An earlier conversation");
-  await waitFor(async () => (await fixture.messages(fixture.chatOf("web"))).some(message => message.role === "assistant"));
-  fixture.scripts.api = async (session) => { await session.call("delegate", delegation(fixture, { chat: "new" })); session.finish("sent"); };
+  await waitFor(async () => (await fixture.messages(fixture.chatOf("web"))).some((message) => message.role === "assistant"));
+  fixture.scripts.api = async (session) => {
+    await session.call("delegate", delegation(fixture, { chat: "new" }));
+    session.finish("sent");
+  };
   await fixture.send("api", "Ask web in a new chat");
   const report = await findMessage(fixture, "api", "delegation-report");
   assert.equal(report.body, "web done");
   const target = report.context.from;
   assert.notEqual(target, fixture.chatOf("web"), "a Chat other than the existing one received it");
   const project = await fixture.runtime.invoke("project:snapshot", [fixture.folders.web]);
-  const received = project.state.messages.find(message => message.context?.kind === "delegation");
+  const received = project.state.messages.find((message) => message.context?.kind === "delegation");
   assert.equal(`${fixture.folders.web}#${received.session_id}`, target);
   assert.equal(received.model, "claude-test");
 });
@@ -220,7 +282,14 @@ test("approval follows the requesting Chat's mode: Ask shows the card, Always al
     results.push(await session.call("delegate", delegation(fixture, { message: `Request ${session.prompts.length}` })));
     session.finish("ok");
   };
-  const card = () => waitFor(() => fixture.events.findLast(({ channel, payload }) => channel === "agent:event" && payload.event.type === "permission-request" && payload.event.kind === "delegation" && !payload.handled)?.payload);
+  const card = () =>
+    waitFor(
+      () =>
+        fixture.events.findLast(
+          ({ channel, payload }) =>
+            channel === "agent:event" && payload.event.type === "permission-request" && payload.event.kind === "delegation" && !payload.handled,
+        )?.payload,
+    );
   const answer = async (decision) => {
     const payload = await card();
     payload.handled = true;
@@ -242,7 +311,7 @@ test("approval follows the requesting Chat's mode: Ask shows the card, Always al
   await waitFor(() => results.length === 2);
   assert.equal(results[1].isError, false);
   const cards = fixture.events.filter(({ payload }) => payload?.event?.kind === "delegation").length;
-  await waitFor(async () => (await fixture.messages(fixture.chatOf("api"))).filter(message => message.context?.kind === "delegation-report").length === 1);
+  await waitFor(async () => (await fixture.messages(fixture.chatOf("api"))).filter((message) => message.context?.kind === "delegation-report").length === 1);
   await fixture.send("api", "three", "ask");
   await waitFor(() => results.length === 3);
   assert.equal(results[2].isError, false);
@@ -251,7 +320,10 @@ test("approval follows the requesting Chat's mode: Ask shows the card, Always al
   for (const mode of ["auto", "full"]) {
     const other = await linkedProjects(t);
     let result;
-    other.scripts.api = async (session) => { result = await session.call("delegate", delegation(other)); session.finish("ok"); };
+    other.scripts.api = async (session) => {
+      result = await session.call("delegate", delegation(other));
+      session.finish("ok");
+    };
     await other.send("api", "go", mode);
     await waitFor(() => result);
     assert.equal(result.isError, false);
@@ -266,7 +338,10 @@ test("a turn handling a Delegation can't delegate, and an unlinked Worktree is r
     back = await session.call("delegate", { worktree: fixture.folders.api, chat: fixture.chatOf("api"), message: "Do it yourself", negotiation: true });
     session.finish("web handled it");
   };
-  fixture.scripts.api = async (session) => { await session.call("delegate", delegation(fixture)); session.finish("sent"); };
+  fixture.scripts.api = async (session) => {
+    await session.call("delegate", delegation(fixture));
+    session.finish("sent");
+  };
   await fixture.send("api", "go");
   await waitFor(() => back);
   assert.equal(back.isError, true);
@@ -275,7 +350,11 @@ test("a turn handling a Delegation can't delegate, and an unlinked Worktree is r
   const lonely = await linkedProjects(t, { link: false });
   let refused;
   lonely.scripts.api = async (session) => {
-    refused = await Promise.all([session.call("delegate", delegation(lonely)), session.call("read_linked_file", { worktree: lonely.folders.web, path: "README.md" }), session.call("linked_git", { worktree: lonely.folders.web, operation: "status" })]);
+    refused = await Promise.all([
+      session.call("delegate", delegation(lonely)),
+      session.call("read_linked_file", { worktree: lonely.folders.web, path: "README.md" }),
+      session.call("linked_git", { worktree: lonely.folders.web, operation: "status" }),
+    ]);
     session.finish("done");
   };
   await lonely.send("api", "go");
@@ -290,12 +369,20 @@ test("removing the Link cancels queued Delegations with a notice in both Chats",
   const fixture = await linkedProjects(t);
   let asked;
   fixture.scripts.web = async (session) => {
-    if (session.prompts.length === 1) { asked = true; await session.ask("perm-1"); session.finish("web done"); return; }
+    if (session.prompts.length === 1) {
+      asked = true;
+      await session.ask("perm-1");
+      session.finish("web done");
+      return;
+    }
     session.finish("should not run");
   };
   await fixture.send("web", "Waiting task", "ask");
   await waitFor(() => asked);
-  fixture.scripts.api = async (session) => { await session.call("delegate", delegation(fixture)); session.finish("sent"); };
+  fixture.scripts.api = async (session) => {
+    await session.call("delegate", delegation(fixture));
+    session.finish("sent");
+  };
   await fixture.send("api", "go");
   await waitFor(() => fixture.events.some(({ channel, payload }) => channel === "linked:changed" && payload.delegations.length));
   await fixture.runtime.invoke("canvas:link-remove", [fixture.links[0].id]);
@@ -351,8 +438,13 @@ test("a Negotiation stops after 10 rounds and asks the user to step in", async (
 test("Stop in either Chat stops the Negotiation", async (t) => {
   const stopped = await linkedProjects(t);
   let webStarted;
-  stopped.scripts.api = async (session) => { await session.call("delegate", delegation(stopped, { negotiation: true })); session.finish("opened"); };
-  stopped.scripts.web = async () => { webStarted = true; };
+  stopped.scripts.api = async (session) => {
+    await session.call("delegate", delegation(stopped, { negotiation: true }));
+    session.finish("opened");
+  };
+  stopped.scripts.web = async () => {
+    webStarted = true;
+  };
   await stopped.send("api", "Negotiate");
   await waitFor(() => webStarted);
   await stopped.runtime.invoke("agent:interrupt", [stopped.chatOf("web")]);
@@ -365,7 +457,12 @@ test("a Negotiation pauses while a side waits on the user", async (t) => {
   const paused = await linkedProjects(t);
   let asked;
   paused.scripts.web = async (session) => {
-    if (session.prompts.length === 1) { asked = true; await session.ask("perm-1"); session.finish("ready"); return; }
+    if (session.prompts.length === 1) {
+      asked = true;
+      await session.ask("perm-1");
+      session.finish("ready");
+      return;
+    }
     session.finish("my position");
   };
   await paused.send("web", "User work", "ask");
@@ -383,28 +480,45 @@ test("a Negotiation pauses while a side waits on the user", async (t) => {
 });
 
 // The Delegations alone, with every runtime part faked: what each port was asked, and Chats that are idle.
-function desk({ data = { delegations: [], negotiations: [], grants: [] }, target = async () => ({ link_id: "link-1", projectPath: "/web", projectName: "web", branch: "main" }) } = {}) {
+function desk({
+  data = { delegations: [], negotiations: [], grants: [] },
+  target = async () => ({ link_id: "link-1", projectPath: "/web", projectName: "web", branch: "main" }),
+} = {}) {
   const notes = [];
   const delivered = [];
   let turn = 0;
   const ports = {
     target,
-    chat: async key => ({ label: key, worktreePath: key.startsWith("/web") ? "/web" : "/api", archived: false }),
+    chat: async (key) => ({ label: key, worktreePath: key.startsWith("/web") ? "/web" : "/api", archived: false }),
     openChat: async () => "/web#9",
     status: () => "idle",
-    deliver: async (key, item) => { delivered.push({ key, item }); return { started: Promise.resolve("nextStart" in ports ? ports.nextStart : { turnId: `t${++turn}`, steered: false }) }; },
+    deliver: async (key, item) => {
+      delivered.push({ key, item });
+      return { started: Promise.resolve("nextStart" in ports ? ports.nextStart : { turnId: `t${++turn}`, steered: false }) };
+    },
     reply: async () => "reply",
-    note: async (key, note) => { notes.push({ key, ...note }); },
+    note: async (key, note) => {
+      notes.push({ key, ...note });
+    },
     permissionMode: () => "full",
     approve: async () => "allow",
     changed: () => {},
   };
   const saved = [];
-  const delegations = new Delegations({ store: { load: async () => structuredClone(data), save: async (next) => { saved.push(structuredClone(next)); } }, ports });
+  const delegations = new Delegations({
+    store: {
+      load: async () => structuredClone(data),
+      save: async (next) => {
+        saved.push(structuredClone(next));
+      },
+    },
+    ports,
+  });
   return { delegations, ports, notes, delivered, saved };
 }
 
-const end = (desk, key, turnId) => desk.delegations.observe(key, { type: "turn-started", turnId }).then(() => desk.delegations.observe(key, { type: "turn-completed" }));
+const end = (desk, key, turnId) =>
+  desk.delegations.observe(key, { type: "turn-started", turnId }).then(() => desk.delegations.observe(key, { type: "turn-completed" }));
 
 test("Delegations still open when Milagre starts again are cancelled with a notice in their Chats", async () => {
   const open = { id: "d1", link_id: "l", from_chat: "/api#1", from_label: "api", to_chat: "/web#2", to_label: "web", message: "Add it", status: "running" };
@@ -412,8 +526,17 @@ test("Delegations still open when Milagre starts again are cancelled with a noti
   const { delegations, notes, saved } = desk({ data: { delegations: [open], negotiations: [negotiation], grants: [] } });
   await delegations.ready;
   await waitFor(() => notes.length === 3);
-  assert.match(notes.find(note => note.context.kind === "delegation-report").body, /Milagre restarted before web finished this Delegation, so it was cancelled: "Add it"/);
-  assert.deepEqual(notes.filter(note => note.context.kind === "linked-notice").map(note => note.key).sort(), ["/api#1", "/web#2"]);
+  assert.match(
+    notes.find((note) => note.context.kind === "delegation-report").body,
+    /Milagre restarted before web finished this Delegation, so it was cancelled: "Add it"/,
+  );
+  assert.deepEqual(
+    notes
+      .filter((note) => note.context.kind === "linked-notice")
+      .map((note) => note.key)
+      .sort(),
+    ["/api#1", "/web#2"],
+  );
   assert.equal(saved.at(-1).delegations[0].status, "cancelled");
   assert.equal(saved.at(-1).negotiations[0].status, "stopped");
 });
@@ -446,7 +569,7 @@ test("a steered message the agent runs in a turn of its own is reported from tha
   await settled();
   await fake.delegations.observe("/web#2", { type: "turn-completed" });
   await fake.delegations.observe("/web#2", { type: "turn-started", turnId: "t2", continues: "t1" });
-  await new Promise(resolve => setTimeout(resolve, 1700));
+  await new Promise((resolve) => setTimeout(resolve, 1700));
   assert.equal(fake.notes.length, 0, "t1's end doesn't report it");
   await fake.delegations.observe("/web#2", { type: "turn-failed", message: "boom" });
   await waitFor(() => fake.notes.length === 1);
@@ -454,7 +577,10 @@ test("a steered message the agent runs in a turn of its own is reported from tha
 });
 
 test("a turn that never starts, or a setup stopped before it, reports the Delegation as failed or cancelled", async () => {
-  for (const [start, status] of [[null, "failed"], [{ turnId: null, steered: false, cancelled: true }, "cancelled"]]) {
+  for (const [start, status] of [
+    [null, "failed"],
+    [{ turnId: null, steered: false, cancelled: true }, "cancelled"],
+  ]) {
     const fake = desk();
     fake.ports.nextStart = start;
     await fake.delegations.delegate("/api#1", { worktree: "/web", chat: "/web#2", message: "Add it" });
@@ -483,11 +609,58 @@ test("in a Negotiation only the side whose move it is sends the next round", asy
   await assert.rejects(fake.delegations.delegate("/api#1", { worktree: "/web", chat: "/web#2", message: "Again" }), /It's \/web#2's turn/);
   await assert.rejects(fake.delegations.delegate("/web#2", { worktree: "/api", chat: "/api#1", message: "Back" }), /Give your answer in your final reply/);
   await settled();
-  await assert.rejects(fake.delegations.delegate("/web#2", { worktree: "/other", chat: "/other#5", message: "Third", negotiation: true }), /Only the requesting side can open a Negotiation/);
-  await assert.rejects(fake.delegations.conclude("/api#1", "Nope"), /doesn't belong to a running Negotiation/, "a turn holding nothing of the Negotiation can't conclude it");
+  await assert.rejects(
+    fake.delegations.delegate("/web#2", { worktree: "/other", chat: "/other#5", message: "Third", negotiation: true }),
+    /Only the requesting side can open a Negotiation/,
+  );
+  await assert.rejects(
+    fake.delegations.conclude("/api#1", "Nope"),
+    /doesn't belong to a running Negotiation/,
+    "a turn holding nothing of the Negotiation can't conclude it",
+  );
   await end(fake, "/web#2", "t1");
   await waitFor(() => fake.delivered.at(-1).key === "/api#1");
   assert.match(fake.delivered.at(-1).item.prompt, /Delegation report from \/web#2 \(Negotiation round 1 of 10\)/);
   await settled();
   assert.match(await fake.delegations.delegate("/api#1", { worktree: "/web", chat: "/web#2", message: "Round two" }), /^Round 2 sent/);
+});
+test("runtime shutdown waits for a Delegation completion save before releasing its profile", async (t) => {
+  const fixture = await linkedProjects(t);
+  let release,
+    saving = false,
+    block = false;
+  const renamed = fs.rename;
+  t.mock.method(fs, "rename", async (...args) => {
+    if (block && path.basename(String(args[1])) === "delegations.json") {
+      saving = true;
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+      block = false;
+    }
+    return renamed(...args);
+  });
+  fixture.scripts.api = async (session) => {
+    await session.call("delegate", delegation(fixture));
+    session.finish("Sent");
+  };
+  fixture.scripts.web = async () => {};
+  await fixture.send("api", "Delegate");
+  await waitFor(() => fixture.sessionOf("web")?.turnActive);
+  await waitFor(async () => (await fixture.messages(fixture.chatOf("api"))).some((message) => message.body === "Sent"));
+  block = true;
+  fixture.sessionOf("web").finish("Completed");
+  await waitFor(() => saving);
+  let closed = false;
+  const closing = fixture.runtime.close().then(() => {
+    closed = true;
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(closed, false, "Profile remains owned while its Delegation save is pending");
+  } finally {
+    release();
+    await closing;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 });

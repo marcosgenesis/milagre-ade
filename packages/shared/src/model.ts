@@ -1,9 +1,8 @@
 export type SessionStatus = "Created" | "Running" | "Stopped";
-export type ModelProvider = "codex" | "claude";
+export type ModelProvider = "codex" | "claude" | "antigravity";
 export type PermissionMode = "ask" | "auto" | "full";
 /** Where a new chat runs: the selected checkout, or a fresh git worktree. */
 export type Isolation = "local" | "worktree";
-
 
 /** Effort ids come from the agents themselves (Claude: low…max, Codex adds ultra). */
 export type EffortLevel = string;
@@ -19,7 +18,6 @@ export interface ModelCapability {
 }
 
 export type ModelCapabilities = Record<ModelProvider, Record<string, ModelCapability>>;
-
 
 export interface ModelOption {
   id: string;
@@ -84,6 +82,25 @@ export interface Worktree {
   base?: string;
   /** Lines changed against the base, refreshed in the background so the hover card shows it at once. */
   diff?: DiffStat;
+  sharedChat?: { linkId: string; sessionId: number };
+}
+
+/** What the chat lists need from a Chat's messages, kept on the Chat by the host (chat-summary.mjs). */
+export interface ChatSummary {
+  count: number;
+  /** The first and last message in the Project's order: when the Chat started, and its latest activity. */
+  firstId?: number;
+  lastId?: number;
+  /** The first line of the first thing the user wrote, which names a Chat that has no title. */
+  titleLine?: string;
+  /** How the last reply ended (the commit dialog's notes aren't replies). */
+  lastOutcome?: "completed" | "failed" | "cancelled";
+  /** The PRs the Chat's commands created or merged. */
+  pullRequests?: string[];
+  /** The model of the last message the user sent. */
+  lastModel?: string;
+  /** A handoff divider still preparing, by message id. */
+  openHandoff?: number;
 }
 
 export interface AgentSession {
@@ -91,10 +108,14 @@ export interface AgentSession {
   worktree_id: number;
   agent_name: string;
   status: SessionStatus;
-  /** The agent this chat is bound to once it has messages. */
+  /** Kept by the host from the Chat's messages; absent from an older host. */
+  summary?: ChatSummary;
+  /** The agent this chat runs on now. A send on the other provider hands the chat off in place (see handoff.mjs). */
   provider?: ModelProvider;
-  /** Claude session id or Codex thread id, used to resume the agent's memory. */
+  /** Claude session id or Codex thread id of the current `provider`, used to resume the agent's memory. */
   native_session_id?: string;
+  /** Session ids of the providers this chat is not on right now, so switching back resumes them. */
+  native_sessions?: Partial<Record<ModelProvider, string>>;
   subagents?: Subagent[];
   /** Automatic title from the first message; a manual title takes precedence. */
   generatedTitle?: string;
@@ -106,19 +127,69 @@ export interface AgentSession {
   unread?: boolean;
   /** Hidden from the chat list. */
   archived?: boolean;
-  /** The chat this one was handed over to, on the other provider. */
+  /** Shown in the chat list's Pinned section, above the rest, in `pin_order`. */
+  pinned?: boolean;
+  /** Where a pinned chat sits among the pinned ones, lowest first. Kept when unpinned; only read while pinned. */
+  pin_order?: number;
+  /** Legacy (before in-place handoff): the chat this one was handed over to, on the other provider. Read, never written. */
   handedOverTo?: number;
-  /** The chat this one was handed over from. */
+  /** Legacy (before in-place handoff): the chat this one was handed over from. Read, never written. */
   handedOverFrom?: number;
-  /** Set while the handover brief is being written; the composer waits. */
+  /** Legacy (before in-place handoff): set while the handover brief is being written; the composer waits. Read, never written. */
   handoverPending?: boolean;
-  /** The handover brief, waiting in the composer for the user to review and send. Removed with the first message. Written by the main process only. */
+  /** Legacy (before in-place handoff): the handover brief, waiting in the composer for the user to review and send. Read, never written. */
   handoverDraft?: string;
   /** Set when a quit stopped this chat's turn: when, so a stale one waits for Continue instead of resuming by itself. */
   resumeTurn?: { stoppedAt?: number };
+  /** How full the agent's context window was when its last turn ended. */
+  contextUsage?: ContextUsage;
 }
 
+/** Tokens in the agent's context window, out of the model's window size. */
+export interface ContextUsage {
+  used: number;
+  size: number;
+}
 
+/** A named Link owns one conversation across an isolated Worktree in each member Project. */
+export type ChatScope = { kind: "project"; projectPath: string } | { kind: "link"; linkId: string };
+export interface NamedProjectLink {
+  id: string;
+  name: string;
+  projectIds: string[];
+  createdAt: string;
+}
+export interface WorktreeBinding {
+  projectId: string;
+  projectPath: string;
+  worktreePath: string;
+  branch: string;
+  base: string;
+}
+export interface LinkChatSession extends Omit<AgentSession, "worktree_id"> {
+  workspacePath: string;
+  worktrees: WorktreeBinding[];
+}
+export interface LinkPreparation {
+  operationId: string;
+  chatId: number;
+  status: "reserved" | "creating" | "setup" | "ready" | "failed";
+  members: Array<WorktreeBinding & { created?: boolean; setupDone?: boolean }>;
+  workspacePath: string;
+  error?: string;
+  retainedPaths?: string[];
+}
+export interface LinkState {
+  next_id: number;
+  sessions: Record<string, LinkChatSession>;
+  messages: ChatMessage[];
+  preparations: Record<string, LinkPreparation>;
+}
+export interface OpenLink {
+  link: NamedProjectLink;
+  state: LinkState;
+  projects: Array<{ id: string; path: string; name: string }>;
+}
 
 export interface ChatMessage {
   id: number;
@@ -131,24 +202,53 @@ export interface ChatMessage {
   model?: string;
   images?: ImageAttachment[];
   files?: string[];
-  /** On the first message of a handed-over chat: the brief it was sent with, ahead of `body`. */
+  /** Legacy (before in-place handoff): on the first message of a handed-over chat, the brief it was sent with, ahead of `body`. Read, never written. */
   handoverBrief?: string;
   /** How the agent turn that produced this reply ended. */
   outcome?: "completed" | "failed" | "cancelled";
   /** The tool calls the agent made in this reply, and its thinking, in the order they started. */
   steps?: ChatStep[];
+  /** The host's sidecar with the long details of these steps (each marked `hasDetail`); read with the chat:message command. */
+  detailFile?: string;
+  operationId?: string;
 }
+
+/** A provider switch inside a chat, shown as a divider before the message that caused it. `brief` is what the new provider was sent. */
+export type HandoffContext = {
+  kind: "handoff";
+  from: { provider: ModelProvider; model?: string };
+  to: { provider: ModelProvider; model?: string };
+  status: "preparing" | "done" | "failed";
+  brief?: string;
+  transcriptPath?: string;
+};
+
+/** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, a handoff, or a legacy handover note. */
+export type AdvisorResultContext = {
+  kind: "advisor-result";
+  advisorId: string;
+  completionId: string;
+  title: string;
+  provider: ModelProvider;
+  outcome: "completed" | "failed" | "cancelled";
+};
+
+export type ChatContext = AdvisorResultContext | LinkedContext | { kind: "git-action" } | HandoffContext | "handover" | null;
 
 /**
  * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
  * report coming back, a Negotiation's agreement, or a notice about one. `from` is the other Chat's key.
  */
-/** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, or a handover note. */
-export type ChatContext = LinkedContext | { kind: "git-action" } | "handover" | null;
-
 export type LinkedContext =
   | { kind: "delegation"; delegationId: string; from: string; fromLabel: string; negotiation?: { id: string; round: number } }
-  | { kind: "delegation-report"; delegationId: string; from: string | null; fromLabel: string; status: "done" | "cancelled" | "failed"; negotiation?: { id: string; round: number } }
+  | {
+      kind: "delegation-report";
+      delegationId: string;
+      from: string | null;
+      fromLabel: string;
+      status: "done" | "cancelled" | "failed";
+      negotiation?: { id: string; round: number };
+    }
   | { kind: "negotiation-agreement"; negotiationId: string; with: string; by?: string }
   | { kind: "linked-notice"; negotiationId?: string; delegationId?: string; with?: string };
 
@@ -181,7 +281,14 @@ export interface LinkedWork {
   receiveOnly: string[];
 }
 
-export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup" | "image";
+export type StepKind = "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup" | "image" | "artifact";
+
+/** A design an agent showed with artifact_show: which artifact and the version this step made. */
+export interface ArtifactRef {
+  id: string;
+  version: number;
+  title: string;
+}
 
 /** One tool call in an agent's reply (a `setup` step is the worktree's setup command, which Milagre ran, not the agent) (a command, an edit, a read, a search or another tool), or a stretch of its thinking. */
 export interface ChatStep {
@@ -194,9 +301,10 @@ export interface ChatStep {
   /** The command and its output, a unified diff, or the thinking summary, capped at 20,000 characters. */
   detail?: string;
   /**
-   * The phone leaves a tool's detail out and sets this. A saved message's full text comes from GET /message; a step of
-   * a turn still streaming has no full message to fetch until the turn ends (the phone keeps only the tail of the last
-   * few steps and of running ones).
+   * The detail is left out and kept elsewhere. A saved message keeps a long detail in a sidecar on the host (desktop:
+   * the chat:message command; phone: GET /message). The phone also leaves out what the host still has inline, and for a
+   * turn still streaming it keeps only the tail of the last few steps and of running ones, with no full message to
+   * fetch until the turn ends.
    */
   hasDetail?: boolean;
   /** The file a read or edit worked on, as the tool named it; the title shows only its name. For an image step, the generated image. */
@@ -207,6 +315,8 @@ export interface ChatStep {
   durationMs?: number;
   /** Where the step sits in the reply: the length of the reply's text when it started. */
   offset?: number;
+  /** For an artifact step, the design it showed. */
+  artifact?: ArtifactRef;
 }
 
 export interface ImageAttachment {
@@ -289,6 +399,10 @@ export interface SubagentCommunication {
 
 export interface Subagent {
   id: string;
+  source?: "milagre-advisor";
+  provider?: ModelProvider;
+  model?: string;
+  retryable?: boolean;
   archived?: boolean;
   parentId?: string;
   title: string;
@@ -332,6 +446,7 @@ export type AgentEvent =
   | { type: "subagent-update"; agent: Subagent }
   | { type: "subagents-waiting"; waiting: boolean }
   | { type: "tasks-updated"; tasks: AgentTask[] }
+  | ({ type: "context-usage" } & ContextUsage)
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
   /** `continues`: the turn whose steering message arrived as it ended, which this turn the agent started by itself takes. */
@@ -375,9 +490,6 @@ export interface ChatSendRequest {
   /** Apply bundled TLDR writing rules to both providers. Defaults to true. */
   tldrEnabled?: boolean;
 }
-
-/** Hands a chat over to the other provider: the settings are the new chat's, `sessionId` is the chat being left. */
-export type ChatHandoverRequest = Pick<ChatSendRequest, "projectPath" | "provider" | "model" | "permissionMode" | "effort" | "ultracode" | "fastMode" | "replies" | "tldrEnabled"> & { sessionId: number };
 
 /** A code editor found on this Mac. */
 export interface EditorInfo {
@@ -431,8 +543,15 @@ export interface SkillOption {
   provider: string;
 }
 
+/** A skill discovery skipped because an earlier one has the same name; `shadowedBy` is the winner's path. */
+export interface ShadowedSkill extends SkillOption {
+  shadowedBy: string;
+}
+
 export interface SkillCatalog {
   skills: SkillOption[];
+  /** Absent from an older host. */
+  shadowed?: ShadowedSkill[];
   warnings: string[];
 }
 
@@ -445,6 +564,8 @@ export interface UsageWindow {
 }
 
 export interface ProviderUsage {
+  /** The host Account whose limits are shown, captured with the usage read. */
+  account?: Pick<ProviderAccount, "id" | "label" | "email">;
   provider: ModelProvider;
   status: "ok" | "unavailable" | "error";
   windows: UsageWindow[];
@@ -455,5 +576,33 @@ export interface ProviderUsage {
 }
 
 export interface UsageSnapshot {
+  accountKey?: string;
   providers: ProviderUsage[];
 }
+
+/** Provider identities only. Credentials stay with the CLI on the connected computer. */
+export type ProviderAccount = {
+  /** An explicit assignment whose saved profile was removed. */
+  missing?: boolean;
+  id: string;
+  provider: ModelProvider;
+  label: string;
+  state: "unknown" | "ready" | "signed-out" | "signing-in" | "error";
+  email?: string;
+  plan?: string;
+  message?: string;
+};
+export type AccountsSnapshot = { providers: { provider: ModelProvider; selectedId: string; accounts: ProviderAccount[] }[] };
+export interface TranscriptState {
+  next_id: number;
+  sessions: Record<string, AgentSession | LinkChatSession>;
+  messages: ChatMessage[];
+}
+export type LinkSendRequest = Omit<ChatSendRequest, "projectPath" | "worktreeId"> & { linkId: string; operationId: string };
+
+/** Host-local account assignments; null follows the computer selection. */
+export type ProjectAccountScope = { key: string; name: string; kind: "project" | "link"; projects: { id: string; path: string; name: string }[] };
+export type ProjectAccountsSnapshot = {
+  scopeKey: string;
+  providers: { provider: ModelProvider; accountId: string | null; effectiveId: string; defaultId: string; accounts: ProviderAccount[] }[];
+};

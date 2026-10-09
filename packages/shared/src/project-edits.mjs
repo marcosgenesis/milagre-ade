@@ -8,6 +8,8 @@ export function patchSession(state, sessionId, patch) {
   const next = { ...session };
   for (const [field, value] of Object.entries(patch)) {
     if (!SESSION_FIELDS.has(field)) continue;
+    // The chat lists sort by it, so only a real number gets in.
+    if (field === "pin_order" && value !== undefined && !Number.isFinite(value)) continue;
     if (value === undefined || value === false || value === "") delete next[field];
     else next[field] = value;
   }
@@ -16,7 +18,7 @@ export function patchSession(state, sessionId, patch) {
 }
 
 /** The session fields a patch may change; the renderer is untrusted input. */
-const SESSION_FIELDS = new Set(["title", "unread", "archived"]);
+const SESSION_FIELDS = new Set(["title", "unread", "archived", "pinned", "pin_order"]);
 
 /** The state with fresh diff stats for some worktrees (by id); unchanged state is returned as is. */
 export function withDiffStats(state, stats) {
@@ -34,10 +36,12 @@ export function withDiffStats(state, stats) {
 export function renameWorktree(state, { path, from, name }) {
   const worktree = Object.values(state.worktrees).find((item) => item.path === path && item.name === from);
   if (!worktree) return state;
-  const sessions = Object.fromEntries(Object.entries(state.sessions).map(([id, session]) => [
-    id,
-    session.worktree_id === worktree.id && session.agent_name === from ? { ...session, agent_name: name } : session,
-  ]));
+  const sessions = Object.fromEntries(
+    Object.entries(state.sessions).map(([id, session]) => [
+      id,
+      session.worktree_id === worktree.id && session.agent_name === from ? { ...session, agent_name: name } : session,
+    ]),
+  );
   return { ...state, worktrees: { ...state.worktrees, [worktree.id]: { ...worktree, name } }, sessions };
 }
 
@@ -48,12 +52,29 @@ export const subagentFinished = (agent) => ["completed", "failed", "cancelled"].
 export function archiveSubagent(state, sessionId, id, archived) {
   const session = state.sessions[sessionId];
   if (!session?.subagents?.some((agent) => agent.id === id)) return state;
-  return { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, subagents: session.subagents.map((agent) => (agent.id === id ? { ...agent, archived } : agent)) } } };
+  return {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      [sessionId]: { ...session, subagents: session.subagents.map((agent) => (agent.id === id ? { ...agent, archived } : agent)) },
+    },
+  };
 }
 
 /** The state with a chat's finished subagents archived; unchanged state is returned as is. */
-export function archiveFinishedSubagents(state, sessionId) {
+export function archiveFinishedSubagents(state, sessionId, { keepAdvisors = false } = {}) {
   const session = state.sessions[sessionId];
-  if (!session?.subagents?.some((agent) => !agent.archived && subagentFinished(agent))) return state;
-  return { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, subagents: session.subagents.map((agent) => (!agent.archived && subagentFinished(agent) ? { ...agent, archived: true } : agent)) } } };
+  if (!session?.subagents?.some((agent) => !agent.archived && subagentFinished(agent) && !(keepAdvisors && agent.source === "milagre-advisor"))) return state;
+  return {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      [sessionId]: {
+        ...session,
+        subagents: session.subagents.map((agent) =>
+          !agent.archived && subagentFinished(agent) && !(keepAdvisors && agent.source === "milagre-advisor") ? { ...agent, archived: true } : agent,
+        ),
+      },
+    },
+  };
 }

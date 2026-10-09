@@ -3,7 +3,10 @@ export const DEFAULT_FILES_TO_COPY = ".env*";
 
 /** The patterns in the field: one per line, blank lines dropped. */
 export function parsePatterns(text: string): string[] {
-  return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 /** The preview line: "Matches 3 files: .env, .env.local, apps/web/.env". */

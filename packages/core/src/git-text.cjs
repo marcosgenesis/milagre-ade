@@ -1,10 +1,11 @@
 const { PROVIDERS } = require("@milagre/shared/providers");
 const os = require("node:os");
 const { CodexRpc } = require("./agents/codex-rpc.cjs");
+const { antigravityModel: acpModel } = require("./agents/antigravity-text.cjs");
 
 // The commit message, PR title and PR body the "Commit and open PR" dialog starts with: one call to a
 // small model, which returns the three as JSON. Claude chats ask Claude Haiku 4.5, Codex chats ask
-// GPT-6 Luna, and either falls back to the other. The model call is injected, so tests use a fake.
+// GPT-6 Luna, Antigravity chats ask Gemini 3.8 Flash, and each falls back to the others. The model call is injected, so tests use a fake.
 
 const DIFF_LIMIT = 40_000;
 const TITLE_LIMIT = 200;
@@ -40,12 +41,29 @@ function section(name, body) {
 }
 
 /** The user turn for the model: the rules, the chat, the tests run, the repo's style, a stat and the diff. */
-function buildGitTextPrompt({ diff = "", stat = "", omitted = [], chatTitle = "", firstMessage = "", recentMessages = [], testCommands = [], recentSubjects = [], branchCommits = [], branch, base, hasChanges = true }) {
+function buildGitTextPrompt({
+  diff = "",
+  stat = "",
+  omitted = [],
+  chatTitle = "",
+  firstMessage = "",
+  recentMessages = [],
+  testCommands = [],
+  recentSubjects = [],
+  branchCommits = [],
+  branch,
+  base,
+  hasChanges = true,
+}) {
   const fullDiff = String(diff ?? "");
-  const shownDiff = fullDiff.length > DIFF_LIMIT
-    ? `${fullDiff.slice(0, DIFF_LIMIT)}\n[The diff is cut off here: ${(fullDiff.length - DIFF_LIMIT).toLocaleString("en-US")} more characters are not shown.]`
-    : fullDiff;
-  const latest = recentMessages.map((message) => cap(message, MESSAGE_LIMIT)).filter(Boolean).slice(-RECENT_MESSAGES);
+  const shownDiff =
+    fullDiff.length > DIFF_LIMIT
+      ? `${fullDiff.slice(0, DIFF_LIMIT)}\n[The diff is cut off here: ${(fullDiff.length - DIFF_LIMIT).toLocaleString("en-US")} more characters are not shown.]`
+      : fullDiff;
+  const latest = recentMessages
+    .map((message) => cap(message, MESSAGE_LIMIT))
+    .filter(Boolean)
+    .slice(-RECENT_MESSAGES);
   const tests = testCommands.length
     ? testCommands.map(({ command, status }) => `- ${command} (${status === "failed" ? "failed" : "passed"})`).join("\n")
     : "No tests were run in this chat.";
@@ -62,16 +80,27 @@ function buildGitTextPrompt({ diff = "", stat = "", omitted = [], chatTitle = ""
     const label = hasChanges ? "Already committed; the new commit covers only <diff>:\n" : "";
     parts.push(section("branch_commits", `${label}${branchCommits.join("\n")}`));
   }
-  if (!hasChanges) parts.push("There is nothing left to commit: the diff below is the branch's committed work, for the pull request. Still fill commitMessage.");
+  if (!hasChanges)
+    parts.push("There is nothing left to commit: the diff below is the branch's committed work, for the pull request. Still fill commitMessage.");
   if (stat) parts.push(section("diff_stat", stat));
   if (omitted.length) {
-    parts.push(section("not_shown", omitted.map(({ path, reason }) => `${path} (${reason === "lockfile" ? "lockfile" : "looks like a secret"}; contents not shown)`).join("\n")));
+    parts.push(
+      section(
+        "not_shown",
+        omitted.map(({ path, reason }) => `${path} (${reason === "lockfile" ? "lockfile" : "looks like a secret"}; contents not shown)`).join("\n"),
+      ),
+    );
   }
   parts.push(section("diff", shownDiff || "(empty)"));
   return parts.join("\n\n");
 }
 
-const subjectOf = (message) => String(message ?? "").trim().split("\n")[0].trim().toLowerCase();
+const subjectOf = (message) =>
+  String(message ?? "")
+    .trim()
+    .split("\n")[0]
+    .trim()
+    .toLowerCase();
 
 /** Whether a generated message's subject repeats one already in the repo or on the branch. */
 function repeatsSubject(message, { recentSubjects = [], branchCommits = [] } = {}) {
@@ -87,7 +116,11 @@ function repeatNote(message) {
 const FOOTER = /^\s*(?:🤖\s*)?(?:generated with\b|co-authored-by:)/i;
 
 function withoutFooter(text) {
-  return text.split("\n").filter((line) => !FOOTER.test(line)).join("\n").trim();
+  return text
+    .split("\n")
+    .filter((line) => !FOOTER.test(line))
+    .join("\n")
+    .trim();
 }
 
 function textField(value, keys) {
@@ -139,14 +172,14 @@ async function withTimeout(task, timeoutMs) {
 }
 
 /**
- * Writes the dialog's text with the chat's own agent, else the other one. Each gets `timeoutMs`. A
+ * Writes the dialog's text with the chat's own agent, else the others in picker order. Each gets `timeoutMs`. A
  * commit subject that repeats an earlier one is asked for again, once; if it still repeats, the
  * commit message comes back empty (`repeated: true`) and the dialog shows its note there. Never
  * throws: when neither agent answers, the result carries the note.
  */
 async function generateGitText(input, { provider = "claude", models = {}, timeoutMs = TIMEOUT_MS } = {}) {
   const prompt = buildGitTextPrompt(input);
-  const order = provider === "codex" ? PROVIDERS : PROVIDERS.toReversed();
+  const order = [provider, ...PROVIDERS.filter((name) => name !== provider)];
   const ask = (call, text) => withTimeout((signal) => call({ system: SYSTEM, prompt: text, signal }), timeoutMs);
   for (const name of order) {
     const call = models[name];
@@ -173,7 +206,9 @@ async function generateGitText(input, { provider = "claude", models = {}, timeou
 /** One Haiku 4.5 turn through the Agent SDK, with no tools, settings or saved session (as #37's naming call). */
 function claudeModel({ getCommand, loadSdk = () => import("@anthropic-ai/claude-agent-sdk") }) {
   return async ({ system, prompt, signal }) => {
-    const command = await getCommand();
+    const resolved = await getCommand();
+    const command = typeof resolved === "string" ? resolved : resolved?.command;
+    const env = typeof resolved === "object" ? resolved?.env : undefined;
     signal?.throwIfAborted();
     if (!command) throw new Error("The Claude CLI isn't installed.");
     const { query } = await loadSdk();
@@ -194,6 +229,7 @@ function claudeModel({ getCommand, loadSdk = () => import("@anthropic-ai/claude-
           persistSession: false,
           cwd: os.tmpdir(),
           pathToClaudeCodeExecutable: command,
+          ...(env ? { env } : {}),
           abortController,
         },
       });
@@ -216,13 +252,18 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
+/** One Gemini 3.8 Flash turn in a one-shot ACP session in an empty temporary folder, with every permission request turned down. */
+const antigravityModel = (options) => acpModel({ outputSchema: OUTPUT_SCHEMA, ...options });
+
 /** One GPT-6 Luna turn in a short-lived, ephemeral, read-only `codex app-server` thread. */
 function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options), clientVersion = "0.0.0", outputSchema = OUTPUT_SCHEMA }) {
   return async ({ system, prompt, signal }) => {
-    const command = await getCommand();
+    const resolved = await getCommand();
+    const command = typeof resolved === "string" ? resolved : resolved?.command;
+    const env = typeof resolved === "object" ? resolved?.env : undefined;
     signal?.throwIfAborted();
     if (!command) throw new Error("Codex isn't installed.");
-    const rpc = createRpc({ command, cwd: os.tmpdir() });
+    const rpc = createRpc({ command, cwd: os.tmpdir(), ...(env ? { env } : {}) });
     let streamed = "";
     let final = null;
     const finished = new Promise((resolve, reject) => {
@@ -252,7 +293,14 @@ function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options)
       rpc.start();
       await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null });
       rpc.notify("initialized");
-      const { thread } = await rpc.request("thread/start", { model: CODEX_MODEL, cwd: os.tmpdir(), approvalPolicy: "never", sandbox: "read-only", baseInstructions: system, ephemeral: true });
+      const { thread } = await rpc.request("thread/start", {
+        model: CODEX_MODEL,
+        cwd: os.tmpdir(),
+        approvalPolicy: "never",
+        sandbox: "read-only",
+        baseInstructions: system,
+        ephemeral: true,
+      });
       await rpc.request("turn/start", { threadId: thread?.id, input: [{ type: "text", text: prompt, text_elements: [] }], outputSchema });
       await finished;
       return final ?? streamed;
@@ -263,4 +311,17 @@ function codexModel({ getCommand, createRpc = (options) => new CodexRpc(options)
   };
 }
 
-module.exports = { CLAUDE_MODEL, CODEX_MODEL, DIFF_LIMIT, GENERATION_FAILED, SYSTEM, buildGitTextPrompt, claudeModel, codexModel, generateGitText, parseGitText, repeatsSubject };
+module.exports = {
+  CLAUDE_MODEL,
+  CODEX_MODEL,
+  DIFF_LIMIT,
+  GENERATION_FAILED,
+  SYSTEM,
+  buildGitTextPrompt,
+  claudeModel,
+  codexModel,
+  antigravityModel,
+  generateGitText,
+  parseGitText,
+  repeatsSubject,
+};

@@ -52,7 +52,16 @@ function updateStep(run, id, update) {
 
 /** The detail a step ends with replaces what streamed into it; a step that ends without one keeps none. */
 function endStep({ detail: _streamed, ...step }, end) {
-  return { ...step, status: end.status, title: end.title ?? step.title, ...(end.note === undefined ? {} : { note: end.note }), ...(end.detail === undefined ? {} : { detail: end.detail }), ...(end.durationMs === undefined ? {} : { durationMs: end.durationMs }), ...(end.file === undefined ? {} : { file: end.file }) };
+  return {
+    ...step,
+    status: end.status,
+    title: end.title ?? step.title,
+    ...(end.note === undefined ? {} : { note: end.note }),
+    ...(end.detail === undefined ? {} : { detail: end.detail }),
+    ...(end.durationMs === undefined ? {} : { durationMs: end.durationMs }),
+    ...(end.file === undefined ? {} : { file: end.file }),
+    ...(end.artifact === undefined ? {} : { artifact: end.artifact }),
+  };
 }
 
 /**
@@ -64,7 +73,11 @@ function savedSteps(text, steps, closeAs) {
   const lead = text.length - text.trimStart().length;
   const length = text.trim().length;
   return {
-    steps: steps.map((step) => ({ ...step, status: step.status !== "running" ? step.status : step.kind === "thinking" ? "done" : closeAs, offset: Math.min(Math.max((step.offset ?? text.length) - lead, 0), length) })),
+    steps: steps.map((step) => ({
+      ...step,
+      status: step.status !== "running" ? step.status : step.kind === "thinking" ? "done" : closeAs,
+      offset: Math.min(Math.max((step.offset ?? text.length) - lead, 0), length),
+    })),
   };
 }
 
@@ -142,6 +155,8 @@ export function applyRunEvent(runs, chatId, event, model = "") {
       const { tasks: _cleared, ...rest } = run;
       return { ...runs, [chatId]: event.tasks.length ? { ...rest, tasks: event.tasks } : rest };
     }
+    case "context-usage":
+      return run ? { ...runs, [chatId]: { ...run, contextUsage: { used: event.used, size: event.size } } } : runs;
     // The user's answers to a question were saved as their message, after the reply so far (see recordAnswers).
     case "answers-sent":
       return run ? { ...runs, [chatId]: splitRun(run) ?? { ...run, split: true } } : runs;
@@ -150,11 +165,17 @@ export function applyRunEvent(runs, chatId, event, model = "") {
       return run ? { ...runs, [chatId]: { ...run, text: run.text + event.text, ...(run.waitingForSubagents ? { waitingForSubagents: false } : {}) } } : runs;
     case "step-started": {
       if (!run) return runs;
-      const step = { ...event.step, ...(event.step.detail === undefined ? {} : { detail: capOutput(event.step.detail) }), status: "running", offset: run.text.length };
+      const step = {
+        ...event.step,
+        ...(event.step.detail === undefined ? {} : { detail: capOutput(event.step.detail) }),
+        status: "running",
+        offset: run.text.length,
+      };
       return { ...runs, [chatId]: { ...run, steps: [...run.steps.filter((item) => item.id !== step.id), step] } };
     }
     case "step-output": {
-      const next = run && updateStep(run, event.id, (step) => (step.status === "running" ? { ...step, detail: capOutput((step.detail ?? "") + event.text) } : null));
+      const next =
+        run && updateStep(run, event.id, (step) => (step.status === "running" ? { ...step, detail: capOutput((step.detail ?? "") + event.text) } : null));
       return next ? { ...runs, [chatId]: next } : runs;
     }
     case "step-completed": {
@@ -188,26 +209,31 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
   switch (event.type) {
     case "subagent-update": {
       if (event.agent.id === session.native_session_id) return { state, runs, changed: false };
-      const children = (session.subagents ?? []).filter(agent => agent.id !== session.native_session_id);
+      const children = (session.subagents ?? []).filter((agent) => agent.id !== session.native_session_id);
       const previous = children.find((agent) => agent.id === event.agent.id);
       if (previous && previous.updatedAt > event.agent.updatedAt) return { state, runs, changed: false };
-      const communications = new Map((previous?.communications ?? []).map(entry => [entry.id, entry]));
+      const communications = new Map((previous?.communications ?? []).map((entry) => [entry.id, entry]));
       for (const entry of event.agent.communications ?? []) {
         // Resuming a provider may replay an item with a new observation time.
-        if (!communications.has(entry.id)) communications.set(entry.id,entry);
+        if (!communications.has(entry.id)) communications.set(entry.id, entry);
       }
       // A resumed provider can rediscover a child before it has replayed the earlier output.
-      const agent = previous ? {
-        ...previous,
-        ...event.agent,
-        archived: previous.archived,
-        title: event.agent.title === "Subagent" ? previous.title : event.agent.title,
-        prompt: event.agent.prompt ?? previous.prompt,
-        parentId: event.agent.parentId ?? previous.parentId,
-        startedAt: Math.min(previous.startedAt, event.agent.startedAt),
-        communications: [...communications.values()].sort((a,b) => a.at - b.at).slice(-20),
-        transcript: [...new Map([...previous.transcript, ...event.agent.transcript].map((entry) => [entry.id, entry])).values()].slice(-100),
-      } : event.agent;
+      const agent = previous
+        ? {
+            ...previous,
+            ...event.agent,
+            archived: previous.archived,
+            title: event.agent.title === "Subagent" ? previous.title : event.agent.title,
+            prompt: event.agent.prompt ?? previous.prompt,
+            parentId: event.agent.parentId ?? previous.parentId,
+            startedAt: Math.min(previous.startedAt, event.agent.startedAt),
+            communications: [...communications.values()].sort((a, b) => a.at - b.at).slice(-20),
+            transcript:
+              event.agent.source === "milagre-advisor"
+                ? event.agent.transcript
+                : [...new Map([...previous.transcript, ...event.agent.transcript].map((entry) => [entry.id, entry])).values()].slice(-100),
+          }
+        : event.agent;
       const subagents = previous ? children.map((child) => (child.id === agent.id ? agent : child)) : [...children, agent];
       return { state: { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, subagents } } }, runs, changed: true };
     }
@@ -229,8 +255,11 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
     case "turn-failed": {
       if (!run) return { state, runs, changed: false };
       const remaining = applyRunEvent(runs, chatId, event);
+      // The context gauge outlives the run, so the composer still shows it between turns.
+      if (run.contextUsage) state = { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, contextUsage: run.contextUsage } } };
       // The reply so far was saved when a steering message split it; there is nothing left to show.
-      if (event.type === "turn-completed" && run.split && !run.text.trim() && !run.steps.length) return { state, runs: remaining, changed: false };
+      if (event.type === "turn-completed" && run.split && !run.text.trim() && !run.steps.length)
+        return { state, runs: remaining, changed: Boolean(run.contextUsage) };
       const message = {
         id: state.next_id,
         session_id: sessionId,
@@ -273,7 +302,15 @@ export function splitRunForSteer(state, runs, projectPath, chatId) {
   const split = splitRun(run);
   if (!split) return { state, runs, changed: false };
   const finished = run.steps.filter((step) => step.status !== "running");
-  const message = { id: state.next_id, session_id: sessionId, body: run.text.trim(), context: null, role: "assistant", model: run.model, ...savedSteps(run.text, finished, "done") };
+  const message = {
+    id: state.next_id,
+    session_id: sessionId,
+    body: run.text.trim(),
+    context: null,
+    role: "assistant",
+    model: run.model,
+    ...savedSteps(run.text, finished, "done"),
+  };
   return {
     state: { ...state, next_id: state.next_id + 1, messages: [...state.messages, message] },
     runs: { ...runs, [chatId]: split },

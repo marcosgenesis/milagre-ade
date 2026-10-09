@@ -1,11 +1,45 @@
+import type {
+  ProjectAccountScope,
+  ProjectAccountsSnapshot,
+  NamedProjectLink,
+  OpenLink,
+  LinkState,
+  LinkSendRequest,
+  TranscriptState,
+  ChatMessage,
+} from "@milagre/shared/model";
 import type { Result } from "@milagre/shared/result";
+import type { StatePatch } from "@milagre/shared/state-patch";
+
+/** On a state event from a host that sends patches: what changed since the state numbered `base`, or `resync`. */
+type StateNumbering = { patch?: StatePatch; base?: number; version?: number; epoch?: string; resync?: boolean };
+import type { SimulatorApi } from "@milagre/shared/simulator";
+import type { BrowserApi } from "@milagre/shared/browser";
+import type { ArtifactApi } from "@milagre/shared/artifact";
 
 import type { AgentRuns } from "./lib/agent-runs";
 import type { SessionPatch, WorktreeRename } from "@milagre/shared/project-edits";
 import type { GitChanges, GitChatContext, GitCommitResult, GitPrResult, GitPushResult, GitTextResult } from "./lib/git-dialog";
 import type { ModelProvider } from "./model";
 import type { RecentProject } from "./lib/project-list";
-import type { AgentCliStatus, AgentModels, AgentPorts, EditorInfo, AgentEvent, ChatHandoverRequest, ChatSendRequest, CoordinatorState, LinkedWork, OpenProject, PermissionDecision, PermissionMode, QuestionAnswers, SkillCatalog, UsageSnapshot, WorktreeRequest } from "./model";
+import type {
+  AgentCliStatus,
+  AgentModels,
+  AgentPorts,
+  Subagent,
+  EditorInfo,
+  AgentEvent,
+  ChatSendRequest,
+  CoordinatorState,
+  LinkedWork,
+  OpenProject,
+  PermissionDecision,
+  PermissionMode,
+  QuestionAnswers,
+  SkillCatalog,
+  UsageSnapshot,
+  WorktreeRequest,
+} from "./model";
 
 import type { WorktreeStatus } from "./lib/archive";
 import type { PullRequest } from "./model";
@@ -19,7 +53,13 @@ export type WorktreeSetupSource = "repo" | "setting" | "none";
 /** The project's saved setup command, and the one that applies. `note` says why a repo file was ignored. */
 export type WorktreeSetupSettings = { setupCommand: string; source: WorktreeSetupSource; command: string | null; note?: string };
 
-export type UpdateState = { status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "error" | "unavailable"; version: string | null; progress: number };
+export type ReleaseChannel = "stable" | "beta";
+export type UpdateState = {
+  status: "idle" | "checking" | "up-to-date" | "downloading" | "downloaded" | "installing" | "error" | "unavailable";
+  version: string | null;
+  progress: number;
+  error?: string;
+};
 
 /** The Phone setting as the host runs it. The link and QR (an SVG) are there only while it is on; both carry the access token. */
 export type PhoneStatus = {
@@ -38,6 +78,8 @@ export type PhoneStatus = {
   publicUrl?: string;
   pairingLink?: string;
   qrSvg?: string;
+  /** Phone access on this Mac's local network: on or off, and the addresses a phone on the same network dials. */
+  lan?: { enabled: boolean; addresses: string[]; error?: string };
 };
 
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";
@@ -46,29 +88,52 @@ export type { DiffMode, DiffFileEntry, DiffFilesResult, DiffFileResult } from "@
 /** `hostOutdated`: connected to a host from before result pages, which can't load very large Projects.
  * `notice`: shown once, e.g. the host went away and was started again. `failed`: it couldn't be started again (`message` says why). */
 export type RuntimeConnection = { connected: boolean; message?: string; hostOutdated?: boolean; notice?: string; failed?: boolean };
-export type RuntimeSnapshot = { projects: OpenProject[]; runs: { runs: AgentRuns; seq: number }; ports: AgentPorts; eventSeq: number };
+export type RuntimeSnapshot = {
+  projects: OpenProject[];
+  links?: Array<{ linkId: string; state: LinkState }>;
+  runs: { runs: AgentRuns; seq: number };
+  ports: AgentPorts;
+  eventSeq: number;
+};
 export type LinkEndpoint = { project_id: string; worktree_path?: string };
 export type ProjectLink = { id: string; a: LinkEndpoint; b: LinkEndpoint; created_at: string };
 export type CanvasSnapshot = {
   projects: { id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[];
   links: ProjectLink[];
+  projectGroups?: NamedProjectLink[];
   worktreePositions: Record<string, Record<string, { x: number; y: number }>>;
   states: { path: string; state: CoordinatorState }[];
 };
 
+export type CliProgress =
+  | { provider: ModelProvider; phase: "download"; received: number; total: number }
+  | { provider: ModelProvider; phase: "extract" | "validate" | "done" };
+
 declare global {
   interface Window {
     milagre: {
+      simulators: SimulatorApi;
+      browsers: BrowserApi;
+      artifacts: ArtifactApi;
       getRuntimeConnection: () => Promise<RuntimeConnection>;
       /** Stops the running host (it saves and suspends turns) and starts this desktop's own. */
       restartHost: () => Promise<void>;
       onRuntimeConnection: (callback: (state: RuntimeConnection) => void) => () => void;
       onRuntimeSnapshot: (callback: (snapshot: RuntimeSnapshot) => void) => () => void;
       getPathForFile: (file: File) => string;
+      readAttachment: (file: string) => Promise<{ text: string; binary: boolean; truncated: boolean }>;
       searchProjectFiles: (root: string, query: string) => Promise<string[]>;
       listSkills: (projectPath: string) => Promise<SkillCatalog>;
+      /** The text of a SKILL.md the catalog listed (a shadowed one included), up to 256 KiB. */
+      readSkill: (projectPath: string, file: string) => Promise<string>;
+      /** Opens a listed SKILL.md in an editor, wherever it lives (user skills are outside any checkout). */
+      openSkill: (request: { projectPath: string; file: string; editor?: string }) => Promise<Result<null>>;
+      /** Shows a listed SKILL.md in the file manager. */
+      revealSkill: (projectPath: string, file: string) => Promise<void>;
       listBranches: (projectPath: string) => Promise<string[]>;
       getProjectImage: (projectPath: string) => Promise<string | null>;
+      /** Saves a chosen icon (an image data URL), or null to go back to the repository's own; returns the icon now shown. */
+      setProjectIcon: (projectPath: string, icon: string | null) => Promise<string | null>;
       getAppVersion: () => Promise<string>;
       /** `setupNote`: why the repo's setup file was ignored. */
       createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number; setupNote?: string }>;
@@ -81,7 +146,10 @@ declare global {
        * and checks again against `seen`, the status the user saw. Rejects with git's message, or a message that
        * says the worktree changed after it was checked.
        */
-      removeWorktree: (worktreePath: string, options: { force: boolean; base: string; projectPath: string; chatId: string; seen: WorktreeStatus }) => Promise<{ removed: boolean; alreadyRemoved?: boolean; branch: string | null; branchDeleted: boolean }>;
+      removeWorktree: (
+        worktreePath: string,
+        options: { force: boolean; base: string; projectPath: string; chatId: string; seen: WorktreeStatus },
+      ) => Promise<{ removed: boolean; alreadyRemoved?: boolean; branch: string | null; branchDeleted: boolean }>;
       /** The project's saved "Files to copy" patterns, with what the effective patterns match now. */
       readFilesToCopy: (projectPath: string) => Promise<FilesToCopy & { filesToCopy: string[] }>;
       /** What patterns would match, without saving them. `.worktreeinclude` still wins. */
@@ -127,15 +195,32 @@ declare global {
       openProject: () => Promise<OpenProject | null>;
       /** Projects opened lately, most recent first; folders that are gone are left out. */
       listRecentProjects: () => Promise<RecentProject[]>;
+      /** Keeps a recent project out of the all-Projects sidebar and the phone's list, or shows it again; resolves to the list. */
+      setProjectHidden: (projectPath: string, hidden: boolean) => Promise<RecentProject[]>;
+      /** Loads a recent project's chats without opening it; later changes arrive through onProjectState. */
+      readProject: (projectPath: string) => Promise<OpenProject>;
       /** Every opened Project, seeded once from existing coordination files. */
+      listNamedLinks: () => Promise<NamedProjectLink[]>;
+      createNamedLink: (request: { name: string; projectIds: string[] }) => Promise<NamedProjectLink>;
+      openNamedLink: (id: string) => Promise<OpenLink>;
+      /** A Link's chats as saved, without opening it or preparing its worktrees. */
+      readLink: (id: string) => Promise<{ link: NamedProjectLink; state: LinkState }>;
+      sendLinkMessage: (request: LinkSendRequest) => Promise<{ sessionId: number }>;
+      /** Raw from the host: a whole state, or a patch (see StateNumbering). Listen through state-events.ts instead. */
+      onLinkState: (callback: (update: { linkId: string; state?: LinkState } & StateNumbering) => void) => () => void;
       listProjects: () => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
-      setProjectPosition: (id: string, position: { x: number; y: number }) => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
+      setProjectPosition: (
+        id: string,
+        position: { x: number; y: number },
+      ) => Promise<{ id: string; path: string; name: string; position: { x: number; y: number } | null; openedAt: string }[]>;
       getCanvas: () => Promise<CanvasSnapshot>;
       addLink: (a: LinkEndpoint, b: LinkEndpoint) => Promise<ProjectLink[]>;
       removeLink: (id: string) => Promise<ProjectLink[]>;
       /** Delegations and Negotiations still open across Links, and the Codex Chats that only receive. */
       getLinkedWork: () => Promise<LinkedWork>;
       onLinkedWork: (callback: (work: LinkedWork) => void) => () => void;
+      /** An app ⌘⇧ shortcut pressed while an embedded frame had focus, forwarded by the main process (its letter). */
+      onAppShortcut: (callback: (key: string) => void) => () => void;
       /** The canvas's Stop on a Link: the Negotiation stops, turns already running finish. */
       stopNegotiation: (id: string) => Promise<void>;
       setWorktreePosition: (id: string, worktreePath: string, position: { x: number; y: number }) => Promise<unknown>;
@@ -147,15 +232,12 @@ declare global {
       /** A project's state changed in the main process, its only writer. Changes made by agent events come with the event instead. */
       retryQuit: () => Promise<void>;
       onQuitFailed: (callback: (message: string) => void) => () => void;
-      onProjectState: (callback: (update: { path: string; state: CoordinatorState }) => void) => () => void;
+      /** Raw from the host: a whole state, or a patch (see StateNumbering). Listen through state-events.ts instead. */
+      onProjectState: (callback: (update: { path: string; state?: CoordinatorState } & StateNumbering) => void) => () => void;
       /** Saves a message in its chat (a new one when `sessionId` is null), then starts or steers the chat's turn. */
       sendMessage: (request: ChatSendRequest) => Promise<{ sessionId: number }>;
       /** Continues a chat a quit stopped mid-turn, on its saved options. Resolves false when it has nothing to continue. */
       resumeChat: (projectPath: string, sessionId: number) => Promise<boolean>;
-      /** Opens a chat on the other provider in this chat's worktree and writes it a brief of this chat, kept as a draft until the first message. Resolves once the new chat exists. */
-      handover: (request: ChatHandoverRequest) => Promise<{ sessionId: number }>;
-      /** Replaces a handed-over chat's brief while it has no messages yet; does nothing once it has. */
-      setHandoverDraft: (projectPath: string, sessionId: number, text: string) => Promise<void>;
       patchChat: (projectPath: string, sessionId: number, patch: SessionPatch) => Promise<void>;
       /** Archives one of a chat's subagents, or brings it back; the provider carries on either way. */
       archiveSubagent: (projectPath: string, sessionId: number, id: string, archived: boolean) => Promise<void>;
@@ -166,19 +248,33 @@ declare global {
       setOpenChat: (chatId: string | null) => Promise<void>;
       /** The turns streaming now, in every project, and the number of the last agent event they hold. */
       getRuns: () => Promise<{ runs: AgentRuns; seq: number }>;
+      /** One saved message of a Project or Link (scope key), with the long step details the state leaves out. */
+      getMessage: (scope: string, id: number) => Promise<ChatMessage>;
       respondToPermission: (chatId: string, requestId: string, decision: PermissionDecision) => Promise<boolean>;
       /** Sends the answers to a question card, or dismisses it (null). False when the question is gone. */
       answerQuestion: (chatId: string, requestId: string, answers: QuestionAnswers | null, summary?: string) => Promise<boolean>;
       setAgentPermissionMode: (chatId: string, mode: PermissionMode) => Promise<void>;
       /** Each agent's model list as its CLI reports it, asked once per app run; null for an agent that couldn't be asked. */
-      getModels: () => Promise<AgentModels>;
+      listAccountScopes: () => Promise<ProjectAccountScope[]>;
+      getProjectAccounts: (scopeKey: string, refresh?: boolean) => Promise<ProjectAccountsSnapshot>;
+      assignProjectAccount: (scopeKey: string, provider: ModelProvider, accountId: string | null) => Promise<ProjectAccountsSnapshot>;
+      getModels: (scopeKey?: string) => Promise<AgentModels>;
       /** How each agent's CLI stands (missing, outdated, broken, logged out, or ready); checked again on every call while it has a problem. */
-      getCliStatus: () => Promise<AgentCliStatus>;
+      getCliStatus: (scopeKey?: string) => Promise<AgentCliStatus>;
       /** Runs update for the specified CLI agent and refreshes status. */
       updateCli: (provider: ModelProvider) => Promise<{ ok: boolean; version?: string; error?: string; status?: CliStatus }>;
+      stopAdvisor: (chatId: string, id: string) => Promise<Subagent>;
+      retryAdvisor: (chatId: string, id: string) => Promise<Subagent>;
+      /** Where Antigravity's install stands while `updateCli("antigravity")` runs: download bytes, then extract, validate, done. */
+      onCliProgress: (callback: (progress: CliProgress) => void) => () => void;
       interruptAgent: (chatId: string) => Promise<void>;
       /** An agent event, with its project's new state when the event changed it, and its number once it's folded into the main process's runs (see getRuns). */
-      onAgentEvent: (callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState; seq?: number }) => void) => () => void;
+      /** Raw from the host; an event's state can come as a patch (see StateNumbering). For the state, listen through state-events.ts. */
+      onAgentEvent: (
+        callback: (payload: { chatId: string; event: AgentEvent; state?: CoordinatorState | LinkState; seq?: number } & StateNumbering) => void,
+      ) => () => void;
+      /** A Project's or Link's (scope key) state and its number, for applying the host's state patches. */
+      readState: (scope: string) => Promise<{ state: CoordinatorState | LinkState; version: number; epoch: string }>;
       /** Every chat's listening ports now, by chat key. */
       getAgentPorts: () => Promise<AgentPorts>;
       /** Stops the command listening on one of a chat's ports; false when the chat's list doesn't show that pid. */
@@ -187,26 +283,43 @@ declare global {
       onAgentPorts: (callback: (ports: AgentPorts) => void) => () => void;
       getUpdateState: () => Promise<UpdateState>;
       checkForUpdates: () => Promise<UpdateState>;
+      getReleaseChannel: () => Promise<ReleaseChannel>;
+      setReleaseChannel: (channel: ReleaseChannel) => Promise<ReleaseChannel>;
       installUpdate: () => Promise<void>;
       onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       getPhoneStatus: () => Promise<PhoneStatus>;
       /** Turns phone access on or off. Resolves as it starts; progress and the result arrive through onPhoneStatus. */
       setPhoneEnabled: (enabled: boolean) => Promise<PhoneStatus>;
+      /** Turns phone access over the local network on or off. Resolves with the new status. */
+      setPhoneLan(enabled: boolean): Promise<PhoneStatus>;
       /** A new access token: phones paired before scan again. */
       resetPhoneAccess: () => Promise<PhoneStatus>;
       /** Lets phones that have not paired yet do so for another ten minutes. */
       openPhonePairing: () => Promise<PhoneStatus>;
       onPhoneStatus: (callback: (status: PhoneStatus) => void) => () => void;
-      readUsage: () => Promise<UsageSnapshot>;
+      listAccounts: (refresh?: boolean) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
+      accountAction: (
+        action: "add" | "select" | "login" | "cancel" | "remove",
+        provider: ModelProvider,
+        value: string,
+      ) => Promise<import("@milagre/shared/model").AccountsSnapshot>;
+      onAccountsChanged: (callback: () => void) => () => void;
+      readUsage: (scopeKey?: string) => Promise<UsageSnapshot>;
       /** Whether the Mac stays awake while an agent works (the screen can still sleep). */
       setKeepAwake: (enabled: boolean) => Promise<void>;
-      getCachedUsage: () => Promise<UsageSnapshot>;
+      getCachedUsage: (scopeKey?: string) => Promise<UsageSnapshot>;
       /** Whether a chat that waits on the user while Milagre is in the background gets a system notification. */
       setNotifyWhenWaiting: (on: boolean) => Promise<void>;
       /** Whether the window lets the blurred desktop show through (macOS). `theme` picks the blur material. */
       setWindowTranslucent: (on: boolean, theme: "light" | "dark") => Promise<void>;
       /** The open project's unread chats and the notification settings, for completion alerts and the Dock badge. */
-      syncNotifications: (state: { projectPath: string; activeChatId: string | null; unread: string[]; notifyOnCompletion: boolean; showDockBadge: boolean }) => Promise<void>;
+      syncNotifications: (state: {
+        projectPath: string;
+        activeChatId: string | null;
+        unread: string[];
+        notifyOnCompletion: boolean;
+        showDockBadge: boolean;
+      }) => Promise<void>;
       notifyCompletion: (notice: { chatId: string; title: string; subtitle?: string }) => Promise<boolean>;
       /** A notification was clicked: the window is back, and the chat it was about should open. */
       onOpenChat: (callback: (chatId: string) => void) => () => void;

@@ -6,7 +6,7 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-export const PROVIDER_NAMES = Object.fromEntries(PROVIDERS.map(provider => [provider, providerName(provider)])) as Record<ModelProvider, string>;
+export const PROVIDER_NAMES = Object.fromEntries(PROVIDERS.map((provider) => [provider, providerName(provider)])) as Record<ModelProvider, string>;
 
 export type UsageTone = "normal" | "warning" | "critical";
 
@@ -56,7 +56,8 @@ export function visibleProviders(snapshot: UsageSnapshot) {
 }
 
 export function usageLabel(usage: ProviderUsage, display: UsageDisplay = "used") {
-  const name = PROVIDER_NAMES[usage.provider];
+  const account = usage.account?.email || usage.account?.label;
+  const name = `${PROVIDER_NAMES[usage.provider]}${account ? ` (${account})` : ""}`;
   if (usage.windows.length === 0) return `${name} usage unavailable`;
   const windows = usage.windows.slice(0, 2).map((item) => `${item.label} ${formatPercent(shownPercent(item.usedPercent, display))} ${shownSuffix(display)}`);
   return `${name} usage${usage.status === "error" ? ", last known" : ""}: ${windows.join(", ")}`;
@@ -72,7 +73,9 @@ export function seedSnapshot(current: UsageSnapshot | null, cached: UsageSnapsho
 // stays useful and "Updated Xm ago" stays truthful while showing the error.
 // Windows that have reset since are dropped: their old numbers no longer apply.
 export function mergeSnapshot(previous: UsageSnapshot | null, next: UsageSnapshot, now: number): UsageSnapshot {
+  if (previous?.accountKey !== next.accountKey) previous = null;
   return {
+    ...(next.accountKey ? { accountKey: next.accountKey } : {}),
     providers: next.providers.map((current) => {
       if (current.status !== "error") return current;
       const before = previous?.providers.find((item) => item.provider === current.provider);
@@ -81,5 +84,25 @@ export function mergeSnapshot(previous: UsageSnapshot | null, next: UsageSnapsho
       const banked = before.bankedResets ? { bankedResets: before.bankedResets } : {};
       return { ...current, windows, updatedAt: before.updatedAt, ...banked };
     }),
+  };
+}
+
+/** A token count the way model windows are named: 366k, 1M, 1.5M. */
+export function formatTokens(tokens: number) {
+  const thousands = Math.round(tokens / 1000);
+  if (thousands < 1) return String(Math.round(tokens));
+  if (thousands < 1000) return `${thousands}k`;
+  return `${Math.round(tokens / 100_000) / 10}M`;
+}
+
+/** How full the agent's context window is: the percent used and the token counts behind it. */
+export function contextSummary({ used, size }: { used: number; size: number }) {
+  const ratio = size > 0 ? Math.min(1, Math.max(0, used / size)) : 0;
+  const percent = Math.round(ratio * 100);
+  return {
+    ratio,
+    percent,
+    tokens: `${formatTokens(used)} of ${formatTokens(size)} tokens`,
+    left: `${formatTokens(Math.max(0, size - used))} left`,
   };
 }

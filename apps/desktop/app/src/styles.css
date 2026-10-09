@@ -22,12 +22,29 @@
   opacity: 0;
   transition-duration: 90ms;
 }
+
+.link-project-dialog[open] {
+  animation: pop-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+.link-project-dialog[open]::backdrop {
+  animation: fade-in 140ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .link-project-dialog[open],
+  .link-project-dialog[open]::backdrop {
+    animation: fade-in 60ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+}
 @starting-style {
-  .command-palette[open]::backdrop { opacity: 0; }
+  .command-palette[open]::backdrop {
+    opacity: 0;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .command-palette::backdrop,
-  .command-palette[data-closing]::backdrop { transition-duration: 60ms; }
+  .command-palette[data-closing]::backdrop {
+    transition-duration: 60ms;
+  }
 }
 
 /* GENERIC FOUNDATION — tokens, @theme, base rules, the primitive-*
@@ -135,13 +152,9 @@
    * dissolves into the shadow as one continuous stroke (per smooth-shadow-ring),
    * graduated by how far the surface floats. */
   --shadow-btn: 0 0 0 1px oklch(1 0 0 / 0.1), 0 1px 2px oklch(0 0 0 / 0.3);
-  --shadow-card:
-    0 0 0 1px oklch(1 0 0 / 0.11), 0 1px 2px oklch(0 0 0 / 0.2),
-    0 2px 6px oklch(0 0 0 / 0.2);
-  --shadow-raised:
-    0 0 0 1px oklch(1 0 0 / 0.13), 0 2px 10px oklch(0 0 0 / 0.22);
-  --shadow-overlay:
-    0 0 0 1px oklch(1 0 0 / 0.15), 0 8px 28px oklch(0 0 0 / 0.34);
+  --shadow-card: 0 0 0 1px oklch(1 0 0 / 0.11), 0 1px 2px oklch(0 0 0 / 0.2), 0 2px 6px oklch(0 0 0 / 0.2);
+  --shadow-raised: 0 0 0 1px oklch(1 0 0 / 0.13), 0 2px 10px oklch(0 0 0 / 0.22);
+  --shadow-overlay: 0 0 0 1px oklch(1 0 0 / 0.15), 0 8px 28px oklch(0 0 0 / 0.34);
   --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.4);
 }
 
@@ -222,6 +235,22 @@
 
 /* ── base ─────────────────────────────────────────────── */
 
+/* The title bar moves the window, except while a popover is open: a press on a drag region never reaches
+ * the page, so it couldn't close the popover (lib/use-dismiss.ts). The first press then closes it instead. */
+.title-drag {
+  -webkit-app-region: drag;
+}
+html[data-popover-open] .title-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* A docked simulator (SimulatorTrack) and an open design (ArtifactCard) sit in this space beside the chat. A chat pane
+   inside the workspace already has it from the workspace; reserving it twice would leave the chat no room. */
+[data-workspace-main],
+[data-chat-pane]:not([data-workspace-main] [data-chat-pane]) {
+  margin-right: calc(var(--simulator-dock, 0px) + var(--artifact-dock, 0px));
+}
+
 html {
   height: 100%;
   min-height: 100%;
@@ -240,13 +269,7 @@ body,
 
 body {
   background-color: var(--stripe-bg);
-  background-image: repeating-linear-gradient(
-    -45deg,
-    transparent 0,
-    transparent 7px,
-    var(--stripe) 7px,
-    var(--stripe) 8px
-  );
+  background-image: repeating-linear-gradient(-45deg, transparent 0, transparent 7px, var(--stripe) 7px, var(--stripe) 8px);
   /* Pin the stripe pattern to the viewport so it stays put on scroll. */
   background-attachment: fixed;
   color: var(--ink);
@@ -332,7 +355,9 @@ a {
 }
 .scroll-fade {
   mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent);
-  transition: --fade-top 180ms ease-out, --fade-bottom 180ms ease-out;
+  transition:
+    --fade-top 180ms ease-out,
+    --fade-bottom 180ms ease-out;
 }
 .scroll-fade[data-fade-top] {
   --fade-top: 28px;
@@ -388,6 +413,9 @@ a {
 /* The prompt is a floating control, not a raised card. Keep its elevation
  * close to the surface so the lower edge does not read as a second bar. */
 .promptbar-surface {
+  background: color-mix(in oklab, var(--surface) 76%, transparent);
+  backdrop-filter: blur(var(--blur-chip));
+  -webkit-backdrop-filter: blur(var(--blur-chip));
   box-shadow:
     0 1px 2px oklch(0.24 0.008 258 / 0.045),
     0 3px 9px oklch(0.24 0.008 258 / 0.055);
@@ -399,23 +427,17 @@ a {
     0 3px 9px oklch(0 0 0 / 0.2);
 }
 
-.prompt-input-highlighted { color: transparent; }
-.prompt-input-highlighted::selection { color: var(--ink); }
+.prompt-input-highlighted {
+  color: transparent;
+}
+.prompt-input-highlighted::selection {
+  color: var(--ink);
+}
 
 @media (min-width: 64rem) {
   .component-nav-scroll {
-    -webkit-mask-image: linear-gradient(
-      to bottom,
-      oklch(0 0 0) 0,
-      oklch(0 0 0) calc(100% - 6rem),
-      transparent 100%
-    );
-    mask-image: linear-gradient(
-      to bottom,
-      oklch(0 0 0) 0,
-      oklch(0 0 0) calc(100% - 6rem),
-      transparent 100%
-    );
+    -webkit-mask-image: linear-gradient(to bottom, oklch(0 0 0) 0, oklch(0 0 0) calc(100% - 6rem), transparent 100%);
+    mask-image: linear-gradient(to bottom, oklch(0 0 0) 0, oklch(0 0 0) calc(100% - 6rem), transparent 100%);
   }
 }
 
@@ -461,7 +483,6 @@ a {
   cursor: pointer;
 }
 
-
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -469,7 +490,13 @@ a {
 }
 
 /* The project menu's rows show keyboard focus with their own fill, in ink rather than the accent. */
-[data-workspace-menu] :focus-visible {
+[data-workspace-menu] :focus-visible,
+[data-scope-menu-panel] :focus-visible {
+  outline: none;
+}
+
+/* Project action rows keep the picker's neutral focus fill inside its scrolling panel. */
+[data-link-project-menu] [data-picker-row]:focus-visible {
   outline: none;
 }
 
@@ -566,41 +593,72 @@ a:focus-visible .animated-underline::after {
 
 /* The sidebar is one persistent 224–420px tree clipped by a 52px shell.
  * Every rail glyph remains centered at x=26 in both states. */
-/* Linear blur over the top of a scrolled chat: strongest at the window edge, gone by the bottom. */
-.chat-top-blur {
-  backdrop-filter: blur(var(--blur-edge));
-  -webkit-backdrop-filter: blur(var(--blur-edge));
-  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 70%, transparent), transparent);
-  mask-image: linear-gradient(to bottom, black 35%, transparent);
-}
-
-/* The bottom of the chat, under the chips and down to the composer. The text fades into the page
- * over the whole height and blurs only near the composer, so it softens all the way down instead of
- * cutting off. Two layers: a mask on the blur itself would leave a crisp copy showing through it. */
-.chat-bottom-blur > * {
+/* Progressive blur where content scrolls under a window edge. One masked blur leaves a crisp copy showing
+ * through wherever its mask is half on, so four blurs that double in strength stack up
+ * instead, each switched on a step closer to the edge. The last child is the page-colored tint.
+ * --blur-dir points from the content toward the edge; the blur starts at --blur-start and is at full
+ * strength from --blur-end on. */
+.progressive-blur > * {
   position: absolute;
   inset: 0;
 }
-.chat-bottom-blur > :nth-child(1) {
-  backdrop-filter: blur(var(--blur-edge));
-  -webkit-backdrop-filter: blur(var(--blur-edge));
-  mask-image: linear-gradient(to top, black 20%, transparent 60%);
+.progressive-blur > :not(:last-child) {
+  --blur-step: calc((var(--blur-end) - var(--blur-start)) / 4);
+  backdrop-filter: blur(calc(var(--blur-edge) * var(--blur-scale)));
+  -webkit-backdrop-filter: blur(calc(var(--blur-edge) * var(--blur-scale)));
+  mask-image: linear-gradient(
+    var(--blur-dir),
+    transparent calc(var(--blur-start) + var(--blur-step) * var(--blur-layer)),
+    #000 calc(var(--blur-start) + var(--blur-step) * (var(--blur-layer) + 1))
+  );
 }
-.chat-bottom-blur > :nth-child(2) {
-  background: linear-gradient(to top, var(--page) 5%, color-mix(in oklab, var(--page) 70%, transparent) 40%, transparent);
+.progressive-blur > :nth-child(1) {
+  --blur-layer: 0;
+  --blur-scale: 0.25;
+}
+.progressive-blur > :nth-child(2) {
+  --blur-layer: 1;
+  --blur-scale: 0.5;
+}
+.progressive-blur > :nth-child(3) {
+  --blur-layer: 2;
+  --blur-scale: 1;
+}
+.progressive-blur > :nth-child(4) {
+  --blur-layer: 3;
+  --blur-scale: 2;
 }
 /* While a turn streams the transcript repaints every batch, and a backdrop blur re-blurs it each time. The
  * fades stay as plain gradients, a touch denser where the blur used to soften the text. */
-.chat-top-blur[data-busy] {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 88%, transparent), transparent);
-}
-.chat-bottom-blur[data-busy] > :nth-child(1) {
+.progressive-blur[data-busy] > :not(:last-child) {
   display: none;
 }
-.chat-bottom-blur[data-busy] > :nth-child(2) {
-  background: linear-gradient(to top, var(--page) 15%, color-mix(in oklab, var(--page) 80%, transparent) 50%, transparent);
+
+/* The top of a scrolled chat, under the window-drag strip. Blur and tint build across the whole overlay, so the
+ * text softens gradually and is fully blurred only at the window edge. */
+.chat-top-blur {
+  --blur-dir: to top;
+  --blur-start: 0%;
+  --blur-end: 100%;
+}
+.chat-top-blur > :last-child {
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 55%, transparent), transparent);
+}
+.chat-top-blur[data-busy] > :last-child {
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--page) 80%, transparent), transparent);
+}
+
+/* The bottom mirrors the top: blur and tint grow gradually toward the composer. */
+.chat-bottom-blur {
+  --blur-dir: to bottom;
+  --blur-start: 0%;
+  --blur-end: 100%;
+}
+.chat-bottom-blur > :last-child {
+  background: linear-gradient(to top, color-mix(in oklab, var(--page) 55%, transparent), transparent);
+}
+.chat-bottom-blur[data-busy] > :last-child {
+  background: linear-gradient(to top, color-mix(in oklab, var(--page) 80%, transparent), transparent);
 }
 
 /* Messages far off screen skip layout and paint; the size of the last render stands in, so scrolling stays steady.
@@ -609,6 +667,10 @@ a:focus-visible .animated-underline::after {
   content-visibility: auto;
   contain-intrinsic-size: auto 160px;
 }
+/* An opening conversation measures every message once; contain-intrinsic-size remembers it from then on. */
+[data-measuring] [data-slot="message"] {
+  content-visibility: visible;
+}
 
 /* The diff's sticky file headers sit at its top edge, so only the bottom fades. */
 .diff-scroll.scroll-fade[data-fade-top] {
@@ -616,29 +678,92 @@ a:focus-visible .animated-underline::after {
 }
 
 /* Agent replies rendered from Markdown: compact chat spacing, no document-sized headings. */
-.markdown > :first-child { margin-top: 0; }
-.markdown > :last-child { margin-bottom: 0; }
-.markdown :where(p, ul, ol, blockquote) { margin-block: 0.5em; }
-.markdown :where(h1, h2, h3, h4, h5, h6) { margin-block: 0.9em 0.35em; font-weight: 600; line-height: 1.35; color: var(--ink); }
-.markdown h1 { font-size: 16px; }
-.markdown h2 { font-size: 15px; }
-.markdown h3 { font-size: 14px; }
-.markdown :where(h4, h5, h6) { font-size: 13px; }
-.markdown :where(ul, ol) { padding-left: 1.35em; }
-.markdown ul { list-style: disc; }
-.markdown ol { list-style: decimal; }
-.markdown li { margin-block: 0.2em; }
-.markdown li::marker { color: var(--ink-3); }
-.markdown li > :where(ul, ol) { margin-block: 0.2em; }
-.markdown li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.35em; }
-.markdown input[type="checkbox"] { margin-right: 0.45em; vertical-align: -0.1em; accent-color: var(--accent); }
-.markdown strong { font-weight: 600; color: var(--ink); }
-.markdown blockquote { border-left: 2px solid var(--line-strong); padding-left: 0.8em; color: var(--ink-2); }
-.markdown hr { margin-block: 1em; border: 0; border-top: 1px solid var(--line); }
-.markdown table { border-collapse: collapse; font-size: 12px; overflow-wrap: normal; }
-.markdown :where(th, td) { border: 1px solid var(--line); padding: 0.3em 0.65em; text-align: left; vertical-align: top; }
-.markdown th { background: var(--inset); font-weight: 600; }
-.markdown del { color: var(--ink-2); }
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown :where(p, ul, ol, blockquote) {
+  margin-block: 0.5em;
+}
+.markdown :where(h1, h2, h3, h4, h5, h6) {
+  margin-block: 0.9em 0.35em;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.markdown h1 {
+  font-size: 16px;
+}
+.markdown h2 {
+  font-size: 15px;
+}
+.markdown h3 {
+  font-size: 14px;
+}
+.markdown :where(h4, h5, h6) {
+  font-size: 13px;
+}
+.markdown :where(ul, ol) {
+  padding-left: 1.35em;
+}
+.markdown ul {
+  list-style: disc;
+}
+.markdown ol {
+  list-style: decimal;
+}
+.markdown li {
+  margin-block: 0.2em;
+}
+.markdown li::marker {
+  color: var(--ink-3);
+}
+.markdown li > :where(ul, ol) {
+  margin-block: 0.2em;
+}
+.markdown li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -1.35em;
+}
+.markdown input[type="checkbox"] {
+  margin-right: 0.45em;
+  vertical-align: -0.1em;
+  accent-color: var(--accent);
+}
+.markdown strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+.markdown blockquote {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 0.8em;
+  color: var(--ink-2);
+}
+.markdown hr {
+  margin-block: 1em;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.markdown table {
+  border-collapse: collapse;
+  font-size: 12px;
+  overflow-wrap: normal;
+}
+.markdown :where(th, td) {
+  border: 1px solid var(--line);
+  padding: 0.3em 0.65em;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown th {
+  background: var(--inset);
+  font-weight: 600;
+}
+.markdown del {
+  color: var(--ink-2);
+}
 
 /* Shiki tokens carry both themes' colours as variables; the app's theme class picks one. */
 .code-token {
@@ -960,8 +1085,12 @@ a:focus-visible .animated-underline::after {
  * piece of the title (label and code chip) shares one set of coordinates and the highlight travels
  * across the whole title, left to right. Moving it one tile width is one seamless loop. */
 @keyframes step-shimmer {
-  from { background-position: 0 0; }
-  to { background-position: 320px 0; }
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 320px 0;
+  }
 }
 
 .step-shimmer {
@@ -978,14 +1107,26 @@ a:focus-visible .animated-underline::after {
 
 /* The same sweep for code chips, whose second background layer (the chip fill) stays put. */
 @keyframes step-shimmer-code {
-  from { background-position: 0 0, 0 0; }
-  to { background-position: 320px 0, 0 0; }
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
+  to {
+    background-position:
+      320px 0,
+      0 0;
+  }
 }
 
 /* Code in a title keeps its chip: the chip's fill sits behind the clipped gradient. */
 code.step-shimmer {
-  background-image: linear-gradient(90deg, var(--ink-3) 0, var(--ink-3) 110px, var(--ink) 160px, var(--ink-3) 210px, var(--ink-3) 320px), linear-gradient(var(--field), var(--field));
-  background-size: 320px 100vh, 100% 100%;
+  background-image:
+    linear-gradient(90deg, var(--ink-3) 0, var(--ink-3) 110px, var(--ink) 160px, var(--ink-3) 210px, var(--ink-3) 320px),
+    linear-gradient(var(--field), var(--field));
+  background-size:
+    320px 100vh,
+    100% 100%;
   background-repeat: repeat-x, no-repeat;
   background-attachment: fixed, scroll;
   animation-name: step-shimmer-code;
@@ -1001,7 +1142,9 @@ code.step-shimmer {
     -webkit-text-fill-color: currentColor;
     color: var(--ink-3);
   }
-  code.step-shimmer { background-color: var(--field); }
+  code.step-shimmer {
+    background-color: var(--field);
+  }
 }
 
 @keyframes pop-in {
@@ -1025,26 +1168,63 @@ code.step-shimmer {
  * the legs and the sparkle take turns: while the sparkle holds, the legs light up, left then right, from 15% ink; once
  * they are dim again the sparkle swells, turns and settles back (four-fold symmetry, so the quarter turn loops seamlessly).
  * Reduced motion stops every part on a dim, static logo. */
-.running-logo { overflow: visible; }
-.running-logo * { transform-box: fill-box; transform-origin: center; }
-.running-logo-mark { fill: var(--ink); }
-.running-logo-leg { opacity: 0.15; animation: running-logo-glow 2400ms ease-in-out infinite; }
-.running-logo-leg-right { animation-delay: 240ms; }
-.running-logo-star { opacity: 0.45; animation: running-logo-twinkle 2400ms cubic-bezier(0.65, 0, 0.35, 1) infinite; }
+.running-logo {
+  overflow: visible;
+}
+.running-logo * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.running-logo-mark {
+  fill: var(--ink);
+}
+.running-logo-leg {
+  opacity: 0.15;
+  animation: running-logo-glow 2400ms ease-in-out infinite;
+}
+.running-logo-leg-right {
+  animation-delay: 240ms;
+}
+.running-logo-star {
+  opacity: 0.45;
+  animation: running-logo-twinkle 2400ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
 
 @keyframes running-logo-twinkle {
-  0%, 50% { opacity: 0.45; transform: scale(1) rotate(0deg); }
-  70% { opacity: 1; transform: scale(1.3) rotate(45deg); }
-  85% { opacity: 1; transform: scale(1.12) rotate(80deg); }
-  100% { opacity: 0.45; transform: scale(1) rotate(90deg); }
+  0%,
+  50% {
+    opacity: 0.45;
+    transform: scale(1) rotate(0deg);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.3) rotate(45deg);
+  }
+  85% {
+    opacity: 1;
+    transform: scale(1.12) rotate(80deg);
+  }
+  100% {
+    opacity: 0.45;
+    transform: scale(1) rotate(90deg);
+  }
 }
 @keyframes running-logo-glow {
-  0%, 40%, 100% { opacity: 0.15; }
-  12%, 22% { opacity: 0.55; }
+  0%,
+  40%,
+  100% {
+    opacity: 0.15;
+  }
+  12%,
+  22% {
+    opacity: 0.55;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .running-logo * { animation: none !important; }
+  .running-logo * {
+    animation: none !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1063,20 +1243,39 @@ code.step-shimmer {
   display: grid;
   place-items: center;
 }
-.startup-splash svg { overflow: visible; }
-.startup-splash svg * { transform-box: fill-box; transform-origin: center; }
-.startup-splash-mark { fill: #0a0a0a; }
-.dark .startup-splash-mark { fill: #ffffff; }
+.startup-splash svg {
+  overflow: visible;
+}
+.startup-splash svg * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.startup-splash-mark {
+  fill: #0a0a0a;
+}
+.dark .startup-splash-mark {
+  fill: #ffffff;
+}
 .startup-splash-screen[data-leaving] {
   pointer-events: none;
   animation: splash-leave 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
-.startup-splash-screen[data-leaving] .startup-splash { animation: splash-logo-leave 320ms cubic-bezier(0.4, 0, 1, 1) both; }
+.startup-splash-screen[data-leaving] .startup-splash {
+  animation: splash-logo-leave 320ms cubic-bezier(0.4, 0, 1, 1) both;
+}
 /* the app's panes arrive under the fading splash: sidebar from the left, then the main pane rising */
-.app-enter > * { animation: app-enter-main 520ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both; }
-.app-enter > :first-child { animation: app-enter-sidebar 520ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
-.startup-splash-leg { animation: splash-leg 340ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.startup-splash-leg-right { animation-delay: 60ms; }
+.app-enter > * {
+  animation: app-enter-main 520ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both;
+}
+.app-enter > :first-child {
+  animation: app-enter-sidebar 520ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both;
+}
+.startup-splash-leg {
+  animation: splash-leg 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.startup-splash-leg-right {
+  animation-delay: 60ms;
+}
 .startup-splash-star {
   animation:
     splash-star-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) 140ms both,
@@ -1084,34 +1283,73 @@ code.step-shimmer {
 }
 
 @keyframes splash-leg {
-  from { opacity: 0; transform: translateY(18%); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(18%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 @keyframes splash-star-in {
-  from { opacity: 0; transform: scale(0) rotate(-90deg); }
-  to { opacity: 1; transform: scale(1) rotate(0deg); }
+  from {
+    opacity: 0;
+    transform: scale(0) rotate(-90deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
 }
 @keyframes splash-leave {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
 @keyframes splash-logo-leave {
-  from { transform: scale(1); }
-  to { transform: scale(0.9); }
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(0.9);
+  }
 }
 @keyframes app-enter-sidebar {
-  from { opacity: 0; transform: translateX(-12px); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 @keyframes app-enter-main {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 /* the sparkle has four-fold symmetry, so a quarter turn loops seamlessly */
 @keyframes splash-star-twinkle {
-  0%, 55% { transform: scale(1) rotate(0deg); }
-  75% { transform: scale(0.82) rotate(45deg); }
-  100% { transform: scale(1) rotate(90deg); }
+  0%,
+  55% {
+    transform: scale(1) rotate(0deg);
+  }
+  75% {
+    transform: scale(0.82) rotate(45deg);
+  }
+  100% {
+    transform: scale(1) rotate(90deg);
+  }
 }
 
 /* Diff view row tints; the word variants sit on top of the row tint for the changed words. */
@@ -1129,15 +1367,51 @@ code.step-shimmer {
 }
 
 /* A title resolves in place without changing the row's width or height. */
-.chat-title { display: block; position: relative; overflow: hidden; }
-.chat-title-current, .chat-title-outgoing { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-title-outgoing { position: absolute; inset: 0; pointer-events: none; animation: chat-title-out 150ms cubic-bezier(.16, 1, .3, 1) both; }
-.chat-title[data-changing] .chat-title-current { animation: chat-title-in 240ms cubic-bezier(.16, 1, .3, 1) both; }
-@keyframes chat-title-out { to { opacity: 0; transform: translateY(-5px); } }
-@keyframes chat-title-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+.chat-title {
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+.chat-title-current,
+.chat-title-outgoing {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-title-outgoing {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: chat-title-out 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.chat-title[data-changing] .chat-title-current {
+  animation: chat-title-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes chat-title-out {
+  to {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+}
+@keyframes chat-title-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  .chat-title-outgoing, .chat-title[data-changing] .chat-title-current { animation: none; }
-  .chat-title-outgoing { display: none; }
+  .chat-title-outgoing,
+  .chat-title[data-changing] .chat-title-current {
+    animation: none;
+  }
+  .chat-title-outgoing {
+    display: none;
+  }
 }
 .milagre-canvas-flow .react-flow__controls {
   border: 1px solid var(--line);
@@ -1170,9 +1444,13 @@ code.step-shimmer {
 }
 
 @keyframes milagre-link-flow {
-  to { stroke-dashoffset: -10; }
+  to {
+    stroke-dashoffset: -10;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .milagre-canvas-flow .milagre-link-active { animation: none; }
+  .milagre-canvas-flow .milagre-link-active {
+    animation: none;
+  }
 }

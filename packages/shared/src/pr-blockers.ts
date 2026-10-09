@@ -1,3 +1,5 @@
+import type { PullRequest } from "./model.ts";
+
 type BlockerStatus = {
   number?: number;
   url: string;
@@ -42,6 +44,27 @@ function clears(pr: BlockerStatus, blocker: PullRequestBlocker) {
 
 export function pullRequestBlockers(pr: BlockerStatus | null | undefined): PullRequestBlocker[] {
   return pr ? ORDER.filter((blocker) => blocks(pr, blocker)) : [];
+}
+
+/** The same PR badge status, color and label in both chat lists. */
+export function pullRequestPresentation(pr: BlockerStatus & { readyToMerge?: boolean }) {
+  const blocker = pullRequestBlockers(pr)[0];
+  const merged = pr.state === "MERGED";
+  const ready = !merged && !blocker && !!pr.readyToMerge;
+  const checking = !merged && !blocker && !ready && pr.checks === "running";
+  const tone = merged ? "purple" : blocker ? BLOCKERS[blocker].tone : checking ? "orange" : "green";
+  const icon = merged ? "merged" : ready ? "ready" : checking ? "checking" : "open";
+  const label = blocker ? BLOCKERS[blocker].short : ready ? "Ready" : checking ? "CI running" : "";
+  return { blocker, ready, checking, tone, icon, label } as const;
+}
+
+/** Blocked PRs first, then other open PRs, then merged ones; retain creation order within each group. */
+export function rowPullRequests(prs: PullRequest[]): PullRequest[] {
+  const rank = (pr: PullRequest) => (pr.state === "MERGED" ? 2 : pullRequestBlockers(pr).length ? 0 : 1);
+  return prs
+    .map((pr, index) => ({ pr, index }))
+    .sort((a, b) => rank(a.pr) - rank(b.pr) || a.index - b.index)
+    .map(({ pr }) => pr);
 }
 
 export function blockerPrompt(blocker: PullRequestBlocker, pr: BlockerStatus): string {

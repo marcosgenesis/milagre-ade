@@ -68,18 +68,24 @@ class DiffRefresher {
 
   read(worktree) {
     if (this.closed || !worktree) return Promise.resolve(null);
-    return new Promise(resolve => {
-      this.pending.push({worktree, resolve});
+    return new Promise((resolve) => {
+      this.pending.push({ worktree, resolve });
       this.drain();
     });
   }
 
   drain() {
     while (!this.closed && this.active < 4 && this.pending.length) {
-      const {worktree, resolve} = this.pending.shift();
+      const { worktree, resolve } = this.pending.shift();
       this.active++;
-      Promise.resolve().then(() => this.readDiffStat(worktree.path, worktree.base))
-        .catch(() => null).then(resolve).finally(() => { this.active--; this.drain(); });
+      Promise.resolve()
+        .then(() => this.readDiffStat(worktree.path, worktree.base))
+        .catch(() => null)
+        .then(resolve)
+        .finally(() => {
+          this.active--;
+          this.drain();
+        });
     }
   }
 
@@ -94,15 +100,31 @@ class DiffRefresher {
   async refresh(projectPath, worktreeIds) {
     if (this.closed) return;
     const state = await this.states.get(projectPath);
-    const ids = worktreeIds ?? [...new Set(state.messages.map((message) => state.sessions[message.session_id]?.worktree_id).filter((id) => id !== undefined))];
-    const stats = await Promise.all(ids.map(async (id) => {
-      const worktree = state.worktrees[id];
-      return [id, await this.read(worktree)];
-    }));
+    const ids = worktreeIds ?? worktreesWithChats(state);
+    const stats = await Promise.all(
+      ids.map(async (id) => {
+        const worktree = state.worktrees[id];
+        return [id, await this.read(worktree)];
+      }),
+    );
     if (this.closed) return;
     // Applied to the latest state: turns may have finished while git ran.
     await this.update(projectPath, (latest) => withDiffStats(latest, Object.fromEntries(stats)));
   }
 }
 
+/** The Worktrees that have a Chat with a message: from Chat summaries, or the messages of a state without them. */
+function worktreesWithChats(state) {
+  const sessions = Object.values(state.sessions ?? {});
+  if (sessions.every((session) => session.summary))
+    return [
+      ...new Set(
+        sessions
+          .filter((session) => session.summary.count > 0)
+          .map((session) => session.worktree_id)
+          .filter((id) => id !== undefined),
+      ),
+    ];
+  return [...new Set(state.messages.map((message) => state.sessions[message.session_id]?.worktree_id).filter((id) => id !== undefined))];
+}
 module.exports = { DiffRefresher };

@@ -4,9 +4,8 @@ import type { ClipboardEvent } from "react";
 import type { ImageAttachment } from "../model";
 
 const TYPES = new Set(IMAGE_TYPES);
-export { MAX_IMAGE_BYTES, MAX_IMAGES } from "@milagre/shared/limits";
 
-export function isAttachableImage(file: File): boolean {
+function isAttachableImage(file: File): boolean {
   return TYPES.has(file.type) && file.size <= MAX_IMAGE_BYTES;
 }
 
@@ -21,6 +20,7 @@ function readImage(file: File): Promise<ImageAttachment> {
 
 export function usePastedImages(scope: string) {
   const [images, setImages] = useState<ImageAttachment[]>([]);
+  const localFiles = useRef(new Map<string, File>());
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -38,16 +38,31 @@ export function usePastedImages(scope: string) {
 
   useEffect(() => {
     clear();
-    return () => { generation.current++; };
+    localFiles.current.clear();
+    return () => {
+      generation.current++;
+    };
   }, [scope]);
 
   async function addFiles(files: File[]) {
     if (!files.length) return;
     setError("");
-    if (reading.current) { setError("Wait for the current image to finish loading, then try again."); return; }
-    if (files.some((file) => !TYPES.has(file.type))) { setError(IMAGE_ERRORS.type); return; }
-    if (files.some((file) => file.size > MAX_IMAGE_BYTES)) { setError(IMAGE_ERRORS.size); return; }
-    if (images.length + files.length > MAX_IMAGES) { setError(IMAGE_ERRORS.count); return; }
+    if (reading.current) {
+      setError("Wait for the current image to finish loading, then try again.");
+      return;
+    }
+    if (files.some((file) => !TYPES.has(file.type))) {
+      setError(IMAGE_ERRORS.type);
+      return;
+    }
+    if (files.some((file) => file.size > MAX_IMAGE_BYTES)) {
+      setError(IMAGE_ERRORS.size);
+      return;
+    }
+    if (images.length + files.length > MAX_IMAGES) {
+      setError(IMAGE_ERRORS.count);
+      return;
+    }
     const current = generation.current;
     reading.current = true;
     setLoading(true);
@@ -57,19 +72,28 @@ export function usePastedImages(scope: string) {
     } catch (error) {
       if (current === generation.current) setError(error instanceof Error ? error.message : "Could not read image.");
     } finally {
-      if (current === generation.current) { reading.current = false; setLoading(false); }
+      if (current === generation.current) {
+        reading.current = false;
+        setLoading(false);
+      }
     }
   }
 
   async function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const files = Array.from(event.clipboardData.items).filter((item) => item.kind === "file" && item.type.startsWith("image/")).map((item) => item.getAsFile()).filter((file): file is File => file !== null);
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
     if (!files.length) return;
     event.preventDefault();
     await addFiles(files);
   }
 
   async function attachFiles(selected: File[]) {
-    if (reading.current) { setError("Wait for the current attachment to finish loading, then try again."); return; }
+    if (reading.current) {
+      setError("Wait for the current attachment to finish loading, then try again.");
+      return;
+    }
     const current = generation.current;
     reading.current = true;
     setLoading(true);
@@ -80,37 +104,61 @@ export function usePastedImages(scope: string) {
     for (const file of selected) {
       try {
         const path = window.milagre.getPathForFile(file);
-        if (!path) { failed = true; continue; }
-        paths.push(path);
-        if (isAttachableImage(file) && images.length + nextImages.length < MAX_IMAGES) {
-          try { nextImages.push({ ...await readImage(file), path }); } catch { /* The disk attachment still works. */ }
+        if (!path) {
+          failed = true;
+          continue;
         }
-      } catch { failed = true; }
+        paths.push(path);
+        localFiles.current.set(path, file);
+        if (isAttachableImage(file) && images.length + nextImages.length < MAX_IMAGES) {
+          try {
+            nextImages.push({ ...(await readImage(file)), path });
+          } catch {
+            /* The disk attachment still works. */
+          }
+        }
+      } catch {
+        failed = true;
+      }
     }
     if (current !== generation.current) return;
-    setFiles(existing => [...new Set([...existing, ...paths])]);
-    setImages(existing => [...existing, ...nextImages.filter(image => !existing.some(item => item.path === image.path))]);
+    setFiles((existing) => [...new Set([...existing, ...paths])]);
+    setImages((existing) => [...existing, ...nextImages.filter((image) => !existing.some((item) => item.path === image.path))]);
     if (failed) setError("Could not get a local path for one or more files. Choose them again with Add files.");
     reading.current = false;
     setLoading(false);
   }
 
   function attachPath(path: string) {
-    setFiles(current => current.includes(path) ? current : [...current, path]);
+    setFiles((current) => (current.includes(path) ? current : [...current, path]));
     setError("");
   }
 
   function removeFile(path: string) {
-    setFiles(current => current.filter(file => file !== path));
-    setImages(current => current.filter(image => image.path !== path));
+    setFiles((current) => current.filter((file) => file !== path));
+    setImages((current) => current.filter((image) => image.path !== path));
   }
 
   function restore(sentImages: ImageAttachment[], sentFiles: string[]) {
-    setImages(current => [...sentImages, ...current.filter(image => !sentImages.some(sent => sent.id === image.id))]);
-    setFiles(current => [...new Set([...sentFiles, ...current])]);
+    setImages((current) => [...sentImages, ...current.filter((image) => !sentImages.some((sent) => sent.id === image.id))]);
+    setFiles((current) => [...new Set([...sentFiles, ...current])]);
   }
 
-  return { images, files, loading, error, onPaste, addFiles, attachFiles, attachPath, removeFile, clear, restore, remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)) };
+  return {
+    images,
+    files,
+    localFiles: localFiles.current,
+    loading,
+    error,
+    onPaste,
+    addFiles,
+    attachFiles,
+    attachPath,
+    removeFile,
+    clear,
+    restore,
+    remove: (id: string) => setImages((current) => current.filter((image) => image.id !== id)),
+  };
 }
 
 export type ImageDraft = ReturnType<typeof usePastedImages>;

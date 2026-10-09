@@ -1,5 +1,6 @@
 /** A project in the recent list, as the main process keeps it (most recent first). */
-export type RecentProject = { path: string; name: string; openedAt: string };
+/** `hidden`: kept out of the all-Projects sidebar and the phone's Projects list. */
+export type RecentProject = { path: string; name: string; openedAt: string; hidden?: boolean };
 
 /** One project row in the project menu. */
 export type ProjectRow = { path: string; name: string; initial: string; current: boolean };
@@ -27,3 +28,17 @@ export function projectRows({ recent, currentPath, currentName }: { recent: Rece
     return [{ path: project.path, name: project.name, initial: projectInitial(project.name), current: project.path === currentPath }];
   });
 }
+
+/**
+ * The sidebar's group order for this session: keys already shown keep their place, and a key seen for the first
+ * time (a project just added) goes on top. Opening a project reorders the recent list; the sidebar doesn't follow.
+ */
+export function stableOrder(previous: string[], next: string[]): string[] {
+  const present = new Set(next);
+  const kept = previous.filter((key) => present.has(key));
+  const known = new Set(kept);
+  return [...next.filter((key) => !known.has(key)), ...kept];
+}
+
+/** Fired on window after a project is hidden or shown again, so lists read from the main process refresh. */
+export const RECENT_PROJECTS_CHANGED = "milagre:recent-projects-changed";

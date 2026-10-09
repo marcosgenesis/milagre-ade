@@ -1,9 +1,36 @@
 // @ts-check
-/** @typedef {import("../app/src/electron.d.ts")} BridgeTypes */
+/** @typedef {typeof import("../app/src/electron.d.ts")} BridgeTypes */
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 /** @type {Window["milagre"]} */
 const bridge = {
+  simulators: {
+    list: (request) => ipcRenderer.invoke("simulator:list", request),
+    attach: (request) => ipcRenderer.invoke("simulator:attach", request),
+    detach: (request) => ipcRenderer.invoke("simulator:detach", request),
+    open: (request) => ipcRenderer.invoke("simulator:open", request),
+    offer: (request) => ipcRenderer.invoke("simulator:offer", request),
+    status: (request) => ipcRenderer.invoke("simulator:status", request),
+    control: (request) => ipcRenderer.invoke("simulator:control", request),
+    input: (request) => ipcRenderer.invoke("simulator:input", request),
+    close: (request) => ipcRenderer.invoke("simulator:close", request),
+  },
+  browsers: {
+    list: (request) => ipcRenderer.invoke("browser:list", request),
+    attach: (request) => ipcRenderer.invoke("browser:attach", request),
+    open: (request) => ipcRenderer.invoke("browser:open", request),
+    frame: (request) => ipcRenderer.invoke("browser:frame", request),
+    status: (request) => ipcRenderer.invoke("browser:status", request),
+    control: (request) => ipcRenderer.invoke("browser:control", request),
+    input: (request) => ipcRenderer.invoke("browser:input", request),
+    close: (request) => ipcRenderer.invoke("browser:close", request),
+  },
+  artifacts: {
+    get: (request) => ipcRenderer.invoke("artifact:get", request),
+    list: (request) => ipcRenderer.invoke("artifact:list", request),
+    addComments: (request) => ipcRenderer.invoke("artifact:add-comments", request),
+    comments: (request) => ipcRenderer.invoke("artifact:comments", request),
+  },
   getRuntimeConnection: () => ipcRenderer.invoke("runtime:connection"),
   restartHost: () => ipcRenderer.invoke("runtime:restart-host"),
   onRuntimeConnection: (callback) => {
@@ -17,10 +44,15 @@ const bridge = {
     return () => ipcRenderer.removeListener("runtime:snapshot", listener);
   },
   getPathForFile: (file) => webUtils.getPathForFile(file),
+  readAttachment: (file) => ipcRenderer.invoke("attachment:preview", file),
   searchProjectFiles: (root, query) => ipcRenderer.invoke("project:files", root, query),
   listSkills: (projectPath) => ipcRenderer.invoke("skills:list", projectPath),
+  readSkill: (projectPath, file) => ipcRenderer.invoke("skills:read", projectPath, file),
+  openSkill: (request) => ipcRenderer.invoke("skills:open", request),
+  revealSkill: (projectPath, file) => ipcRenderer.invoke("skills:reveal", projectPath, file),
   listBranches: (projectPath) => ipcRenderer.invoke("project:branches", projectPath),
   getProjectImage: (projectPath) => ipcRenderer.invoke("project:image", projectPath),
+  setProjectIcon: (projectPath, icon) => ipcRenderer.invoke("project:set-icon", projectPath, icon),
   getAppVersion: () => ipcRenderer.invoke("app:version"),
   createWorktree: (request) => ipcRenderer.invoke("worktree:create", request),
   getWorktreeRoots: () => ipcRenderer.invoke("worktree:roots"),
@@ -57,6 +89,18 @@ const bridge = {
   getCurrentProject: () => ipcRenderer.invoke("project:current"),
   openProject: () => ipcRenderer.invoke("project:open"),
   listRecentProjects: () => ipcRenderer.invoke("project:recent"),
+  setProjectHidden: (projectPath, hidden) => ipcRenderer.invoke("project:set-hidden", projectPath, hidden),
+  readProject: (projectPath) => ipcRenderer.invoke("project:read", projectPath),
+  listNamedLinks: () => ipcRenderer.invoke("link:list"),
+  createNamedLink: (request) => ipcRenderer.invoke("link:create", request),
+  openNamedLink: (id) => ipcRenderer.invoke("link:open", id),
+  readLink: (id) => ipcRenderer.invoke("link:snapshot", id),
+  sendLinkMessage: (request) => ipcRenderer.invoke("link:send", request),
+  onLinkState: (callback) => {
+    const listener = (_event, update) => callback(update);
+    ipcRenderer.on("link:state", listener);
+    return () => ipcRenderer.removeListener("link:state", listener);
+  },
   listProjects: () => ipcRenderer.invoke("project:registry"),
   setProjectPosition: (id, position) => ipcRenderer.invoke("project:position", id, position),
   getCanvas: () => ipcRenderer.invoke("canvas:snapshot"),
@@ -66,6 +110,11 @@ const bridge = {
   openCanvasProject: (projectPath) => ipcRenderer.invoke("canvas:open-project", projectPath),
   getLinkedWork: () => ipcRenderer.invoke("linked:snapshot"),
   stopNegotiation: (id) => ipcRenderer.invoke("linked:stop-negotiation", id),
+  onAppShortcut: (callback) => {
+    const listener = (_event, key) => callback(key);
+    ipcRenderer.on("app:shortcut", listener);
+    return () => ipcRenderer.removeListener("app:shortcut", listener);
+  },
   onLinkedWork: (callback) => {
     const listener = (_event, work) => callback(work);
     ipcRenderer.on("linked:changed", listener);
@@ -86,17 +135,27 @@ const bridge = {
   },
   sendMessage: (request) => ipcRenderer.invoke("chat:send", request),
   resumeChat: (projectPath, sessionId) => ipcRenderer.invoke("chat:resume", projectPath, sessionId),
-  handover: (request) => ipcRenderer.invoke("chat:handover", request),
-  setHandoverDraft: (projectPath, sessionId, text) => ipcRenderer.invoke("chat:handover-draft", projectPath, sessionId, text),
   patchChat: (projectPath, sessionId, patch) => ipcRenderer.invoke("chat:patch", projectPath, sessionId, patch),
   archiveSubagent: (projectPath, sessionId, id, archived) => ipcRenderer.invoke("chat:archive-subagent", projectPath, sessionId, id, archived),
   archiveFinishedSubagents: (projectPath, sessionId) => ipcRenderer.invoke("chat:archive-finished-subagents", projectPath, sessionId),
   addGitNote: (chatId, body) => ipcRenderer.invoke("chat:git-note", chatId, body),
   setOpenChat: (chatId) => ipcRenderer.invoke("chat:set-open", chatId),
   getRuns: () => ipcRenderer.invoke("chat:runs"),
-  getModels: () => ipcRenderer.invoke("agent:models"),
-  getCliStatus: () => ipcRenderer.invoke("agent:cli-status"),
+  getMessage: (scope, id) => ipcRenderer.invoke("chat:message", scope, id),
+  readState: (scope) => ipcRenderer.invoke("state:read", scope),
+  listAccountScopes: () => ipcRenderer.invoke("accounts:scopes"),
+  getProjectAccounts: (scopeKey, refresh) => ipcRenderer.invoke("accounts:scope", scopeKey, refresh),
+  assignProjectAccount: (scopeKey, provider, accountId) => ipcRenderer.invoke("accounts:assign", scopeKey, provider, accountId),
+  getModels: (scopeKey) => ipcRenderer.invoke("agent:models", scopeKey),
+  getCliStatus: (scopeKey) => ipcRenderer.invoke("agent:cli-status", scopeKey),
   updateCli: (provider) => ipcRenderer.invoke("agent:update-cli", provider),
+  stopAdvisor: (chatId, id) => ipcRenderer.invoke("advisor:stop", chatId, id),
+  retryAdvisor: (chatId, id) => ipcRenderer.invoke("advisor:retry", chatId, id),
+  onCliProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on("agent:cli-progress", listener);
+    return () => ipcRenderer.removeListener("agent:cli-progress", listener);
+  },
   interruptAgent: (chatId) => ipcRenderer.invoke("agent:interrupt", chatId),
   respondToPermission: (chatId, requestId, decision) => ipcRenderer.invoke("agent:respond-permission", { chatId, requestId, decision }),
   answerQuestion: (chatId, requestId, answers, summary) => ipcRenderer.invoke("agent:answer-question", { chatId, requestId, answers, summary }),
@@ -115,6 +174,8 @@ const bridge = {
   },
   getUpdateState: () => ipcRenderer.invoke("update:state"),
   checkForUpdates: () => ipcRenderer.invoke("update:check"),
+  getReleaseChannel: () => ipcRenderer.invoke("update:channel"),
+  setReleaseChannel: (channel) => ipcRenderer.invoke("update:set-channel", channel),
   installUpdate: () => ipcRenderer.invoke("update:install"),
   onUpdateState: (callback) => {
     const listener = (_event, state) => callback(state);
@@ -123,6 +184,7 @@ const bridge = {
   },
   getPhoneStatus: () => ipcRenderer.invoke("phone:status"),
   setPhoneEnabled: (enabled) => ipcRenderer.invoke("phone:set-enabled", enabled),
+  setPhoneLan: (enabled) => ipcRenderer.invoke("phone:set-lan", enabled),
   resetPhoneAccess: () => ipcRenderer.invoke("phone:reset"),
   openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
   onPhoneStatus: (callback) => {
@@ -130,9 +192,16 @@ const bridge = {
     ipcRenderer.on("phone:status", listener);
     return () => ipcRenderer.removeListener("phone:status", listener);
   },
-  readUsage: () => ipcRenderer.invoke("usage:read"),
+  listAccounts: (refresh = false) => ipcRenderer.invoke("accounts:list", refresh),
+  accountAction: (action, provider, value) => ipcRenderer.invoke(`accounts:${action}`, provider, value),
+  onAccountsChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("accounts:changed", listener);
+    return () => ipcRenderer.removeListener("accounts:changed", listener);
+  },
+  readUsage: (scopeKey) => ipcRenderer.invoke("usage:read", scopeKey),
   setKeepAwake: (enabled) => ipcRenderer.invoke("app:set-keep-awake", enabled),
-  getCachedUsage: () => ipcRenderer.invoke("usage:cached"),
+  getCachedUsage: (scopeKey) => ipcRenderer.invoke("usage:cached", scopeKey),
   setNotifyWhenWaiting: (on) => ipcRenderer.invoke("settings:notify-when-waiting", on),
   setWindowTranslucent: (on, theme) => ipcRenderer.invoke("settings:window-translucent", { on, theme }),
   syncNotifications: (state) => ipcRenderer.invoke("notification:state", state),

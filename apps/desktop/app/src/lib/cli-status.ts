@@ -38,6 +38,8 @@ export function extractOutdatedProvider(message: string): ModelProvider | null {
   if (/(?:Codex|codex update)/i.test(message) && /(?:needs Codex|Run `?codex update`?)/i.test(message)) {
     return "codex";
   }
+  if (/Antigravity/i.test(message) && /needs Antigravity/i.test(message) && /Update it from/i.test(message)) {
+    return "antigravity";
+  }
   return null;
 }
-

@@ -24,8 +24,25 @@ const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const notify = (method, params) => send({ method, params });
 const completeTurn = (threadId, turnId, status, error = null) => notify("turn/completed", { threadId, turn: { id: turnId, items: [], status, error } });
 
-const QUESTIONS = [{ id: "color", header: "Color", question: "Which color?", isOther: true, isSecret: false, options: [{ label: "Red", description: "Warm" }, { label: "Green", description: "Calm" }] }];
-const askQuestion = (id, threadId, turnId) => send({ id, method: "item/tool/requestUserInput", params: { threadId, turnId, itemId: "call-1", questions: QUESTIONS, isBlocking: false, autoResolutionMs: null } });
+const QUESTIONS = [
+  {
+    id: "color",
+    header: "Color",
+    question: "Which color?",
+    isOther: true,
+    isSecret: false,
+    options: [
+      { label: "Red", description: "Warm" },
+      { label: "Green", description: "Calm" },
+    ],
+  },
+];
+const askQuestion = (id, threadId, turnId) =>
+  send({
+    id,
+    method: "item/tool/requestUserInput",
+    params: { threadId, turnId, itemId: "call-1", questions: QUESTIONS, isBlocking: false, autoResolutionMs: null },
+  });
 
 createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
@@ -47,6 +64,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return send({ id, result: { userAgent: "fake/0.158.0" } });
     case "initialized":
       return undefined;
+    case "config/read":
+      return send({ id, result: { config: { mcp_servers: { personal: { command: "outside-tools" } } } } });
     // logged-out: no login while OpenAI auth is required; custom-provider: a provider that needs no OpenAI login.
     case "account/read":
       if (scenario === "logged-out") return send({ id, result: { account: null, requiresOpenaiAuth: true } });
@@ -54,8 +73,51 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return send({ id, result: { account: { type: "chatgpt", email: null, planType: "pro" }, requiresOpenaiAuth: true } });
     // Two pages, the second with a hidden model, as model/list pages with nextCursor.
     case "model/list":
-      if (!params.cursor) return send({ id, result: { data: [{ id: "gpt-6-astra", displayName: "GPT-6-Astra", description: "Frontier intelligence.", hidden: false, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "ultra" }], defaultReasoningEffort: "medium", serviceTiers: [{ id: "priority", name: "Fast", description: "2x speed, increased usage" }] }], nextCursor: "page-2" } });
-      return send({ id, result: { data: [{ id: "gpt-6-luna", displayName: "GPT-6-Luna", description: "Fast.", hidden: false, isDefault: false, supportedReasoningEfforts: [{ reasoningEffort: "low" }], defaultReasoningEffort: "low" }, { id: "codex-auto-review", displayName: "Codex Auto Review", description: "Review model.", hidden: true, isDefault: false, supportedReasoningEfforts: [], defaultReasoningEffort: "medium" }], nextCursor: null } });
+      if (!params.cursor)
+        return send({
+          id,
+          result: {
+            data: [
+              {
+                id: "gpt-6-astra",
+                displayName: "GPT-6-Astra",
+                description: "Frontier intelligence.",
+                hidden: false,
+                isDefault: true,
+                supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "ultra" }],
+                defaultReasoningEffort: "medium",
+                serviceTiers: [{ id: "priority", name: "Fast", description: "2x speed, increased usage" }],
+              },
+            ],
+            nextCursor: "page-2",
+          },
+        });
+      return send({
+        id,
+        result: {
+          data: [
+            {
+              id: "gpt-6-luna",
+              displayName: "GPT-6-Luna",
+              description: "Fast.",
+              hidden: false,
+              isDefault: false,
+              supportedReasoningEfforts: [{ reasoningEffort: "low" }],
+              defaultReasoningEffort: "low",
+            },
+            {
+              id: "codex-auto-review",
+              displayName: "Codex Auto Review",
+              description: "Review model.",
+              hidden: true,
+              isDefault: false,
+              supportedReasoningEfforts: [],
+              defaultReasoningEffort: "medium",
+            },
+          ],
+          nextCursor: null,
+        },
+      });
     case "fake/received":
       return send({ id, result: { received, threadStarts } });
     case "thread/start":
@@ -102,7 +164,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         return undefined;
       }
       if (scenario === "steps" || scenario === "running-step") {
-        const command = { type: "commandExecution", id: "exec-1", command: "/bin/zsh -lc 'npm test'", cwd: "/repo", status: "inProgress", commandActions: [{ type: "unknown", command: "npm test" }], aggregatedOutput: null, exitCode: null };
+        const command = {
+          type: "commandExecution",
+          id: "exec-1",
+          command: "/bin/zsh -lc 'npm test'",
+          cwd: "/repo",
+          status: "inProgress",
+          commandActions: [{ type: "unknown", command: "npm test" }],
+          aggregatedOutput: null,
+          exitCode: null,
+        };
         notify("item/started", { threadId, turnId, item: command });
         if (scenario === "running-step") {
           pendingTurn = { threadId, turnId };
@@ -111,7 +182,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         notify("item/commandExecution/outputDelta", { threadId, turnId, itemId: "exec-1", delta: "ok 2\n" });
         notify("item/completed", { threadId, turnId, item: { ...command, status: "completed", aggregatedOutput: "ok 1\nok 2\n", exitCode: 0 } });
         notify("item/started", { threadId, turnId, item: { type: "reasoning", id: "rs-1", summary: [], content: [] } });
-        const patch = { type: "fileChange", id: "exec-2", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }] };
+        const patch = {
+          type: "fileChange",
+          id: "exec-2",
+          status: "inProgress",
+          changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }],
+        };
         notify("item/started", { threadId, turnId, item: patch });
         notify("item/completed", { threadId, turnId, item: { ...patch, status: "completed" } });
         notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "Done" });
@@ -119,12 +195,24 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       }
       if (scenario === "approval") {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
-        return send({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "cmd-1", startedAtMs: 0, command: "/bin/zsh -lc 'rm -rf build'", cwd: "/repo", reason: "Clean the build" } });
+        return send({
+          id: "srv-1",
+          method: "item/commandExecution/requestApproval",
+          params: { threadId, turnId, itemId: "cmd-1", startedAtMs: 0, command: "/bin/zsh -lc 'rm -rf build'", cwd: "/repo", reason: "Clean the build" },
+        });
       }
       if (scenario === "file-approval") {
         pendingTurn = { threadId, turnId, approvalId: "srv-1" };
-        notify("item/started", { threadId, turnId, item: { type: "fileChange", id: "patch-1", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }] } });
-        return send({ id: "srv-1", method: "item/fileChange/requestApproval", params: { threadId, turnId, itemId: "patch-1", startedAtMs: 0, reason: "Write notes" } });
+        notify("item/started", {
+          threadId,
+          turnId,
+          item: { type: "fileChange", id: "patch-1", status: "inProgress", changes: [{ path: "/repo/notes.txt", kind: { type: "add" }, diff: "hello\n" }] },
+        });
+        return send({
+          id: "srv-1",
+          method: "item/fileChange/requestApproval",
+          params: { threadId, turnId, itemId: "patch-1", startedAtMs: 0, reason: "Write notes" },
+        });
       }
       if (scenario === "question") {
         pendingTurn = { threadId, turnId, approvalId: "srv-q" };
@@ -144,7 +232,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         return send({ id: "srv-1", method: "item/permissions/requestApproval", params: { threadId, turnId, itemId: "perm-1" } });
       }
       if (scenario === "withdrawn") {
-        send({ id: "srv-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "cmd-1", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" } });
+        send({
+          id: "srv-1",
+          method: "item/commandExecution/requestApproval",
+          params: { threadId, turnId, itemId: "cmd-1", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" },
+        });
         notify("serverRequest/resolved", { threadId, requestId: "srv-1" });
         return completeTurn(threadId, turnId, "completed");
       }
@@ -153,7 +245,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (scenario === "fail") return completeTurn(threadId, turnId, "failed", { message: "The model gpt-x is not supported." });
       // unauthorized: logged in as far as account/read knows, but the API answers 401 (an expired token).
       // unauthorized-custom: the same on a provider that needs no OpenAI login.
-      if (scenario === "unauthorized" || scenario === "unauthorized-custom") return completeTurn(threadId, turnId, "failed", { message: "unexpected status 401 Unauthorized: token expired", codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 401 } } });
+      if (scenario === "unauthorized" || scenario === "unauthorized-custom")
+        return completeTurn(threadId, turnId, "failed", {
+          message: "unexpected status 401 Unauthorized: token expired",
+          codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 401 } },
+        });
       return completeTurn(threadId, turnId, "completed");
     }
     case "fake/turn-started":
@@ -166,7 +262,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         pendingTurn = null;
         setTimeout(() => {
           send({ id, result: {} });
-          if (scenario === "late-approval") send({ id: "srv-late", method: "item/commandExecution/requestApproval", params: { threadId: stopping.threadId, turnId: stopping.turnId, itemId: "cmd-late", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" } });
+          if (scenario === "late-approval")
+            send({
+              id: "srv-late",
+              method: "item/commandExecution/requestApproval",
+              params: { threadId: stopping.threadId, turnId: stopping.turnId, itemId: "cmd-late", startedAtMs: 0, command: "/bin/zsh -lc 'ls'" },
+            });
           if (scenario === "late-question") askQuestion("srv-late", stopping.threadId, stopping.turnId);
           completeTurn(stopping.threadId, stopping.turnId, "interrupted");
         }, 150);

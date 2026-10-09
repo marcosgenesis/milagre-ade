@@ -32,6 +32,12 @@ function codexPlanTasks(plan) {
   return plan.flatMap((item, index) => (text(item?.step) ? [task(index, text(item.step), item.status === "inProgress" ? "in_progress" : item.status)] : []));
 }
 
+// ACP plan entries [{ content, status: "pending" | "in_progress" | "completed", priority }]: the whole plan each time.
+function acpPlanTasks(entries) {
+  if (!Array.isArray(entries)) return null;
+  return entries.flatMap((entry, index) => (text(entry?.content) ? [task(index, text(entry.content), entry.status)] : []));
+}
+
 // The id TaskCreate gave a task: from its structured result, else from "Task #3 created successfully".
 function createdId(structured, block) {
   if (structured?.task?.id !== undefined) return String(structured.task.id);
@@ -65,7 +71,10 @@ function applyToolResult(map, call, block, structured) {
   if (call.name === "TaskList") {
     if (!Array.isArray(structured?.tasks)) return null;
     // The list doesn't carry activeForm, so keep what we know of a task that is still there.
-    return replace(map, structured.tasks.flatMap((item) => (text(item?.subject) ? [task(item.id, text(item.subject), item.status, map.get(String(item.id))?.activeForm)] : [])));
+    return replace(
+      map,
+      structured.tasks.flatMap((item) => (text(item?.subject) ? [task(item.id, text(item.subject), item.status, map.get(String(item.id))?.activeForm)] : [])),
+    );
   }
   if (call.name !== "TaskCreate") return null;
   const subject = text(call.input?.subject);
@@ -75,4 +84,4 @@ function applyToolResult(map, call, block, structured) {
   return [...map.values()];
 }
 
-module.exports = { applyToolResult, applyToolUse, codexPlanTasks, todoWriteTasks };
+module.exports = { acpPlanTasks, applyToolResult, applyToolUse, codexPlanTasks, todoWriteTasks };

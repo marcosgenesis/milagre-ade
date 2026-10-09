@@ -107,7 +107,10 @@ test("committed diffs from the merge-base when the base has moved on", async (t)
   git("commit", "-m", "main moves");
   git("checkout", "feature");
   const { files } = await diff.listDiffFiles({ cwd, base: "main", mode: "committed" });
-  assert.deepEqual(files.map((file) => file.path), ["feature.txt"]);
+  assert.deepEqual(
+    files.map((file) => file.path),
+    ["feature.txt"],
+  );
 });
 
 test("committed with no base branch has an empty list and a null base", async (t) => {
@@ -131,7 +134,10 @@ test("a repository with no commits lists its files against the empty tree", asyn
 test("a folder that is not a repository says so", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-gitdiff-none-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const result = await createGitDiff({ env: { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(root) } }).listDiffFiles({ cwd: root, mode: "uncommitted" });
+  const result = await createGitDiff({ env: { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(root) } }).listDiffFiles({
+    cwd: root,
+    mode: "uncommitted",
+  });
   assert.equal(result.isRepo, false);
   assert.match(result.message, /git repository/);
 });
@@ -186,9 +192,8 @@ test("a base that starts with a dash is treated as not given", async (t) => {
 test("a copy entry is a plain added file with no oldPath", async (t) => {
   const { cwd } = await fixture(t);
   const real = require("node:child_process").execFile;
-  const execFile = (cmd, args, options, callback) => args.includes("--name-status")
-    ? callback(null, "C100\0README.md\0copy.md\0", "")
-    : real(cmd, args, options, callback);
+  const execFile = (cmd, args, options, callback) =>
+    args.includes("--name-status") ? callback(null, "C100\0README.md\0copy.md\0", "") : real(cmd, args, options, callback);
   const { files } = await createGitDiff({ execFile }).listDiffFiles({ cwd, mode: "uncommitted" });
   const copy = files.find((file) => file.path === "copy.md");
   assert.equal(copy.status, "added");
@@ -202,7 +207,12 @@ test("committed on a branch that shares no history with the base says so", async
   await write("island.txt", "i\n");
   git("add", ".");
   git("commit", "-m", "island");
-  assert.deepEqual(await diff.listDiffFiles({ cwd, base: "main", mode: "committed" }), { isRepo: true, base: "main", files: [], message: "This branch shares no history with main." });
+  assert.deepEqual(await diff.listDiffFiles({ cwd, base: "main", mode: "committed" }), {
+    isRepo: true,
+    base: "main",
+    files: [],
+    message: "This branch shares no history with main.",
+  });
 });
 
 test("patch reads turn off textconv", async (t) => {
@@ -210,7 +220,10 @@ test("patch reads turn off textconv", async (t) => {
   await write("README.md", "one\nTWO\nthree\n");
   const real = require("node:child_process").execFile;
   const seen = [];
-  const execFile = (cmd, args, options, callback) => { seen.push(args); return real(cmd, args, options, callback); };
+  const execFile = (cmd, args, options, callback) => {
+    seen.push(args);
+    return real(cmd, args, options, callback);
+  };
   await createGitDiff({ execFile }).readDiffFile({ cwd, mode: "uncommitted", path: "README.md" });
   assert.ok(seen.some((args) => args.includes("diff") && args.includes("--no-textconv")));
 });

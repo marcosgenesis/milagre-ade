@@ -2,6 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { SIMULATOR_RECEIVER_SCRIPT } from "@milagre/shared/simulator-receiver";
+import { BROWSER_RECEIVER_SCRIPT } from "@milagre/shared/browser-receiver";
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 
@@ -9,7 +12,8 @@ const projectRoot = dirname(fileURLToPath(import.meta.url));
 // the media protocol and GitHub avatars. Dev keeps Vite's inline client and HMR socket, so this applies to builds only.
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  // The simulator and browser iframes embed these exact bundled receivers, with data kept outside their executable scripts.
+  `script-src 'self' ${[SIMULATOR_RECEIVER_SCRIPT, BROWSER_RECEIVER_SCRIPT].map((script) => `'sha256-${createHash("sha256").update(script).digest("base64")}'`).join(" ")}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: milagre-media: https:",
   "media-src 'self' blob: milagre-media:",
@@ -18,7 +22,7 @@ const CSP = [
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
-  "frame-src 'none'",
+  "frame-src 'self'",
 ].join("; ");
 const contentSecurityPolicy = {
   name: "milagre-csp",
@@ -31,6 +35,9 @@ export default defineConfig({
   // Packaged builds load dist/index.html over file://, so asset URLs must be relative.
   base: "./",
   plugins: [react(), contentSecurityPolicy],
+  // Canvas is lazy-loaded. Prebundle it before first paint so its React runtime
+  // stays shared with the renderer when the user first opens it in development.
+  optimizeDeps: { include: ["@xyflow/react"] },
   resolve: {
     alias: {
       "@": resolve(projectRoot, "app/src"),

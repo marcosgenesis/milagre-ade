@@ -2,6 +2,28 @@
   "name": "@milagre/shared",
   "version": "0.1.0",
   "private": true,
+  "files": [
+    "src/*.mjs",
+    "src/*.d.mts",
+    "src/model.ts",
+    "src/git-diff.ts",
+    "src/model-options.ts",
+    "src/model-copy.ts",
+    "src/reply-parts.ts",
+    "src/streaming-markdown.ts",
+    "src/pr-blockers.ts",
+    "src/diff-parse.ts",
+    "src/diff-tree.ts",
+    "src/diff-layout.ts",
+    "src/usage.ts",
+    "src/simulator.ts",
+    "src/browser.ts",
+    "src/message-navigation.ts",
+    "src/artifact.ts",
+    "src/message-search.ts",
+    "src/agent-activity.ts",
+    "src/advisor-result.ts"
+  ],
   "type": "module",
   "exports": {
     "./prompt-skills": {
@@ -9,6 +31,18 @@
       "default": "./src/prompt-skills.mjs"
     },
     "./model": "./src/model.ts",
+    "./chat-summary": {
+      "types": "./src/chat-summary.d.mts",
+      "default": "./src/chat-summary.mjs"
+    },
+    "./state-patch": {
+      "types": "./src/state-patch.d.mts",
+      "default": "./src/state-patch.mjs"
+    },
+    "./chat-scopes": {
+      "types": "./src/chat-scopes.d.mts",
+      "default": "./src/chat-scopes.mjs"
+    },
     "./git-diff": "./src/git-diff.ts",
     "./agent-runs": {
       "types": "./src/agent-runs.d.mts",
@@ -22,6 +56,10 @@
       "types": "./src/chats.d.mts",
       "default": "./src/chats.mjs"
     },
+    "./handoff": {
+      "types": "./src/handoff.d.mts",
+      "default": "./src/handoff.mjs"
+    },
     "./archive": {
       "types": "./src/archive.d.mts",
       "default": "./src/archive.mjs"
@@ -29,6 +67,10 @@
     "./attention": {
       "types": "./src/attention.d.mts",
       "default": "./src/attention.mjs"
+    },
+    "./antigravity-models": {
+      "types": "./src/antigravity-models.d.mts",
+      "default": "./src/antigravity-models.mjs"
     },
     "./providers": {
       "types": "./src/providers.d.mts",
@@ -66,31 +108,37 @@
     "./diff-parse": "./src/diff-parse.ts",
     "./diff-tree": "./src/diff-tree.ts",
     "./diff-layout": "./src/diff-layout.ts",
-    "./usage": "./src/usage.ts"
+    "./usage": "./src/usage.ts",
+    "./skill-catalog": "./src/skill-catalog.ts",
+    "./simulator": "./src/simulator.ts",
+    "./artifact": "./src/artifact.ts",
+    "./simulator-receiver": {
+      "types": "./src/simulator-receiver.d.mts",
+      "default": "./src/simulator-receiver.mjs"
+    },
+    "./browser": "./src/browser.ts",
+    "./browser-receiver": {
+      "types": "./src/browser-receiver.d.mts",
+      "default": "./src/browser-receiver.mjs"
+    },
+    "./message-navigation": "./src/message-navigation.ts",
+    "./message-search": "./src/message-search.ts",
+    "./file-syntax": {
+      "types": "./src/file-syntax.d.mts",
+      "default": "./src/file-syntax.mjs"
+    },
+    "./agent-activity": "./src/agent-activity.ts",
+    "./advisor-result": "./src/advisor-result.ts"
   },
-  "files": [
-    "src/*.mjs",
-    "src/*.d.mts",
-    "src/model.ts",
-    "src/git-diff.ts",
-    "src/model-options.ts",
-    "src/model-copy.ts",
-    "src/reply-parts.ts",
-    "src/streaming-markdown.ts",
-    "src/pr-blockers.ts",
-    "src/diff-parse.ts",
-    "src/diff-tree.ts",
-    "src/diff-layout.ts",
-    "src/usage.ts"
-  ],
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "refractor": "^5.0.0",
+    "tweetnacl": "1.0.3"
+  },
   "devDependencies": {
     "typescript": "~6.0.3"
-  },
-  "dependencies": {
-    "tweetnacl": "1.0.3"
   }
 }

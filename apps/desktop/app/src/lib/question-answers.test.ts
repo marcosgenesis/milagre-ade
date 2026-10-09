@@ -1,11 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentQuestion } from "../model";
-import { advancesOnPick, answerSummary, arrowTab, draftAnswers, nextTab, pickOption, primaryAction, primaryEnabled, questionAnswered, sendsOnPick, tabLabel, typeAnswer } from "./question-answers.ts";
+import {
+  advancesOnPick,
+  answerSummary,
+  arrowTab,
+  draftAnswers,
+  nextTab,
+  pickOption,
+  primaryAction,
+  primaryEnabled,
+  questionAnswered,
+  sendsOnPick,
+  tabLabel,
+  typeAnswer,
+} from "./question-answers.ts";
 import type { QuestionDrafts } from "./question-answers.ts";
 
-const color: AgentQuestion = { id: "color", header: "Color", question: "Which color?", options: [{ label: "Red" }, { label: "Green" }, { label: "Blue" }], multiSelect: false, allowOther: true, secret: false };
-const fruits: AgentQuestion = { id: "fruits", header: "Fruit", question: "Which fruits?", options: [{ label: "Apple" }, { label: "Banana" }, { label: "Cherry" }], multiSelect: true, allowOther: true, secret: false };
+const color: AgentQuestion = {
+  id: "color",
+  header: "Color",
+  question: "Which color?",
+  options: [{ label: "Red" }, { label: "Green" }, { label: "Blue" }],
+  multiSelect: false,
+  allowOther: true,
+  secret: false,
+};
+const fruits: AgentQuestion = {
+  id: "fruits",
+  header: "Fruit",
+  question: "Which fruits?",
+  options: [{ label: "Apple" }, { label: "Banana" }, { label: "Cherry" }],
+  multiSelect: true,
+  allowOther: true,
+  secret: false,
+};
 const strict: AgentQuestion = { ...color, id: "strict", allowOther: false };
 
 test("a single-choice question keeps one option, and a typed answer replaces it", () => {

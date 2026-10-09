@@ -47,16 +47,28 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
     return () => window.clearTimeout(timer);
   }, [copied]);
   const src = step.file && !broken ? mediaUrl(step.file) : null;
-  if (step.status === "failed" || (step.status === "done" && !src)) return <StepRow step={step.status === "failed" ? step : { ...step, status: "failed", title: "Couldn't show the generated image" }} />;
+  if (step.status === "failed" || (step.status === "done" && !src))
+    return <StepRow step={step.status === "failed" ? step : { ...step, status: "failed", title: "Couldn't show the generated image" }} />;
   const file = step.file!;
   const status: ImageGenerationStatus = step.status === "done" && size ? "complete" : "generating";
-  const copy = () => void window.milagre.copyImage(file).then(() => setCopied(true)).catch(() => {});
+  const copy = () =>
+    void window.milagre
+      .copyImage(file)
+      .then(() => setCopied(true))
+      .catch(() => {});
   const save = () => void window.milagre.saveImage(file).catch(() => {});
   return (
     <div
       data-slot="generated-image"
       className="my-2"
-      onContextMenu={status === "complete" ? (event) => { event.preventDefault(); void window.milagre.showImageMenu(file); } : undefined}
+      onContextMenu={
+        status === "complete"
+          ? (event) => {
+              event.preventDefault();
+              void window.milagre.showImageMenu(file);
+            }
+          : undefined
+      }
     >
       <ImageGeneration
         size="fluid"
@@ -67,17 +79,42 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
         label={step.detail ? `Generated image: ${step.detail}` : "Generated image"}
         resolution={size ? `${size.width} × ${size.height}` : ""}
         aspectRatio={size ? `${size.width} / ${size.height}` : "1 / 1"}
-        actions={<>
-          <ImageAction label={copied ? "Copied" : "Copy image"} icon={copied ? Tick02Icon : Copy01Icon} onClick={copy} />
-          <ImageAction label="Download image" icon={Download04Icon} onClick={save} />
-        </>}
+        actions={
+          <>
+            <ImageAction label={copied ? "Copied" : "Copy image"} icon={copied ? Tick02Icon : Copy01Icon} onClick={copy} />
+            <ImageAction label="Download image" icon={Download04Icon} onClick={save} />
+          </>
+        }
       >
-        {src ? <button ref={thumb} type="button" aria-label="Preview generated image" disabled={status !== "complete"} onClick={() => setOpen(true)} className="block cursor-zoom-in focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink-3 disabled:cursor-default">
-          {/* Hidden while the viewer shows it, so the image morphs out of and back into its place. */}
-          <img src={src} alt="" draggable={false} className={open ? "opacity-0" : undefined} onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setBroken(true)} />
-        </button> : null}
+        {src ? (
+          <button
+            ref={thumb}
+            type="button"
+            aria-label="Preview generated image"
+            disabled={status !== "complete"}
+            onClick={() => setOpen(true)}
+            className="block cursor-zoom-in focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink-3 disabled:cursor-default"
+          >
+            {/* Hidden while the viewer shows it, so the image morphs out of and back into its place. */}
+            <img
+              src={src}
+              alt=""
+              draggable={false}
+              className={open ? "opacity-0" : undefined}
+              onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+              onError={() => setBroken(true)}
+            />
+          </button>
+        ) : null}
       </ImageGeneration>
-      {open && src && <MediaLightbox items={[{ id: step.id, name: file.split("/").at(-1) || "Generated image", src, kind: "image", file }]} start={0} thumbFor={thumbFor} close={close} />}
+      {open && src && (
+        <MediaLightbox
+          items={[{ id: step.id, name: file.split("/").at(-1) || "Generated image", src, kind: "image", file }]}
+          start={0}
+          thumbFor={thumbFor}
+          close={close}
+        />
+      )}
     </div>
   );
 });

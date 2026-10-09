@@ -7,7 +7,14 @@ import { ShortcutKeys } from "./ShortcutKeys";
 export const TOOLTIP_SHOW_DELAY = 400;
 
 /** Shared tooltip presentation for ordinary triggers and text hit-tested under a native input. */
-export function TooltipBubble({ label, rect, align = "start", side = "top", wrap = false, hint }: {
+export function TooltipBubble({
+  label,
+  rect,
+  align = "start",
+  side = "top",
+  wrap = false,
+  hint,
+}: {
   label: string;
   rect: DOMRect;
   align?: "start" | "end";
@@ -39,6 +46,7 @@ export default function Tooltip({
   align = "start",
   side = "top",
   wrap = false,
+  compactHint = false,
   className = "",
   children,
 }: {
@@ -49,6 +57,8 @@ export default function Tooltip({
   side?: "top" | "bottom";
   /** Lets a long label break onto more lines instead of running past the window. */
   wrap?: boolean;
+  /** For a row of icon buttons too close for full hints: smaller keys, just under its button instead of over it. */
+  compactHint?: boolean;
   /** Extra classes for the trigger wrapper, e.g. to position it. */
   className?: string;
   children: ReactNode;
@@ -96,15 +106,30 @@ export default function Tooltip({
       onPointerEnter={() => show(TOOLTIP_SHOW_DELAY)}
       onPointerLeave={hide}
       onPointerDown={hide}
-      onFocus={(event) => { if (event.target.matches(":focus-visible")) show(0); }}
+      onFocus={(event) => {
+        if (event.target.matches(":focus-visible")) show(0);
+      }}
       onBlur={hide}
     >
       {children}
       {rect && <TooltipBubble label={label} rect={rect} align={align} side={side} wrap={wrap} hint={hint} />}
-      {hintRect && !rect && createPortal(
-        <ShortcutKeys ref={hintRef} shortcut={hint!} aria-hidden="true" className="pointer-events-none fixed z-[70]"
-          style={{ top: hintRect.top + hintRect.height / 2, left: hintRect.width > 80 ? hintRect.right - 22 : hintRect.left + hintRect.width / 2, transform: "translate(-50%, -50%)" }} />, document.body,
-      )}
+      {hintRect &&
+        !rect &&
+        createPortal(
+          <ShortcutKeys
+            ref={hintRef}
+            shortcut={hint!}
+            compact={compactHint}
+            aria-hidden="true"
+            className="pointer-events-none fixed z-[70]"
+            style={{
+              top: compactHint ? hintRect.bottom + 12 : hintRect.top + hintRect.height / 2,
+              left: hintRect.width > 80 ? hintRect.right - 22 : hintRect.left + hintRect.width / 2,
+              transform: "translate(-50%, -50%)",
+            }}
+          />,
+          document.body,
+        )}
     </span>
   );
 }

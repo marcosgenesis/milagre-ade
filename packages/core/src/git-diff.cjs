@@ -103,7 +103,10 @@ function createGitDiff(options = {}) {
     const files = parseNameStatus(status.stdout).map((entry) => ({ ...entry, ...(counts.get(entry.path) ?? { added: 0, removed: 0, binary: false }) }));
     if (mode !== "committed") {
       const listed = await run(cwd, ["ls-files", "--others", "--exclude-standard", "-z", ...PATHSPEC]);
-      const untracked = listed.stdout.split("\0").filter(Boolean).slice(0, Math.max(0, FILE_LIMIT - files.length));
+      const untracked = listed.stdout
+        .split("\0")
+        .filter(Boolean)
+        .slice(0, Math.max(0, FILE_LIMIT - files.length));
       for (let i = 0; i < untracked.length; i += UNTRACKED_CONCURRENCY) {
         files.push(...(await Promise.all(untracked.slice(i, i + UNTRACKED_CONCURRENCY).map((file) => untrackedFile(cwd, file)))));
       }

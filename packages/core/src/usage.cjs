@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { createUsageStore } = require("./usage-cache.cjs");
+const { readAntigravityUsage } = require("./antigravity-usage.cjs");
 
 const PROVIDER_TIMEOUT_MS = 10_000;
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
@@ -183,8 +184,12 @@ async function readCodexUsage(deps = {}) {
   if (!command) return done("unavailable", [], "Codex CLI not found.");
   return new Promise((resolve) => {
     let child;
-    try { child = spawnCommand(command, ["app-server"], { stdio: ["pipe", "pipe", "ignore"], env: process.env, windowsHide: true }, spawnImpl); }
-    catch { resolve(done("error", [], "Codex could not start.")); return; }
+    try {
+      child = spawnCommand(command, ["app-server"], { stdio: ["pipe", "pipe", "ignore"], env: deps.env || process.env, windowsHide: true }, spawnImpl);
+    } catch {
+      resolve(done("error", [], "Codex could not start."));
+      return;
+    }
     let settled = false;
     let buffer = "";
     const timer = setTimeout(() => finish(done("error", [], "Codex usage timed out.")), timeoutMs);
@@ -215,15 +220,13 @@ async function readCodexUsage(deps = {}) {
       } else if (message.id === 3) {
         const windows = codexWindows(message.result?.rateLimits);
         const banked = bankedResetsOf(message.result?.rateLimitResetCredits?.availableCount);
-        finish(windows.length
-          ? providerResult("codex", now, "ok", windows, undefined, banked)
-          : done("error", [], "Codex returned no usage windows."));
+        finish(windows.length ? providerResult("codex", now, "ok", windows, undefined, banked) : done("error", [], "Codex returned no usage windows."));
       }
     }
 
-    child.on("error", (error) => finish(error?.code === "ENOENT"
-      ? done("unavailable", [], "Codex CLI not found.")
-      : done("error", [], "Couldn't start Codex.")));
+    child.on("error", (error) =>
+      finish(error?.code === "ENOENT" ? done("unavailable", [], "Codex CLI not found.") : done("error", [], "Couldn't start Codex.")),
+    );
     child.on("close", () => finish(done("error", [], "Codex exited before reporting usage.")));
     child.stdin.on("error", () => {});
     child.stdout.on("data", (chunk) => {
@@ -257,7 +260,14 @@ function withLastGood(result, last, nowMs) {
 function createUsageReader(deps = {}) {
   // `ready` resolves once the login environment is applied: opened from Finder the app's PATH is bare until then,
   // and the Codex lookup starts `codex` from it.
-  const { readClaude = readClaudeUsage, readCodex = readCodexUsage, now = Date.now, store = createUsageStore(), ready = () => undefined } = deps;
+  const {
+    readClaude = readClaudeUsage,
+    readCodex = readCodexUsage,
+    readAntigravity = () => readAntigravityUsage({ now }),
+    now = Date.now,
+    store = createUsageStore(),
+    ready = () => undefined,
+  } = deps;
   const readProvider = async (provider, read) => {
     const { blocked } = store.get(provider);
     let result;
@@ -274,8 +284,10 @@ function createUsageReader(deps = {}) {
   };
   let inFlight = null;
   return function readUsage() {
-    inFlight ??= Promise.resolve().then(ready).catch(() => {})
-      .then(() => Promise.all([readProvider("claude", readClaude), readProvider("codex", readCodex)]))
+    inFlight ??= Promise.resolve()
+      .then(ready)
+      .catch(() => {})
+      .then(() => Promise.all([readProvider("claude", readClaude), readProvider("codex", readCodex), readProvider("antigravity", readAntigravity)]))
       .then((providers) => ({ providers }))
       .finally(() => {
         inFlight = null;
@@ -284,4 +296,49 @@ function createUsageReader(deps = {}) {
   };
 }
 
-module.exports = { createUsageReader, readClaudeUsage, readCodexUsage };
+// The CLI owns the per-profile Keychain name and token refresh. Ask its control API without
+// starting a model turn, instead of depending on the credential store's private naming scheme.
+async function readClaudeProfileUsage({
+  command,
+  env,
+  loadSdk = () => import("@anthropic-ai/claude-agent-sdk"),
+  now = Date.now,
+  timeoutMs = PROVIDER_TIMEOUT_MS,
+}) {
+  let session, timer;
+  const done = (status, windows, message) => providerResult("claude", now, status, windows, message);
+  try {
+    const { query } = await loadSdk();
+    session = query({
+      prompt: {
+        // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
+        async *[Symbol.asyncIterator]() {
+          await new Promise(() => {});
+        },
+      },
+      options: {
+        pathToClaudeCodeExecutable: command,
+        env,
+        cwd: os.homedir(),
+        settingSources: [],
+        persistSession: false,
+      },
+    });
+    const result = await Promise.race([
+      session.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+      }),
+    ]);
+    if (!result.rate_limits_available) return done("unavailable", [], "Plan usage is unavailable for this account.");
+    if (!result.rate_limits) return done("error", [], "Could not read usage for this account.");
+    return done("ok", claudeWindows(result.rate_limits));
+  } catch {
+    return done("error", [], "Could not read usage for this account.");
+  } finally {
+    clearTimeout(timer);
+    session?.close?.();
+  }
+}
+
+module.exports = { createUsageReader, readClaudeUsage, readClaudeProfileUsage, readCodexUsage, readAntigravityUsage };

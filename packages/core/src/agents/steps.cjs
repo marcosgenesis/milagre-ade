@@ -4,7 +4,7 @@ const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./pe
 // Tool steps: each command, edit, read, search or other tool call an agent makes, as the rows of
 // its reply, and each stretch of thinking. A step starts as { id, kind, title, detail? } and ends as
 // { id, status, title?, detail?, durationMs? }:
-//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup" | "image"
+//   kind    "shell" | "edit" | "read" | "search" | "other" | "thinking" | "setup" | "image" | "artifact"
 //   title   what it did, past tense, with code between backticks: "Ran `npm test`", "Edited `App.tsx`"
 //   file    the file a read or edit worked on, as the tool named it (absolute, or relative to the chat's folder);
 //           the title shows only its name, and the renderer opens it in an editor from here
@@ -14,6 +14,7 @@ const { capText, claudeEditDiff, codexChangesDiff, unwrapShell } = require("./pe
 // A title given at the end replaces the first one, for agents that only know it then.
 // A thinking step streams the agent's thinking summary into its detail and ends with how long it took.
 // An image step is an image the agent generated: it ends with the image's file and the prompt it was made from as its detail.
+// An artifact step is a design the agent showed with artifact_show: it ends with the artifact it made ({ id, version, title }).
 
 // Command output keeps its end, where results and errors are (capOutput); diffs and other details keep their start.
 const { MAX_OUTPUT, capOutput } = require("@milagre/shared/agent-runs");
@@ -23,7 +24,10 @@ const CLAUDE_AGENT_TOOLS = new Set(["Agent", "Task"]);
 
 // Text shown as code in a title: one line of at most 80 characters, with no backticks of its own.
 function code(text, max = 80) {
-  const flat = String(text ?? "").trim().replace(/`/g, "'").replace(/\s+/g, " ");
+  const flat = String(text ?? "")
+    .trim()
+    .replace(/`/g, "'")
+    .replace(/\s+/g, " ");
   return `\`${flat.length > max ? `${flat.slice(0, max - 1)}…` : flat}\``;
 }
 
@@ -41,7 +45,28 @@ function compact(object) {
 function blocksText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content.map((block) => (block?.type === "text" ? block.text : block?.type ? `[${block.type}]` : "")).filter(Boolean).join("\n");
+  return content
+    .map((block) => (block?.type === "text" ? block.text : block?.type ? `[${block.type}]` : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
+// --- Artifacts ---
+
+// Milagre's own artifact_show tool is a design the Chat shows as a card, not a generic tool row.
+const isArtifactTool = (server, tool) => server === "milagre" && tool === "artifact_show";
+const artifactStep = (step, title) => step("artifact", `Showed ${code(title || "a design")}`);
+// Resolving a comment the user left on a design reads as that, not as a tool call.
+const isResolveTool = (server, tool) => server === "milagre" && tool === "artifact_resolve_comment";
+
+// The artifact a finished artifact_show made, from its result text.
+function artifactRef(text) {
+  try {
+    const { id, version, title } = JSON.parse(text);
+    return typeof id === "string" && Number.isInteger(version) && typeof title === "string" ? { id, version, title } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // --- Thinking ---
@@ -65,7 +90,8 @@ function claudeStep(id, name, input = {}) {
   const step = (kind, title, detail, file) => compact({ id: String(id), kind, title, detail, file: filePath(file) });
   if (name === "Bash") return step("shell", `Ran ${code(input.command)}`, capOutput(`$ ${input.command ?? ""}\n`));
   if (name === "Read") return step("read", `Read ${fileName(input.file_path)}`, undefined, input.file_path);
-  if (CLAUDE_EDIT_TOOLS.has(name)) return step("edit", `Edited ${fileName(input.file_path ?? input.notebook_path)}`, undefined, input.file_path ?? input.notebook_path);
+  if (CLAUDE_EDIT_TOOLS.has(name))
+    return step("edit", `Edited ${fileName(input.file_path ?? input.notebook_path)}`, undefined, input.file_path ?? input.notebook_path);
   if (name === "Write") return step("edit", `Wrote ${fileName(input.file_path)}`, undefined, input.file_path);
   if (name === "Grep") return step("search", `Searched for ${code(input.pattern)}${input.path ? ` in ${code(input.path)}` : ""}`);
   if (name === "Glob") return step("search", `Found files matching ${code(input.pattern)}`);
@@ -74,6 +100,8 @@ function claudeStep(id, name, input = {}) {
   if (CLAUDE_AGENT_TOOLS.has(name)) return step("other", `Ran an agent: ${input.description || "a subtask"}`);
   if (name === "TodoWrite") return step("other", "Updated the to-do list");
   const mcp = /^mcp__(.+?)__(.+)$/.exec(String(name));
+  if (mcp && isArtifactTool(mcp[1], mcp[2])) return artifactStep(step, input.title);
+  if (mcp && isResolveTool(mcp[1], mcp[2])) return step("other", "Resolved a design comment", input.note);
   if (mcp) return step("other", `Used ${code(mcp[2])} from ${mcp[1]}`);
   return step("other", `Used ${name}`);
 }
@@ -82,7 +110,9 @@ function claudeStep(id, name, input = {}) {
 function patchDiff(result) {
   const hunks = result?.structuredPatch;
   if (!Array.isArray(hunks) || !hunks.length) return undefined;
-  return capText(hunks.map((hunk) => [`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, ...(hunk.lines ?? [])].join("\n")).join("\n"));
+  return capText(
+    hunks.map((hunk) => [`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, ...(hunk.lines ?? [])].join("\n")).join("\n"),
+  );
 }
 
 const TODO_MARKS = { completed: "[x]", in_progress: "[~]", pending: "[ ]" };
@@ -97,10 +127,13 @@ function claudeStepResult(call, block, structured) {
   if (name === "Bash") return end({ detail: capOutput(`$ ${input.command ?? ""}\n${text}`) });
   if (failed) return end({ detail: text ? capText(text) : undefined });
   if (name === "Read") return end();
+  if (name === "mcp__milagre__artifact_show") return end({ artifact: artifactRef(text) });
+  if (name === "mcp__milagre__artifact_resolve_comment") return end({ detail: input.note });
   if (CLAUDE_EDIT_TOOLS.has(name) || name === "Write") return end({ detail: patchDiff(structured) ?? claudeEditDiff(name, input) });
   if (CLAUDE_AGENT_TOOLS.has(name) && structured?.status === "async_launched") return end({ title: `Started an agent: ${input.description || "a subtask"}` });
   if (CLAUDE_AGENT_TOOLS.has(name) && Array.isArray(structured?.content)) return end({ detail: capText(blocksText(structured.content)) || undefined });
-  if (name === "TodoWrite" && Array.isArray(input.todos)) return end({ detail: input.todos.map((todo) => `${TODO_MARKS[todo.status] ?? "[ ]"} ${todo.content}`).join("\n") });
+  if (name === "TodoWrite" && Array.isArray(input.todos))
+    return end({ detail: input.todos.map((todo) => `${TODO_MARKS[todo.status] ?? "[ ]"} ${todo.content}`).join("\n") });
   return end({ detail: text ? capText(text) : undefined });
 }
 
@@ -141,13 +174,20 @@ function codexStep(item) {
       const action = commandAction(item);
       const detail = capOutput(`$ ${command}\n`);
       if (action?.type === "read") return step("read", `Read ${code(action.name || path.basename(String(action.path ?? command)))}`, detail, action.path);
-      if (action?.type === "search") return step("search", action.query ? `Searched for ${code(action.query)}${action.path ? ` in ${code(action.path)}` : ""}` : `Searched ${code(action.path || command)}`, detail);
+      if (action?.type === "search")
+        return step(
+          "search",
+          action.query ? `Searched for ${code(action.query)}${action.path ? ` in ${code(action.path)}` : ""}` : `Searched ${code(action.path || command)}`,
+          detail,
+        );
       if (action?.type === "listFiles") return step("search", action.path ? `Listed files in ${code(action.path)}` : "Listed files", detail);
       return step("shell", `Ran ${code(command)}`, detail);
     }
     case "fileChange":
       return step("edit", changeTitle(item.changes ?? []), undefined, item.changes?.length === 1 ? item.changes[0].path : undefined);
     case "mcpToolCall":
+      if (isArtifactTool(item.server, item.tool)) return artifactStep(step, item.arguments?.title);
+      if (isResolveTool(item.server, item.tool)) return step("other", "Resolved a design comment", item.arguments?.note);
       return step("other", `Used ${code(item.tool)} from ${item.server}`);
     case "dynamicToolCall":
       return step("other", `Used ${code(item.tool)}`);
@@ -157,6 +197,9 @@ function codexStep(item) {
       return step("image", `Viewed ${fileName(item.path)}`, undefined, item.path);
     case "imageGeneration":
       return step("image", "Generating an image");
+    // Codex summarizes the conversation when the context window fills, before or during a turn.
+    case "contextCompaction":
+      return step("other", "Compacting context");
     default:
       return null;
   }
@@ -170,17 +213,34 @@ function codexStepResult(item) {
       const failed = item.status !== "completed" || (item.exitCode ?? 0) !== 0;
       const status = failed ? "failed" : "done";
       if (!failed && commandAction(item)?.type === "read") return { id, status };
-      const output = item.status === "declined" ? "Declined." : item.aggregatedOutput ?? "";
+      const output = item.status === "declined" ? "Declined." : (item.aggregatedOutput ?? "");
       return { id, status, detail: capOutput(`$ ${unwrapShell(String(item.command ?? ""))}\n${output}`) };
     }
     case "fileChange": {
       const changes = item.changes ?? [];
-      return compact({ id, status: item.status === "completed" ? "done" : "failed", title: changeTitle(changes), detail: changes.length ? codexChangesDiff(changes) : undefined });
+      return compact({
+        id,
+        status: item.status === "completed" ? "done" : "failed",
+        title: changeTitle(changes),
+        detail: changes.length ? codexChangesDiff(changes) : undefined,
+      });
     }
-    case "mcpToolCall":
-      return compact({ id, status: item.status === "completed" ? "done" : "failed", detail: capText(item.error?.message ?? blocksText(item.result?.content)) || undefined });
+    case "mcpToolCall": {
+      const done = item.status === "completed" && !item.error;
+      const text = blocksText(item.result?.content);
+      if (done && isArtifactTool(item.server, item.tool)) return compact({ id, status: "done", artifact: artifactRef(text) });
+      if (done && isResolveTool(item.server, item.tool)) return compact({ id, status: "done", detail: item.arguments?.note });
+      return compact({
+        id,
+        status: item.status === "completed" ? "done" : "failed",
+        detail: capText(item.error?.message ?? text) || undefined,
+      });
+    }
     case "dynamicToolCall": {
-      const text = (item.contentItems ?? []).map((content) => (typeof content?.text === "string" ? content.text : "")).filter(Boolean).join("\n");
+      const text = (item.contentItems ?? [])
+        .map((content) => (typeof content?.text === "string" ? content.text : ""))
+        .filter(Boolean)
+        .join("\n");
       return compact({ id, status: item.status === "completed" && item.success !== false ? "done" : "failed", detail: text ? capText(text) : undefined });
     }
     case "webSearch":
@@ -191,8 +251,17 @@ function codexStepResult(item) {
       // Codex reports "completed", or "failed" with a failure such as a used-up limit; result is the image as base64.
       const failed = item.status === "failed" || Boolean(item.failure) || (!item.savedPath && !item.result);
       const note = item.failure?.type === "usageLimitExceeded" ? "image limit reached" : undefined;
-      return compact({ id, status: failed ? "failed" : "done", title: failed ? "Couldn't generate an image" : "Generated an image", note, detail: item.revisedPrompt ? capText(item.revisedPrompt) : undefined, file: filePath(item.savedPath) });
+      return compact({
+        id,
+        status: failed ? "failed" : "done",
+        title: failed ? "Couldn't generate an image" : "Generated an image",
+        note,
+        detail: item.revisedPrompt ? capText(item.revisedPrompt) : undefined,
+        file: filePath(item.savedPath),
+      });
     }
+    case "contextCompaction":
+      return { id, status: "done", title: "Compacted context" };
     default:
       return { id, status: item.status === "failed" ? "failed" : "done" };
   }

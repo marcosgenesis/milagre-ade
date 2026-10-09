@@ -5,13 +5,23 @@ const { externalUrl, guardNavigation } = require("./links.cjs");
 
 function fakeContents() {
   const contents = new EventEmitter();
-  contents.setWindowOpenHandler = (handler) => { contents.openHandler = handler; };
+  contents.setWindowOpenHandler = (handler) => {
+    contents.openHandler = handler;
+  };
   return contents;
 }
 
 function navigate(contents, url) {
   let prevented = false;
-  contents.emit("will-navigate", { preventDefault: () => { prevented = true; } }, url);
+  contents.emit(
+    "will-navigate",
+    {
+      preventDefault: () => {
+        prevented = true;
+      },
+    },
+    url,
+  );
   return prevented;
 }
 
@@ -50,8 +60,27 @@ test("the window never navigates away from the app", () => {
 test("a packaged app may only reload its own page", () => {
   const opened = [];
   const contents = fakeContents();
-  guardNavigation(contents, { appUrl: "file:///Applications/Milagre.app/Contents/Resources/app.asar/dist/index.html", openExternal: (url) => opened.push(url) });
+  guardNavigation(contents, {
+    appUrl: "file:///Applications/Milagre.app/Contents/Resources/app.asar/dist/index.html",
+    openExternal: (url) => opened.push(url),
+  });
   assert.equal(navigate(contents, "file:///Applications/Milagre.app/Contents/Resources/app.asar/dist/index.html#chat"), false);
   assert.equal(navigate(contents, "file:///Users/me/notes.html"), true);
   assert.deepEqual(opened, []);
+});
+
+test("an embedded frame stays on the document the app gave it", () => {
+  const contents = fakeContents();
+  guardNavigation(contents, { appUrl: "http://127.0.0.1:5180/", openExternal: () => {} });
+  const frameNavigates = (url, isMainFrame = false) => {
+    let prevented = false;
+    contents.emit("will-frame-navigate", { url, isMainFrame, preventDefault: () => (prevented = true) });
+    return prevented;
+  };
+  assert.equal(frameNavigates("https://evil.example/collect?d=1"), true, "a design can't load a remote page");
+  assert.equal(frameNavigates("data:text/html,hi"), true);
+  assert.equal(frameNavigates("about:srcdoc"), false);
+  assert.equal(frameNavigates("about:blank"), false);
+  assert.equal(frameNavigates("http://127.0.0.1:5180/x"), false);
+  assert.equal(frameNavigates("https://evil.example", true), false, "the main frame has will-navigate");
 });

@@ -1,6 +1,6 @@
 // Languages that code blocks in agent replies are highlighted in, keyed by Shiki language id, with the fence names that mean each one.
 // Anything else renders as plain monospace.
-export const CODE_LANGUAGES = {
+const CODE_LANGUAGES = {
   typescript: ["ts", "mts", "cts"],
   tsx: [],
   javascript: ["js", "mjs", "cjs", "node"],

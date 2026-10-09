@@ -7,7 +7,7 @@ const visibleWorktrees = (...args) => linkedWorktrees(...args).map(({ project_id
 
 const projects = [{ id: "a" }, { id: "b" }, { id: "c" }];
 const active = { a: ["/a/one", "/a/two"], b: ["/b/one"], c: ["/c/one"] };
-const project = project_id => ({ project_id });
+const project = (project_id) => ({ project_id });
 const worktree = (project_id, worktree_path) => ({ project_id, worktree_path });
 
 test("Project and Worktree endpoints expand to current active Worktrees, one hop only", () => {
@@ -15,9 +15,17 @@ test("Project and Worktree endpoints expand to current active Worktrees, one hop
   const second = createLink([first], worktree("b", "/b/one"), project("c"), projects, active);
   assert.deepEqual(visibleWorktrees(worktree("a", "/a/one"), [first, second], active), [worktree("b", "/b/one")]);
   assert.deepEqual(visibleWorktrees(worktree("a", "/a/two"), [first, second], active), [worktree("b", "/b/one")]);
-  assert.deepEqual(visibleWorktrees(worktree("b", "/b/one"), [first, second], active), [worktree("a", "/a/one"), worktree("a", "/a/two"), worktree("c", "/c/one")]);
+  assert.deepEqual(visibleWorktrees(worktree("b", "/b/one"), [first, second], active), [
+    worktree("a", "/a/one"),
+    worktree("a", "/a/two"),
+    worktree("c", "/c/one"),
+  ]);
   assert.deepEqual(visibleWorktrees(worktree("a", "/a/one"), [first], { ...active, a: [...active.a, "/a/later"] }), [worktree("b", "/b/one")]);
-  assert.deepEqual(visibleWorktrees(worktree("b", "/b/one"), [first], { ...active, a: [...active.a, "/a/later"] }), [worktree("a", "/a/one"), worktree("a", "/a/two"), worktree("a", "/a/later")]);
+  assert.deepEqual(visibleWorktrees(worktree("b", "/b/one"), [first], { ...active, a: [...active.a, "/a/later"] }), [
+    worktree("a", "/a/one"),
+    worktree("a", "/a/two"),
+    worktree("a", "/a/later"),
+  ]);
   assert.deepEqual(visibleWorktrees(worktree("a", "/gone"), [first], active), []);
 });
 
@@ -27,7 +35,7 @@ test("Project to Project and Worktree to Worktree Links have symmetric reach", (
   assert.deepEqual(visibleWorktrees(worktree("a", "/a/one"), [broad, narrow], active), [worktree("b", "/b/one"), worktree("a", "/a/two")]);
   assert.deepEqual(visibleWorktrees(worktree("a", "/a/two"), [narrow], active), [worktree("a", "/a/one")]);
   assert.deepEqual(visibleWorktrees(worktree("b", "/b/one"), [broad], active), [worktree("a", "/a/one"), worktree("a", "/a/two")]);
-  assert.ok(!visibleWorktrees(worktree("a", "/a/one"), [broad, narrow], active).some(endpoint => endpoint.worktree_path === "/a/one"));
+  assert.ok(!visibleWorktrees(worktree("a", "/a/one"), [broad, narrow], active).some((endpoint) => endpoint.worktree_path === "/a/one"));
 });
 
 test("self links, Project to its own Worktree, duplicates and inactive Worktrees are refused", () => {

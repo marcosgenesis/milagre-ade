@@ -1,15 +1,30 @@
 // How a chat is named, shared by the sidebar and the main process's notifications. Types: chats.d.mts.
+export { pullRequestRefs, pullRequestRefsCache, chatPullRequests } from "./chat-pull-requests.mjs";
+import { summarizeChat } from "./chat-summary.mjs";
 
-/** The chat's name: the one the user gave it, else the first line of its first message. */
-export function chatTitle(session, messages) {
+/** The same status palette for desktop and mobile chat lists. */
+export function chatMarkTone(mark) {
+  if (mark === "waiting" || mark === "interrupted") return "orange";
+  if (mark === "failed") return "red";
+  if (mark === "idle") return "ink3";
+  return "accent";
+}
+
+/** The chat's name: the one the user gave it, else the first line of its first message (from its summary when it has one). */
+export function chatTitle(session, messages = []) {
   if (session.title?.trim()) return session.title.trim();
   if (session.generatedTitle?.trim()) return session.generatedTitle.trim();
-  const line = messages.find((message) => message.role !== "assistant" && message.body.trim())?.body.trim().split("\n")[0] ?? "";
+  const line = session.summary
+    ? (session.summary.titleLine ?? "")
+    : (messages
+        .find((message) => message.role !== "assistant" && message.body.trim())
+        ?.body.trim()
+        .split("\n")[0] ?? "");
   if (!line) return session.agent_name;
   return line.length > 60 ? `${line.slice(0, 57)}…` : line;
 }
 
-/** A handed-over chat that is still being prepared or holds its brief as a draft: it is a live, provider-locked chat even with no messages. */
+/** A legacy handover chat (before in-place handoff) that is still being prepared or holds its brief as a draft: it is a live, provider-locked chat even with no messages. */
 export function isHandoverChat(session) {
   return Boolean(session?.handoverPending) || session?.handoverDraft !== undefined;
 }
@@ -19,25 +34,80 @@ export function isListedChat(session, messageCount) {
   return messageCount > 0 || isHandoverChat(session);
 }
 
+/** Sorts pinned chats first, in their manual order; 0 for two unpinned chats, so the list's own order decides those. */
+export function comparePins(a, b) {
+  if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+  return a.pinned ? (a.pin_order ?? 0) - (b.pin_order ?? 0) : 0;
+}
+
+/** The `pin_order` that puts a chat at `index` among pinned chats whose orders are `orders`, lowest first. */
+export function pinOrderAt(orders, index) {
+  const before = orders[index - 1],
+    after = orders[index];
+  if (before === undefined && after === undefined) return 0;
+  if (before === undefined) return after - 1;
+  if (after === undefined) return before + 1;
+  return (before + after) / 2;
+}
+
 let nextPreviewId = -2;
 
 /** A local message preview. It is never written into the Project's persisted state. */
 export function createPendingChat({ state, worktreeId, sessionId = null, body, images = [], files = [], model, provider }) {
   const id = nextPreviewId--;
-  const session = state.sessions[sessionId] ?? { id, worktree_id: worktreeId, agent_name: state.worktrees[worktreeId]?.name || 'New Chat', status: 'Created', provider };
-  const message = { id, session_id: session.id, body, role: 'user', context: null, images, files, model, clientMessageId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${-id}` };
-  const messages = state.messages.filter(item => item.session_id === session.id);
-  return { session: { ...session, title: chatTitle(session, [...messages, message]) }, message, startedAt: Date.now(), sortId: state.next_id, targetSessionId: sessionId };
+  const session = state.sessions[sessionId] ?? {
+    id,
+    worktree_id: worktreeId,
+    agent_name: state.worktrees[worktreeId]?.name || "New Chat",
+    status: "Created",
+    provider,
+  };
+  const message = {
+    id,
+    session_id: session.id,
+    body,
+    role: "user",
+    context: null,
+    images,
+    files,
+    model,
+    clientMessageId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${-id}`,
+  };
+  const messages = state.messages.filter((item) => item.session_id === session.id);
+  return {
+    session: { ...session, title: chatTitle(session, [...messages, message]) },
+    message,
+    startedAt: Date.now(),
+    sortId: state.next_id,
+    targetSessionId: sessionId,
+  };
 }
 
 /** The saved Chat may arrive over the live connection before the send response does. */
 export function pendingChatSessionId(state, pending) {
   if (!pending) return null;
-  return state.messages.find(message => message.clientMessageId === pending.message.clientMessageId)?.session_id ?? null;
+  const canonical = state.messages.find((message) => message.clientMessageId === pending.message.clientMessageId);
+  if (canonical) return canonical.session_id;
+  // Older hosts omit clientMessageId. Only use their persisted input after the send response
+  // confirms its target; existing inputs and messages tagged by another client cannot match.
+  if (pending.acceptedSessionId == null) return null;
+  return (
+    state.messages.find(
+      (message) =>
+        !message.clientMessageId &&
+        message.session_id === pending.acceptedSessionId &&
+        message.id >= pending.sortId &&
+        message.role === "user" &&
+        message.body === pending.message.body,
+    )?.session_id ?? null
+  );
 }
 
 /** A display projection shared by desktop's sidebar and the phone's drawer; canonical input replaces its preview. */
 export function withPendingChat(state, pending) {
   if (!pending || pendingChatSessionId(state, pending) !== null) return state;
-  return { ...state, sessions: { ...state.sessions, [pending.session.id]: pending.session }, messages: [...state.messages, { ...pending.message, id: pending.sortId }] };
+  const messages = [...state.messages, { ...pending.message, id: pending.sortId }];
+  // The preview counts in its Chat's summary, so the lists show it (and order it) before the host saves it.
+  const summary = summarizeChat(messages.filter((message) => message.session_id === pending.session.id));
+  return { ...state, sessions: { ...state.sessions, [pending.session.id]: { ...pending.session, summary } }, messages };
 }

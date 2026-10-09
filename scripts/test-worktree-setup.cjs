@@ -1,4 +1,4 @@
-// Run with npm run test:worktree-setup. Exercises the real App with an isolated project and mocked Electron IPC:
+// Run with npm test -- --only worktree-setup. Exercises the real App with an isolated project and mocked Electron IPC:
 // the Setup command field in Settings, and the setup step in the chat of a new worktree, which starts without asking.
 // Set MILAGRE_SCREENSHOT_DIR to save screenshots.
 const assert = require("node:assert/strict");
@@ -34,6 +34,8 @@ window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
   // The main process always answers with a map of chat id to ports; null would crash the ports hook.
   getAgentPorts: async () => ({}),
+  // So is the linked-work snapshot (linked:snapshot); null would crash useLinkedWork.
+  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   getCurrentProject: async () => ({ path: "/fixture", name: "shop", state }),
   listBranches: async () => ["main"],
   createWorktree: async () => {
@@ -63,6 +65,13 @@ window.milagre = new Proxy({
   },
   onAgentEvent: (callback) => { listeners.add(callback); return () => listeners.delete(callback); },
   listEditors: async () => [],
+  listRecentProjects: async () => [{ path: "/fixture", name: "shop", openedAt: "" }, { path: "/blog", name: "blog", openedAt: "" }],
+  getProjectImage: async (projectPath) => window.icons?.[projectPath] ?? null,
+  setProjectIcon: async (projectPath, icon) => {
+    window.calls.icons = [...(window.calls.icons ?? []), { projectPath, icon }];
+    window.icons = { ...window.icons, [projectPath]: icon };
+    return icon;
+  },
   getCachedUsage: async () => ({ providers: [] }),
   readUsage: async () => ({ providers: [] }),
   getUpdateState: async () => ({ status: "idle" }),
@@ -76,14 +85,28 @@ async function browserChecks() {
   const { app, BrowserWindow } = require("electron");
   app.setPath("userData", fs.mkdtempSync(path.join(os.tmpdir(), "milagre-worktree-setup-ui-")));
   await app.whenReady();
-  const window = new BrowserWindow({ width: 1100, height: 760, useContentSize: true, show: false, webPreferences: { partition: "worktree-setup-test", backgroundThrottling: false } });
-  window.webContents.on("console-message", (event) => { if (event.level === "error") console.error(event.message); });
+  const window = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    useContentSize: true,
+    show: false,
+    webPreferences: { partition: "worktree-setup-test", backgroundThrottling: false },
+  });
+  window.webContents.on("console-message", (event) => {
+    if (event.level === "error") console.error(event.message);
+  });
   const evaluate = async (source) => {
-    try { return await window.webContents.executeJavaScript(source); }
-    catch (error) { throw new Error(`${source}: ${error.message}`); }
+    try {
+      return await window.webContents.executeJavaScript(source);
+    } catch (error) {
+      throw new Error(`${source}: ${error.message}`);
+    }
   };
   async function waitFor(source) {
-    for (let n = 0; n < 200; n++) { if (await evaluate(source)) return; await delay(25); }
+    for (let n = 0; n < 200; n++) {
+      if (await evaluate(source)) return;
+      await delay(25);
+    }
     throw Error(`Timed out: ${source}`);
   }
   async function click(text, { exact = true } = {}) {
@@ -98,7 +121,8 @@ async function browserChecks() {
     fs.mkdirSync(screenshotDir, { recursive: true });
     fs.writeFileSync(path.join(screenshotDir, `${name}.png`), (await window.webContents.capturePage()).toPNG());
   }
-  const type = (selector, value, proto = "HTMLTextAreaElement") => evaluate(`(() => {
+  const type = (selector, value, proto = "HTMLTextAreaElement") =>
+    evaluate(`(() => {
     const input = document.querySelector(${JSON.stringify(selector)});
     input.focus();
     Object.getOwnPropertyDescriptor(${proto}.prototype, 'value').set.call(input, ${JSON.stringify(value)});
@@ -123,7 +147,11 @@ async function browserChecks() {
 
     // Settings › Worktrees: the field saves what is typed, and a repo file takes it over.
     await evaluate(`document.querySelector('[aria-label="Settings"]').click()`);
-    await click("Worktrees");
+    // Every recent Project is listed; the open one is picked.
+    const settingsProject = (name) =>
+      `[...document.querySelectorAll('[aria-label="Settings navigation"] button')].find(el => el.querySelector('.sidebar-copy')?.textContent.trim() === ${JSON.stringify(name)})`;
+    await waitFor(`!!(${settingsProject("blog")})`);
+    await evaluate(`(${settingsProject("shop")}).click()`);
     await waitFor(`!!document.querySelector('#setup-command') && !document.querySelector('#setup-command').disabled`);
     assert.equal(await evaluate(`document.querySelector('#setup-command').placeholder`), "npm ci");
     assert.equal(await evaluate(`document.body.textContent.includes('Runs once in each new worktree before the agent starts, e.g. npm ci.')`), true);
@@ -133,16 +161,49 @@ async function browserChecks() {
     await screenshot("settings-field");
     console.log("PASS: the Setup command field saves what is typed");
 
-    await evaluate(`window.setupSettings = { setupCommand: "pnpm install --frozen-lockfile", source: "repo", command: "uv sync" }; window.dispatchEvent(new Event('focus'))`);
+    await evaluate(
+      `window.setupSettings = { setupCommand: "pnpm install --frozen-lockfile", source: "repo", command: "uv sync" }; window.dispatchEvent(new Event('focus'))`,
+    );
     await waitFor(`!!document.querySelector('[data-setup-command-locked]')`);
     assert.equal(await evaluate(`document.querySelector('#setup-command').value`), "uv sync");
     assert.equal(await evaluate(`document.querySelector('#setup-command').readOnly`), true);
     await screenshot("settings-repo-file");
-    await evaluate(`window.setupSettings = { setupCommand: "pnpm install --frozen-lockfile", source: "setting", command: "pnpm install --frozen-lockfile", note: ".milagre/worktree.json isn't valid JSON, so Milagre ignored it." }; window.dispatchEvent(new Event('focus'))`);
+    await evaluate(
+      `window.setupSettings = { setupCommand: "pnpm install --frozen-lockfile", source: "setting", command: "pnpm install --frozen-lockfile", note: ".milagre/worktree.json isn't valid JSON, so Milagre ignored it." }; window.dispatchEvent(new Event('focus'))`,
+    );
     await waitFor(`!!document.querySelector('[data-setup-command-note]')`);
     assert.equal(await evaluate(`document.querySelector('#setup-command').readOnly`), false);
     await screenshot("settings-invalid-file");
     console.log("PASS: a repo file locks the field, and an invalid one shows a note");
+
+    // Another Project's settings, and its icon: the chosen image is scaled down and saved for that Project.
+    await evaluate(`(${settingsProject("blog")}).click()`);
+    await waitFor(`document.querySelector('h1')?.textContent === "blog" && !!document.querySelector('[data-project-icon-input]')`);
+    await evaluate(`(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1024;
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#e4572e'; context.fillRect(0, 0, 1024, 1024);
+      context.fillStyle = '#fff'; context.beginPath(); context.arc(512, 512, 300, 0, Math.PI * 2); context.fill();
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([blob], 'icon.png', { type: 'image/png' }));
+      const input = document.querySelector('[data-project-icon-input]');
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await waitFor(`window.calls.icons?.length === 1`);
+    assert.equal(await evaluate(`window.calls.icons[0].projectPath`), "/blog");
+    assert.equal(await evaluate(`window.calls.icons[0].icon.startsWith('data:image/png;base64,')`), true);
+    await waitFor(`!!document.querySelector('[data-project-icon-preview] img') && !!(${settingsProject("blog")}).querySelector('img')`);
+    assert.equal(
+      await evaluate(`(() => { const image = new Image(); image.src = window.calls.icons[0].icon; return image.decode().then(() => image.width); })()`),
+      256,
+    );
+    await screenshot("project-icon");
+    await click("Reset");
+    await waitFor(`window.calls.icons.length === 2 && window.calls.icons[1].icon === null && !document.querySelector('[data-project-icon-preview] img')`);
+    console.log("PASS: every Project is listed in Settings, and its icon can be chosen and reset");
     await click("Back");
 
     // A new worktree's setup starts with the first message: no dialog, and the reply shows the setup running.
@@ -161,13 +222,33 @@ async function browserChecks() {
     await screenshot("setup-running");
     console.log("PASS: the setup shows as a running row of its own at the start of the reply");
 
-    await emit(chatId, { type: "step-output", id: "setup-1", text: "npm error code EUSAGE\nnpm error The `npm ci` command can only install with an existing package-lock.json\n" });
-    await emit(chatId, { type: "step-completed", id: "setup-1", status: "failed", title: "Setup failed `npm ci`", note: "exited with code 1 after 4s", detail: "$ npm ci\nnpm warn deprecated inflight@1.0.6\nnpm error code EUSAGE\nnpm error The `npm ci` command can only install with an existing package-lock.json\n\nExited with code 1", durationMs: 4200 });
+    await emit(chatId, {
+      type: "step-output",
+      id: "setup-1",
+      text: "npm error code EUSAGE\nnpm error The `npm ci` command can only install with an existing package-lock.json\n",
+    });
+    await emit(chatId, {
+      type: "step-completed",
+      id: "setup-1",
+      status: "failed",
+      title: "Setup failed `npm ci`",
+      note: "exited with code 1 after 4s",
+      detail:
+        "$ npm ci\nnpm warn deprecated inflight@1.0.6\nnpm error code EUSAGE\nnpm error The `npm ci` command can only install with an existing package-lock.json\n\nExited with code 1",
+      durationMs: 4200,
+    });
     await emit(chatId, { type: "turn-started", turnId: "t1" });
-    await emit(chatId, { type: "text-delta", messageId: "t1", text: "The setup failed because there is no package-lock.json. I'll run `npm install` to create one, then add the checkout page." });
+    await emit(chatId, {
+      type: "text-delta",
+      messageId: "t1",
+      text: "The setup failed because there is no package-lock.json. I'll run `npm install` to create one, then add the checkout page.",
+    });
     await emit(chatId, { type: "turn-completed" });
     await waitFor(`document.querySelector('[data-slot="step"][data-status="failed"]')?.textContent.includes('Setup failed')`);
-    assert.equal(await evaluate(`document.querySelector('[data-slot="step"][data-status="failed"]').textContent.includes('exited with code 1 after 4s')`), true);
+    assert.equal(
+      await evaluate(`document.querySelector('[data-slot="step"][data-status="failed"]').textContent.includes('exited with code 1 after 4s')`),
+      true,
+    );
     await evaluate(`[...document.querySelectorAll('[data-slot="step"] button')].find(el => el.textContent.includes('Setup failed')).click()`);
     await waitFor(`document.body.textContent.includes('EUSAGE')`);
     await screenshot("setup-failed");
@@ -178,10 +259,25 @@ async function browserChecks() {
     await waitFor(`window.calls.turns.length === 2`);
     const second = await evaluate(`window.calls.turns[1].chatId`);
     await emit(second, { type: "step-started", step: { id: "setup-2", kind: "setup", title: "Running setup `npm ci`", detail: "$ npm ci\n" } });
-    await emit(second, { type: "step-completed", id: "setup-2", status: "done", title: "Ran setup `npm ci`", note: "3s", detail: "$ npm ci\nadded 412 packages in 3s\n", durationMs: 3000 });
+    await emit(second, {
+      type: "step-completed",
+      id: "setup-2",
+      status: "done",
+      title: "Ran setup `npm ci`",
+      note: "3s",
+      detail: "$ npm ci\nadded 412 packages in 3s\n",
+      durationMs: 3000,
+    });
     await emit(second, { type: "turn-started", turnId: "t2" });
     await emit(second, { type: "step-started", step: { id: "think-1", kind: "thinking", title: "Thinking" } });
-    await emit(second, { type: "step-completed", id: "think-1", status: "done", title: "Thought", detail: "The header owns the cart count.", durationMs: 4000 });
+    await emit(second, {
+      type: "step-completed",
+      id: "think-1",
+      status: "done",
+      title: "Thought",
+      detail: "The header owns the cart count.",
+      durationMs: 4000,
+    });
     await emit(second, { type: "step-started", step: { id: "cmd-1", kind: "shell", title: "Ran `npm test`", detail: "$ npm test\n" } });
     await emit(second, { type: "step-completed", id: "cmd-1", status: "done", title: "Ran `npm test`", detail: "$ npm test\nok\n" });
     await emit(second, { type: "text-delta", messageId: "t2", text: "Added the cart badge to the header." });
@@ -210,19 +306,28 @@ async function main() {
   const { spawn } = require("node:child_process");
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
-    plugins: [{
-      name: "worktree-setup-fixture",
-      resolveId(id) { if (id === "/__worktree_setup_fixture.tsx") return id; },
-      load(id) { if (id === "/__worktree_setup_fixture.tsx") return fixture; },
-      configureServer(server) {
-        server.middlewares.use(async (request, response, next) => {
-          if (request.url !== "/__worktree_setup__") return next();
-          const html = await server.transformIndexHtml(request.url, '<html><body><div id="root"></div><script type="module" src="/__worktree_setup_fixture.tsx"></script></body></html>');
-          response.setHeader("Content-Type", "text/html");
-          response.end(html);
-        });
+    plugins: [
+      {
+        name: "worktree-setup-fixture",
+        resolveId(id) {
+          if (id === "/__worktree_setup_fixture.tsx") return id;
+        },
+        load(id) {
+          if (id === "/__worktree_setup_fixture.tsx") return fixture;
+        },
+        configureServer(server) {
+          server.middlewares.use(async (request, response, next) => {
+            if (request.url !== "/__worktree_setup__") return next();
+            const html = await server.transformIndexHtml(
+              request.url,
+              '<html><body><div id="root"></div><script type="module" src="/__worktree_setup_fixture.tsx"></script></body></html>',
+            );
+            response.setHeader("Content-Type", "text/html");
+            response.end(html);
+          });
+        },
       },
-    }],
+    ],
   });
   try {
     await server.listen();

@@ -2,10 +2,7 @@
   "expo": {
     "name": "Milagre",
     "slug": "milagre",
-    "scheme": [
-      "milagre",
-      "milagre-local"
-    ],
+    "scheme": ["milagre", "milagre-local"],
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -19,6 +16,9 @@
           "ios": {
             "enableSceneSupport": true,
             "buildReactNativeFromSource": true
+          },
+          "android": {
+            "usesCleartextTraffic": true
           }
         }
       ],
@@ -62,14 +62,13 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.victorlucas.milagre",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocalNetworkUsageDescription": "Milagre connects to your computer directly when you are on the same network."
       }
     },
     "android": {
       "package": "com.victorlucas.milagre",
-      "permissions": [
-        "android.permission.CAMERA"
-      ]
+      "permissions": ["android.permission.CAMERA"]
     },
     "extra": {
       "router": {},

@@ -4,9 +4,10 @@ const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { killTree } = require("./process-tree.cjs");
 const { milagreInstructions, RESUME_FAILED_MESSAGE, crashMessage, failedWith, isTerminal, mapClaudeMessage, missingCliMessage } = require("./events.cjs");
-const { PendingPermissions, claudeRequest, claudeResult, insideRoot } = require("./permissions.cjs");
+const { PendingPermissions, claudeRequest, claudeResult, insideRoot, insideWorkspace } = require("./permissions.cjs");
 const { PendingQuestions, claudeQuestionRequest, claudeQuestionResult } = require("./questions.cjs");
 const { runTool } = require("../linked-tools.cjs");
+const { advisorPolicy, ANALYSIS_INSTRUCTIONS } = require("./advisor-policy.cjs");
 
 // Milagre permission mode -> Claude Code permission mode. In Ask (`default`) Claude Code checks with
 // the user, through canUseTool, before edits and commands its rules don't already allow.
@@ -42,15 +43,21 @@ class Inbox {
     while (true) {
       while (this.queue.length) yield this.queue.shift();
       if (this.ended) return;
-      await new Promise((resolve) => { this.wake = resolve; });
+      await new Promise((resolve) => {
+        this.wake = resolve;
+      });
       this.wake = null;
     }
   }
 }
 
+// The uuid comes back in the result of the turn that reads the message (see mapClaudeMessage).
 function userMessage(prompt, images = []) {
-  const content = [{ type: "text", text: prompt }, ...images.map((image) => ({ type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } }))];
-  return { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
+  const content = [
+    { type: "text", text: prompt },
+    ...images.map((image) => ({ type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } })),
+  ];
+  return { type: "user", uuid: randomUUID(), message: { role: "user", content }, parent_tool_use_id: null };
 }
 
 // A Chat's linked tools, served in-process. They are allowed outright: the reads need no approval, and
@@ -59,10 +66,18 @@ function linkedOptions(tools, sdk) {
   const server = sdk.createSdkMcpServer({
     name: "milagre",
     alwaysLoad: true,
-    tools: tools.map((definition) => sdk.tool(definition.name, definition.description, definition.input, async (args) => {
-      const { text, isError } = await runTool(definition, args);
-      return { content: [{ type: "text", text }], isError };
-    }, { annotations: { readOnlyHint: definition.readOnly } })),
+    tools: tools.map((definition) =>
+      sdk.tool(
+        definition.name,
+        definition.description,
+        definition.input,
+        async (args) => {
+          const { text, isError } = await runTool(definition, args);
+          return { content: [{ type: "text", text }], isError };
+        },
+        { annotations: { readOnlyHint: definition.readOnly } },
+      ),
+    ),
   });
   return { mcpServers: { milagre: server }, allowedTools: tools.map((definition) => `mcp__milagre__${definition.name}`) };
 }
@@ -70,8 +85,36 @@ function linkedOptions(tools, sdk) {
 const sessionClosedError = () => Object.assign(new Error("The agent session closed before this message was sent."), { sessionClosed: true });
 
 class ClaudeSession {
-  constructor({ cwd, resumeId, command, emit, tldrEnabled = true, linked = null, loadSdk = () => import("@anthropic-ai/claude-agent-sdk"), spawnImpl = spawn, interruptGraceMs = 3000 }) {
-    Object.assign(this, { cwd, resumeId, command, emit, tldrEnabled, linked, loadSdk, spawnImpl, interruptGraceMs });
+  constructor({
+    cwd,
+    resumeId,
+    command,
+    env,
+    emit,
+    workspaceRoots,
+    workspaceInstructions,
+    tldrEnabled = true,
+    analysisOnly = false,
+    linked = null,
+    loadSdk = () => import("@anthropic-ai/claude-agent-sdk"),
+    spawnImpl = spawn,
+    interruptGraceMs = 3000,
+  }) {
+    Object.assign(this, {
+      cwd,
+      resumeId,
+      command,
+      env,
+      emit,
+      workspaceRoots,
+      workspaceInstructions,
+      tldrEnabled,
+      analysisOnly,
+      linked,
+      loadSdk,
+      spawnImpl,
+      interruptGraceMs,
+    });
     this.state = { sessionId: resumeId ?? null, turnId: null, hasText: false };
     this.query = null;
     this.inbox = null;
@@ -96,7 +139,7 @@ class ClaudeSession {
   /** The Claude Code process, while it runs; the ports its commands open belong to the chat. */
   get pid() {
     const child = this.child;
-    return this.closed || child?.exitCode != null || child?.signalCode != null || child?.killed ? null : child?.pid ?? null;
+    return this.closed || child?.exitCode != null || child?.signalCode != null || child?.killed ? null : (child?.pid ?? null);
   }
 
   async startTurn(request) {
@@ -107,12 +150,17 @@ class ClaudeSession {
       return { turnId: null, steered: false };
     }
     this.turnActive = true;
+    this.implicitTurn = false;
     // Whether this turn's init announced a session id (session-started); see readMessages.
     this.announcedId = false;
     this.cancelRequested = false;
-    this.turnEnded = new Promise((resolve) => { this.markEnded = resolve; });
+    this.turnEnded = new Promise((resolve) => {
+      this.markEnded = resolve;
+    });
     let markReady;
-    this.turnReady = new Promise((resolve) => { markReady = resolve; });
+    this.turnReady = new Promise((resolve) => {
+      markReady = resolve;
+    });
     try {
       return await this.beginTurn(request);
     } finally {
@@ -125,14 +173,14 @@ class ClaudeSession {
     Object.assign(this.state, { turnId, hasText: false });
     this.permissions.setMode(permissionMode);
     try {
-      if (!this.query) await this.start(model, CLAUDE_MODES[permissionMode] ?? "default", effort, ultracode, fastMode);
+      if (!this.query) await this.start(model, this.analysisOnly ? "dontAsk" : (CLAUDE_MODES[permissionMode] ?? "default"), effort, ultracode, fastMode);
       if (!this.closed) {
         if (model !== this.model) {
           await this.query.setModel(model);
           this.model = model;
         }
         // The user may have switched modes while Claude Code was starting.
-        const mode = CLAUDE_MODES[this.permissions.mode] ?? "default";
+        const mode = this.analysisOnly ? "dontAsk" : (CLAUDE_MODES[this.permissions.mode] ?? "default");
         if (mode !== this.mode) {
           await this.query.setPermissionMode(mode);
           this.mode = mode;
@@ -209,7 +257,9 @@ class ClaudeSession {
     this.cancelRequested = false;
     Object.assign(this.state, { turnId, hasText: false });
     this.turnReady = Promise.resolve();
-    this.turnEnded = new Promise((resolve) => { this.markEnded = resolve; });
+    this.turnEnded = new Promise((resolve) => {
+      this.markEnded = resolve;
+    });
     // It runs a steering message the last turn didn't take; that message's sender learns which turn has it.
     this.emit({ type: "turn-started", turnId, ...(this.lastTurnId ? { continues: this.lastTurnId } : {}) });
   }
@@ -229,7 +279,9 @@ class ClaudeSession {
     this.query = sdk.query({
       prompt: this.inbox,
       options: {
+        ...(this.env ? { env: this.env } : {}),
         cwd: this.cwd,
+        ...(this.workspaceRoots ? { additionalDirectories: this.workspaceRoots.filter((root) => root !== this.cwd) } : {}),
         model,
         permissionMode: mode,
         ...(effort ? { effort } : {}),
@@ -239,14 +291,24 @@ class ClaudeSession {
         forwardSubagentText: true,
         pathToClaudeCodeExecutable: this.command,
         settingSources: ["user", "project", "local"],
-        systemPrompt: { type: "preset", preset: "claude_code", append: milagreInstructions(this.tldrEnabled) },
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: [milagreInstructions(this.tldrEnabled, this.workspaceInstructions), this.analysisOnly ? ANALYSIS_INSTRUCTIONS : ""]
+            .filter(Boolean)
+            .join("\n\n"),
+        },
         ...(this.linked?.tools.length ? linkedOptions(this.linked.tools, sdk) : {}),
-        canUseTool: (toolName, input, options) => (toolName === "AskUserQuestion" ? this.askQuestion(input, options) : this.askPermission(toolName, input, options)),
+        canUseTool: (toolName, input, options) =>
+          toolName === "AskUserQuestion" ? this.askQuestion(input, options) : this.askPermission(toolName, input, options),
+        ...(this.analysisOnly ? advisorPolicy("claude", this.linked?.tools ?? []) : {}),
         ...(this.resumeId ? { resume: this.resumeId } : {}),
         // Own the process so close() can stop Claude Code and everything it started.
         spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
           const child = spawnCommand(command, args, { cwd, env, signal, stdio: ["pipe", "pipe", "pipe"], detached: true, windowsHide: true }, this.spawnImpl);
-          child.stderr?.on("data", (chunk) => { this.stderr = (this.stderr + chunk.toString()).slice(-4000); });
+          child.stderr?.on("data", (chunk) => {
+            this.stderr = (this.stderr + chunk.toString()).slice(-4000);
+          });
           this.child = child;
           return child;
         },
@@ -266,11 +328,18 @@ class ClaudeSession {
     const request = claudeRequest(toolName, input, options);
     return new Promise((resolve) => {
       const abort = () => this.permissions.resolve(request.requestId, "cancelled");
-      const inWorkspace = !options.blockedPath && Boolean(request.files?.length) && insideRoot(this.cwd, request.files);
-      this.permissions.add(request, (decision) => {
-        options.signal?.removeEventListener("abort", abort);
-        resolve(claudeResult(decision, input, options.suggestions));
-      }, { inWorkspace });
+      const inWorkspace =
+        !options.blockedPath &&
+        Boolean(request.files?.length) &&
+        (this.workspaceRoots ? insideWorkspace([this.cwd, ...this.workspaceRoots], request.files, this.cwd) : insideRoot(this.cwd, request.files));
+      this.permissions.add(
+        request,
+        (decision) => {
+          options.signal?.removeEventListener("abort", abort);
+          resolve(claudeResult(decision, input, options.suggestions));
+        },
+        { inWorkspace },
+      );
       if (options.signal?.aborted) abort();
       else options.signal?.addEventListener("abort", abort, { once: true });
     });
@@ -305,6 +374,7 @@ class ClaudeSession {
   // The user switched modes, possibly mid-turn: Claude Code stops asking for what the new mode allows,
   // and the waiting cards it allows are answered (see PendingPermissions).
   async setPermissionMode(permissionMode) {
+    if (this.analysisOnly) return;
     this.permissions.setMode(permissionMode);
     const mode = CLAUDE_MODES[permissionMode] ?? "default";
     if (!this.query || this.closed || mode === this.mode) return;
@@ -321,9 +391,12 @@ class ClaudeSession {
     try {
       for await (const message of query) {
         // Claude Code opens every turn with init. One arriving while no turn runs is a turn Claude Code
-        // started by itself, for a steering message that came in just as the last turn ended.
-        if (message.type === "system" && message.subtype === "init" && !this.turnActive && !this.closed) this.beginImplicitTurn();
+        // started by itself, for a steering message that came in just as the last turn ended. It starts
+        // with its first event, so a turn that only records a task notification never shows.
+        if (message.type === "system" && message.subtype === "init" && !this.turnActive && !this.closed) this.implicitTurn = true;
         for (const event of mapClaudeMessage(message, this.state)) {
+          if (this.implicitTurn && !this.turnActive && !this.closed) this.beginImplicitTurn();
+          this.implicitTurn = false;
           if (event.type === "session-started") this.announcedId = true;
           if (!isTerminal(event)) this.emit(event);
           else if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
@@ -338,6 +411,7 @@ class ClaudeSession {
             if (event.login) void this.close();
           }
         }
+        if (message.type === "result") this.implicitTurn = false;
       }
       this.handleEnd(query, null);
     } catch (error) {
@@ -355,7 +429,7 @@ class ClaudeSession {
     if (query !== this.query) return;
     this.query = null;
     this.closed = true;
-    settleSubagents(this.state, this.cancelRequested ? "cancelled" : "failed").forEach(event => this.emit(event));
+    settleSubagents(this.state, this.cancelRequested ? "cancelled" : "failed").forEach((event) => this.emit(event));
     if (!this.turnActive) return;
     if (this.cancelRequested) this.finishTurn({ type: "turn-cancelled" });
     else if (this.resumeGone(error?.message ?? "")) this.resumeFailed();
@@ -401,7 +475,7 @@ class ClaudeSession {
   }
 
   async close() {
-    settleSubagents(this.state, "cancelled").forEach(event => this.emit(event));
+    settleSubagents(this.state, "cancelled").forEach((event) => this.emit(event));
     this.permissions.cancelAll();
     this.questions.cancelAll();
     if (this.turnActive) this.cancelRequested = true;

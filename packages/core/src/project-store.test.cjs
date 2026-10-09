@@ -22,7 +22,7 @@ test("concurrent saves leave valid JSON equal to the last save", async (t) => {
   await Promise.all([states.update(projectPath, () => long), states.update(projectPath, () => short)]);
   await states.close();
 
-  assert.deepEqual(JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")), short);
+  assert.deepEqual(await require("./project-store.cjs").readProjectState(projectPath), short);
 });
 
 test("saves leave no temporary files behind", async (t) => {
@@ -45,9 +45,25 @@ test("a failed save rejects without blocking the next one", async (t) => {
   assert.deepEqual(await fs.readdir(path.join(projectPath, ".milagre")), ["coordination.json"]);
 });
 
-const subagentState = (...transcripts) => ({ next_id: 3, messages: [], sessions: { 1: { id: 1, subagents: transcripts.map((text, index) => ({ id: `agent-${index}`, title: "Review", startedAt: 1, updatedAt: 2, transcript: [{ id: "m", kind: "message", text }] })) } } });
+const subagentState = (...transcripts) => ({
+  next_id: 3,
+  messages: [],
+  sessions: {
+    1: {
+      id: 1,
+      subagents: transcripts.map((text, index) => ({
+        id: `agent-${index}`,
+        title: "Review",
+        startedAt: 1,
+        updatedAt: 2,
+        transcript: [{ id: "m", kind: "message", text }],
+      })),
+    },
+  },
+});
 const sidecars = async (projectPath) => (await fs.readdir(path.join(projectPath, ".milagre", "subagents"))).sort();
-const referenced = async (projectPath) => JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")).sessions[1].subagents.map((agent) => agent.transcriptFile);
+const referenced = async (projectPath) =>
+  JSON.parse(await fs.readFile(stateFile(projectPath), "utf8")).sessions[1].subagents.map((agent) => agent.transcriptFile);
 const NOW = { sweepMinAgeMs: 0 };
 
 test("an unchanged save writes no sidecar again, a changed agent writes only its own", async (t) => {
@@ -90,7 +106,9 @@ test("sidecars the state still references survive, and nothing else in the folde
   state.sessions[1].subagents[0].transcriptFiles = [older];
   await saveProjectState(projectPath, state, NOW);
   // Settled digests mean no new sidecar; the sweep is skipped, so run one that did write.
-  state.sessions[1].subagents[1].transcript[0].text = "two!";
+  // A new transcript array, as the app makes one (states are replaced, never changed in place).
+  const agent = state.sessions[1].subagents[1];
+  agent.transcript = [{ ...agent.transcript[0], text: "two!" }];
   await saveProjectState(projectPath, state, NOW);
   const names = await fs.readdir(directory);
   assert.ok(names.includes(kept));
@@ -128,7 +146,10 @@ test("many subagents round-trip through bounded concurrent hydration", async (t)
   const texts = Array.from({ length: 20 }, (_, index) => `transcript ${index}`);
   await saveProjectState(projectPath, subagentState(...texts), NOW);
   const loaded = await readProjectState(projectPath);
-  assert.deepEqual(loaded.sessions[1].subagents.map((agent) => agent.transcript[0].text), texts);
+  assert.deepEqual(
+    loaded.sessions[1].subagents.map((agent) => agent.transcript[0].text),
+    texts,
+  );
   const calls = t.mock.method(fs, "mkdir");
   await readProjectState(projectPath);
   assert.equal(calls.mock.callCount(), 2); // contentDirectory once for the whole Project, not once per agent
@@ -145,4 +166,100 @@ test("only a durable save syncs to disk; routine saves just rename", async (t) =
   await saveProjectState(projectPath, { sessions: { 1: { id: 1 } } }, { durable: true });
   assert.equal(syncs.mock.callCount(), 2, "the file, then its folder after the rename");
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(projectPath, ".milagre/coordination.json"), "utf8")).sessions, { 1: { id: 1 } });
+});
+
+const withOutput = (id, label) => ({
+  id,
+  session_id: 1,
+  role: "assistant",
+  body: "Done",
+  context: null,
+  steps: [{ id: `step-${id}`, kind: "shell", title: "Ran a command", status: "done", detail: `$ ${label}\n`.padEnd(5000, "output line\n") }],
+});
+const detailFiles = async (projectPath) =>
+  (await fs.readdir(path.join(projectPath, ".milagre", "details")).catch(() => [])).filter((name) => name.endsWith(".json")).sort();
+
+test("a saved state from before sidecars reads back with its long tool output moved out, and saves small", async (t) => {
+  const { readProjectState, saveProjectState } = require("./project-store.cjs");
+  const { withDetails } = require("./project-content.cjs");
+  const projectPath = await tempProject(t);
+  const legacy = { next_id: 3, sessions: {}, messages: [withOutput(1, "npm test"), withOutput(2, "npm run lint")] };
+  await fs.mkdir(path.join(projectPath, ".milagre"));
+  await fs.writeFile(stateFile(projectPath), JSON.stringify(legacy));
+  const read = await readProjectState(projectPath);
+  assert.equal(
+    read.messages.every((message) => message.steps[0].hasDetail && !message.steps[0].detail),
+    true,
+  );
+  assert.equal((await detailFiles(projectPath)).length, 2);
+  await saveProjectState(projectPath, read, { sweepMinAgeMs: 0 });
+  assert.ok((await fs.stat(stateFile(projectPath))).size < 1000);
+  assert.deepEqual(await withDetails(projectPath, (await readProjectState(projectPath)).messages[1]), legacy.messages[1]);
+});
+
+test("a details sidecar no saved message points at is removed by the next save that writes one", async (t) => {
+  const { readProjectState, saveProjectState } = require("./project-store.cjs");
+  const projectPath = await tempProject(t);
+  await saveProjectState(projectPath, { next_id: 3, sessions: {}, messages: [withOutput(1, "one"), withOutput(2, "two")] }, { sweepMinAgeMs: 0 });
+  const saved = await readProjectState(projectPath);
+  assert.equal((await detailFiles(projectPath)).length, 2);
+  // The first chat's worktree went away, and its messages with it; the other chat replied again.
+  await saveProjectState(projectPath, { ...saved, messages: [saved.messages[1], withOutput(3, "three")] }, { sweepMinAgeMs: 0 });
+  const kept = (await readProjectState(projectPath)).messages.map((message) => message.detailFile).sort();
+  assert.deepEqual(await detailFiles(projectPath), kept);
+  assert.equal(kept.includes(saved.messages[0].detailFile), false);
+});
+
+const reply = (id, session_id, body = "Done") => ({ id, session_id, role: "assistant", body, context: null });
+test("messages move from coordination.json to chats.db on the first save, in their order, and read back the same", async (t) => {
+  const { readProjectState, saveProjectState } = require("./project-store.cjs");
+  const projectPath = await tempProject(t);
+  // Ids out of order in the array happen (a message re-sent after a reply split in two); the order is kept.
+  const legacy = { next_id: 9, sessions: { 1: { id: 1 }, 2: { id: 2 } }, messages: [reply(3, 1), reply(5, 2), reply(4, 1), reply(8, 2, "last")] };
+  await fs.mkdir(path.join(projectPath, ".milagre"));
+  await fs.writeFile(stateFile(projectPath), JSON.stringify(legacy));
+  const read = await readProjectState(projectPath);
+  assert.deepEqual(read, legacy);
+  await saveProjectState(projectPath, read, NOW);
+  const saved = JSON.parse(await fs.readFile(stateFile(projectPath), "utf8"));
+  assert.deepEqual(saved.messages, { storedIn: "chats.db", format: 2 });
+  assert.equal(Array.isArray(saved.messages), false, "an older release, which reads messages as an array, fails to open it rather than showing empty chats");
+  assert.deepEqual(await readProjectState(projectPath), legacy);
+  assert.deepEqual(JSON.parse(await fs.readFile(`${stateFile(projectPath)}.before-chats-db`, "utf8")), legacy, "the old file is kept once");
+  await saveProjectState(projectPath, { ...legacy, next_id: 10 }, NOW);
+  assert.deepEqual(JSON.parse(await fs.readFile(`${stateFile(projectPath)}.before-chats-db`, "utf8")), legacy, "and never overwritten");
+});
+
+test("a save writes only the messages that changed and removes the ones that are gone", async (t) => {
+  const { readProjectState, saveProjectState } = require("./project-store.cjs");
+  const { DatabaseSync } = require("node:sqlite");
+  const projectPath = await tempProject(t);
+  const first = { next_id: 4, sessions: { 1: { id: 1 } }, messages: [reply(1, 1), reply(2, 1), reply(3, 1)] };
+  await saveProjectState(projectPath, first, NOW);
+  // A row changed behind the store's back shows whether the next save rewrites it.
+  const touch = (sql) => {
+    const db = new DatabaseSync(path.join(projectPath, ".milagre", "chats.db"));
+    db.exec(sql);
+    db.close();
+  };
+  touch(`UPDATE messages SET payload = '{"id":1,"session_id":1,"role":"assistant","body":"untouched","context":null}' WHERE id = 1`);
+  const next = { ...first, next_id: 5, messages: [first.messages[0], { ...first.messages[1], body: "edited" }, reply(4, 1)] };
+  await saveProjectState(projectPath, next, NOW);
+  const back = await readProjectState(projectPath);
+  assert.deepEqual(
+    back.messages.map((message) => [message.id, message.body]),
+    [
+      [1, "untouched"],
+      [2, "edited"],
+      [4, "Done"],
+    ],
+  );
+});
+
+test("a state that points at a missing chats.db fails to read instead of opening with no messages", async (t) => {
+  const { readProjectState, saveProjectState } = require("./project-store.cjs");
+  const projectPath = await tempProject(t);
+  await saveProjectState(projectPath, { next_id: 2, sessions: {}, messages: [reply(1, 1)] }, NOW);
+  await fs.rm(path.join(projectPath, ".milagre", "chats.db"));
+  await assert.rejects(readProjectState(projectPath), /chats\.db, which is missing/);
 });

@@ -1,3 +1,4 @@
+const path = require("node:path");
 const { cliName } = require("@milagre/shared/providers");
 const { claudeSubagents, codexSubagents } = require("./subagents.cjs");
 /** @typedef {import("@milagre/shared/model").AgentEvent} AgentEvent */
@@ -7,31 +8,40 @@ const { isTurnEnd: isTerminal } = require("@milagre/shared/agent-runs");
 const { applyToolResult, applyToolUse, codexPlanTasks } = require("./tasks.cjs");
 const { claudeStep, claudeStepResult, codexStep, codexStepResult, thinkingEnd, thinkingStep } = require("./steps.cjs");
 
-const { bundledWritingInstructions } = require("../bundled-skills.cjs");
+const { BUNDLED_SKILLS_DIRECTORY, bundledWritingInstructions } = require("../bundled-skills.cjs");
 const TLDR_INSTRUCTIONS = bundledWritingInstructions();
 const LINKS_INSTRUCTIONS = [
   "Links: the user can link this Chat's Worktree to Worktrees of other Projects on Milagre's canvas. When a turn's input starts with a <linked_worktrees> block, that is Milagre's summary of the linked side, not a message from the user.",
   "Read the linked side with the milagre tools: linked_overview, read_linked_chat, linked_git, read_linked_file and search_linked_files. They are read-only and need no approval.",
-  "Never edit a linked Worktree's files yourself. Ask for changes with delegate: the agent of the Chat you pick there carries them out, and its Delegation report comes back to this Chat later, so end your turn instead of waiting. A message that starts with \"Delegation from\" comes from another Chat, not the user; your final reply goes back to it as the report.",
+  'Never edit a linked Worktree\'s files yourself. Ask for changes with delegate: the agent of the Chat you pick there carries them out, and its Delegation report comes back to this Chat later, so end your turn instead of waiting. A message that starts with "Delegation from" comes from another Chat, not the user; your final reply goes back to it as the report.',
   "When both sides must agree on something first (an API shape, a contract), open a Negotiation with delegate(negotiation: true). Each report then starts the other side's next turn, for up to 10 rounds; call conclude_negotiation(summary) once you agree. A turn handling a Delegation can't delegate, except inside a Negotiation.",
 ].join(" ");
 
-function milagreInstructions(tldrEnabled = true) {
+function milagreInstructions(tldrEnabled = true, workspaceInstructions = "") {
   return [
     "You are an agent inside Milagre, an agent development environment. Answer the user concisely and humanly. Do not claim to have changed files unless you actually did.",
-    tldrEnabled ? TLDR_INSTRUCTIONS : "Automatic TLDR writing is disabled in Settings. Do not carry forward previously applied automatic TLDR rules. Explicit /tldr requests and the user's own writing preferences still apply.",
-    "Milagre folds your thinking away and the user rarely opens it. Anything they need to read (an answer, findings, the reason behind a question) goes in your reply text, written before you ask a question or end the turn.",
+    tldrEnabled
+      ? TLDR_INSTRUCTIONS
+      : "Automatic TLDR writing is disabled in Settings. Do not carry forward previously applied automatic TLDR rules. Explicit /tldr requests and the user's own writing preferences still apply.",
+    "Milagre folds your thinking away and the user rarely opens it. Anything they need to read (an answer, findings, the reason behind a question) goes in your reply text, written before you ask a question or end the turn. Never leave a summary or a conclusion meant for the user only in your thinking: if you catch yourself drafting one there, write it as reply text before the next tool call.",
     "When you need the user to choose between options, ask with your question tool if you have one (AskUserQuestion or request_user_input); otherwise ask in your reply as a short numbered list.",
     LINKS_INSTRUCTIONS,
+    "Simulators: use milagre simulator_list, simulator_attach and simulator_detach to manage devices for this Chat. After choosing a simulator for mobile work, attach its exact deviceId so the user can view it. The bundled simulator skill has the workflow. Discovery never attaches devices; detach leaves them running.",
+    `Designs: when the user asks to see a UI, screen, mockup or visual design, show it with milagre artifact_show as one self-contained HTML document, with the width and height of the screen it is for (390 by 844 for a phone). The Chat shows it as a card, and the user sees every design of the Chat on a canvas beside it, where they can comment on a spot or choose one; those reach you as their messages. Each comment has an id: once you have addressed one (usually by showing a revised version), resolve it with artifact_resolve_comment and a short note on what you changed. To revise a design, show it again with the same id; to offer variants, show each with its own id. Before your first design in a Chat, read the bundled design skill at ${path.join(BUNDLED_SKILLS_DIRECTORY, "design", "SKILL.md")}: it has the process.`,
+    ...(workspaceInstructions ? [workspaceInstructions] : []),
   ].join("\n\n");
 }
 const MILAGRE_INSTRUCTIONS = milagreInstructions();
-const RESUME_FAILED_MESSAGE = "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
+const RESUME_FAILED_MESSAGE =
+  "Couldn't resume this chat's earlier agent session; it may have been deleted. Send your message again to continue in a fresh session.";
 
 // What a turn fails with when an agent's CLI can't run it. Each names the fix; the next message checks again.
+// Claude and Codex are fixed in a terminal. Antigravity is installed and signed in by Milagre itself, so its
+// instructions point at Settings, not at a shell command.
 const INSTALL_COMMANDS = { claude: "curl -fsSL https://claude.ai/install.sh | bash", codex: "npm install -g @openai/codex" };
 const UPDATE_COMMANDS = { claude: "claude update", codex: "codex update" };
 const LOGIN_COMMANDS = { claude: "claude auth login", codex: "codex login" };
+const SETTINGS_ACCOUNTS = "Milagre Settings \u2192 Accounts";
 
 // A tracing log line: "2026-10-02T00:59:00.724526Z ERROR codex_core::tools::router: error=…". The prefix says
 // nothing a reader needs.
@@ -40,7 +50,14 @@ const LOG_PREFIX = /^(?:\d{4}-\d\d-\d\dT[\d:.]+Z?\s+)?(?:TRACE|DEBUG|INFO|WARN|E
 // The last non-empty line a CLI printed, without terminal colours and without a log line's timestamp, level
 // and module, and whether it was a log line.
 function readLastLine(text) {
-  const raw = String(text ?? "").replace(/\x1b\[[0-9;]*m/g, "").split("\n").map((item) => item.trim()).filter(Boolean).at(-1) ?? "";
+  const raw =
+    String(text ?? "")
+      // oxlint-disable-next-line no-control-regex -- strips ANSI colour escapes from provider output
+      .replace(/\x1b\[[0-9;]*m/g, "")
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .at(-1) ?? "";
   const logged = LOG_PREFIX.test(raw);
   const line = logged ? raw.replace(LOG_PREFIX, "") : raw;
   return { line: line.length > 300 ? `${line.slice(0, 299)}…` : line, logged };
@@ -52,19 +69,25 @@ const lastLine = (text) => readLastLine(text).line;
 const withoutPeriod = (text) => text.replace(/\.$/, "");
 
 function missingCliMessage(name) {
+  if (name === "antigravity") return `Milagre couldn't find ${cliName(name)}. Install it from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `Milagre couldn't find ${cliName(name)}. Install it with \`${INSTALL_COMMANDS[name]}\`, then send your message again.`;
 }
 
 function cliTooOldMessage(name, version, minimum) {
+  if (name === "antigravity")
+    return `Milagre needs ${cliName(name)} ${minimum} or later, and you have ${version}. Update it from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `Milagre needs ${cliName(name)} ${minimum} or later, and you have ${version}. Run \`${UPDATE_COMMANDS[name]}\` in a terminal, then send your message again.`;
 }
 
 function cliBrokenMessage(name, command, detail) {
   const reason = lastLine(detail);
+  if (name === "antigravity")
+    return `${cliName(name)} (${command}) didn't start${reason ? `: ${withoutPeriod(reason)}` : ""}. Reinstall it from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `${cliName(name)} (${command}) didn't start${reason ? `: ${withoutPeriod(reason)}` : ""}. Check that it runs in a terminal, then send your message again.`;
 }
 
 function loginMessage(name) {
+  if (name === "antigravity") return `${cliName(name)} isn't signed in. Sign in to Antigravity from ${SETTINGS_ACCOUNTS}, then send your message again.`;
   return `${cliName(name)} isn't logged in. Run \`${LOGIN_COMMANDS[name]}\` in a terminal, then send your message again.`;
 }
 
@@ -95,7 +118,6 @@ function codexUnauthorized(error) {
   return info === "unauthorized" || (Boolean(info) && typeof info === "object" && Object.values(info).some((detail) => detail?.httpStatusCode === 401));
 }
 
-
 // The mapper's clock; tests set state.now.
 const now = (state) => (state.now ?? Date.now)();
 
@@ -117,6 +139,23 @@ function mapClaudeMessage(message, state) {
   if (message.type === "system" && message.subtype === "init" && message.session_id && message.session_id !== state.sessionId) {
     state.sessionId = message.session_id;
     events.push({ type: "session-started", nativeId: message.session_id });
+  }
+  // Claude Code compacts the conversation when the context window fills: a status, then a boundary.
+  if (message.type === "system" && message.subtype === "status" && message.status === "compacting" && !state.compacting) {
+    state.compactCount = (state.compactCount ?? 0) + 1;
+    state.compacting = `compact-${state.compactCount}`;
+    events.push({ type: "step-started", step: { id: state.compacting, kind: "other", title: "Compacting context" } });
+  }
+  if (message.type === "system" && message.subtype === "compact_boundary") {
+    if (state.compacting) events.push({ type: "step-completed", id: state.compacting, status: "done", title: "Compacted context" });
+    state.compacting = null;
+    const after = message.compact_metadata?.post_tokens;
+    if (typeof after === "number") events.push(...claudeContextUsage(state, after));
+  }
+  if (message.type === "assistant" && message.parent_tool_use_id == null && message.message?.usage) {
+    const usage = message.message.usage;
+    const used = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.output_tokens ?? 0);
+    events.push(...claudeContextUsage(state, used));
   }
   if (message.type === "stream_event" && message.parent_tool_use_id == null) {
     const event = message.event ?? {};
@@ -166,22 +205,57 @@ function mapClaudeMessage(message, state) {
       if (tasks) events.push({ type: "tasks-updated", tasks });
     }
   }
+  // Claude Code records some task notifications in the transcript without asking the model, and ends
+  // that turn with a result of its own: no model call, no text, and no message of ours. It isn't the
+  // end of the turn Milagre is running (on resume it lands just before the user's message is read).
+  if (
+    message.type === "result" &&
+    message.subtype === "success" &&
+    !message.is_error &&
+    message.num_turns === 0 &&
+    !message.result &&
+    !message.user_message_uuids?.length
+  )
+    return events;
   if (message.type === "result") {
+    // The window size only arrives with a result, so the first turn shows its usage when it ends.
+    const windows = Object.values(message.modelUsage ?? {}).map((usage) => usage?.contextWindow ?? 0);
+    if (Math.max(0, ...windows) > 0) {
+      state.contextWindow = Math.max(...windows);
+      if (state.contextUsed !== undefined) events.push(...claudeContextUsage(state, state.contextUsed));
+    }
     if (message.subtype === "success" && !message.is_error) events.push({ type: "turn-completed" });
     else if (state.authFailed) events.push(failedWith(loginMessage("claude"), { login: true }));
-    else events.push({ type: "turn-failed", message: (message.errors?.length ? message.errors.join("\n") : message.result) || "Claude could not finish this turn." });
+    else
+      events.push({
+        type: "turn-failed",
+        message: (message.errors?.length ? message.errors.join("\n") : message.result) || "Claude could not finish this turn.",
+      });
     state.authFailed = false;
+    state.compacting = null;
   }
   return events;
 }
 
+// The context gauge, once the window size is known.
+function claudeContextUsage(state, used) {
+  state.contextUsed = used;
+  return state.contextWindow ? [{ type: "context-usage", used, size: state.contextWindow }] : [];
+}
+
 // codex app-server notification -> events. Everything not listed is ignored on purpose:
-// the server also reports MCP startup, hooks, rate limits, token usage and the turn's running diff.
+// the server also reports MCP startup, hooks, rate limits and the turn's running diff.
 function mapCodexNotification(method, params, state) {
   const children = codexSubagents(method, params, state);
   if (children.length) return children;
   if (params.threadId && state.threadId && params.threadId !== state.threadId) return [];
   if (method === "turn/started") return [{ type: "turn-started", turnId: params.turn?.id ?? null }];
+  // The last request's tokens are what the context window holds now.
+  if (method === "thread/tokenUsage/updated") {
+    const used = params.tokenUsage?.last?.totalTokens;
+    const size = params.tokenUsage?.modelContextWindow;
+    return typeof used === "number" && size > 0 ? [{ type: "context-usage", used, size }] : [];
+  }
   if ((method === "item/started" || method === "item/completed") && params.item) {
     // An item from an earlier turn is not part of this reply.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
@@ -199,11 +273,14 @@ function mapCodexNotification(method, params, state) {
     const started = state.steps.delete(step.id) ? [] : [{ type: "step-started", step }];
     return [...started, { type: "step-completed", ...codexStepResult(params.item) }];
   }
-  if (method === "item/reasoning/summaryTextDelta" && params.delta && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
+  if (method === "item/reasoning/summaryTextDelta" && params.delta && state.steps?.has(String(params.itemId)))
+    return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
   // A new summary part is a new paragraph.
-  if (method === "item/reasoning/summaryPartAdded" && params.summaryIndex > 0 && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: "\n\n" }];
+  if (method === "item/reasoning/summaryPartAdded" && params.summaryIndex > 0 && state.steps?.has(String(params.itemId)))
+    return [{ type: "step-output", id: String(params.itemId), text: "\n\n" }];
   // The deltas are a preview: the first chunk can be missing, and item/completed carries the whole output.
-  if (method === "item/commandExecution/outputDelta" && params.delta && state.steps?.has(String(params.itemId))) return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
+  if (method === "item/commandExecution/outputDelta" && params.delta && state.steps?.has(String(params.itemId)))
+    return [{ type: "step-output", id: String(params.itemId), text: params.delta }];
   if (method === "item/agentMessage/delta" && params.delta) {
     // Late text from an earlier turn is not part of this reply, and must not take over turnId.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
@@ -226,7 +303,12 @@ function mapCodexNotification(method, params, state) {
     if (turn.status === "interrupted") return [{ type: "turn-cancelled" }];
     // A 401 means "log in" only where OpenAI auth is required (state.requiresOpenaiAuth, from account/read); on an
     // API key or a custom provider it is that provider's own error.
-    if (turn.status === "failed") return [codexUnauthorized(turn.error) && state.requiresOpenaiAuth === true ? failedWith(loginMessage("codex"), { login: true }) : { type: "turn-failed", message: codexErrorText(turn.error) }];
+    if (turn.status === "failed")
+      return [
+        codexUnauthorized(turn.error) && state.requiresOpenaiAuth === true
+          ? failedWith(loginMessage("codex"), { login: true })
+          : { type: "turn-failed", message: codexErrorText(turn.error) },
+      ];
     return [{ type: "turn-completed" }];
   }
   return [];
@@ -250,4 +332,18 @@ function codexReasoning(method, item, state) {
   return [...started, { type: "step-completed", ...thinkingEnd(id, startedAt === undefined ? undefined : now(state) - startedAt, summary) }];
 }
 
-module.exports = { MILAGRE_INSTRUCTIONS, milagreInstructions, RESUME_FAILED_MESSAGE, cliBrokenMessage, failedWith, cliTooOldMessage, crashMessage, isTerminal, lastLine, loginMessage, mapClaudeMessage, mapCodexNotification, missingCliMessage };
+module.exports = {
+  MILAGRE_INSTRUCTIONS,
+  milagreInstructions,
+  RESUME_FAILED_MESSAGE,
+  cliBrokenMessage,
+  failedWith,
+  cliTooOldMessage,
+  crashMessage,
+  isTerminal,
+  lastLine,
+  loginMessage,
+  mapClaudeMessage,
+  mapCodexNotification,
+  missingCliMessage,
+};

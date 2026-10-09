@@ -10,6 +10,7 @@ export function PickerPanel({
   query,
   onQueryChange,
   placeholder,
+  searchPlacement = "top",
   emptyLabel,
   isEmpty,
   header,
@@ -22,6 +23,7 @@ export function PickerPanel({
   query?: string;
   onQueryChange?: (query: string) => void;
   placeholder?: string;
+  searchPlacement?: "top" | "bottom";
   emptyLabel?: string;
   isEmpty?: boolean;
   header?: ReactNode;
@@ -37,9 +39,7 @@ export function PickerPanel({
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       event.stopPropagation();
-      const next = index < 0
-        ? (event.key === "ArrowDown" ? 0 : rows.length - 1)
-        : (index + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+      const next = index < 0 ? (event.key === "ArrowDown" ? 0 : rows.length - 1) : (index + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
       rows[next]?.focus({ preventScroll: true });
       rows[next]?.scrollIntoView({ block: "nearest" });
     } else if (!searching && (event.key === "Home" || event.key === "End")) {
@@ -57,33 +57,82 @@ export function PickerPanel({
     }
   }
 
+  const search = onQueryChange && (
+    <label className="my-2 flex shrink-0 items-center gap-2 rounded-control border border-line px-2.5 py-2 text-ink-3">
+      <HugeiconsIcon icon={Search01Icon} size={15} strokeWidth={1.8} color="currentColor" />
+      <input
+        className="w-full border-0 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3"
+        value={query}
+        onChange={(event) => onQueryChange(event.target.value)}
+        placeholder={placeholder}
+        autoFocus
+      />
+    </label>
+  );
+
   return (
-    <div onKeyDown={handleKeyDown} className={`z-20 flex flex-col rounded-[10px] border border-line bg-surface p-1.5 shadow-raised ${className}`} style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", ...style }}>
-      {title && <div className="shrink-0 px-2 pb-2 pt-1"><strong className="text-sm text-ink">{title}</strong></div>}
-      {header}
-      {onQueryChange && (
-        <label className="my-2 flex shrink-0 items-center gap-2 rounded-control border border-line px-2.5 py-2 text-ink-3">
-          <HugeiconsIcon icon={Search01Icon} size={15} strokeWidth={1.8} color="currentColor" />
-          <input className="w-full border-0 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3" value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder={placeholder} autoFocus />
-        </label>
+    <div
+      data-picker-panel
+      onKeyDown={handleKeyDown}
+      className={`z-20 flex flex-col rounded-[10px] border border-line bg-surface p-1.5 shadow-raised ${className}`}
+      style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", ...style }}
+    >
+      {title && (
+        <div className="shrink-0 px-2 pb-2 pt-1">
+          <strong className="text-sm text-ink">{title}</strong>
+        </div>
       )}
+      {header}
+      {searchPlacement === "top" && search}
       <ScrollArea className="grid max-h-64 grid-cols-1 content-start gap-0.5">
         {children}
         {isEmpty && <div className="px-2 py-5 text-center text-xs text-ink-3">{emptyLabel}</div>}
       </ScrollArea>
+      {searchPlacement === "bottom" && search}
     </div>
   );
 }
 
-export function PickerRow({ icon, label, description, selected, onClick, option = false }: { icon?: ReactNode; label: string; description?: string; selected: boolean; onClick: () => void; option?: boolean }) {
+export function PickerRow({
+  icon,
+  label,
+  description,
+  selected,
+  onClick,
+  option = false,
+  disabled = false,
+  wrapLabel = false,
+}: {
+  icon?: ReactNode;
+  label: string;
+  description?: string;
+  selected: boolean;
+  onClick: () => void;
+  option?: boolean;
+  disabled?: boolean;
+  wrapLabel?: boolean;
+}) {
   return (
-    <button type="button" data-picker-row role={option ? "option" : undefined} aria-selected={option ? selected : undefined} onClick={onClick} className={`relative z-10 flex w-full items-center gap-2 rounded-control border px-2 py-1.5 text-left transition-colors focus-visible:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 focus-visible:-outline-offset-2 ${selected ? "border-line-strong bg-hover" : "border-transparent hover:border-line hover:bg-inset"}`}>
-      {icon}
-      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-        <strong className="shrink-0 text-xs font-medium text-ink">{label}</strong>
+    <button
+      type="button"
+      disabled={disabled}
+      aria-disabled={disabled || undefined}
+      data-picker-row
+      role={option ? "option" : undefined}
+      aria-selected={option ? selected : undefined}
+      onClick={onClick}
+      className={`relative z-10 flex w-full disabled:opacity-40 disabled:cursor-default items-center gap-2 rounded-control border px-2 py-1.5 text-left transition-colors focus-visible:bg-hover focus-visible:outline-2 focus-visible:outline-ink-3 focus-visible:-outline-offset-2 ${selected ? "border-line-strong bg-hover" : "border-transparent hover:border-line hover:bg-inset"}`}
+    >
+      {icon && <span className="shrink-0">{icon}</span>}
+      <span className={`flex min-w-0 flex-1 ${wrapLabel ? "flex-col gap-1" : "items-baseline gap-1.5"}`}>
+        <strong className={`${wrapLabel ? "w-full break-all whitespace-normal font-mono leading-5" : "shrink-0"} text-xs font-medium text-ink`}>{label}</strong>
         {description && <span className="truncate text-[10px] text-ink-3">{description}</span>}
       </span>
-      {selected && <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={1.8} color="currentColor" />}
+      {selected && (
+        <span className="shrink-0">
+          <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={1.8} color="currentColor" />
+        </span>
+      )}
     </button>
   );
 }

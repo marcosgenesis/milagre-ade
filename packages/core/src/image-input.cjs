@@ -9,10 +9,14 @@ function decodeImages(images = []) {
     const bytes = Buffer.from(match[2], "base64");
     if (!bytes.length || bytes.length > MAX_IMAGE_BYTES || bytes.toString("base64") !== match[2]) throw new Error("Invalid image data.");
     const mime = match[1];
-    const valid = mime === "image/png" ? bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
-      : mime === "image/jpeg" ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
-      : mime === "image/gif" ? /^GIF8[79]a$/.test(bytes.subarray(0, 6).toString())
-      : bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP";
+    const valid =
+      mime === "image/png"
+        ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        : mime === "image/jpeg"
+          ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
+          : mime === "image/gif"
+            ? /^GIF8[79]a$/.test(bytes.subarray(0, 6).toString())
+            : bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP";
     if (!valid) throw new Error("The pasted file is not a valid supported image.");
     return { mime, bytes, base64: match[2] };
   });

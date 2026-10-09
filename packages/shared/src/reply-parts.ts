@@ -24,35 +24,62 @@ export function replyParts(body: string, steps: ChatStep[] = []): ReplyPart[] {
   return parts;
 }
 
+/** A design the agent showed, finished, which the reply shows as a card. */
+export type ArtifactStep = ChatStep & { artifact: NonNullable<ChatStep["artifact"]> };
+export const isArtifactCard = (step: ChatStep): step is ArtifactStep => step.kind === "artifact" && step.status === "done" && !!step.artifact;
+
 export type ActivityEntry = { type: "text"; text: string } | { type: "step"; step: ChatStep };
 
 /**
  * A reply as its activity and its answer. The answer is the reply's last text; the activity is
  * everything else (thinking, tool steps and the text between them) in the order it happened.
  * The worktree's setup is neither: it comes back apart, to show as a row of its own before both.
- * Generated images come back apart too, to show between the activity and the answer.
+ * Generated images come back apart too, to show between the activity and the answer, and so do the designs the agent
+ * showed, once each at the newest version this reply made (an artifact step still running, or one that failed, stays in
+ * the activity as a row).
  */
-export function replyActivity(body: string, allSteps: ChatStep[] = []): { setup: ChatStep[]; activity: ActivityEntry[]; images: ChatStep[]; answer: string } {
+export function replyActivity(
+  body: string,
+  allSteps: ChatStep[] = [],
+): { setup: ChatStep[]; activity: ActivityEntry[]; images: ChatStep[]; artifacts: ArtifactStep[]; answer: string } {
   const setup = allSteps.filter((step) => step.kind === "setup");
   const images = allSteps.filter((step) => step.kind === "image");
-  const parts = replyParts(body, allSteps.filter((step) => step.kind !== "setup" && step.kind !== "image"));
+  // One entry per design, at its newest version in this reply, where it was first shown.
+  const artifacts: ArtifactStep[] = [];
+  for (const step of allSteps.filter(isArtifactCard)) {
+    const at = artifacts.findIndex((item) => item.artifact.id === step.artifact.id);
+    if (at === -1) artifacts.push(step);
+    else if (artifacts[at]!.artifact.version < step.artifact.version) artifacts[at] = step;
+  }
+  const parts = replyParts(
+    body,
+    allSteps.filter((step) => step.kind !== "setup" && step.kind !== "image" && !isArtifactCard(step)),
+  );
   const answerIndex = parts.map((part) => part.type).lastIndexOf("text");
   const activity = parts.flatMap((part, index): ActivityEntry[] => {
     if (index === answerIndex) return [];
     return part.type === "text" ? [part] : part.steps.map((step) => ({ type: "step", step }));
   });
   const answer = answerIndex === -1 ? "" : (parts[answerIndex] as { text: string }).text;
-  return { setup, activity, images, answer };
+  return { setup, activity, images, artifacts, answer };
 }
 
 /**
- * What a reply that never wrote an answer concluded: its last thinking, when the agent kept it all
- * there. Shown under the fold so the answer isn't hidden in a step the user rarely opens.
+ * What a reply concluded without writing it: its last thinking, when no text came after it (the agent
+ * kept its findings there, then asked a question or ended the turn). Shown under the answer so it isn't
+ * hidden in a step the user rarely opens.
  */
-export function unspokenThought(activity: ActivityEntry[], answer: string): string {
-  if (answer.trim() || activity.some((entry) => entry.type === "text")) return "";
-  const thought = [...activity].reverse().find((entry) => entry.type === "step" && entry.step.kind === "thinking" && entry.step.detail?.trim());
-  return thought?.type === "step" ? thought.step.detail?.trim() ?? "" : "";
+export function unspokenThought(body: string, steps: ChatStep[] = []): string {
+  const parts = replyParts(
+    body,
+    steps.filter((step) => step.kind !== "setup" && step.kind !== "image"),
+  );
+  for (const part of [...parts].reverse()) {
+    if (part.type === "text") return "";
+    const thought = [...part.steps].reverse().find((step) => step.kind === "thinking" && step.status !== "running" && step.detail?.trim());
+    if (thought) return thought.detail?.trim() ?? "";
+  }
+  return "";
 }
 
 const count = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", String(n)));
@@ -87,5 +114,8 @@ export function activitySummary(all: ChatStep[]): { text: string; failed: number
 
 /** A step title split into plain text and code: "Ran `npm test`" → "Ran ", then the code "npm test". */
 export function titleSpans(title: string): Array<{ text: string; code: boolean }> {
-  return title.split("`").map((text, index) => ({ text, code: index % 2 === 1 })).filter((span) => span.text);
+  return title
+    .split("`")
+    .map((text, index) => ({ text, code: index % 2 === 1 }))
+    .filter((span) => span.text);
 }

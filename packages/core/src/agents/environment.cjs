@@ -43,7 +43,15 @@ function parseShellEnv(stdout, mark) {
 // Starts the login shell once. Resolves its environment as soon as the closing mark arrives, or null when
 // the shell can't be started, exits without printing it (an rc file that execs something else), or
 // outlives the timeout, in which case its whole process group is killed.
-function readLoginShellEnv({ shell, env = process.env, timeoutMs = SHELL_TIMEOUT_MS, spawnImpl = spawn, killGroup = (pid) => process.kill(-pid, "SIGKILL"), setTimeoutImpl = setTimeout, clearTimeoutImpl = clearTimeout } = {}) {
+function readLoginShellEnv({
+  shell,
+  env = process.env,
+  timeoutMs = SHELL_TIMEOUT_MS,
+  spawnImpl = spawn,
+  killGroup = (pid) => process.kill(-pid, "SIGKILL"),
+  setTimeoutImpl = setTimeout,
+  clearTimeoutImpl = clearTimeout,
+} = {}) {
   if (!shell || !SHELLS.has(path.basename(shell))) return Promise.resolve(null);
   const mark = `__MILAGRE_ENV_${randomBytes(8).toString("hex")}__`;
   return new Promise((resolve) => {
@@ -96,21 +104,37 @@ function nvmBin(home, { exists, readdir, readFile }) {
   if (!exists(root)) return null;
   let wanted = "";
   try {
-    wanted = String(readFile(path.join(home, ".nvm/alias/default"), "utf8")).trim().replace(/^v/, "");
+    wanted = String(readFile(path.join(home, ".nvm/alias/default"), "utf8"))
+      .trim()
+      .replace(/^v/, "");
   } catch {}
   const numbers = (name) => name.slice(1).split(".").map(Number);
-  const versions = readdir(root).filter((name) => /^v\d+\.\d+\.\d+$/.test(name)).sort((a, b) => {
-    const [x, y] = [numbers(a), numbers(b)];
-    return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
-  });
+  const versions = readdir(root)
+    .filter((name) => /^v\d+\.\d+\.\d+$/.test(name))
+    .sort((a, b) => {
+      const [x, y] = [numbers(a), numbers(b)];
+      return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+    });
   const match = (/^\d/.test(wanted) && versions.find((name) => name.slice(1) === wanted || name.slice(1).startsWith(`${wanted}.`))) || versions[0];
   return match ? path.join(root, match, "bin") : null;
 }
 
 // Where the CLIs and their tools usually live, for when the shell can't be read or its PATH misses one.
 // Only folders that exist.
-function installDirs(home = os.homedir(), { exists = fs.existsSync, readdir = fs.readdirSync, readFile = fs.readFileSync, platform = process.platform, env = process.env } = {}) {
-  if (platform === "win32") return [path.join(home, ".local/bin"), path.join(env.APPDATA || path.join(home, "AppData/Roaming"), "npm"), path.join(env.LOCALAPPDATA || path.join(home, "AppData/Local"), "Microsoft/WinGet/Links"), env.VOLTA_HOME && path.join(env.VOLTA_HOME, "bin"), env.NVM_SYMLINK, env.PNPM_HOME, path.join(home, ".bun/bin")].filter(dir => dir && exists(dir));
+function installDirs(
+  home = os.homedir(),
+  { exists = fs.existsSync, readdir = fs.readdirSync, readFile = fs.readFileSync, platform = process.platform, env = process.env } = {},
+) {
+  if (platform === "win32")
+    return [
+      path.join(home, ".local/bin"),
+      path.join(env.APPDATA || path.join(home, "AppData/Roaming"), "npm"),
+      path.join(env.LOCALAPPDATA || path.join(home, "AppData/Local"), "Microsoft/WinGet/Links"),
+      env.VOLTA_HOME && path.join(env.VOLTA_HOME, "bin"),
+      env.NVM_SYMLINK,
+      env.PNPM_HOME,
+      path.join(home, ".bun/bin"),
+    ].filter((dir) => dir && exists(dir));
   return [
     path.join(home, ".local/bin"), // Claude Code's native installer
     path.join(home, ".claude/local"), // Claude Code's older local npm install
@@ -150,7 +174,7 @@ function userShell() {
 // Adds the install folders that exist now to PATH, after the folders it already has. A CLI installed while
 // the app runs (its installer may create ~/.local/bin, or nvm a new node version) is found on the next check.
 function refreshInstallPath({ target = process.env, platform = process.platform, home = os.homedir(), dirs = installDirs } = {}) {
-  const name = platform === "win32" ? Object.keys(target).find(key => key.toLowerCase() === "path") || "Path" : "PATH";
+  const name = platform === "win32" ? Object.keys(target).find((key) => key.toLowerCase() === "path") || "Path" : "PATH";
   target[name] = mergePathFor(platform, target[name], dirs(home, { platform, env: target }));
 }
 
@@ -159,32 +183,44 @@ function refreshInstallPath({ target = process.env, platform = process.platform,
 // PATH becomes the shell's folders, then the app's, then the install folders. Started from a terminal
 // (npm run dev), the app's own PATH comes first, so an `nvm use`, direnv or virtualenv there still wins,
 // then the shell's, then the install folders.
-async function loadLoginEnvironment({ target = process.env, platform = process.platform, home = os.homedir(), userShell: shellInfo = userShell, shell = target.SHELL || shellInfo() || (platform === "darwin" ? "/bin/zsh" : "/bin/sh"), readShellEnv = readLoginShellEnv, dirs = installDirs } = {}) {
-  if (platform === "win32") { refreshInstallPath({ target, platform, home, dirs }); return { source: "fallback" }; }
+async function loadLoginEnvironment({
+  target = process.env,
+  platform = process.platform,
+  home = os.homedir(),
+  userShell: shellInfo = userShell,
+  shell = target.SHELL || shellInfo() || (platform === "darwin" ? "/bin/zsh" : "/bin/sh"),
+  readShellEnv = readLoginShellEnv,
+  dirs = installDirs,
+} = {}) {
+  if (platform === "win32") {
+    refreshInstallPath({ target, platform, home, dirs });
+    return { source: "fallback" };
+  }
   const imported = await readShellEnv({ shell, env: { ...target } });
   for (const [key, value] of Object.entries(imported ?? {})) {
     if (key !== "PATH" && !SHELL_ONLY.has(key) && target[key] === undefined) target[key] = value;
   }
-  target.PATH = target.PATH === LAUNCHD_PATH || !target.PATH
-    ? mergePath(imported?.PATH, target.PATH, dirs(home))
-    : mergePath(target.PATH, imported?.PATH, dirs(home));
+  target.PATH =
+    target.PATH === LAUNCHD_PATH || !target.PATH ? mergePath(imported?.PATH, target.PATH, dirs(home)) : mergePath(target.PATH, imported?.PATH, dirs(home));
   return { source: imported ? "shell" : "fallback" };
 }
 
 // Absolute path of a CLI on the app's PATH, or null when it isn't installed.
 function resolveExecutable(name, { platform = process.platform, env = process.env, execFileImpl = execFile, fsImpl = fs } = {}) {
-  if (platform === 'win32') {
+  if (platform === "win32") {
     // where.exe and cmd.exe search cwd before PATH. A Project must never supply
     // the executable used for agent discovery, turns or updates.
     if (!/^[a-z0-9_.-]+$/i.test(name)) return Promise.resolve(null);
-    const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path');
-    const extensions = (env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(ext => /^\.(exe|com|cmd|bat)$/i.test(ext));
+    const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path");
+    const extensions = (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => /^\.(exe|com|cmd|bat)$/i.test(ext));
     const hasExtension = /\.(exe|com|cmd|bat)$/i.test(name);
-    for (const directory of String(env[pathKey] || '').split(';')) {
-      if (!path.isAbsolute(directory) || directory === '.' || directory.includes('\0')) continue;
-      for (const extension of hasExtension ? [''] : extensions) {
+    for (const directory of String(env[pathKey] || "").split(";")) {
+      if (!path.isAbsolute(directory) || directory === "." || directory.includes("\0")) continue;
+      for (const extension of hasExtension ? [""] : extensions) {
         const candidate = path.join(directory, name + extension.toLowerCase());
-        try { if (fsImpl.statSync(candidate).isFile()) return Promise.resolve(candidate); } catch {}
+        try {
+          if (fsImpl.statSync(candidate).isFile()) return Promise.resolve(candidate);
+        } catch {}
       }
     }
     return Promise.resolve(null);

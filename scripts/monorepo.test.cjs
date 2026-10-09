@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
 const path = require("node:path");
 const { createRequire } = require("node:module");
 const { execFileSync } = require("node:child_process");
@@ -8,7 +9,15 @@ const root = path.resolve(__dirname, "..");
 
 test("npm discovers the desktop and shared packages from the repository root", () => {
   const workspaces = JSON.parse(execFileSync("npm", ["query", ".workspace"], { cwd: root, encoding: "utf8" }));
-  assert.deepEqual(workspaces.map(item => item.name).sort(), ["@milagre/core", "@milagre/daemon", "@milagre/mobile", "@milagre/relay", "@milagre/shared", "@milagre/site", "milagre"]);
+  assert.deepEqual(workspaces.map((item) => item.name).sort(), [
+    "@milagre/core",
+    "@milagre/daemon",
+    "@milagre/mobile",
+    "@milagre/relay",
+    "@milagre/shared",
+    "@milagre/site",
+    "milagre",
+  ]);
 });
 
 test("Electron CommonJS and renderer imports share the same chat operations", async () => {
@@ -35,4 +44,17 @@ test("electron-builder retains desktop identity, update feed, output path and re
   assert.equal(info.version, "9.8.7");
   assert.equal(path.resolve(root, packager.config.directories.output), path.join(root, "release"));
   assert.deepEqual(packager.config.publish, { provider: "github", owner: "the-ptf", repo: "milagre-ade", releaseType: "release" });
+});
+
+test("the Linux icon is a hicolor icon set with the sizes desktops look for", async () => {
+  const { Packager } = require("app-builder-lib");
+  const packager = new Packager({ projectDir: root });
+  await packager.validateConfig();
+  const directory = path.resolve(root, packager.config.linux.icon);
+  assert.ok((await fs.stat(directory)).isDirectory(), "linux.icon must be a directory of NxN.png files");
+  for (const size of [48, 128, 256, 512]) {
+    const bytes = await fs.readFile(path.join(directory, `${size}x${size}.png`));
+    assert.equal(bytes.readUInt32BE(16), size, `${size}x${size}.png width`);
+    assert.equal(bytes.readUInt32BE(20), size, `${size}x${size}.png height`);
+  }
 });

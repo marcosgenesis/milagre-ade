@@ -4,12 +4,13 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedParameters": true,
+    "noUnusedLocals": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
-  "include": [
-    "src/model.ts",
-    "src/*.d.mts"
-  ]
+  "include": ["src/model.ts", "src/*.d.mts"]
 }

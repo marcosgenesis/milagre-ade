@@ -5,7 +5,7 @@ import { parsePatch, type DiffHunk } from "../../lib/diff-parse";
 // Patches load as files scroll into view; a few at a time keeps git from competing with the agent.
 const MAX_IN_FLIGHT = 4;
 // Past this many changed lines a file waits for "Show diff" instead of loading and highlighting on scroll.
-export const LARGE_DIFF_LINES = 3000;
+const LARGE_DIFF_LINES = 3000;
 
 export type PatchState = { status: "loading" } | { status: "error"; message: string } | ({ status: "ready" } & DiffFileResult);
 
@@ -39,7 +39,9 @@ function patchKey(cwd: string, mode: DiffMode, file: DiffFileEntry) {
  * the user opened with "Show diff" stay opened until the folder or mode changes.
  */
 export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: string; mode: DiffMode; active: boolean }) {
-  const [list, setList] = useState<DiffList>({ state: "idle" });
+  const scope = JSON.stringify([cwd, base, mode]);
+  const [snapshot, setSnapshot] = useState<{ scope: string; list: DiffList }>({ scope, list: { state: "idle" } });
+  const list: DiffList = snapshot.scope === scope ? snapshot.list : { state: "idle" };
   const [, setVersion] = useState(0);
   const cache = useRef(new Map<string, PatchState>());
   const queue = useRef<(() => void)[]>([]);
@@ -60,26 +62,30 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
 
   const refresh = useCallback(async () => {
     const { cwd, base, mode } = request.current;
+    const scope = JSON.stringify([cwd, base, mode]);
     const current = ++generation.current;
-    setList((previous) => (previous.state === "ready" ? previous : { state: "loading" }));
+    setSnapshot((previous) => ({ scope, list: previous.scope === scope && previous.list.state === "ready" ? previous.list : { state: "loading" } }));
     try {
       const result = await window.milagre.git.diffFiles({ cwd, base, mode });
       if (current === generation.current) {
         dropPatches();
-        setList({ state: "ready", ...result });
+        setSnapshot({ scope, list: { state: "ready", ...result } });
       }
     } catch (error) {
-      if (current === generation.current) setList({ state: "error", message: error instanceof Error ? error.message : "Couldn't read the changes" });
+      if (current === generation.current)
+        setSnapshot({ scope, list: { state: "error", message: error instanceof Error ? error.message : "Couldn't read the changes" } });
     }
   }, [dropPatches]);
 
   useEffect(() => {
     dropPatches();
     forced.current.clear();
-    setList({ state: "idle" });
+    setSnapshot({ scope: JSON.stringify([cwd, base, mode]), list: { state: "idle" } });
     if (active && cwd) void refresh();
     // Invalidates a read still running for the old folder or mode.
-    return () => { generation.current++; };
+    return () => {
+      generation.current++;
+    };
   }, [active, cwd, base, mode, refresh, dropPatches]);
 
   const pump = useCallback(() => {
@@ -87,27 +93,34 @@ export function useDiffFiles({ cwd, base, mode, active }: { cwd: string; base?: 
   }, []);
 
   /** Starts loading a file's patch unless it is cached or already loading. `force` is "Show diff" on a large file. */
-  const load = useCallback((file: DiffFileEntry, force = false) => {
-    const { cwd, base, mode } = request.current;
-    const key = patchKey(cwd, mode, file);
-    if (force) forced.current.add(file.path);
-    if (cache.current.has(key) || file.binary || (isLarge(file) && !forced.current.has(file.path))) return;
-    const loadEpoch = epoch.current;
-    cache.current.set(key, { status: "loading" });
-    bump();
-    queue.current.push(() => {
-      inFlight.current++;
-      window.milagre.git.diffFile({ cwd, base, mode, path: file.path, oldPath: file.oldPath, untracked: file.untracked })
-        .then<PatchState, PatchState>((result) => ({ status: "ready", ...result }), (error) => ({ status: "error", message: error instanceof Error ? error.message : "Couldn't read this file" }))
-        .then((next) => {
-          if (loadEpoch === epoch.current) cache.current.set(key, next);
-          inFlight.current--;
-          bump();
-          pump();
-        });
-    });
-    pump();
-  }, [pump]);
+  const load = useCallback(
+    (file: DiffFileEntry, force = false) => {
+      const { cwd, base, mode } = request.current;
+      const key = patchKey(cwd, mode, file);
+      if (force) forced.current.add(file.path);
+      if (cache.current.has(key) || file.binary || (isLarge(file) && !forced.current.has(file.path))) return;
+      const loadEpoch = epoch.current;
+      cache.current.set(key, { status: "loading" });
+      bump();
+      queue.current.push(() => {
+        inFlight.current++;
+        window.milagre.git
+          .diffFile({ cwd, base, mode, path: file.path, oldPath: file.oldPath, untracked: file.untracked })
+          .then<PatchState, PatchState>(
+            (result) => ({ status: "ready", ...result }),
+            (error) => ({ status: "error", message: error instanceof Error ? error.message : "Couldn't read this file" }),
+          )
+          .then((next) => {
+            if (loadEpoch === epoch.current) cache.current.set(key, next);
+            inFlight.current--;
+            bump();
+            pump();
+          });
+      });
+      pump();
+    },
+    [pump],
+  );
 
   const patchFor = (file: DiffFileEntry) => cache.current.get(patchKey(cwd, mode, file));
 

@@ -3,6 +3,7 @@ const { isTerminal } = require("./events.cjs");
 const { PERMISSION_MODES, USER_DECISIONS } = require("./permissions.cjs");
 const { validAnswers } = require("./questions.cjs");
 const { capOutput } = require("./steps.cjs");
+const { recordAntigravityModels } = require("./models.cjs");
 
 const IDLE_MS = 10 * 60 * 1000;
 const BATCH_MS = 50;
@@ -32,34 +33,81 @@ class SessionManager {
   async startTurn(request) {
     const start = (entry) => {
       clearTimeout(entry.idleTimer);
-      return entry.session.startTurn({ prompt: request.prompt, images: request.images, model: request.model, permissionMode: request.permissionMode, effort: request.effort, ultracode: request.ultracode, fastMode: request.fastMode, replies: request.replies });
+      return entry.session.startTurn({
+        prompt: request.prompt,
+        images: request.images,
+        model: request.model,
+        permissionMode: request.permissionMode,
+        effort: request.effort,
+        ultracode: request.ultracode,
+        fastMode: request.fastMode,
+        replies: request.replies,
+      });
     };
     const entry = await this.serial(request.chatId, () => this.currentEntry(request));
     try {
-      return await start(entry);
+      return await this.recordModels(entry, await start(entry));
     } catch (error) {
       if (!error.sessionClosed) throw error;
       // The session closed under this message (Stop had to close it); retry once on a fresh one.
-      return start(await this.serial(request.chatId, () => this.currentEntry(request)));
+      const retry = await this.serial(request.chatId, () => this.currentEntry(request));
+      return this.recordModels(retry, await start(retry));
     }
+  }
+
+  // What an Antigravity session offers is only known once it has started; the model picker lists it for its account.
+  recordModels(entry, started) {
+    if (entry.provider === "antigravity") recordAntigravityModels(entry.accountId, entry.session.models, entry.session.currentModel);
+    return started;
   }
 
   async currentEntry(request) {
     const { chatId, provider, cwd } = request;
     const existing = this.sessions.get(chatId);
     const tldrEnabled = request.tldrEnabled !== false;
-    const sameChat = existing && existing.provider === provider && existing.cwd === cwd;
+    const accountId = request.accountId ?? "default";
+    const workspaceRoots = [...new Set(request.workspaceRoots ?? [])].sort();
+    const sameChat =
+      existing &&
+      existing.provider === provider &&
+      existing.cwd === cwd &&
+      JSON.stringify(existing.workspaceRoots) === JSON.stringify(workspaceRoots) &&
+      existing.workspaceInstructions === request.workspaceInstructions;
     // System instructions are fixed for a provider session. Resume it between turns when
     // the preference changes, preserving its native history and any running reply.
-    if (sameChat && !existing.session.closed && (existing.tldrEnabled === tldrEnabled || existing.session.turnActive)) return existing;
-    const resumeId = sameChat && !existing.session.closed ? existing.session.nativeId ?? request.resumeId : request.resumeId;
+    if (
+      sameChat &&
+      !existing.session.closed &&
+      ((existing.tldrEnabled === tldrEnabled && existing.accountId === accountId) || existing.session.turnActive || existing.activeChildren?.size)
+    )
+      return existing;
+    const resumeId = sameChat && !existing.session.closed ? (existing.session.nativeId ?? request.resumeId) : request.resumeId;
     if (existing) await this.closeEntry(chatId, existing);
-    const entry = { provider, cwd, tldrEnabled, session: null, idleTimer: null };
+    const entry = {
+      provider,
+      cwd,
+      tldrEnabled,
+      accountId,
+      command: request.command,
+      env: request.env,
+      harness: request.harness,
+      args: request.args,
+      workspaceRoots,
+      workspaceInstructions: request.workspaceInstructions,
+      session: null,
+      idleTimer: null,
+    };
     entry.session = this.createSession(provider, {
       cwd,
+      workspaceRoots: request.workspaceRoots,
+      workspaceInstructions: request.workspaceInstructions,
       resumeId,
       tldrEnabled,
       command: request.command,
+      ...(request.env ? { env: request.env } : {}),
+      // An ACP agent's companion binary and launch arguments, from its resolved install (Antigravity only).
+      ...(request.harness ? { harness: request.harness } : {}),
+      ...(request.args ? { args: request.args } : {}),
       linked: this.linkedFor(chatId),
       emit: (event) => this.forward(chatId, entry, event),
     });
@@ -154,6 +202,12 @@ class SessionManager {
 
   permissionMode(chatId) {
     return this.sessions.get(chatId)?.session.permissions?.mode ?? "ask";
+  }
+
+  activeAccount(chatId, provider) {
+    const entry = this.sessions.get(chatId);
+    if (!entry || (provider && entry.provider !== provider) || entry.session.closed || (!entry.session.turnActive && !entry.activeChildren?.size)) return null;
+    return { accountId: entry.accountId, command: entry.command, env: entry.env, harness: entry.harness, args: entry.args };
   }
 
   isTurnActive(chatId) {

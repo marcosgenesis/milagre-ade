@@ -13,12 +13,18 @@ test("merges a chain of single-child folders into one row", () => {
   assert.equal(folder.name, "packages/app/src/Calendar");
   assert.equal(folder.path, "packages/app/src/Calendar");
   assert.deepEqual([folder.added, folder.removed], [6, 4]);
-  assert.deepEqual(folder.children.map((c) => c.name), ["A.tsx", "B.tsx"]);
+  assert.deepEqual(
+    folder.children.map((c) => c.name),
+    ["A.tsx", "B.tsx"],
+  );
 });
 
 test("stops merging where a folder branches or holds a file", () => {
   const tree = buildDiffTree([f("src/a/x.ts"), f("src/b/y.ts"), f("lib/z.ts")]);
-  assert.deepEqual(tree.map((n) => n.name), ["lib", "src"]);
+  assert.deepEqual(
+    tree.map((n) => n.name),
+    ["lib", "src"],
+  );
   const src = tree[1];
   assert.equal(src.type === "folder" && src.children.map((c) => c.name).join(), "a,b");
   const mixed = buildDiffTree([f("src/only/x.ts"), f("src/top.ts")]);
@@ -27,7 +33,10 @@ test("stops merging where a folder branches or holds a file", () => {
 
 test("folders come before files, each alphabetical", () => {
   const tree = buildDiffTree([f("z.ts"), f("b/x.ts"), f("a.ts"), f("a/x.ts")]);
-  assert.deepEqual(tree.map((n) => n.name), ["a", "b", "a.ts", "z.ts"]);
+  assert.deepEqual(
+    tree.map((n) => n.name),
+    ["a", "b", "a.ts", "z.ts"],
+  );
 });
 
 test("sums counts through nested folders", () => {

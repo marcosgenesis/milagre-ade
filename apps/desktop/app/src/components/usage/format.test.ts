@@ -1,13 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProviderUsage, UsageSnapshot } from "../../model";
-import { formatResetsIn, formatUpdatedAgo, mergeSnapshot, seedSnapshot, shownPercent, usageLabel, usageTone, visibleProviders } from "./format.ts";
+import {
+  contextSummary,
+  formatResetsIn,
+  formatTokens,
+  formatUpdatedAgo,
+  mergeSnapshot,
+  seedSnapshot,
+  shownPercent,
+  usageLabel,
+  usageTone,
+  visibleProviders,
+} from "./format.ts";
 
 const NOW = Date.parse("2026-10-01T19:30:00Z");
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
+
+test("failed usage after an account switch never inherits another account's windows", () => {
+  const previous = { accountKey: "personal", providers: [claude()] };
+  const next = { accountKey: "work", providers: [claude({ status: "error", windows: [] })] };
+  assert.deepEqual(mergeSnapshot(previous, next, NOW), next);
+});
 
 function claude(overrides: Partial<ProviderUsage> = {}): ProviderUsage {
   return {
@@ -53,7 +70,9 @@ test("picks a tone from the rounded percentage", () => {
 
 test("keeps the last good numbers when a refresh fails", () => {
   const previous: UsageSnapshot = { providers: [claude({ updatedAt: at(-6 * MINUTE) })] };
-  const failed: UsageSnapshot = { providers: [claude({ status: "error", windows: [], message: "Claude is rate limiting usage checks. Try again in a minute." })] };
+  const failed: UsageSnapshot = {
+    providers: [claude({ status: "error", windows: [], message: "Claude is rate limiting usage checks. Try again in a minute." })],
+  };
 
   const merged = mergeSnapshot(previous, failed, NOW);
   assert.deepEqual(merged.providers[0].windows, previous.providers[0].windows);
@@ -79,7 +98,10 @@ test("does not invent data for a first-time error or keep data for an unavailabl
 
 test("hides unavailable providers and labels segments for screen readers", () => {
   const codexMissing: ProviderUsage = { provider: "codex", status: "unavailable", windows: [], updatedAt: at(0), message: "Codex CLI not found." };
-  assert.deepEqual(visibleProviders({ providers: [claude(), codexMissing] }).map((item) => item.provider), ["claude"]);
+  assert.deepEqual(
+    visibleProviders({ providers: [claude(), codexMissing] }).map((item) => item.provider),
+    ["claude"],
+  );
   assert.equal(usageLabel(claude()), "Claude usage: Session 73% used, Weekly 61% used");
   assert.equal(usageLabel(claude({ status: "error", windows: [] })), "Claude usage unavailable");
   assert.equal(usageLabel(claude({ status: "error", message: "Couldn't reach Claude." })), "Claude usage, last known: Session 73% used, Weekly 61% used");
@@ -91,8 +113,14 @@ test("the sidebar shows a provider only when it has numbers", () => {
   const claudeErrored = claude({ status: "error", windows: [], message: "Couldn't reach Claude." });
   const claudeLastKnown = claude({ status: "error", message: "Couldn't reach Claude." });
   const codexOk: ProviderUsage = { provider: "codex", status: "ok", windows: claude().windows, updatedAt: at(0) };
-  assert.deepEqual(visibleProviders({ providers: [claudeErrored, codexOk] }).map((item) => item.provider), ["codex"]);
-  assert.deepEqual(visibleProviders({ providers: [claudeLastKnown, codexOk] }).map((item) => item.provider), ["claude", "codex"]);
+  assert.deepEqual(
+    visibleProviders({ providers: [claudeErrored, codexOk] }).map((item) => item.provider),
+    ["codex"],
+  );
+  assert.deepEqual(
+    visibleProviders({ providers: [claudeLastKnown, codexOk] }).map((item) => item.provider),
+    ["claude", "codex"],
+  );
   assert.deepEqual(visibleProviders({ providers: [claudeErrored, codexMissing] }), []);
   assert.deepEqual(visibleProviders({ providers: [claude({ status: "ok", windows: [] }), codexMissing] }), []);
 });
@@ -100,9 +128,15 @@ test("the sidebar shows a provider only when it has numbers", () => {
 test("numbers seeded from the saved cache count as numbers for the sidebar", () => {
   const cached: UsageSnapshot = { providers: [{ provider: "claude", status: "ok", windows: claude().windows, updatedAt: at(0) }] };
   const seeded = seedSnapshot(null, cached)!;
-  assert.deepEqual(visibleProviders(seeded).map((item) => item.provider), ["claude"]);
+  assert.deepEqual(
+    visibleProviders(seeded).map((item) => item.provider),
+    ["claude"],
+  );
   // A provider with nothing saved and nothing read yet stays hidden.
-  assert.deepEqual(visibleProviders({ providers: [{ provider: "codex", status: "error", windows: [], updatedAt: at(0), message: "Couldn't read usage." }] }), []);
+  assert.deepEqual(
+    visibleProviders({ providers: [{ provider: "codex", status: "error", windows: [], updatedAt: at(0), message: "Couldn't read usage." }] }),
+    [],
+  );
 });
 
 test("shows used or remaining percent", () => {
@@ -113,9 +147,14 @@ test("shows used or remaining percent", () => {
 
 test("drops kept windows that have already reset", () => {
   const previous: UsageSnapshot = { providers: [claude({ updatedAt: at(-6 * HOUR) })] };
-  const failed: UsageSnapshot = { providers: [claude({ status: "error", windows: [], message: "Claude sign-in expired. Running any Claude agent refreshes it." })] };
+  const failed: UsageSnapshot = {
+    providers: [claude({ status: "error", windows: [], message: "Claude sign-in expired. Running any Claude agent refreshes it." })],
+  };
   const merged = mergeSnapshot(previous, failed, NOW + 2 * HOUR);
-  assert.deepEqual(merged.providers[0].windows.map((item) => item.id), ["weekly", "weekly:fable"]);
+  assert.deepEqual(
+    merged.providers[0].windows.map((item) => item.id),
+    ["weekly", "weekly:fable"],
+  );
   assert.equal(merged.providers[0].updatedAt, at(-6 * HOUR));
 });
 
@@ -125,4 +164,19 @@ test("seedSnapshot fills an empty snapshot but never overwrites a fresh read", (
   assert.equal(seedSnapshot(null, cached), cached);
   assert.equal(seedSnapshot(fresh, cached), fresh);
   assert.equal(seedSnapshot(null, { providers: [] }), null);
+});
+
+test("token counts name a million-token window 1M, not 1000k", () => {
+  assert.equal(formatTokens(1_000_000), "1M");
+  assert.equal(formatTokens(999_600), "1M");
+  assert.equal(formatTokens(1_500_000), "1.5M");
+  assert.equal(formatTokens(366_400), "366k");
+  assert.equal(formatTokens(258_400), "258k");
+  assert.equal(formatTokens(400), "400");
+  assert.deepEqual(contextSummary({ used: 366_000, size: 1_000_000 }), {
+    ratio: 0.366,
+    percent: 37,
+    tokens: "366k of 1M tokens",
+    left: "634k left",
+  });
 });

@@ -13,6 +13,16 @@ Every scrolling list or panel is a `ScrollArea` (`apps/desktop/app/src/component
 
 Every dropdown goes through `primitives/Select`; a native `<select>` opens macOS's own menu. `no-native-select.test.ts` enforces it.
 
+## Popovers and menus
+
+Every transient surface (picker, menu, anchored popover) closes through `useDismiss` (`apps/desktop/app/src/lib/use-dismiss.ts`): a pointer press anywhere outside it or the window losing focus closes it, unless focus moved into an iframe inside it (the simulator and browser viewers); Escape stays with the component, which also returns focus. Don't add a `pointerdown` or `blur` listener of your own.
+
+- Pass `inside` so the panel and its trigger count as the surface; the trigger's own click still toggles.
+- A surface anchored to a trigger passes `follow`, its positioning function, and stays put through scrolls and resizes. A surface anchored to a point (the chat row's context menu) omits it and closes instead.
+- While anything is open, `<html>` carries `data-popover-open` and the title bar's `.title-drag` strip stops dragging the window, so a press there closes the surface. Drag strips use that class, not an inline `app-region`.
+
+Modal dialogs are different: they use `<dialog>` with `showModal` or a full-window scrim, and the scrim press closes them.
+
 ## Sliders
 
 Every slider is a `RangeSlider` (`apps/desktop/app/src/components/primitives/RangeSlider.tsx`): tick dots per step, a bar handle that bounces as it lands, drag anywhere on the track or use the arrow keys, and no springs under reduced motion. Its value plumbing is `lib/use-slider.ts`; a native `<input type="range">` draws macOS's own control.
@@ -22,8 +32,8 @@ Every slider is a `RangeSlider` (`apps/desktop/app/src/components/primitives/Ran
 Three blur strengths, all theme tokens in `apps/desktop/app/src/styles.css`:
 
 - `backdrop-blur-overlay` (3px) on the scrim behind a dialog, palette or viewer. It softens the app behind without hiding it; pair it with a dark tint for contrast.
-- `backdrop-blur-chip` (8px) on a small control that sits over media, such as the copy and download buttons on a generated image.
-- `backdrop-blur-edge` (4px) where content scrolls under a window edge, faded out with a mask (`.chat-top-blur`, `.chat-bottom-blur`).
+- `backdrop-blur-chip` (8px) on a floating control, such as the chat composer or the copy and download buttons on a generated image.
+- `backdrop-blur-edge` (4px) where content scrolls under a window edge. Build it as a progressive blur, never one masked blur: a single blur under a fading mask shows a crisp copy through its half-on part. `.progressive-blur` stacks four layers at 0.25x to 2x the token; chat edges override it to 0.5px for a gentler fade. Mobile's `EdgeFade` uses a native variable blur (`ProgressiveBlurView` from `@sbaiahmed1/react-native-blur`).
 
 Don't use Tailwind's own sizes (`backdrop-blur-sm` to `-3xl`) or a hand-written `backdrop-filter: blur(...)`; a stronger blur behind a full-window scrim also costs frames while something animates over it. CSS that needs the value uses the variable, e.g. `blur(var(--blur-overlay))`. `primitives/backdrop-blur.test.ts` enforces it.
 

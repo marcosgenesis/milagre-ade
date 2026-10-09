@@ -1,8 +1,9 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { PROVIDERS } = require("@milagre/shared/providers");
 const { createGitActions } = require("./git-actions.cjs");
 const { createGitDiff } = require("./git-diff.cjs");
-const { GENERATION_FAILED, claudeModel, codexModel, generateGitText } = require("./git-text.cjs");
+const { GENERATION_FAILED, claudeModel, codexModel, generateGitText, antigravityModel } = require("./git-text.cjs");
 
 const NOT_A_CHAT_FOLDER = "This folder isn't one of the open project's chats.";
 
@@ -14,7 +15,9 @@ function chatContext(chat = {}) {
     chatTitle: text(chat.chatTitle, 500),
     firstMessage: text(chat.firstMessage),
     recentMessages: Array.isArray(chat.recentMessages) ? chat.recentMessages.slice(-10).map((message) => text(message)) : [],
-    testCommands: Array.isArray(chat.testCommands) ? chat.testCommands.slice(-20).map((item) => ({ command: text(item?.command, 500), status: item?.status === "failed" ? "failed" : "done" })) : [],
+    testCommands: Array.isArray(chat.testCommands)
+      ? chat.testCommands.slice(-20).map((item) => ({ command: text(item?.command, 500), status: item?.status === "failed" ? "failed" : "done" }))
+      : [],
   };
 }
 
@@ -26,15 +29,29 @@ function chatContext(chat = {}) {
  * folder with that environment. `cli(name)` is main's CLI check: `{ command, problem }`, the path the
  * SDK and Codex start directly, without a shell.
  */
-function registerGitHandlers(ipcMain, { cli, ready = () => undefined, clientVersion, env = process.env, actions = createGitActions({ env }), diff = createGitDiff({ env }), models, knownFolders } = {}) {
-  const command = (name) => async () => {
-    const status = await cli(name);
-    return status?.problem ? null : status?.command ?? null;
+function registerGitHandlers(
+  ipcMain,
+  {
+    cli,
+    ready = () => undefined,
+    clientVersion,
+    env = process.env,
+    actions = createGitActions({ env }),
+    diff = createGitDiff({ env }),
+    models,
+    knownFolders,
+  } = {},
+) {
+  const command = (name, cwd) => async () => {
+    const status = await cli(name, cwd);
+    return status?.problem ? null : (status ?? null);
   };
-  const textModels = models ?? {
-    claude: claudeModel({ getCommand: command("claude") }),
-    codex: codexModel({ getCommand: command("codex"), clientVersion }),
-  };
+  const textModels = (cwd) =>
+    models ?? {
+      claude: claudeModel({ getCommand: command("claude", cwd) }),
+      codex: codexModel({ getCommand: command("codex", cwd), clientVersion }),
+      antigravity: antigravityModel({ getCommand: command("antigravity", cwd), clientVersion }),
+    };
 
   async function folder(cwd) {
     if (typeof cwd !== "string" || !path.isAbsolute(cwd)) throw new Error("The chat's folder must be an absolute path.");
@@ -49,12 +66,17 @@ function registerGitHandlers(ipcMain, { cli, ready = () => undefined, clientVers
 
   ipcMain.handle("git:changes", async (_event, { cwd, base } = {}) => actions.readChanges({ cwd: await folder(cwd), base }));
   ipcMain.handle("git:diff-files", async (_event, { cwd, base, mode } = {}) => diff.listDiffFiles({ cwd: await folder(cwd), base, mode }));
-  ipcMain.handle("git:diff-file", async (_event, { cwd, base, mode, path: file, oldPath, untracked } = {}) => diff.readDiffFile({ cwd: await folder(cwd), base, mode, path: file, oldPath, untracked }));
+  ipcMain.handle("git:diff-file", async (_event, { cwd, base, mode, path: file, oldPath, untracked } = {}) =>
+    diff.readDiffFile({ cwd: await folder(cwd), base, mode, path: file, oldPath, untracked }),
+  );
   ipcMain.handle("git:generate", async (_event, { cwd, base, provider, chat } = {}) => {
     const checked = await folder(cwd);
     try {
       const context = await actions.readTextContext({ cwd: checked, base });
-      return await generateGitText({ ...chatContext(chat), ...context }, { provider: provider === "codex" ? "codex" : "claude", models: textModels });
+      return await generateGitText(
+        { ...chatContext(chat), ...context },
+        { provider: PROVIDERS.includes(provider) ? provider : "claude", models: textModels(checked) },
+      );
     } catch {
       return { ok: false, message: GENERATION_FAILED };
     }

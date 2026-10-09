@@ -1,35 +1,58 @@
-const { readToken, authenticationProof, authenticationNonce, validToken, validNonce } = require('./local-auth.cjs');
-const net = require('node:net');
-const { once, EventEmitter } = require('node:events');
-const { socketPath } = require('./paths.cjs');
-const { VERSION, MAX_PENDING, wire } = require('./protocol.cjs');
+const { readToken, authenticationProof, authenticationNonce, validToken, validNonce } = require("./local-auth.cjs");
+const net = require("node:net");
+const { once, EventEmitter } = require("node:events");
+const { socketPath } = require("./paths.cjs");
+const { VERSION, MAX_PENDING, wire } = require("./protocol.cjs");
 
 // Commands core lets run longer than the default deadline (git/client.cjs LIMITS, gh, the CLI installers), plus a
 // margin. A shorter client deadline reported a slow pre-commit hook or push as failed while it was still running.
 const SLOW_METHODS = Object.freeze({
-  'git:commit': 330000, 'git:push': 330000, 'git:open-pr': 120000, 'git:generate': 180000,
-  'worktree:create': 330000, 'worktree:remove': 330000, 'agent:update-cli': 150000,
+  "git:commit": 330000,
+  "git:push": 330000,
+  "git:open-pr": 120000,
+  "git:generate": 180000,
+  "worktree:create": 330000,
+  "worktree:remove": 330000,
+  // Installing Antigravity downloads about 110 MB and unpacks it; a slow connection takes minutes.
+  "agent:update-cli": 1200000,
 });
 const deadlineFor = (method, fallback) => Math.max(fallback, SLOW_METHODS[method] ?? 0);
 
-async function connect({ dataDir, timeoutMs = 30000, requireAuthentication = process.platform === 'win32' }) {
+async function connect({ dataDir, timeoutMs = 30000, requireAuthentication = process.platform === "win32" }) {
   const authenticationToken = requireAuthentication ? readToken(dataDir) : null;
   const socket = net.createConnection(socketPath(dataDir));
-  const connecting = once(socket, 'connect');
-  const deadline = setTimeout(() => socket.destroy(new Error('Daemon connection timed out')), timeoutMs);
-  try { await connecting; } finally { clearTimeout(deadline); }
+  const connecting = once(socket, "connect");
+  const deadline = setTimeout(() => socket.destroy(new Error("Daemon connection timed out")), timeoutMs);
+  try {
+    await connecting;
+  } finally {
+    clearTimeout(deadline);
+  }
   const client = new EventEmitter();
   const pending = new Map();
   let nextId = 0;
   function fail(error) {
-    for (const { reject, timeout } of pending.values()) { clearTimeout(timeout); reject(error); }
+    for (const { reject, timeout } of pending.values()) {
+      clearTimeout(timeout);
+      reject(error);
+    }
     pending.clear();
   }
   const connection = wire(socket, {
-    onInvalid(error) { fail(error); socket.destroy(); },
+    onInvalid(error) {
+      fail(error);
+      socket.destroy();
+    },
     onMessage(message) {
-      if (message?.v !== VERSION) { fail(new Error('Incompatible daemon protocol')); socket.destroy(); return; }
-      if (message.event) { client.emit('event', message.event); return; }
+      if (message?.v !== VERSION) {
+        fail(new Error("Incompatible daemon protocol"));
+        socket.destroy();
+        return;
+      }
+      if (message.event) {
+        client.emit("event", message.event);
+        return;
+      }
       const request = pending.get(message.id);
       if (!request) return;
       pending.delete(message.id);
@@ -41,36 +64,56 @@ async function connect({ dataDir, timeoutMs = 30000, requireAuthentication = pro
   });
   // A response too large for one frame (a big Project's state) arrives as pages, read one at a time in order.
   async function readPages({ pageId, pageCount }) {
-    if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw new Error('The daemon sent an invalid paged response');
+    if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw new Error("The daemon sent an invalid paged response");
     const parts = [];
-    for (let index = 0; index < pageCount; index++) parts.push(await client.call('daemon:result-page', [pageId, index]));
-    return JSON.parse(parts.join(''));
+    for (let index = 0; index < pageCount; index++) parts.push(await client.call("daemon:result-page", [pageId, index]));
+    return JSON.parse(parts.join(""));
   }
-  socket.on('error', fail);
-  socket.on('close', () => { fail(new Error('Daemon connection closed')); client.emit('close'); });
-  client.call = (method, args = []) => new Promise((resolve, reject) => {
-    if (socket.destroyed) { reject(new Error('Daemon connection closed')); return; }
-    if (pending.size >= MAX_PENDING) { reject(new Error('Too many pending daemon requests')); return; }
-    const id = ++nextId;
-    const timeout = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error(`Timed out: ${method}. It may still be running; do not retry a mutation without checking state.`));
-    }, deadlineFor(method, timeoutMs));
-    pending.set(id, { resolve, reject, timeout });
-    try {
-      if (!connection.send({ v: VERSION, id, method, args, pages: true })) throw new Error('Daemon connection closed');
-    } catch (error) { pending.delete(id); clearTimeout(timeout); reject(error); }
+  socket.on("error", fail);
+  socket.on("close", () => {
+    fail(new Error("Daemon connection closed"));
+    client.emit("close");
   });
+  client.call = (method, args = []) =>
+    new Promise((resolve, reject) => {
+      if (socket.destroyed) {
+        reject(new Error("Daemon connection closed"));
+        return;
+      }
+      if (pending.size >= MAX_PENDING) {
+        reject(new Error("Too many pending daemon requests"));
+        return;
+      }
+      const id = ++nextId;
+      const timeout = setTimeout(
+        () => {
+          pending.delete(id);
+          reject(new Error(`Timed out: ${method}. It may still be running; do not retry a mutation without checking state.`));
+        },
+        deadlineFor(method, timeoutMs),
+      );
+      pending.set(id, { resolve, reject, timeout });
+      try {
+        if (!connection.send({ v: VERSION, id, method, args, pages: true })) throw new Error("Daemon connection closed");
+      } catch (error) {
+        pending.delete(id);
+        clearTimeout(timeout);
+        reject(error);
+      }
+    });
   client.close = () => socket.destroy();
   if (requireAuthentication) {
     try {
       const token = authenticationToken;
       const clientNonce = authenticationNonce();
-      const challenge = await client.call('daemon:authenticate', [{ clientNonce }]);
-      if (!validNonce(challenge?.serverNonce) || !validToken(authenticationProof(token, 'server', clientNonce, challenge.serverNonce), challenge?.proof)) throw Object.assign(new Error('The local daemon could not prove its identity'), { code: 'UNAUTHORIZED' });
-      await client.call('daemon:authenticate', [{ proof: authenticationProof(token, 'client', clientNonce, challenge.serverNonce) }]);
+      const challenge = await client.call("daemon:authenticate", [{ clientNonce }]);
+      if (!validNonce(challenge?.serverNonce) || !validToken(authenticationProof(token, "server", clientNonce, challenge.serverNonce), challenge?.proof))
+        throw Object.assign(new Error("The local daemon could not prove its identity"), { code: "UNAUTHORIZED" });
+      await client.call("daemon:authenticate", [{ proof: authenticationProof(token, "client", clientNonce, challenge.serverNonce) }]);
+    } catch (error) {
+      client.close();
+      throw error;
     }
-    catch (error) { client.close(); throw error; }
   }
   return client;
 }

@@ -1,4 +1,5 @@
 const { CodexRpc } = require("./codex-rpc.cjs");
+const { ANTIGRAVITY_AGENT_OPTIONS, ANTIGRAVITY_FAMILY_COPY, antigravityFamilies } = require("@milagre/shared/antigravity-models");
 
 // The models each agent offers, asked from its CLI once per app run: Claude's supportedModels() and
 // Codex's model/list. A model is { id, name, description, recommended, efforts, defaultEffort?, ultracode, fastMode },
@@ -6,15 +7,21 @@ const { CodexRpc } = require("./codex-rpc.cjs");
 // says whether it has a faster, costlier tier: Claude Code's fast mode, or Codex's "priority" service tier.
 
 // "claude-haiku-4-5-20251001" and "claude-opus-5-5[1m]" are the picker's "claude-haiku-4-5" and "claude-opus-5-5".
-const plainId = (id) => String(id ?? "").replace(/\[.*\]$/, "").replace(/-\d{8}$/, "");
+const plainId = (id) =>
+  String(id ?? "")
+    .replace(/\[.*\]$/, "")
+    .replace(/-\d{8}$/, "");
 // Codex ends its descriptions with a period; Claude's and the picker's have none.
-const sentence = (text) => String(text ?? "").trim().replace(/\.$/, "");
+const sentence = (text) =>
+  String(text ?? "")
+    .trim()
+    .replace(/\.$/, "");
 
 // Claude reports no ultracode flag. Ultracode needs a model with the full effort range, so
 // models that offer xhigh are treated as ultracode-capable. supportsFastMode comes only on the
 // models that have it (Opus 5.5, Opus 5 and Opus 4.8 as of Claude Code 2.1.288).
 function claudeCapability(info) {
-  const efforts = info.supportsEffort ? info.supportedEffortLevels ?? [] : [];
+  const efforts = info.supportsEffort ? (info.supportedEffortLevels ?? []) : [];
   return { efforts, ultracode: efforts.includes("xhigh"), fastMode: info.supportsFastMode === true };
 }
 
@@ -37,22 +44,29 @@ const CODEX_FAST_TIER = "priority";
 
 // model/list leaves hidden models out unless asked for them; any that come anyway are dropped.
 function codexModels(entries) {
-  return entries.filter((model) => model?.id && model.hidden !== true).map((model) => ({
-    id: model.id,
-    name: model.displayName || model.id,
-    description: sentence(model.description),
-    recommended: model.isDefault === true,
-    efforts: (model.supportedReasoningEfforts ?? []).map((option) => option.reasoningEffort ?? option),
-    ...(model.defaultReasoningEffort ? { defaultEffort: model.defaultReasoningEffort } : {}),
-    ultracode: false,
-    fastMode: (model.serviceTiers ?? []).some((tier) => tier?.id === CODEX_FAST_TIER),
-  }));
+  return entries
+    .filter((model) => model?.id && model.hidden !== true)
+    .map((model) => ({
+      id: model.id,
+      name: model.displayName || model.id,
+      description: sentence(model.description),
+      recommended: model.isDefault === true,
+      efforts: (model.supportedReasoningEfforts ?? []).map((option) => option.reasoningEffort ?? option),
+      ...(model.defaultReasoningEffort ? { defaultEffort: model.defaultReasoningEffort } : {}),
+      ultracode: false,
+      fastMode: (model.serviceTiers ?? []).some((tier) => tier?.id === CODEX_FAST_TIER),
+    }));
 }
 
-async function listClaudeModels({ command, loadSdk = () => import("@anthropic-ai/claude-agent-sdk") }) {
+async function listClaudeModels({ command, env, loadSdk = () => import("@anthropic-ai/claude-agent-sdk") }) {
   const { query } = await loadSdk();
-  const idle = { async *[Symbol.asyncIterator]() { await new Promise(() => {}); } };
-  const session = query({ prompt: idle, options: { pathToClaudeCodeExecutable: command } });
+  const idle = {
+    // oxlint-disable-next-line require-yield -- async generator stub that throws or never settles on purpose to simulate a failing or idle stream
+    async *[Symbol.asyncIterator]() {
+      await new Promise(() => {});
+    },
+  };
+  const session = query({ prompt: idle, options: { pathToClaudeCodeExecutable: command, ...(env ? { env } : {}) } });
   try {
     return claudeModels(await session.supportedModels());
   } finally {
@@ -60,8 +74,8 @@ async function listClaudeModels({ command, loadSdk = () => import("@anthropic-ai
   }
 }
 
-async function listCodexModels({ command, cwd, clientVersion = "0.0.0", createRpc = (options) => new CodexRpc(options) }) {
-  const rpc = createRpc({ command, cwd });
+async function listCodexModels({ command, cwd, env, clientVersion = "0.0.0", createRpc = (options) => new CodexRpc(options) }) {
+  const rpc = createRpc({ command, cwd, ...(env ? { env } : {}) });
   rpc.start();
   try {
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null });
@@ -79,16 +93,63 @@ async function listCodexModels({ command, cwd, clientVersion = "0.0.0", createRp
   }
 }
 
+// Antigravity's models come from the agent's own session/new answer (configOptions), which only a running session
+// has. SessionManager records what each Antigravity session reports, by account; until one has, the static catalog.
+const reportedAntigravity = new Map();
+const antigravityKey = (accountId) => accountId ?? "default";
+
+/** Records the models an Antigravity session offered ([{ value, name, description }]) and its current one, for its account. */
+function recordAntigravityModels(accountId, offered, current) {
+  if (Array.isArray(offered) && offered.length) reportedAntigravity.set(antigravityKey(accountId), { offered, current: current ?? null });
+}
+
+function forgetAntigravityModels(accountId) {
+  if (accountId === undefined) reportedAntigravity.clear();
+  else reportedAntigravity.delete(antigravityKey(accountId));
+}
+
+// The agent reports one model per thinking level; they are grouped into families whose levels are the efforts
+// (antigravityFamilies). Its descriptions are only its ids, so the catalog's wording is shown per family; a model
+// without levels keeps a description of its own.
+function antigravityModels(offered, current) {
+  const valid = Array.isArray(offered) ? offered.filter((model) => typeof model?.value === "string" && model.value) : [];
+  return antigravityFamilies(valid.length ? valid : ANTIGRAVITY_AGENT_OPTIONS, current).map((family) => {
+    const copy = ANTIGRAVITY_FAMILY_COPY[family.id];
+    const own = family.efforts.length ? "" : String(family.options[0]?.description ?? "").trim();
+    return {
+      id: family.id,
+      name: family.name,
+      description: sentence(copy?.description ?? (own && own !== family.options[0]?.value ? own : "")),
+      recommended: copy?.recommended === true,
+      efforts: family.efforts,
+      ...(family.defaultEffort ? { defaultEffort: family.defaultEffort } : {}),
+      ultracode: false,
+      fastMode: false,
+    };
+  });
+}
+
+/** The Antigravity models the account's last session reported, else the catalog's. Starts no process. */
+function listAntigravityModels({ accountId } = {}) {
+  const reported = reportedAntigravity.get(antigravityKey(accountId));
+  return antigravityModels(reported?.offered, reported?.current);
+}
+
 /**
  * Asks each agent's CLI once per run. An agent whose CLI has a problem (missing, too old) or whose lookup
- * fails or comes back empty reports null, and is asked again on the next call.
+ * fails or comes back empty reports null, and is asked again on the next call. Antigravity is never asked: its
+ * list is whatever the account's last session reported, else the catalog, so it is always present.
  */
-function createModelCache({ cli, cwd, clientVersion, list = { claude: listClaudeModels, codex: listCodexModels } }) {
+function createModelCache({ cli, cwd, clientVersion, list = { claude: listClaudeModels, codex: listCodexModels, antigravity: listAntigravityModels } }) {
   const cache = new Map();
   function lookup(provider) {
     if (!cache.has(provider)) {
       const pending = cli(provider)
-        .then((status) => (status.problem || !status.command ? null : list[provider]({ command: status.command, cwd, clientVersion })))
+        .then((status) =>
+          status.problem || !status.command
+            ? null
+            : list[provider]({ command: status.command, cwd, clientVersion, ...(status.env ? { env: status.env } : {}) }),
+        )
         .catch(() => null)
         .then((models) => {
           if (models?.length) return models;
@@ -99,10 +160,32 @@ function createModelCache({ cli, cwd, clientVersion, list = { claude: listClaude
     }
     return cache.get(provider);
   }
-  return async () => {
-    const [claude, codex] = await Promise.all([lookup("claude"), lookup("codex")]);
-    return { claude, codex };
+  // Even a logged-out or missing agent lists its models; only the account (when the CLI knows it) picks the list.
+  const antigravity = async () =>
+    (list.antigravity ?? listAntigravityModels)({
+      accountId: await cli("antigravity").then(
+        (status) => status?.accountId,
+        () => undefined,
+      ),
+    });
+  const read = async () => {
+    const [claude, codex, antigravityList] = await Promise.all([lookup("claude"), lookup("codex"), antigravity()]);
+    return { claude, codex, antigravity: antigravityList };
   };
+  read.invalidate = (provider) => cache.delete(provider);
+  return read;
 }
 
-module.exports = { CODEX_FAST_TIER, claudeCapability, claudeModels, codexModels, createModelCache, listClaudeModels, listCodexModels };
+module.exports = {
+  CODEX_FAST_TIER,
+  claudeCapability,
+  claudeModels,
+  codexModels,
+  createModelCache,
+  forgetAntigravityModels,
+  antigravityModels,
+  listClaudeModels,
+  listCodexModels,
+  listAntigravityModels,
+  recordAntigravityModels,
+};

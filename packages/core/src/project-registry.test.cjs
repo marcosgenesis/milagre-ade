@@ -44,9 +44,15 @@ test("all worktrees resolve to the main checkout and the same common Git directo
   assert.deepEqual(fromLinked, fromMain);
   assert.equal(fromLinked.path, main);
   assert.equal(fromLinked.id, await fs.realpath(path.join(main, ".git")));
-  assert.deepEqual((await activeWorktrees(main)).map((entry) => entry.path), [main, linked]);
+  assert.deepEqual(
+    (await activeWorktrees(main)).map((entry) => entry.path),
+    [main, linked],
+  );
   await fs.rm(linked, { recursive: true });
-  assert.deepEqual((await activeWorktrees(main)).map((entry) => entry.path), [main]);
+  assert.deepEqual(
+    (await activeWorktrees(main)).map((entry) => entry.path),
+    [main],
+  );
 });
 
 test("the registry joins linked worktrees, keeps canvas positions and removes missing main checkouts", async (t) => {
@@ -58,9 +64,10 @@ test("the registry joins linked worktrees, keeps canvas positions and removes mi
   const identity = await resolveProject(main);
   await registry.setPosition(identity.id, { x: 120, y: 35 });
   await registry.add(identity);
-  assert.deepEqual((await registry.list()).map((entry) => ({ id: entry.id, path: entry.path, position: entry.position })), [
-    { id: identity.id, path: main, position: { x: 120, y: 35 } },
-  ]);
+  assert.deepEqual(
+    (await registry.list()).map((entry) => ({ id: entry.id, path: entry.path, position: entry.position })),
+    [{ id: identity.id, path: main, position: { x: 120, y: 35 } }],
+  );
   assert.equal(JSON.parse(await fs.readFile(file, "utf8")).scanned, true);
   await assert.rejects(registry.setPosition(identity.id, { x: Infinity, y: 0 }), /Invalid Project position/);
   await fs.rm(main, { recursive: true });
@@ -78,9 +85,15 @@ test("the first registry list scans existing coordination files once", async (t)
   const file = path.join(root, "userData", "project-registry.json");
   const roots = [path.join(root, "Developer"), path.join(root, ".milagre", "worktrees")];
   const registry = createProjectRegistry(file, { roots });
-  assert.deepEqual((await registry.list()).map((entry) => entry.path), [first.main]);
+  assert.deepEqual(
+    (await registry.list()).map((entry) => entry.path),
+    [first.main],
+  );
   await repository(root, "second");
-  assert.deepEqual((await createProjectRegistry(file, { roots }).list()).map((entry) => entry.path), [first.main]);
+  assert.deepEqual(
+    (await createProjectRegistry(file, { roots }).list()).map((entry) => entry.path),
+    [first.main],
+  );
   await registry.add(await resolveProject(path.join(root, "Developer", "second")));
   assert.equal((await registry.list()).length, 2);
 });
@@ -104,4 +117,17 @@ test("Links and Worktree positions survive restart and removed Worktrees lose th
   await reopened.pruneLinks({ ...active, [a.id]: [first.main] });
   assert.deepEqual((await reopened.snapshot()).links, []);
   assert.equal((await reopened.snapshot()).worktreePositions[a.id][first.linked], undefined);
+});
+
+test("resolveProject names a folder that is not a Git repository instead of showing Git's error", async () => {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), "milagre-not-git-"));
+  try {
+    const real = await fs.realpath(folder);
+    await assert.rejects(
+      resolveProject(real),
+      new Error(`${path.basename(real)} isn't a Git repository. Choose a folder that contains a Git project, or run git init there first.`),
+    );
+  } finally {
+    await fs.rm(folder, { recursive: true, force: true });
+  }
 });

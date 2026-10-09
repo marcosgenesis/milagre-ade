@@ -4,11 +4,27 @@ import { openInEditor, useEditors } from "../lib/editors";
 import { useNotice } from "../lib/notice";
 
 const RootContext = createContext<string | null>(null);
+const FilesRootContext = createContext<string | null>(null);
 
-/** Names the folder (the chat's worktree or project) that file links in the replies below it resolve against. */
-export function EditorLinks({ root, children }: { root: string; children: ReactNode }) {
-  return <RootContext.Provider value={root}>{children}</RootContext.Provider>;
+/**
+ * Names the folder (the chat's worktree or project) that file links in the replies below it resolve against.
+ * `root` is empty on another Mac, where no editor can open; `files` still names that Mac's folder for the file viewer.
+ */
+export function EditorLinks({ root, files = root, children }: { root: string; files?: string; children: ReactNode }) {
+  return (
+    <RootContext.Provider value={root}>
+      <FilesRootContext.Provider value={files}>{children}</FilesRootContext.Provider>
+    </RootContext.Provider>
+  );
 }
+
+/** Resolves relative file links below it against another folder, such as the folder of a markdown file on view. */
+export function FilesRoot({ root, children }: { root: string; children: ReactNode }) {
+  return <FilesRootContext.Provider value={root}>{children}</FilesRootContext.Provider>;
+}
+
+/** The folder relative file links in a reply resolve against, on the computer the chat runs on. */
+export const useFilesRoot = () => useContext(FilesRootContext);
 
 /** Opens a file of the chat's folder in the editor, or null when there is no folder or no editor to open it in. */
 export function useFileOpener(): { open: (path: string, line?: number) => void; title: string } | null {

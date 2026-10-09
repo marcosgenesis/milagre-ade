@@ -2248,7 +2248,10 @@ function App() {
                 {awayBanner && (
                   <OfflineBanner text={awayBanner} empty={Boolean(lean && selectedSession && !chatWindow.loading && chatWindow.messages.length === 0)} />
                 )}
-                <EditorLinks root={isRemoteKey(project.path) ? "" : (selectedWorktree?.path ?? project.path)}>
+                <EditorLinks
+                  root={isRemoteKey(project.path) ? "" : (selectedWorktree?.path ?? project.path)}
+                  files={selectedWorktree?.path ?? (isRemoteKey(project.path) ? "" : project.path)}
+                >
                   <DraftChatComposer
                     key={project.path}
                     store={draftStore}

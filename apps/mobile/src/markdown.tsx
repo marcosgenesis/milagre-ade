@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, Linking, Pressable, Text, View, type ImageSourcePropType, type TextStyle } from "react-native";
 import { router } from "expo-router";
 import type { Token } from "markdown-it";
+import { localFileLink } from "@milagre/shared/file-link";
 import { markdownChunks, markdownTokens, safeLink } from "./chat-presentation";
 import { PageScroll, useStyles, type Styles } from "./ui";
 import { showImages, type MediaValue, type ThumbRect } from "./viewer-store";
@@ -10,8 +11,8 @@ import { resolveMarkdownImage } from "./markdown-image";
 import { useTheme, type Palette } from "./theme";
 
 type ImageOptions = { media?: (path: string) => MediaValue; basePath?: string };
-/** What the plain render helpers need from the theme; components pass it in from their hooks. */
-type MarkdownTheme = { colors: Palette; styles: Styles };
+/** What the plain render helpers need from the theme; components pass it in from their hooks. `basePath` resolves relative file links. */
+type MarkdownTheme = { colors: Palette; styles: Styles; basePath?: string };
 
 // Chat reading size: desktop uses 13px at 1.55; a phone reads best a little larger.
 const bodyOf = (colors: Palette) => ({ color: colors.ink, fontSize: 15, lineHeight: 22 });
@@ -181,13 +182,21 @@ function inlineNodes(nodes: Node[], t: MarkdownTheme): React.ReactNode {
             : token.type === "code_inline"
               ? { fontFamily: t.styles.code.fontFamily, backgroundColor: t.colors.field, fontSize: 13.5 }
               : {};
-    const url = token.type === "link_open" ? safeLink(String(token.attrGet("href") || "")) : null;
+    const href = token.type === "link_open" ? String(token.attrGet("href") || "") : "";
+    const url = href ? safeLink(href) : null;
+    // A link to a file on the computer opens the file preview; the phone's browser can't reach it.
+    const file = href && !url ? localFileLink(href, t.basePath) : null;
+    const onPress = url
+      ? () => void Linking.openURL(url).catch(() => Alert.alert("Cannot open link", "Try opening this address in your browser."))
+      : file
+        ? () => router.push({ pathname: "/file-preview", params: { path: file.path } })
+        : undefined;
     return (
       <Text
         key={i}
-        style={[style, url ? { color: t.colors.accent, textDecorationLine: "underline" } : {}]}
-        accessibilityRole={url ? "link" : undefined}
-        onPress={url ? () => void Linking.openURL(url).catch(() => Alert.alert("Cannot open link", "Try opening this address in your browser.")) : undefined}
+        style={[style, onPress ? { color: t.colors.accent, textDecorationLine: "underline" } : {}]}
+        accessibilityRole={onPress ? "link" : undefined}
+        onPress={onPress}
       >
         {text}
       </Text>
@@ -269,7 +278,7 @@ const Chunk = memo(function Chunk({ text, streaming, media, basePath }: { text: 
   const { colors } = useTheme();
   const styles = useStyles();
   const nodes = useMemo(() => tree(markdownTokens(text, streaming)), [text, streaming]);
-  return <>{blocks(nodes, { media, basePath }, { colors, styles })}</>;
+  return <>{blocks(nodes, { media, basePath }, { colors, styles, basePath })}</>;
 });
 export const Markdown = memo(function Markdown({ text, streaming = false, media, basePath }: { text: string; streaming?: boolean } & ImageOptions) {
   const chunks = useMemo(() => markdownChunks(text), [text]);

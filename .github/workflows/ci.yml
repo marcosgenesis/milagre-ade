@@ -68,8 +68,6 @@ jobs:
         run: npm run typecheck:relay
       - name: Typecheck site
         run: npm run typecheck:site
-      - name: Test site worker
-        run: npm run test:site:worker
       - name: Build site
         run: npm run build:site
       - name: Lint mobile

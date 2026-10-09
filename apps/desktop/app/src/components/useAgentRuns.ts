@@ -79,7 +79,8 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
     .join("\n");
   const known = computers.map((computer) => computer.id).join("\n");
   const away = computers
-    .filter((computer) => computer.state !== "online")
+    // Reconnecting is a blip: its turns stay until it is offline or refused.
+    .filter((computer) => computer.state !== "online" && computer.state !== "connecting" && computer.state !== "reconnecting")
     .map((computer) => computer.id)
     .join("\n");
   useEffect(() => {

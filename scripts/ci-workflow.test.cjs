@@ -194,7 +194,10 @@ test("PR titles must be Conventional Commits", () => {
   const regex = "/^(feat|fix|perf|docs|refactor|chore|ci|test|style|build|revert)(\\([a-z0-9-]+\\))?!?: \\S/";
   const workflow = read("pr-title.yml");
   assert.deepEqual(workflow.on.pull_request.types, ["opened", "edited", "synchronize", "reopened"]);
-  const run = workflow.jobs.conventional.steps[0].run;
+  const [setup, check] = workflow.jobs.conventional.steps;
+  assert.match(setup.uses, /^actions\/setup-node@/);
+  assert.equal(setup.with["node-version"], 24);
+  const run = check.run;
   assert.ok(run.includes(regex), "workflow carries the expected regex");
   const title = new Function(`return ${regex}`)();
   assert.ok(title.test("feat!: x"));

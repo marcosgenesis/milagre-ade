@@ -3,6 +3,7 @@ const path = require("node:path");
 const { projectOfKey } = require("@milagre/shared/agent-runs");
 
 const REFUSED = "This demo computer only opens its demo project.";
+const MCP_REFUSED = "MCP servers are not shown on this demo computer.";
 const NOTIFICATIONS_OFF = "Notifications are off on the demo computer.";
 const TOO_LONG = "Messages to the demo computer are limited to 64 KB.";
 // A message body, in UTF-8 bytes.
@@ -127,6 +128,8 @@ const PATHS = Object.freeze({
   "accounts:login": none,
   "accounts:cancel": none,
   "accounts:remove": none,
+  "mcp:accounts": none,
+  "mcp:check": none,
   "usage:read": (args) => (args[0] == null ? [] : [args[0]]),
   "usage:cached": (args) => (args[0] == null ? [] : [args[0]]),
   "agent:answer-question": ([value]) => [chatProject(value?.chatId)],
@@ -196,6 +199,7 @@ function createConfinement({ allowedRoot, uploadsDir }) {
     if (method === "accounts:list") return { result: { providers: [] } };
     if (method === "accounts:scopes") return { result: [] };
     if (method.startsWith("accounts:")) throw failure(403, "Accounts cannot be changed on this demo computer.");
+    if (method.startsWith("mcp:")) throw failure(403, MCP_REFUSED);
     if (method === "push:register") throw failure(403, NOTIFICATIONS_OFF);
     if (method === "push:unregister") return { result: { registered: false } };
     if (method === "push:focus") return { result: null };
@@ -259,4 +263,4 @@ function sendRequest(request) {
   return { ...request, ...(images ? { images } : {}) };
 }
 
-module.exports = { createConfinement, PATHS, REFUSED, NOTIFICATIONS_OFF, TOO_LONG, MAX_BODY };
+module.exports = { createConfinement, PATHS, REFUSED, MCP_REFUSED, NOTIFICATIONS_OFF, TOO_LONG, MAX_BODY };

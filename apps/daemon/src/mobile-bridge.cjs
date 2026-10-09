@@ -91,6 +91,8 @@ const METHODS = new Set([
   "accounts:scope",
   "accounts:assign",
   "accounts:list",
+  "mcp:accounts",
+  "mcp:check",
   "accounts:add",
   "accounts:select",
   "accounts:login",

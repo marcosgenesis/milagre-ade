@@ -10,7 +10,7 @@ const { WebSocket } = require("ws");
 const { startDaemon } = require("./server.cjs");
 const { startMobileBridge, METHODS } = require("./mobile-bridge.cjs");
 const { connect } = require("./client.cjs");
-const { PATHS, REFUSED, NOTIFICATIONS_OFF, TOO_LONG, MAX_BODY, createConfinement } = require("./confine.cjs");
+const { PATHS, REFUSED, MCP_REFUSED, NOTIFICATIONS_OFF, TOO_LONG, MAX_BODY, createConfinement } = require("./confine.cjs");
 const { demoRuntimeOptions, DEMO_MODEL, NO_PULL_REQUESTS } = require("./demo-agent.cjs");
 
 const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from("pretend image data")]);
@@ -633,5 +633,16 @@ test("a confined phone cannot access machine-wide Live Activity targets", async 
       status: 403,
       message: REFUSED,
     });
+  }
+});
+
+test("the demo computer's phone cannot list or check MCP servers", async () => {
+  const confine = createConfinement({ allowedRoot: os.tmpdir() });
+  for (const [method, args] of [
+    ["mcp:accounts", []],
+    ["mcp:check", ["claude", "default"]],
+  ]) {
+    assert.ok(METHODS.has(method), method);
+    await assert.rejects(confine.checkCall(method, args), (error) => error.status === 403 && error.message === MCP_REFUSED);
   }
 });

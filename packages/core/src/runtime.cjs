@@ -1,4 +1,5 @@
 const { createAccountRouting } = require("./account-routing.cjs");
+const { createMcp } = require("./mcp/index.cjs");
 const { createAccounts } = require("./accounts.cjs");
 const { createLinkStore } = require("./link-store.cjs");
 const { createLinkWorkspaces } = require("./link-workspaces.cjs");
@@ -954,6 +955,11 @@ function createRuntime(options) {
       accountMutation = pending.catch(() => {});
       return pending;
     });
+  // Settings › MCP (docs/superpowers/specs/2026-10-09-mcp-settings-design.md): each account's servers and their status.
+  // Read only; the tab checks every account in parallel.
+  const mcp = createMcp({ accounts, routing, cwd: require("node:os").homedir(), clientVersion: version });
+  commands.handle("mcp:accounts", () => mcp.accounts());
+  commands.handle("mcp:check", (_event, provider, accountId) => mcp.check(String(provider), String(accountId)));
 
   // The Mac's Linear connections, one per workspace. Phones read them and the Experimental switch; only the Mac connects (mobile-bridge.cjs).
   const linear = createLinear({

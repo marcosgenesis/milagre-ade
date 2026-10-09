@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LOCAL_COMPUTER } from "@milagre/shared/chat-scopes";
 import type { AgentPort, AgentPorts } from "../model";
 import { keepComputers, replaceComputerEntries } from "./agent-runs";
@@ -20,6 +20,8 @@ export const portComputer = (port: AgentPort) => (port.computerId ? computerName
 /** Every chat's listening ports, by chat key, on this Mac and on each paired computer. */
 export function useAgentPorts() {
   const [ports, setPorts] = useState<AgentPorts>({});
+  // Per computer, how many pushed updates have landed: a getAgentPorts() answer older than one of them is stale.
+  const pushed = useRef(new Map<string, number>());
   useEffect(() => {
     // An update that arrives first is newer than the snapshot.
     let live = true;
@@ -36,6 +38,7 @@ export function useAgentPorts() {
     // A computer's ports arrive keyed by its chat keys (computer-routing.cjs); each replaces only that computer's.
     const remote = window.milagre.onComputerEvent?.((event) => {
       const next = event.channel === "agent:ports" ? event.payload : event.channel === "runtime:snapshot" ? event.payload?.ports : null;
+      if (next) pushed.current.set(event.computerId, (pushed.current.get(event.computerId) ?? 0) + 1);
       if (next) setPorts((current) => replaceComputerEntries(current, event.computerId, tagged(event.computerId, next)));
     });
     void window.milagre
@@ -62,14 +65,16 @@ export function useAgentPorts() {
   const known = computers.map((computer) => computer.id).join("\n");
   useEffect(() => {
     let live = true;
-    for (const id of online.split("\n").filter(Boolean))
+    for (const id of online.split("\n").filter(Boolean)) {
+      const asked = pushed.current.get(id) ?? 0;
       void bridgeFor(id)
         .getAgentPorts()
         .then((next) => {
           // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
-          if (live) setPorts((current) => replaceComputerEntries(current, id, tagged(id, next)));
+          if (live && (pushed.current.get(id) ?? 0) === asked) setPorts((current) => replaceComputerEntries(current, id, tagged(id, next)));
         })
         .catch(() => {});
+    }
     return () => {
       live = false;
     };

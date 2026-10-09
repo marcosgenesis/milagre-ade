@@ -11,28 +11,29 @@ const description = "Milagre runs Claude Code and Codex on your Mac, one Git Wor
   <div class="page">
     <Nav />
     <main class="hero container">
-      <h1>Your agents keep working. Answer them from anywhere.</h1>
+      <h1>Your agents keep working. <em>Answer them from anywhere.</em></h1>
+      <DownloadButtons />
       <div class="stage"><HeroDemo /></div>
-      <div class="cta"><DownloadButtons /></div>
     </main>
+    <div class="fade" aria-hidden="true"></div>
   </div>
 </Base>
 
 <style>
-  /* One screen, no scroll: the scene scales into whatever height is left. */
-  .page { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
-  .hero { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; gap: clamp(36px, 7vh, 72px); min-height: 0; padding-top: clamp(24px, 5vh, 56px); text-align: center; }
-  h1 { max-width: 24ch; font-size: clamp(30px, min(4.4vw, 5.4vh), 56px); font-weight: 700; }
-  /* The devices run past the bottom of the screen, under the download band. */
-  .stage { position: relative; flex: 1; width: 100%; min-height: 0; }
-  /* A band that blurs the devices more the lower it goes, then fades to the page, with the download on top. */
-  .cta { position: absolute; inset: auto calc(50% - 50vw) 0; display: flex; justify-content: center; padding: 140px 20px 36px; }
-  .cta::before, .cta::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
-  .cta::before { backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); mask-image: linear-gradient(to bottom, transparent, black 60%); -webkit-mask-image: linear-gradient(to bottom, transparent, black 60%); }
-  .cta::after { background: linear-gradient(to bottom, transparent, color-mix(in oklch, var(--page) 70%, transparent) 55%, var(--page)); }
-  .cta :global(.downloads) { position: relative; z-index: 1; }
+  /* One screen, no scroll. The devices rise from the bottom edge, which blurs and fades them out. */
+  .page { position: relative; display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
+  .hero { display: flex; flex: 1; flex-direction: column; align-items: center; gap: clamp(22px, 3.6vh, 36px); min-height: 0; padding-top: clamp(20px, 4.5vh, 52px); text-align: center; }
+  h1 { max-width: 22ch; font-size: clamp(32px, min(4.6vw, 5.8vh), 60px); font-weight: 600; letter-spacing: -0.035em; line-height: 1.05; }
+  /* The payoff line in an italic serif, a touch larger so it reads at the same size as the grotesk. */
+  h1 em { display: block; font-family: var(--font-serif); font-size: 1.12em; font-weight: 400; letter-spacing: -0.01em; color: oklch(0.86 0.06 255); }
+  .stage { position: relative; flex: 1; width: 100%; min-height: 0; margin-top: clamp(8px, 2.5vh, 28px); }
+  /* Blurs the devices more the lower they go, then fades them into the page. */
+  .fade { position: absolute; inset: auto 0 0; height: var(--fade, 120px); pointer-events: none; }
+  .fade::before, .fade::after { content: ""; position: absolute; inset: 0; }
+  .fade::before { backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); mask-image: linear-gradient(to bottom, transparent, black 70%); -webkit-mask-image: linear-gradient(to bottom, transparent, black 70%); }
+  .fade::after { background: linear-gradient(to bottom, transparent, color-mix(in oklch, var(--page) 75%, transparent) 60%, var(--page)); }
   @media (max-width: 700px) {
-    .hero { gap: 32px; padding-top: 20px; }
-    .cta { padding: 110px 20px 28px; }
+    .hero { gap: 20px; padding-top: 16px; }
+    .page { --fade: 90px; }
   }
 </style>

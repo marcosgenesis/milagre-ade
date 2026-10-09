@@ -27,6 +27,7 @@
   --radius-card: 10px;
   --radius-window: 14px;
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 }

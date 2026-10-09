@@ -24,11 +24,12 @@
 
   if (demo && stage && desktop && phone) {
     const narrow = matchMedia("(max-width: 700px)");
-    // The demo is a fixed-size canvas scaled to the room the page leaves it, a little short of it, so the approval
-    // cards clear the download button while the bottom of the devices runs under its blurred band.
+    // The demo is a fixed-size canvas scaled to the room under the button, sized so its top part, down to both
+    // approval cards, fits on screen; the rest runs off the bottom edge, under the page's blurred fade.
     const fit = () => {
-      const reach = 0.92;
-      const scale = Math.min(1.25, stage.clientWidth / demo.offsetWidth, (stage.clientHeight * reach) / demo.offsetHeight);
+      const fade = narrow.matches ? 90 : 120;
+      const shown = narrow.matches ? 560 : 590;
+      const scale = Math.min(1.25, stage.clientWidth / demo.offsetWidth, (innerHeight - stage.getBoundingClientRect().top - fade * 0.4) / shown);
       demo.style.setProperty("--scale", String(Math.max(scale, 0.1)));
     };
     new ResizeObserver(fit).observe(stage);

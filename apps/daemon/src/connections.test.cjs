@@ -217,3 +217,11 @@ test("a paired desktop may list folders in the daemon's home folder, and only th
     message: "Only folders in the home folder can be listed.",
   });
 });
+
+test("a paired desktop may call media:read, which refuses a file outside the scope's roots", async (t) => {
+  const daemon = await daemonFixture(t);
+  const desktop = virtualClient(daemon, { policy: peerPolicy });
+  assert.ok((await desktop.call("daemon:status")).result.methods.includes("media:read"));
+  const reply = await desktop.call("media:read", [{ scope: "/nowhere", path: "/etc/hosts.png" }]);
+  assert.equal(reply.error?.code, "NOT_SERVED");
+});

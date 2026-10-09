@@ -16,6 +16,7 @@ const { createMobilePush } = require("./mobile-push.cjs");
 const { createExpoPush } = require("./expo-push.cjs");
 const { peerPolicy } = require("./peer-policy.cjs");
 const { listDirs } = require("./remote-files.cjs");
+const { readMedia, scopeRootsVia } = require("./media-access.cjs");
 const { attentionContext } = require("@milagre/shared/attention");
 const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 
@@ -573,6 +574,12 @@ async function startDaemon({
               const paths = [...(Array.isArray(registry) ? registry : []), ...(Array.isArray(recent) ? recent : [])].map((project) => project.path);
               return Promise.all(paths.map((folder) => fs.realpath(folder).catch(() => folder)));
             },
+          });
+        else if (request.method === "media:read")
+          result = await readMedia(request.args[0], {
+            dataDir,
+            scopeRoots: scopeRootsVia({ dataDir, call: (method, args) => runtime.invoke(method, args) }),
+            chatImage: (scope, file) => runtime.invoke("project:chat-image", [scope, file]),
           });
         else if (request.method === "daemon:snapshot") {
           const whole = runtime.snapshot();

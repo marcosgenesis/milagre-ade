@@ -357,6 +357,32 @@ test("a beta is a separate prerelease built from the newest draft candidate on t
   assert.ok(!publish.includes("--latest"), "a beta never becomes the latest release");
 });
 
+test("a beta also builds Linux on the beta channel, and a failed Linux build leaves the macOS beta to ship", () => {
+  const linux = betaWorkflow.jobs["build-linux"];
+  assert.deepEqual(linux.needs, "prepare");
+  const build = linux.steps.find((step) => step.name === "Build Linux installers").run;
+  assert.match(build, /package:linux/);
+  assert.match(build, /--config\.publish\.channel=beta/);
+  assert.ok(
+    linux.steps.some((step) => /test-desktop\.cjs --packaged/.test(step.run ?? "")),
+    "the packaged app is exercised",
+  );
+  assert.match(JSON.stringify(linux.steps), /beta-linux\.yml/);
+  const publish = betaWorkflow.jobs.publish;
+  assert.deepEqual(publish.needs, ["prepare", "build", "build-linux"]);
+  assert.equal(publish.if, "always() && needs.build.result == 'success'");
+  const steps = JSON.stringify(publish.steps);
+  assert.match(steps, /needs\.build-linux\.result == 'success'/);
+  assert.match(steps, /release\/beta-linux\.yml/);
+  assert.doesNotMatch(JSON.stringify(betaWorkflow), /LINUX_REPOSITORY|packages\.milagre\.cloud/, "the package repository stays stable");
+});
+
+test("a stable Linux release mirrors its feed to beta, so Linux beta installs move to it", () => {
+  const names = publishWorkflow.jobs["package-linux"].steps.map((step) => step.name);
+  assert.ok(names.indexOf("Build Linux installers") < names.indexOf("Mirror the stable feed to the beta channel"));
+  assert.ok(names.indexOf("Mirror the stable feed to the beta channel") < names.indexOf("Sign RPM and generate signed repositories"));
+});
+
 test("macos+linux publishes macOS and Linux without Windows, signing or WinGet", () => {
   const platforms = publishWorkflow.on.workflow_dispatch.inputs.platforms;
   assert.deepEqual(platforms.options, ["macos", "macos+linux", "all"]);
@@ -378,7 +404,7 @@ test("macos+linux publishes macOS and Linux without Windows, signing or WinGet",
   assert.doesNotMatch(text, /\.exe|winget|windows/i);
   for (const asset of ["*.AppImage", "*.deb", "*.rpm", "latest-linux.yml", "milagre-linux-repository.tar.gz", "homebrew/milagre.rb", "SHA256SUMS"])
     assert.ok(text.includes(asset), asset);
-  for (const feed of ["latest-mac.yml", "beta-mac.yml", "latest-linux.yml"]) assert.ok(text.includes(feed), feed);
+  for (const feed of ["latest-mac.yml", "beta-mac.yml", "latest-linux.yml", "beta-linux.yml"]) assert.ok(text.includes(feed), feed);
   assert.match(text, /--platform macos,linux --check/);
   assert.match(text, /draft=false --latest/);
   // The macOS leg only un-drafts alone for platforms=macos.

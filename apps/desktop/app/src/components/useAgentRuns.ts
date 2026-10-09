@@ -28,8 +28,11 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
   }, []);
   // Per computer, the number of the last agent event its snapshot holds: events it already folded in are skipped.
   const taken = useRef(new Map<string, number>());
+  // Per computer, which snapshot is the latest: a getRuns() answer that lands after a newer one, or a removal, is stale.
+  const generation = useRef(new Map<string, number>());
   const take = useCallback(
     (computerId: string, snapshot: { runs: AgentRuns; seq: number }) => {
+      generation.current.set(computerId, (generation.current.get(computerId) ?? 0) + 1);
       taken.current.set(computerId, snapshot.seq);
       setAll(replaceComputerEntries(runsRef.current, computerId, snapshot.runs));
     },
@@ -76,18 +79,26 @@ export function useAgentRuns(onState: (projectPath: string, state: CoordinatorSt
     .join("\n");
   const known = computers.map((computer) => computer.id).join("\n");
   useEffect(() => {
-    for (const id of online.split("\n").filter(Boolean))
+    for (const id of online.split("\n").filter(Boolean)) {
+      const asked = generation.current.get(id) ?? 0;
       void bridgeFor(id)
         .getRuns()
-        .then((snapshot) => take(id, snapshot))
+        .then((snapshot) => {
+          if ((generation.current.get(id) ?? 0) === asked) take(id, snapshot);
+        })
         .catch(() => {});
+    }
   }, [online, take]);
   useEffect(() => {
     const ids = new Set(known.split("\n").filter(Boolean));
     let next = runsRef.current;
     for (const key of Object.keys(next)) {
       const id = computerOfKey(key);
-      if (id !== LOCAL_COMPUTER && !ids.has(id)) next = dropComputerRuns(next, id);
+      if (id !== LOCAL_COMPUTER && !ids.has(id)) {
+        next = dropComputerRuns(next, id);
+        taken.current.delete(id);
+        generation.current.set(id, (generation.current.get(id) ?? 0) + 1);
+      }
     }
     if (next !== runsRef.current) setAll(next);
   }, [known, setAll]);

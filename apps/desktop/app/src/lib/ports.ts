@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { LOCAL_COMPUTER } from "@milagre/shared/chat-scopes";
 import type { AgentPort, AgentPorts } from "../model";
-import { replaceComputerEntries } from "./agent-runs";
+import { keepComputers, replaceComputerEntries } from "./agent-runs";
+import { bridgeFor } from "./computer-bridge";
+import { useComputers } from "./computers";
 
 /** Where a port opens in the browser. A server bound only to IPv6 loopback needs its address; "localhost" covers the rest. */
 export function portUrl(port: AgentPort) {
@@ -43,5 +45,31 @@ export function useAgentPorts() {
       remote?.();
     };
   }, []);
+  // A computer that comes online is asked for its ports (its runtime's first connection sends no snapshot); one that
+  // is removed, or every one once Other computers is off, takes its ports with it.
+  const { computers } = useComputers();
+  const online = computers
+    .filter((computer) => computer.state === "online")
+    .map((computer) => computer.id)
+    .join("\n");
+  const known = computers.map((computer) => computer.id).join("\n");
+  useEffect(() => {
+    let live = true;
+    for (const id of online.split("\n").filter(Boolean))
+      void bridgeFor(id)
+        .getAgentPorts()
+        .then((next) => {
+          // oxlint-disable-next-line promise/no-callback-in-promise -- the handler receives the resolved value, not a Node-style callback
+          if (live) setPorts((current) => replaceComputerEntries(current, id, next));
+        })
+        .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [online]);
+  useEffect(() => {
+    const ids = new Set(known.split("\n").filter(Boolean));
+    setPorts((current) => keepComputers(current, ids));
+  }, [known]);
   return ports;
 }

@@ -71,6 +71,7 @@ test("a computer's events and results come back naming it", () => {
     projects: [{ id: "/p/.git", path: `${ID}|/p`, name: "p" }],
   });
   assert.deepEqual(qualifyResult(ID, "link:snapshot", { link: { id: LINK }, state: {} }), { link: { id: `${ID}|${LINK}` }, state: {} });
+  assert.deepEqual(qualifyResult(ID, "agent:ports", { "/p#2": [{ port: 3000 }] }), { [`${ID}|/p#2`]: [{ port: 3000 }] });
   assert.deepEqual(qualifyResult(ID, "chat:runs", { runs: { "/p#2": {} }, seq: 1 }), { runs: { [`${ID}|/p#2`]: {} }, seq: 1 });
   assert.deepEqual(qualifyResult(ID, "worktree:create", { project: { path: "/p", state: {} }, worktreeId: 2 }), {
     project: { path: `${ID}|/p`, state: {} },

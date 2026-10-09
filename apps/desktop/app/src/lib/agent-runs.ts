@@ -1,7 +1,7 @@
 import { subagentActive } from "./subagents.ts";
 import type { ChatMessage, CoordinatorState, ModelOption, ModelProvider, PermissionDecision } from "../model";
 import { chatInProject, sessionIdFromKey } from "@milagre/shared/agent-runs";
-import { computerOfKey } from "@milagre/shared/chat-scopes";
+import { LOCAL_COMPUTER, computerOfKey } from "@milagre/shared/chat-scopes";
 import type { AgentRun, AgentRuns, SentAnswer } from "@milagre/shared/agent-runs";
 
 export type { AgentRun, AgentRuns, SentAnswer } from "@milagre/shared/agent-runs";
@@ -85,3 +85,13 @@ export const dropComputerRuns = (runs: AgentRuns, computerId: string) => replace
 /** Whether an agent event is newer than what its computer's snapshot holds (`taken` is the snapshot's last number per computer). */
 export const eventIsNew = (taken: ReadonlyMap<string, number>, chatId: string, seq: number | undefined) =>
   seq === undefined || seq > (taken.get(computerOfKey(chatId)) ?? 0);
+
+/** `record` (keyed by chat key) without the entries of computers outside `known`; this Mac's always stay. Same object when none go. */
+export function keepComputers<T>(record: Record<string, T>, known: ReadonlySet<string>): Record<string, T> {
+  const entries = Object.entries(record);
+  const kept = entries.filter(([key]) => {
+    const id = computerOfKey(key);
+    return id === LOCAL_COMPUTER || known.has(id);
+  });
+  return kept.length === entries.length ? record : Object.fromEntries(kept);
+}

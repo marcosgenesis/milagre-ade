@@ -290,7 +290,25 @@ const checks = [
       })`,
       );
       assert.equal(meta.canonical, "https://milagre.cloud/");
-      assert.ok(meta.description.startsWith("Milagre runs Claude Code and Codex on your Mac"));
+      assert.ok(meta.description.length >= 120 && meta.description.length <= 160, `description is ${meta.description.length} characters`);
+      assert.ok(meta.description.includes("Claude Code"));
+      const extra = await evaluate(
+        window,
+        `({
+        title: document.title,
+        siteName: document.querySelector('meta[property="og:site_name"]')?.content,
+        imageAlt: document.querySelector('meta[property="og:image:alt"]')?.content,
+        schema: [...document.querySelectorAll('script[type="application/ld+json"]')].map((s) => JSON.parse(s.textContent)["@type"]),
+        summary: document.querySelector("main p")?.textContent ?? "",
+      })`,
+      );
+      assert.ok(extra.title.length >= 30 && extra.title.length <= 60, `title is ${extra.title.length} characters`);
+      assert.equal(extra.siteName, "Milagre");
+      assert.ok(extra.imageAlt.length > 20, "og:image:alt");
+      assert.deepEqual(extra.schema, ["WebSite", "Organization", "SoftwareApplication", "SoftwareSourceCode"]);
+      assert.ok(extra.summary.includes("open-source"), "a crawlable summary of what Milagre is");
+      for (const file of ["sitemap.xml", "llms.txt"]) assert.ok(fs.existsSync(path.join(dist, file)), `${file} is built`);
+      assert.match(fs.readFileSync(path.join(dist, "robots.txt"), "utf8"), /Sitemap: https:\/\/milagre\.cloud\/sitemap\.xml/);
       assert.equal(meta.image, "https://milagre.cloud/og.png");
       assert.equal(meta.card, "summary_large_image");
       assert.ok(fs.existsSync(path.join(dist, "og.png")), "og.png is built");

@@ -1,2 +1,5 @@
+# Search engines and AI search/answer engines are welcome: Milagre is free and open source.
 User-agent: *
 Allow: /
+
+Sitemap: https://milagre.cloud/sitemap.xml

@@ -45,6 +45,9 @@ window.milagre = new Proxy({
   getUpdateState: async () => ({ status: 'idle' }),
 }, { get(target, key) { return target[key] ?? (String(key).startsWith('on') ? () => () => {} : async () => null); } });
 const { default: App } = await import('/src/App');
+import { updateSettings as useLegacySidebar } from "/src/lib/settings";
+// This check drives the legacy sidebar (the project menu, pins in one list).
+useLegacySidebar({ legacySidebar: true });
 createRoot(document.getElementById('root')).render(<App />);
 `;
 const mobile = `
@@ -119,6 +122,8 @@ const stubs = {
   "./chat-actions": "export const chatMenu = () => []; export const runChatAction = async () => {};",
   "./confirm-store": "export const confirm = async () => true;",
   "./attention": "export const AttentionDot = () => null; export const useAttention = () => [];",
+  "./chat-row-store":
+    "export const useChatRowShow = () => ({ computer: true, pullRequests: true, linearIssue: true, branch: true, diff: false, lastActivity: false }); export const saveChatRowShow = () => {}; export const useActivityClock = () => Date.now();",
 };
 
 async function browserChecks() {

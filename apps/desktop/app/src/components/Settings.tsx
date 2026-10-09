@@ -417,14 +417,10 @@ function ExperimentalSettings() {
     <>
       <Group title="Beta">
         <Row
-          label="Every project in the sidebar"
-          description="Lists each project and Link with its chats, so a chat in another project opens in place. Replaces the project menu at the top of the sidebar. Choose which projects show with the checklist button at the bottom of the sidebar, or in each project's settings."
+          label="Use legacy sidebar"
+          description="Brings back the project menu at the top of the sidebar, listing only the open project's chats. Off, the sidebar lists each project and Link with its chats, and Filters chooses which projects show. With other computers paired, every project shows either way."
         >
-          <Switch
-            label="Every project in the sidebar"
-            checked={settings.sidebarAllProjects}
-            onChange={(sidebarAllProjects) => updateSettings({ sidebarAllProjects })}
-          />
+          <Switch label="Use legacy sidebar" checked={settings.legacySidebar} onChange={(legacySidebar) => updateSettings({ legacySidebar })} />
         </Row>
         <Row
           label="Murilo mode"
@@ -1454,7 +1450,7 @@ function ShowInSidebarSetting({ project }: { project: SettingsProject }) {
   }
   return (
     <div data-show-in-sidebar>
-      <Row label="Show in sidebar" description="When the sidebar shows every project, and in your phone's Projects list">
+      <Row label="Show in sidebar" description="In the sidebar, and in your phone's Projects list. Filters › Projects chooses them all at once.">
         <Switch label="Show in sidebar" checked={hidden === false} onChange={(show) => void change(show)} />
       </Row>
       {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}

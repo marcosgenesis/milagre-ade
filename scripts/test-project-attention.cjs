@@ -27,6 +27,9 @@ function Fixture() {
       offset={false} onOpen={key => { window.opened = key; setWaiting(waiting.filter(path => !key.startsWith(path + "#"))); }} />}
   </div>;
 }
+import { updateSettings as useLegacySidebar } from "/src/lib/settings";
+// This check drives the legacy sidebar (the project menu, pins in one list).
+useLegacySidebar({ legacySidebar: true });
 createRoot(document.getElementById("root")).render(<Fixture />);
 `;
 

@@ -19,6 +19,7 @@
     "src/usage.ts",
     "src/main-sync.ts",
     "src/linear.ts",
+    "src/chat-row.ts",
     "src/simulator.ts",
     "src/browser.ts",
     "src/terminal.ts",
@@ -181,7 +182,8 @@
     },
     "./agent-activity": "./src/agent-activity.ts",
     "./advisor-result": "./src/advisor-result.ts",
-    "./themes": "./src/themes/index.ts"
+    "./themes": "./src/themes/index.ts",
+    "./chat-row": "./src/chat-row.ts"
   },
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",

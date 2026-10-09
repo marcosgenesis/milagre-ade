@@ -3,7 +3,18 @@ import { issueChipLabel, LINK_PR_HINT, type LinearIssue } from "@milagre/shared/
 import { LinearLogo } from "../ProviderLogo";
 import { LinearIssuePicker } from "../LinearIssuePicker";
 import { SpinnerRing } from "../primitives/SpinnerRing";
-import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import {
+  Fragment,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -43,6 +54,37 @@ import { BLOCKERS, pullRequestBlockers, pullRequestPresentation } from "@/lib/pr
 import { ScrollArea } from "../primitives/ScrollArea";
 import { useDismiss } from "../../lib/use-dismiss";
 import { chatMarkTone } from "@milagre/shared/chats";
+import { activityAgo, DESKTOP_CHAT_ROW_SHOW, type ChatRowShow } from "@milagre/shared/chat-row";
+
+// One clock for every row's last activity, so "5m" moves on without each row keeping a timer. A read refreshes a stale
+// value, so a row mounted long after the last tick starts right.
+const TICK = 30_000;
+let minuteNow = Date.now();
+const minuteListeners = new Set<() => void>();
+let minuteTimer: number | null = null;
+function readMinute() {
+  if (Date.now() - minuteNow >= TICK) minuteNow = Date.now();
+  return minuteNow;
+}
+function subscribeMinute(listener: () => void) {
+  minuteListeners.add(listener);
+  minuteTimer ??= window.setInterval(() => {
+    minuteNow = Date.now();
+    minuteListeners.forEach((notify) => notify());
+  }, TICK);
+  return () => {
+    minuteListeners.delete(listener);
+    if (minuteListeners.size === 0 && minuteTimer !== null) {
+      window.clearInterval(minuteTimer);
+      minuteTimer = null;
+    }
+  };
+}
+const NO_MINUTE = () => () => {};
+/** Now, to the minute, while `on`; 0 otherwise, so rows that don't show the time never re-render for it. */
+function useMinute(on: boolean) {
+  return useSyncExternalStore(on ? subscribeMinute : NO_MINUTE, () => (on ? readMinute() : 0));
+}
 
 const markToneClass = { accent: "text-accent", orange: "text-orange", red: "text-red", ink3: "text-ink-3" } as const;
 
@@ -71,6 +113,8 @@ type ChatDetails = {
   failed?: boolean;
   /** Ports the chat's commands listen on. */
   ports?: AgentPort[];
+  /** When the chat last got a message or a reply ended (ChatSummary.lastAt). */
+  lastAt?: number;
 };
 
 /** The computer a row's chat lives on, shown on its second line once there are two or more computers. */
@@ -200,6 +244,7 @@ export const ChatRow = memo(function ChatRow({
   actions,
   shortcutHint,
   computer,
+  show = DESKTOP_CHAT_ROW_SHOW,
   dimOffline = false,
   dragging = false,
 }: {
@@ -210,6 +255,8 @@ export const ChatRow = memo(function ChatRow({
   actions: ChatRowActions;
   shortcutHint?: string;
   computer?: RowComputer;
+  /** What the second line shows (the Filters menu's Show). */
+  show?: ChatRowShow;
   /** Dim the row itself when its computer is offline; false inside a section that is already dimmed. */
   dimOffline?: boolean;
   /** The row is being dragged to a new place. */
@@ -218,16 +265,56 @@ export const ChatRow = memo(function ChatRow({
   const [archiving, setArchiving] = useState(false);
   const archivePending = useRef(false);
   const mark = item.mark ?? "idle";
-  const pullRequests = !collapsed ? rowPullRequests(item.details?.pullRequests ?? []) : [];
-  const linearIssue = !collapsed ? item.details?.linearIssue : undefined;
+  const pullRequests = !collapsed && show.pullRequests ? rowPullRequests(item.details?.pullRequests ?? []) : [];
+  const linearIssue = !collapsed && show.linearIssue ? item.details?.linearIssue : undefined;
   const hasPullRequests = pullRequests.length > 0;
   // The chip row shows for a Linear issue alone, too.
   const hasChips = hasPullRequests || linearIssue !== undefined;
   const shownPullRequests = pullRequests.slice(0, ROW_PR_LIMIT);
   const hiddenPullRequests = pullRequests.length - shownPullRequests.length;
-  const twoLines = hasChips || item.worktreeCount !== undefined || Boolean(computer);
-  // This Mac alone keeps the single-Project placement; the computer line is what changes it.
-  const prLines = hasChips || Boolean(computer);
+  const rowComputer = show.computer ? computer : undefined;
+  const branch = show.branch ? item.details?.branch : undefined;
+  const diff = show.diff && item.details?.diff && (item.details.diff.added > 0 || item.details.diff.removed > 0) ? item.details.diff : undefined;
+  const lastAt = show.lastActivity ? item.details?.lastAt : undefined;
+  const now = useMinute(lastAt !== undefined);
+  // Each shown fact, in order, joined by dots; the chips follow.
+  const facts: ReactNode[] = [];
+  if (rowComputer)
+    facts.push(
+      <span key="computer" data-chat-computer className="flex min-w-0 shrink items-center gap-1 truncate">
+        <HugeiconsIcon icon={LaptopIcon} size={12} strokeWidth={2} color="currentColor" className="shrink-0" />
+        {rowComputer.offline ? `${rowComputer.name}, offline` : rowComputer.name}
+      </span>,
+    );
+  const factLine = facts.length > 0 || Boolean(branch || diff || lastAt !== undefined) || hasChips;
+  if (item.worktreeCount !== undefined && factLine)
+    facts.push(
+      <span key="worktrees" className="shrink-0">
+        {item.worktreeCount} Worktrees
+      </span>,
+    );
+  if (branch)
+    facts.push(
+      <span key="branch" data-chat-branch className="flex min-w-0 shrink items-center gap-1 truncate">
+        <HugeiconsIcon icon={GitBranchIcon} size={12} strokeWidth={2} color="currentColor" className="shrink-0" />
+        <span className="truncate">{branch}</span>
+      </span>,
+    );
+  if (diff)
+    facts.push(
+      <span key="diff" data-chat-diff className="shrink-0 font-mono text-[11px] tabular-nums">
+        <span className="text-green">+{formatLineCount(diff.added)}</span> <span className="text-red">−{formatLineCount(diff.removed)}</span>
+      </span>,
+    );
+  if (lastAt !== undefined)
+    facts.push(
+      <span key="ago" data-chat-ago title={new Date(lastAt).toLocaleString()} className="shrink-0 tabular-nums">
+        {activityAgo(lastAt, now)}
+      </span>,
+    );
+  const twoLines = factLine || item.worktreeCount !== undefined;
+  // A Link chat alone keeps its Worktrees under the title; any second-line fact moves it there.
+  const prLines = factLine;
   const rowRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -329,28 +416,29 @@ export const ChatRow = memo(function ChatRow({
               }`}
             >
               <ChatTitle label={item.label} />
-              {item.worktreeCount !== undefined && !computer && (
+              {item.worktreeCount !== undefined && !factLine && (
                 <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>
               )}
             </span>
           </button>
         )}
 
-        {(hasChips || computer) && !renaming && (
+        {factLine && !renaming && (
           <div
             data-chat-prs
             className={`sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2 ${archiving ? "opacity-30" : ""}`}
           >
-            {computer && (
-              <span data-chat-computer className="flex min-w-0 shrink items-center gap-1 truncate text-[12px] leading-4 text-ink-3">
-                <HugeiconsIcon icon={LaptopIcon} size={12} strokeWidth={2} color="currentColor" className="shrink-0" />
-                {computer.offline ? `${computer.name}, offline` : computer.name}
-              </span>
-            )}
-            {computer && item.worktreeCount !== undefined && (
-              <span className="shrink-0 text-[12px] leading-4 text-ink-3">· {item.worktreeCount} Worktrees</span>
-            )}
-            {computer && hasChips && (
+            {facts.map((fact, index) => (
+              <Fragment key={(fact as { key: string | null }).key}>
+                {index > 0 && (
+                  <span aria-hidden className="text-[12px] leading-4 text-ink-3 opacity-60">
+                    ·
+                  </span>
+                )}
+                <span className="flex min-w-0 shrink items-center text-[12px] leading-4 text-ink-3">{fact}</span>
+              </Fragment>
+            ))}
+            {facts.length > 0 && hasChips && (
               <span aria-hidden className="text-[12px] leading-4 text-ink-3 opacity-60">
                 ·
               </span>

@@ -1269,6 +1269,12 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "./use-chat-pull-requests": { useChatPullRequests: () => ({}) },
     "./use-linear": { useLinear: () => ({ active: false }) },
     "./use-worktree-linear-issues": { useWorktreeLinearIssues: () => ({}) },
+    "@milagre/shared/chat-row": require("../packages/shared/src/chat-row.ts"),
+    "./chat-row-store": {
+      useChatRowShow: () => require("../packages/shared/src/chat-row.ts").PHONE_CHAT_ROW_SHOW,
+      saveChatRowShow: () => {},
+      useActivityClock: () => Date.now(),
+    },
     "./chat-pull-request-chips": { ChatPullRequestChips },
     "./icons": { Icon: "Icon", SpinnerRing: "SpinnerRing" },
     "./loading-logo": { LoadingLogo: "LoadingLogo" },
@@ -1561,7 +1567,13 @@ test("the sidebar filter shows archived, running or waiting Chats across Project
   assert.equal(ids(), "[3]");
   nav.filter().props.onSelect("archived");
   assert.equal(ids(), "[4]");
-  assert.equal(nav.filter().props.sections[0].items.find((item) => item.id === "archived").checked, true);
+  assert.equal(
+    nav
+      .filter()
+      .props.sections.flatMap((section) => section.items)
+      .find((item) => item.id === "archived").checked,
+    true,
+  );
   nav.filter().props.onSelect("running");
   assert.equal(ids(), "[]", "chatMark is idle in this host, so nothing is running");
 });

@@ -197,6 +197,19 @@ test("a relay host sends its calls through the relay transport and reads the JSO
   assert.deepEqual(relay.opened[0], { relay: relayHost.relay, token: relayHost.token });
 });
 
+test("a Mac refusing a relayed call because its queue is full reads as busy", async () => {
+  const relay = fakeRelay(() => reply({ v: 1, error: { message: "Too many requests" } }, 429));
+  const client = createClient(
+    relayHost,
+    async () => {
+      throw new Error("a relay host never fetches");
+    },
+    30000,
+    relay.runtime,
+  );
+  await assert.rejects(client.call("daemon:status"), { message: "Your computer is busy right now. Try again in a moment." });
+});
+
 test("a relay snapshot answered with 304 reuses the cached one", async () => {
   let calls = 0;
   const relay = fakeRelay(() =>

@@ -133,6 +133,10 @@ async function main() {
       evaluate(
         `(() => {const input = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', {bubbles:true})); })()`,
       );
+    // This check drives the legacy sidebar's project menu.
+    await evaluate(
+      `localStorage.setItem("milagre-settings", JSON.stringify({ ...JSON.parse(localStorage.getItem("milagre-settings") ?? "{}"), legacySidebar: true })); location.reload(); true`,
+    );
     const selector = () => evaluate(`document.querySelector('[data-workspace-trigger]').click()`);
     await waitFor(() => evaluate(`!!document.querySelector('[data-workspace-trigger]') && !document.querySelector('.startup-splash-screen')`), "desktop ready");
     await selector();

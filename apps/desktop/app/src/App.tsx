@@ -96,7 +96,7 @@ import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
 import { startOfflineCache } from "./lib/offline-cache";
-import { isDimmed, isReadOnly, offlineBanner, useApplyOtherComputers, useComputers } from "./lib/computers";
+import { isDimmed, isReadOnly, offlineBanner, useApplyOtherComputers, useComputers, withComputer } from "./lib/computers";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
@@ -1034,9 +1034,12 @@ function App() {
               .notifyCompletion({
                 chatId,
                 title: link.link.name,
-                subtitle: chatTitle(
-                  session,
-                  latest.messages.filter((message) => message.session_id === session.id),
+                subtitle: withComputer(
+                  chatId,
+                  chatTitle(
+                    session,
+                    latest.messages.filter((message) => message.session_id === session.id),
+                  ),
                 ),
               })
               .catch(() => {});
@@ -1052,9 +1055,12 @@ function App() {
             .notifyCompletion({
               chatId,
               title: current.name,
-              subtitle: chatTitle(
-                session,
-                latest.messages.filter((message) => message.session_id === session.id),
+              subtitle: withComputer(
+                chatId,
+                chatTitle(
+                  session,
+                  latest.messages.filter((message) => message.session_id === session.id),
+                ),
               ),
             })
             .catch(() => {});

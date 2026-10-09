@@ -6,7 +6,8 @@ import type { ComputerView } from "../electron.d.ts";
   localStorage: { getItem: () => null, setItem() {} },
   matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
 };
-const { computerTone, routeLine, seenAgo, settingsTooltip, offlineBanner, offlinePlaceholder, isDimmed, isReadOnly } = await import("./computers.ts");
+const { computerTone, routeLine, seenAgo, settingsTooltip, offlineBanner, offlinePlaceholder, isDimmed, isReadOnly, withComputer } =
+  await import("./computers.ts");
 
 const NOW = Date.parse("2026-10-09T12:00:00Z");
 const view = (patch: Partial<ComputerView> = {}): ComputerView => ({
@@ -72,4 +73,9 @@ test("the gear's tooltip, the banner and the composer say the spec's words", () 
     "studio is offline. This is the last copy it sent. You can read it until studio is back.",
   );
   assert.equal(offlinePlaceholder("studio"), " (studio is offline)");
+});
+
+test("a remote chat's completion notice names its computer; this Mac's is unchanged", () => {
+  assert.equal(withComputer("/p#2", "Fix login"), "Fix login");
+  assert.equal(withComputer("c9|/p#2", "Fix login"), "Computer · Fix login", "a computer the list doesn't know yet");
 });

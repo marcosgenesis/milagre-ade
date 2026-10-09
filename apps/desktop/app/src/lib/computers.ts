@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { ComputersSnapshot, ComputerView } from "../electron.d.ts";
+import { LOCAL_COMPUTER, computerOfKey } from "@milagre/shared/chat-scopes";
 import { useSettings } from "./settings.ts";
 
 /**
@@ -114,4 +115,12 @@ export function useComputers(): ComputersSnapshot {
   const { otherComputers } = useSettings();
   const current = useSyncExternalStore(subscribe, () => snapshot);
   return otherComputers ? current : current === snapshot ? off : { thisMac: current.thisMac, computers: [] };
+}
+
+/** A completion notice's subtitle: a remote chat's computer first, as main labels its waiting notices. */
+export function withComputer(key: string, subtitle: string): string {
+  const id = computerOfKey(key);
+  if (id === LOCAL_COMPUTER) return subtitle;
+  const name = snapshot.computers.find((computer) => computer.id === id)?.name ?? "Computer";
+  return subtitle ? `${name} · ${subtitle}` : name;
 }

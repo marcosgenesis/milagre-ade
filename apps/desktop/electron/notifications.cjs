@@ -13,6 +13,12 @@ const keyOf = (chatId, requestId) => `${chatId}\n${requestId}`;
 // System notifications for chats that wait on the user: an approval or a question. Every agent event
 // is observed, so the notifier knows which requests are still open, and notify names the chat. One shows only while no Milagre window has focus, once per
 // request, and closes when its request is answered or its turn ends. Clicking it opens the chat.
+/** A remote chat's subtitle, its computer first (spec "Routing": notifications labeled with the computer). */
+function labelFor(subtitle, computerName) {
+  if (!computerName) return subtitle;
+  return subtitle ? `${computerName} · ${subtitle}` : computerName;
+}
+
 class AttentionNotifier {
   /** @param {{ createNotification: (notice: {title: string; subtitle: string; body: string}) => Electron.Notification; isAppFocused: () => boolean; openChat: (chatId: string) => void; openPhoneSettings?: () => void; setBadge?: (badge: string) => void }} options */
   constructor({ createNotification, isAppFocused, openChat, openPhoneSettings = () => {}, setBadge = () => {} }) {
@@ -189,4 +195,4 @@ class AttentionNotifier {
   }
 }
 
-module.exports = { AttentionNotifier };
+module.exports = { AttentionNotifier, labelFor };

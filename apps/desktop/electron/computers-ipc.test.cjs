@@ -182,3 +182,18 @@ test("a damaged cache file is deleted so it rebuilds, warns once, and never fail
   await call("computers:invoke", ID, "project:recent", []);
   assert.deepEqual(cache.get(ID, "recent", ""), [{ path: "/p", name: "p" }], "it rebuilds");
 });
+
+test("a computer's events reach main's own listener already naming it", () => {
+  const ID = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+  const heard = [];
+  const handlers = new Map();
+  const ipc = registerComputers({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    computers: { loaded: Promise.resolve(), list: () => [] },
+    thisMac: () => "victor-mbp",
+    send: () => {},
+    onRemoteEvent: (...event) => heard.push(event),
+  });
+  ipc.event(ID, "notification:waiting", { chatId: "/p#2", requestId: "q", title: "t", subtitle: "Fix login" });
+  assert.deepEqual(heard, [[ID, "notification:waiting", { chatId: `${ID}|/p#2`, requestId: "q", title: "t", subtitle: "Fix login" }]]);
+});

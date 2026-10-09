@@ -43,9 +43,10 @@ function readOffline(cache, id, method, args) {
  *   thisMac: () => string;
  *   cache?: any;
  *   send: (channel: string, payload: unknown) => void;
+ *   onRemoteEvent?: (computerId: string, channel: string, payload: any) => void;
  * }} options
  */
-function registerComputers({ ipcMain, computers, thisMac, send, cache = null }) {
+function registerComputers({ ipcMain, computers, thisMac, send, cache = null, onRemoteEvent = () => {} }) {
   // A cache that fails never fails a call, but it says so once per computer and kind of error.
   const warned = new Set();
   const warn = (computerId, error) => {
@@ -155,7 +156,15 @@ function registerComputers({ ipcMain, computers, thisMac, send, cache = null }) 
   return {
     changed: () => send("computers:changed", snapshot()),
     /** @param {string} computerId @param {string} channel @param {unknown} payload */
-    event: (computerId, channel, payload) => send("computers:event", { computerId, channel, payload: qualifyEvent(computerId, channel, payload) }),
+    event: (computerId, channel, payload) => {
+      const named = qualifyEvent(computerId, channel, payload);
+      try {
+        onRemoteEvent(computerId, channel, named);
+      } catch {
+        /* a listener must not stop the window hearing it */
+      }
+      send("computers:event", { computerId, channel, payload: named });
+    },
   };
 }
 

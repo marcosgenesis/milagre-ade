@@ -376,7 +376,16 @@ function TerminalView({
   const { colors, scheme } = useTheme();
   const styles = useStyles();
   const theme = useMemo<TerminalTheme>(() => {
-    return { scheme, background: colors.page, ink: colors.ink, ink3: colors.ink3, accent: colors.accent };
+    return {
+      scheme,
+      background: colors.page,
+      ink: colors.ink,
+      ink3: colors.ink3,
+      accent: colors.accent,
+      ansi: [...colors.ansi],
+      cursor: colors.cursor,
+      selection: colors.selection,
+    };
   }, [colors, scheme]);
   const latestTheme = useRef(theme);
   const view = useRef<DomWebViewRef>(null);

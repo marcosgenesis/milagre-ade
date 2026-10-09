@@ -5,6 +5,7 @@ import { BubbleChatIcon, GitPullRequestIcon, ShieldAlertIcon, Alert02Icon } from
 import type { PullRequest, Subagent, Worktree } from "@milagre/shared/model";
 import { BLOCKERS, pullRequestBlockers } from "@milagre/shared/pr-blockers";
 import { chatMarkTone } from "@milagre/shared/chats";
+import { withAlpha } from "@milagre/shared/themes";
 import { agentCounts, MARK_LABEL, type ChatMark } from "./indicators";
 import { useSession } from "./session";
 import { readPullRequest } from "./pr-status";
@@ -94,7 +95,7 @@ export function PullRequestAction({ pr, onRun, disabled }: { pr: PullRequest; on
         alignItems: "center",
         gap: 6,
         borderWidth: 1,
-        borderColor: red ? "#e3474c33" : "#ef720d33",
+        borderColor: withAlpha(red ? colors.red : colors.orange, 0.2),
         backgroundColor: red ? colors.redTint : colors.orangeTint,
         opacity: disabled ? 0.5 : pressed ? 0.7 : 1,
       })}

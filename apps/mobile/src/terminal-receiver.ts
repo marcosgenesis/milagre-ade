@@ -1,7 +1,16 @@
-import { XTERM_CSS, XTERM_FIT_JS, XTERM_JS } from "./xterm-bundle.gen";
+import { XTERM_CSS, XTERM_FIT_JS, XTERM_JS } from "./xterm-bundle.gen.ts";
 
-/** The colors the phone's Terminal draws with; `scheme` picks the ANSI palette. */
-export type TerminalTheme = { scheme: "light" | "dark"; background: string; ink: string; ink3: string; accent: string };
+/** The colors the phone's Terminal draws with: the theme's 16 ANSI colors, cursor and selection. */
+export type TerminalTheme = {
+  scheme: "light" | "dark";
+  background: string;
+  ink: string;
+  ink3: string;
+  accent: string;
+  ansi: string[];
+  cursor: string;
+  selection: string;
+};
 
 /**
  * What the WebView tells React Native: it is ready at a size, the user typed (`input`), the screen's size changed, or a
@@ -15,49 +24,11 @@ export type TerminalViewMessage =
   /** xterm has parsed the output sent with this id. */
   | { channel: "milagre-terminal"; event: "wrote"; id: number };
 
-const ANSI = {
-  light: [
-    "#24292f",
-    "#cf222e",
-    "#116329",
-    "#7d4e00",
-    "#0969da",
-    "#8250df",
-    "#1b7c83",
-    "#6e7781",
-    "#57606a",
-    "#a40e26",
-    "#1a7f37",
-    "#633c01",
-    "#218bff",
-    "#a475f9",
-    "#3192aa",
-    "#8c959f",
-  ],
-  dark: [
-    "#484f58",
-    "#ff7b72",
-    "#3fb950",
-    "#d29922",
-    "#58a6ff",
-    "#bc8cff",
-    "#39c5cf",
-    "#b1bac4",
-    "#6e7681",
-    "#ffa198",
-    "#56d364",
-    "#e3b341",
-    "#79c0ff",
-    "#d2a8ff",
-    "#56d4dd",
-    "#ffffff",
-  ],
-};
 const NAMES = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
 
 /** xterm's theme for the phone, the same palette desktop's panel uses. */
-export function xtermTheme(theme: TerminalTheme) {
-  const colors = ANSI[theme.scheme];
+export function xtermTheme(theme: TerminalTheme): Record<string, string> {
+  const colors = theme.ansi;
   const named: Record<string, string> = {};
   NAMES.forEach((name, index) => {
     named[name] = colors[index];
@@ -67,9 +38,9 @@ export function xtermTheme(theme: TerminalTheme) {
     ...named,
     background: theme.background,
     foreground: theme.ink,
-    cursor: theme.ink,
+    cursor: theme.cursor,
     cursorAccent: theme.background,
-    selectionBackground: `${theme.accent}55`,
+    selectionBackground: theme.selection,
   };
 }
 

@@ -23,7 +23,7 @@ function applyMode(mode: PhoneThemeSettings["mode"]) {
 }
 void initThemeStore({ read: readThemeSettings, save: saveThemeSettings }).then(() => applyMode(getThemeSettings().mode));
 
-function extend(p: ThemePalette): Palette {
+function extend(p: ThemePalette, scheme: "light" | "dark"): Palette {
   return {
     ...p,
     bg: p.page,
@@ -33,7 +33,7 @@ function extend(p: ThemePalette): Palette {
     error: p.red,
     onInk: p.onAccent,
     idleDot: withAlpha(p.ink3, 0.4),
-    backdrop: "#00000033",
+    backdrop: scheme === "dark" ? "#00000066" : "#00000033",
   };
 }
 
@@ -49,7 +49,7 @@ function paletteFor(settings: PhoneThemeSettings, scheme: "light" | "dark"): Pal
   let palette = paletteCache.get(key);
   if (!palette) {
     if (paletteCache.size > 24) paletteCache.clear();
-    palette = extend(resolvePalette(settings.colorTheme, scheme, settings.customTheme));
+    palette = extend(resolvePalette(settings.colorTheme, scheme, settings.customTheme), scheme);
     paletteCache.set(key, palette);
   }
   return palette;

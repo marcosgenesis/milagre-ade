@@ -89,6 +89,15 @@ function hookHost({ effects = false } = {}) {
     },
   };
 }
+// Every palette key reads back as its own name, so a test can tell which color a component picked.
+const fakePalette = new Proxy({}, { get: (_target, key) => (typeof key === "string" ? key : undefined) });
+const fakeStyles = new Proxy({}, { get: () => ({}) });
+const themeHooks = {
+  useTheme: () => ({ colors: fakePalette, scheme: "light", settings: {}, set() {} }),
+  createStylesHook: (make) => () => make(fakePalette),
+  fonts: { mono: "mono" },
+};
+const uiHooks = { useStyles: () => fakeStyles, makeStyles: () => fakeStyles };
 function load(file, modules, extra = "") {
   const source = fs.readFileSync(path.join(__dirname, "..", "apps/mobile/src", file), "utf8") + extra;
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
@@ -98,6 +107,12 @@ function load(file, modules, extra = "") {
     require: (id) => {
       // Image assets are opaque sources; any value stands in.
       if (id.endsWith(".png") && !(id in modules)) return { uri: id };
+      const base = id.replace(/^\.\.?\//, "");
+      if (base === "theme" || base === "ui") {
+        // Themed code reads colors through hooks; a test's own fake wins over these defaults.
+        const own = modules[id] ?? {};
+        return { ...(base === "theme" ? themeHooks : uiHooks), ...own };
+      }
       assert.ok(id in modules, `Unexpected import: ${id}`);
       return modules[id];
     },
@@ -114,6 +129,7 @@ function load(file, modules, extra = "") {
   return exports;
 }
 const jsx = (type, props, key) => ({ type, props, key });
+const { resolvePalette } = require("../packages/shared/src/themes/index.ts");
 const archiveStore = require("../apps/mobile/src/archive.ts");
 const archiveProgress = load("archive-progress.tsx", {
   react: { useSyncExternalStore: (_subscribe, read) => read() },
@@ -192,7 +208,7 @@ test("mobile slash suggestions filter skills and insert at the caret while prese
     undefined,
     "choosing a skill closes suggestions",
   );
-  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accent"));
+  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accentInk"));
   for (const punctuation of [".", ",", ":"]) {
     draft = `Please /tl${punctuation} afterwards`;
     field().props.onSelectionChange({ nativeEvent: { selection: { start: 10, end: 10 } } });
@@ -260,7 +276,7 @@ test("mobile skill input preserves edits and clears its description when the car
         (node.type === "ListRow" && node.props.subtitle === "Rewrite for a skimming reader."),
     );
   assert.equal("value" in field().props, false, "native attributed children must not be combined with value");
-  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accent"));
+  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accentInk"));
   field().props.onFocus();
   field().props.onSelectionChange({ nativeEvent: { selection: { start: 7, end: 7 } } });
   assert.ok(description());
@@ -4152,8 +4168,7 @@ test("mobile TSX preview colors native text in both themes and preserves selecti
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": { Text: "Text", useColorScheme: () => scheme },
     "@milagre/shared/file-syntax": require("@milagre/shared/file-syntax"),
-    "./theme": { fonts: { mono: "Menlo" } },
-    "./ui": { colors: {}, styles: {} },
+    "./theme": { fonts: { mono: "Menlo" }, useTheme: () => ({ colors: resolvePalette("milagre-blue", scheme), scheme }) },
   });
   const text = 'export const Card = () => (\r\n  <section title="hello">Welcome</section>\r\n);\r\n';
   const render = () => {

@@ -291,7 +291,18 @@ const MessageTranscript = memo(function MessageTranscript({
     messages.findIndex((message) => message.id === firstId),
   );
   const earlierButton = useRef<HTMLButtonElement>(null);
+  const historyRead = useRef(false);
+  const historyChat = useRef(chatId);
   const anchor = useRef<{ element: HTMLElement; top: number; viewport: HTMLElement } | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  useEffect(() => {
+    historyChat.current = chatId;
+    historyRead.current = false;
+    setHistoryError(null);
+    setHistoryLoading(false);
+    anchor.current = null;
+  }, [chatId]);
   useLayoutEffect(() => {
     const saved = anchor.current;
     if (!saved) return;
@@ -313,19 +324,46 @@ const MessageTranscript = memo(function MessageTranscript({
     if (findOpen && remote > 0) void earlier?.loadAll();
   }, [findOpen, remote, earlier]);
   async function showEarlier() {
+    if (historyRead.current || start + remote <= 0) return;
+    historyRead.current = true;
+    setHistoryLoading(true);
+    setHistoryError(null);
     const column = earlierButton.current?.parentElement;
     const element = column?.querySelector<HTMLElement>('[data-slot="message"]');
     const viewport = column?.closest<HTMLElement>('[aria-label="Conversation"]');
     if (element && viewport) anchor.current = { element, viewport, top: element.getBoundingClientRect().top };
-    if (start > 0 || !earlier) {
-      setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
-      return;
+    try {
+      if (start > 0 || !earlier) {
+        setPage({ chat: chatId, firstId: messages[Math.max(0, start - 40)]?.id });
+        return;
+      }
+      await earlier.load();
+      if (historyChat.current === chatId) setPage({ chat: chatId, firstId: Number.NEGATIVE_INFINITY });
+    } catch (error) {
+      anchor.current = null;
+      if (historyChat.current === chatId) setHistoryError((error as Error).message);
+    } finally {
+      if (historyChat.current === chatId) {
+        historyRead.current = false;
+        setHistoryLoading(false);
+      }
     }
-    // None left here: read the next turns from the host, then show everything held (no message has this id, and unlike
-    // NaN it equals itself, so the page comparison below settles).
-    await earlier.load();
-    setPage({ chat: chatId, firstId: Number.NEGATIVE_INFINITY });
   }
+  const loadOnScroll = useEvent(() => {
+    if (!historyError) void showEarlier();
+  });
+  useEffect(() => {
+    const viewport = earlierButton.current?.closest<HTMLElement>('[aria-label="Conversation"]');
+    if (!viewport || start + remote <= 0 || findOpen) return;
+    let previous = viewport.scrollTop;
+    const onScroll = () => {
+      const y = viewport.scrollTop;
+      if (y < previous && y <= 160) loadOnScroll();
+      previous = y;
+    };
+    viewport.addEventListener("scroll", onScroll);
+    return () => viewport.removeEventListener("scroll", onScroll);
+  }, [chatId, start, remote, findOpen, loadOnScroll]);
   const streamingMessage: AppChatMessage | undefined =
     isSending && (streamingText || streamingSteps?.length)
       ? { id: -1, session_id: messages.at(-1)?.session_id ?? -1, body: streamingText ?? "", context: null, role: "assistant", steps: streamingSteps }
@@ -339,14 +377,20 @@ const MessageTranscript = memo(function MessageTranscript({
   const openingIds = openingMessages.current.ids;
   return (
     <>
+      {historyError && (
+        <p role="alert" className="text-xs text-ink-2">
+          Could not load earlier messages: {historyError}. Use Show earlier messages to retry.
+        </p>
+      )}
       {start + remote > 0 && (
         <button
           ref={earlierButton}
           type="button"
           onClick={() => void showEarlier()}
+          disabled={historyLoading}
           className="self-center rounded-control border border-line px-3 py-1.5 text-xs text-ink-2 hover:bg-hover"
         >
-          Show earlier messages ({start + remote})
+          {historyLoading ? "Loading earlier messages..." : `Show earlier messages (${start + remote})`}
         </button>
       )}
       {transcript.map((message) => (

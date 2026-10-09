@@ -2,7 +2,7 @@ import { cliName, pickerProviders, providerName } from "@milagre/shared/provider
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ComponentProps, KeyboardEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Attachment01Icon, FlashIcon, SecurityCheckIcon } from "@hugeicons/core-free-icons";
+import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Attachment01Icon, ClipboardPasteIcon, FlashIcon, SecurityCheckIcon } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, ContextUsage, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { effortCopy, PERMISSION_MODES } from "../model";
 import { cliNotice, messageParts } from "../lib/cli-status";
@@ -33,7 +33,10 @@ type MenuRow = { key: string; name: string; desc: string; group?: string; source
 
 type Source = { key: string; name: string; desc: string; icon: IconData };
 
-const SOURCES: Source[] = [{ key: "attach", name: "Add files", desc: "Choose files from your computer", icon: Attachment01Icon }];
+const SOURCES: Source[] = [
+  { key: "attach", name: "Add files", desc: "Choose files from your computer", icon: Attachment01Icon },
+  { key: "paste", name: "Paste image", desc: "Attach an image from the clipboard", icon: ClipboardPasteIcon },
+];
 
 const COMMANDS = [
   { key: "summarize", name: "/summarize", desc: "Digest the thread so far" },
@@ -322,6 +325,8 @@ export function PromptComposer({
     const source = SOURCES.find((item) => item.key === row.key);
     if (source?.key === "attach") {
       fileInputRef.current?.click();
+    } else if (source?.key === "paste") {
+      void imageDraft.pasteImage();
     } else if (menu === "at") {
       if (token && row.path) {
         const path = fileMentionPath(projectPath, row.path);

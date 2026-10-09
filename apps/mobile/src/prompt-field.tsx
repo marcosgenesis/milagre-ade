@@ -7,6 +7,8 @@ import type { Client } from "./client";
 import { useRpc } from "./use-rpc";
 import { Field, ListRow, PageScroll } from "./ui";
 import { useTheme } from "./theme";
+import { useImagePaste } from "./use-image-paste";
+import type { PastedImage } from "./attachment-picker";
 
 const OPEN_SKILLS = FadeInDown.duration(140)
   .easing(Easing.bezier(0.23, 1, 0.32, 1))
@@ -19,13 +21,16 @@ export function PromptField({
   projectPath,
   draft,
   onChangeText,
+  onImagePaste,
 }: {
   client: Client;
   projectPath: string;
   draft: string;
   onChangeText: (value: string) => void;
+  onImagePaste?: (image: PastedImage) => void;
 }) {
   const { colors } = useTheme();
+  const paste = useImagePaste(onImagePaste);
   const { data, loading, error, refresh } = useRpc<SkillCatalog>(projectPath ? client : null, "skills:list", [projectPath]);
   const skills = data?.skills;
   const parts = useMemo(
@@ -97,6 +102,7 @@ export function PromptField({
       ) : null}
       {/* TextInput cannot receive value and attributed children together. The children mirror every accepted edit. */}
       <Field
+        {...paste}
         label="Message"
         hideLabel
         placeholder="Message the agent"
@@ -114,7 +120,10 @@ export function PromptField({
           setRendered((current) => (current.restore ? { ...current, restore: undefined } : current));
         }}
         selection={restore}
-        onFocus={() => setFocused(true)}
+        onFocus={() => {
+          paste.onFocus();
+          setFocused(true);
+        }}
         onBlur={() => setFocused(false)}
         style={{ backgroundColor: "transparent", minHeight: 44, maxHeight: 140, paddingHorizontal: 10, paddingVertical: 6 }}
       >

@@ -218,7 +218,7 @@ export function Toggle({ title, selected, onPress, disabled = false }: { title: 
     </Host>
   );
 }
-export function Field({ label, hideLabel = false, ...props }: TextInputProps & { label: string; hideLabel?: boolean }) {
+export function Field({ label, hideLabel = false, ...props }: TextInputProps & { label: string; hideLabel?: boolean; ref?: React.Ref<TextInput> }) {
   const { colors } = useTheme();
   const styles = useStyles();
   return (
@@ -497,6 +497,7 @@ type NativeMenuTrigger = {
   systemImage: string;
   disabled?: boolean;
   maxWidth?: number;
+  showIcon?: boolean;
   iconSize?: number;
   menuTint?: ColorValue;
   rotation?: number;
@@ -625,7 +626,7 @@ export function PullDown({
         spacing={6}
         modifiers={[padding({ horizontal: 10, vertical: 6 }), frame({ minWidth: 0, maxWidth: nativeTrigger.maxWidth ?? 260, alignment: "leading" })]}
       >
-        <IOSImage systemName={nativeTrigger.systemImage as never} size={14} color={colors.ink2} />
+        {nativeTrigger.showIcon !== false ? <IOSImage systemName={nativeTrigger.systemImage as never} size={14} color={colors.ink2} /> : null}
         <IOSText modifiers={[font({ size: 13, weight: "medium" }), foregroundStyle(colors.ink2), lineLimit(1)]}>{nativeTrigger.title}</IOSText>
         <IOSImage systemName="chevron.up.chevron.down" size={13} color={colors.ink3} />
       </IOSHStack>

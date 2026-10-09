@@ -7,6 +7,7 @@ import { lanRoutes } from "./routes-native";
 import { savedHosts } from "./hosts-native";
 import { useSession } from "./session";
 import { createPushController, notificationTarget, type PushView } from "./push-controller";
+import { nativeActivity } from "./live-activity-native";
 import { pushNative, pushStore } from "./push-native";
 import type { PushPreferences, PushState } from "./push-store";
 import type { SavedHost } from "./hosts-store";
@@ -31,6 +32,7 @@ function usePushState() {
     if (current?.token === host.token && current.lastUsed === host.lastUsed) {
       sessionRef.current.cancelNavigation();
       if (sessionRef.current.client?.url === host.id) sessionRef.current.disconnect();
+      await nativeActivity?.endAsync(host.id);
       await savedHosts.forget(host.id);
       if (host.relay) relayRuntime.forget(host.relay.hostId);
       lanRoutes.forget(host.id);

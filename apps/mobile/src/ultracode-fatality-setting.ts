@@ -9,7 +9,7 @@ void readUltracodeFatality().then((saved) => {
   listeners.forEach((listener) => listener());
 });
 
-/** Desktop's Ultracode Fatality: turning Ultracode on plays the Mortal Kombat overlay (the phone has no voice yet). */
+/** Turning Ultracode on plays the Fatality overlay and announcer, matching desktop. */
 export function useUltracodeFatality(): [boolean, (on: boolean) => void] {
   const value = useSyncExternalStore(
     (listener) => {

@@ -350,6 +350,14 @@ async function browserChecks() {
       `(() => { const dt = new DataTransfer(); dt.items.add(new File([Uint8Array.from(atob(window.imageBytes), c=>c.charCodeAt(0))], 'pasted.png', {type:'image/png'})); document.querySelector('textarea').dispatchEvent(new ClipboardEvent('paste', { bubbles:true, cancelable:true, clipboardData:dt })); })()`,
     );
     await waitFor(String.raw`document.querySelector('[data-promptbar] img')?.src.startsWith('data:image/png')`);
+    await evaluate(
+      `Object.defineProperty(navigator.clipboard, 'read', { configurable: true, value: async () => [{ types: ['image/png'], getType: async () => new Blob([Uint8Array.from(atob(window.imageBytes), c => c.charCodeAt(0))], { type: 'image/png' }) }] })`,
+    );
+    await click('[aria-label="Add attachments and sources"]');
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.includes('Paste image')).click()`);
+    await waitFor(`!!document.querySelector('[data-promptbar] [aria-label="Preview Pasted image.png"]')`);
+    assert.equal(await evaluate('document.querySelector("textarea").value'), "", "Pasting through the attachment menu leaves text untouched");
+    await screenshot("clipboard-image");
     await chooseFiles([["discard.txt", "text/plain"]]);
     // Sidebar chats keep creation order, newest first: Other chat (session 5) is ⌘1, Attachment test (session 3) is ⌘2.
     await key("1", { metaKey: true });

@@ -332,18 +332,19 @@ async function browserChecks() {
     await window.loadURL(process.argv[2] + "?long=1&lean=1");
     await waitFor(`document.querySelectorAll('[data-slot="message"]').length === 40`);
     assert.equal(await evaluate("window.calls.pages"), 1, "the open Chat reads one page");
-    await evaluate(
-      `(() => { const viewport = document.querySelector('[aria-label="Conversation"]'); viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1000 })); viewport.scrollTop = 0; })()`,
-    );
-    await delay(100);
+    await delay(400);
     assert.equal(await evaluate(`[...document.querySelectorAll("button")].some((button) => button.textContent === "Show earlier messages (260)")`), true);
     await evaluate(
-      `window.historyAnchor = document.querySelector('[data-slot="message"]'); window.historyTop = window.historyAnchor.getBoundingClientRect().top`,
+      `(() => { const viewport = document.querySelector('[aria-label="Conversation"]'); viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1000 })); viewport.scrollTop = 0; window.historyAnchor = document.querySelector('[data-slot="message"]'); window.historyTop = window.historyAnchor.getBoundingClientRect().top; viewport.dispatchEvent(new Event('scroll')); viewport.dispatchEvent(new Event('scroll')); })()`,
     );
-    await clickText("Show earlier messages");
     await waitFor(`document.querySelectorAll('[data-slot="message"]').length === 80`);
-    assert.equal(await evaluate("window.calls.pages"), 2, "Show earlier reads the next page from the host");
+    assert.equal(await evaluate("window.calls.pages"), 2, "scrolling up reads one page from the host");
     assert.equal(await evaluate("window.historyAnchor.isConnected"), true, "the read page keeps mounted messages");
+    await delay(150);
+    assert.ok(
+      await evaluate("Math.abs(window.historyAnchor.getBoundingClientRect().top - window.historyTop) < 16"),
+      "automatic history preserves the reading position",
+    );
     await screenshot("lean-history");
     for (const busy of [false, true]) {
       await window.loadURL(process.argv[2] + "?long=1");
@@ -351,13 +352,8 @@ async function browserChecks() {
       assert.equal(await evaluate(`document.querySelectorAll('[data-slot="message"]').length`), 40, "long chats initially mount only the newest page");
       await delay(400);
       await evaluate(
-        `(() => { const viewport = document.querySelector('[aria-label="Conversation"]'); viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1000 })); viewport.scrollTop = 0; })()`,
+        `(() => { const viewport = document.querySelector('[aria-label="Conversation"]'); viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1000 })); viewport.scrollTop = 0; window.historyAnchor = document.querySelector('[data-slot="message"]'); window.historyTop = window.historyAnchor.getBoundingClientRect().top; viewport.dispatchEvent(new Event('scroll')); })()`,
       );
-      await delay(100);
-      await evaluate(
-        `window.historyAnchor = document.querySelector('[data-slot="message"]'); window.historyTop = window.historyAnchor.getBoundingClientRect().top`,
-      );
-      await clickText("Show earlier messages");
       await waitFor(`document.querySelectorAll('[data-slot="message"]').length === 80`);
       assert.equal(await evaluate("window.historyAnchor.isConnected"), true, "prepending history retains mounted messages");
       await delay(100);

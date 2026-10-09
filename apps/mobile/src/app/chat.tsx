@@ -29,7 +29,7 @@ import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
 import { pullRequestBlockers } from "@milagre/shared/pr-blockers";
 import { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } from "@milagre/shared/pr-action";
 import { useComposer, usePendingChats, useSession } from "../session";
-import { pickAttachments } from "../attachment-picker";
+import { pickAttachments, preparePastedImage, discardPastedImage, type PastedImage } from "../attachment-picker";
 import { appendAttachments, attachmentPrompt, prepareAttachments } from "../attachments";
 import { PullRequestAction, SubagentChip, usePullRequest } from "../status-indicators";
 import { SimulatorChip } from "../simulator";
@@ -47,7 +47,7 @@ import { isHandoff } from "@milagre/shared/handoff";
 import { ThinkingIndicator } from "../running-logo";
 import { BottomFade, EdgeFade } from "../bottom-fade";
 import { useDotBackground } from "../dot-background";
-import { Approval, Questions } from "../questions";
+import { Approval, ActivityQuestions } from "../questions";
 import { AgentControls, PermissionChip } from "../agent-controls";
 import { afterSend, modelsFor, selectedModel, sendOptions, turnTarget } from "../turn-options";
 // Linear's mark as a template image, so iOS tints it like the SF Symbols beside it in menus.
@@ -117,7 +117,13 @@ export default function ChatScreen() {
   const dots = useDotBackground();
   const following = useRef(true);
   const contentHeight = useRef(0);
+  const scrollOffset = useRef(0);
+  const historyRead = useRef<object | null>(null);
+  const pickingNow = useRef(false);
+  const historyAnchor = useRef<{ id: number; y: number; key: string } | null>(null);
   const scrollKey = `${params.hostId || session.client?.url}|${params.projectPath || session.snapshot?.project.path}|${params.id ?? `new:${params.worktreeId}`}`;
+  const currentScrollKey = useRef(scrollKey);
+  const [historyState, setHistoryState] = useState({ key: scrollKey, loading: false, error: "" });
   const [jumpState, setJumpState] = useState({ key: scrollKey, visible: false });
   const showJumpToBottom = jumpState.key === scrollKey && jumpState.visible;
   const onEndVisible = useCallback(
@@ -134,6 +140,10 @@ export default function ChatScreen() {
   useEffect(() => {
     following.current = true;
     contentHeight.current = 0;
+    scrollOffset.current = 0;
+    currentScrollKey.current = scrollKey;
+    historyRead.current = null;
+    historyAnchor.current = null;
   }, [scrollKey]);
   // Short transcripts never auto-scroll: a scroll to the end while the keyboard is up would stay offset after it hides.
   const viewport = useRef(0);
@@ -226,13 +236,36 @@ export default function ChatScreen() {
     [pending, pendingCanonicalId, lean, canonicalPage.messages, allMessages, savedMessages],
   );
   // Messages the host still holds before the ones here.
-  const remote = lean && !pending ? page.total - page.messages.length : 0;
+  const historyPage = pendingCanonicalId !== null ? canonicalPage : page;
+  const remote = lean && (!pending || pendingCanonicalId !== null) ? Math.max(0, historyPage.total - historyPage.messages.length) : 0;
   // The design the user last chose on the design sheet, which its cards mark.
   const chosen = useMemo(() => chosenDesign(messages.filter((message) => message.role === "user").map((message) => message.body)), [messages]);
   const designChoice = chosen ? `${chosen.id}:${chosen.version}` : undefined;
   // Long Chats mount their newest messages first; earlier ones load on request.
-  const [shown, setShown] = useState({ id: params.id, count: PAGE });
-  const visible = shown.id === params.id ? shown.count : PAGE;
+  const [shown, setShown] = useState({ key: scrollKey, count: PAGE });
+  const visible = shown.key === scrollKey ? shown.count : PAGE;
+  async function showEarlier() {
+    if (historyRead.current || historyAnchor.current || messages.length + remote <= visible) return;
+    const request = {};
+    historyRead.current = request;
+    following.current = false;
+    setHistoryState({ key: scrollKey, loading: true, error: "" });
+    try {
+      if (messages.length <= visible) await historyPage.loadEarlier();
+      if (currentScrollKey.current !== scrollKey) return;
+      const first = messages[Math.max(0, messages.length - visible)];
+      const y = first && messagePositions.current.get(first.id);
+      historyAnchor.current = first && y !== undefined ? { id: first.id, y, key: scrollKey } : null;
+      setShown({ key: scrollKey, count: visible + PAGE });
+    } catch (error) {
+      if (currentScrollKey.current === scrollKey) setHistoryState({ key: scrollKey, loading: false, error: (error as Error).message });
+    } finally {
+      if (historyRead.current === request) {
+        historyRead.current = null;
+        setHistoryState((current) => ({ ...current, loading: false }));
+      }
+    }
+  }
   const handoffModels = useMemo(() => [...modelsFor("claude", session.models), ...modelsFor("codex", session.models)], [session.models]);
   const navigationItems = useMemo(
     () =>
@@ -262,7 +295,7 @@ export default function ChatScreen() {
     navigationTarget.current = id;
     if (index < messages.length - visible) {
       messagePositions.current.clear();
-      setShown({ id: params.id, count: messages.length - index });
+      setShown({ key: scrollKey, count: messages.length - index });
     } else {
       const y = messagePositions.current.get(id);
       if (y !== undefined) {
@@ -388,17 +421,41 @@ export default function ChatScreen() {
       setBusy(false);
     }
   }
-  async function pick(kind: "photos" | "camera" | "files") {
-    if (attachmentDisabled) return;
+  async function pick(kind: "photos" | "camera" | "files" | "paste") {
+    if (attachmentDisabled || pickingNow.current) return;
+    pickingNow.current = true;
     setPicking(true);
     setError("");
     try {
       const added = await pickAttachments(kind);
+      if (currentScrollKey.current !== scrollKey) return;
       const next = appendAttachments(attachments, added);
       composer.setAttachments((current) => ({ ...current, [chatId]: next }));
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      pickingNow.current = false;
+      setPicking(false);
+    }
+  }
+  async function pasteImage(image: PastedImage) {
+    if (attachmentDisabled || pickingNow.current) {
+      discardPastedImage(image);
+      setError(attachments.length >= 4 ? "Attach up to 4 photos or files per message." : "Wait for the current attachment to finish, then paste again.");
+      return;
+    }
+    pickingNow.current = true;
+    setPicking(true);
+    setError("");
+    try {
+      const added = await preparePastedImage(image);
+      if (currentScrollKey.current !== scrollKey) return;
+      const next = appendAttachments(attachments, [added]);
+      composer.setAttachments((current) => ({ ...current, [chatId]: next }));
+    } catch (failure) {
+      if (currentScrollKey.current === scrollKey) setError((failure as Error).message);
+    } finally {
+      pickingNow.current = false;
       setPicking(false);
     }
   }
@@ -872,7 +929,11 @@ export default function ChatScreen() {
           contentContainerStyle={[styles.content, { paddingTop: insets.top + 84, paddingLeft: 28, gap: 16, paddingBottom: dockHeight + 16 }]}
           scrollEventThrottle={32}
           onScroll={({ nativeEvent: e }) => {
+            const previous = scrollOffset.current;
+            scrollOffset.current = e.contentOffset.y;
             following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120;
+            if (placed && e.contentOffset.y < previous && e.contentOffset.y <= 160 && !(historyState.key === scrollKey && historyState.error))
+              void showEarlier();
           }}
           style={{ opacity: placed ? 1 : 0 }}
           onLayout={({ nativeEvent }) => {
@@ -882,7 +943,7 @@ export default function ChatScreen() {
           onContentSizeChange={(_, height) => {
             contentHeight.current = height;
             if (!placed) place();
-            else if (following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true });
+            else if (!historyAnchor.current && following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true });
           }}
         >
           {process.env.EXPO_PUBLIC_DEMO === "1" && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
@@ -911,16 +972,17 @@ export default function ChatScreen() {
             </View>
           )}
           {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
+          {historyState.key === scrollKey && historyState.error ? <ErrorNotice message={historyState.error} retry={() => void showEarlier()} /> : null}
           {messages.length + remote > visible && (
             <PillButton
-              title={`Show earlier messages (${messages.length + remote - visible})`}
+              title={
+                historyState.key === scrollKey && historyState.loading
+                  ? "Loading earlier messages..."
+                  : `Show earlier messages (${messages.length + remote - visible})`
+              }
               secondary
-              onPress={async () => {
-                following.current = false;
-                // None left here: read the next turns from the host first.
-                if (messages.length <= visible) await page.loadEarlier().catch(() => {});
-                setShown({ id: params.id, count: visible + PAGE });
-              }}
+              disabled={historyState.key === scrollKey && historyState.loading}
+              onPress={showEarlier}
               style={{ alignSelf: "center" }}
             />
           )}
@@ -931,6 +993,13 @@ export default function ChatScreen() {
               nativeID={`chat-message-${message.id}`}
               onLayout={({ nativeEvent: { layout } }) => {
                 messagePositions.current.set(message.id, layout.y);
+                const anchor = historyAnchor.current;
+                if (anchor?.key === scrollKey && anchor.id === message.id) {
+                  historyAnchor.current = null;
+                  const y = Math.max(0, scrollOffset.current + layout.y - anchor.y);
+                  scrollOffset.current = y;
+                  scroll.current?.scrollTo({ y, animated: false });
+                }
                 if (navigationTarget.current === message.id) {
                   navigationTarget.current = null;
                   scroll.current?.scrollTo({ y: Math.max(0, layout.y - insets.top - 72), animated: true });
@@ -1031,7 +1100,10 @@ export default function ChatScreen() {
             {question && (
               // Hidden, not unmounted, while the answers travel: if they don't arrive, the card comes back as it was.
               <View style={answering ? { display: "none" } : undefined}>
-                <Questions
+                <ActivityQuestions
+                  hostId={client.url}
+                  projectPath={project.path}
+                  sessionId={Number(params.id)}
                   key={question.requestId}
                   request={question}
                   busy={actionBusy || answering}
@@ -1261,6 +1333,7 @@ export default function ChatScreen() {
                   client={client}
                   projectPath={worktree?.path || (project.link ? "" : project.path)}
                   draft={draft}
+                  onImagePaste={(image) => void pasteImage(image)}
                   onChangeText={(value) => composer.setDrafts((current) => ({ ...current, [chatId]: value }))}
                 />
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -1273,10 +1346,11 @@ export default function ChatScreen() {
                           { id: "photos", title: "Photo Library", systemImage: "photo.on.rectangle", disabled: attachmentDisabled },
                           { id: "camera", title: "Take Photo", systemImage: "camera", disabled: attachmentDisabled },
                           { id: "files", title: "Choose Files", systemImage: "folder", disabled: attachmentDisabled },
+                          { id: "paste", title: "Paste image", systemImage: "doc.on.clipboard", disabled: attachmentDisabled },
                         ],
                       },
                     ]}
-                    onSelect={(kind) => void pick(kind as "photos" | "camera" | "files")}
+                    onSelect={(kind) => void pick(kind as "photos" | "camera" | "files" | "paste")}
                   >
                     <View style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: attachmentDisabled ? 0.35 : 1 }}>
                       <Icon icon={Add01Icon} tone="ink2" size={21} />

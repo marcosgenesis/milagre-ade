@@ -1,10 +1,11 @@
 import { Linking, Text, View } from "react-native";
 import { Stack } from "expo-router";
 import { Notification01Icon } from "@hugeicons/core-free-icons";
+import { useActivity } from "../live-activity";
 import { usePush } from "../push";
 import { useSession } from "../session";
 import { Icon } from "../icons";
-import { ErrorNotice, PageScroll, PillButton, Toggle, useStyles } from "../ui";
+import { ErrorNotice, PageScroll, PillButton, PullDown, Toggle, useStyles } from "../ui";
 import { useTheme } from "../theme";
 
 export default function NotificationsScreen() {
@@ -21,6 +22,7 @@ export function NotificationsView() {
   const { colors } = useTheme();
   const styles = useStyles();
   const push = usePush();
+  const activity = useActivity();
   const session = useSession();
   const state = push.state;
   return (
@@ -65,6 +67,44 @@ export function NotificationsView() {
           onPress={() => void push.preferences({ notifyOnCompletion: !state?.notifyOnCompletion })}
         />
         <Text style={styles.muted}>Completed turns and turns that fail.</Text>
+      </View>
+      <View style={styles.card}>
+        <Toggle
+          title="Live Activities"
+          selected={activity.enabled}
+          disabled={activity.busy || !activity.available || !session.hosts.length}
+          onPress={() => void activity.toggle()}
+        />
+        <View style={styles.separator} />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={{ color: colors.ink, fontSize: 17, flex: 1 }}>Show in Live Activities</Text>
+          <PullDown
+            label="Show in Live Activities"
+            title="Show in Live Activities"
+            sections={[
+              {
+                items: [
+                  { id: "all", title: "Running agents and questions", checked: activity.mode === "all" },
+                  { id: "questions", title: "Questions only", checked: activity.mode === "questions" },
+                ],
+              },
+            ]}
+            nativeTrigger={{
+              title: activity.mode === "questions" ? "Questions only" : "Agents + questions",
+              systemImage: "list.bullet",
+              showIcon: false,
+              disabled: activity.busy,
+              maxWidth: 150,
+            }}
+            onSelect={(id) => {
+              if (id === "all" || id === "questions") void activity.changeMode(id);
+            }}
+          >
+            <Text style={styles.text}>{activity.mode === "questions" ? "Questions only" : "Running agents and questions"}</Text>
+          </PullDown>
+        </View>
+        {!activity.available ? <Text style={styles.muted}>Live Activities are unavailable in this build or disabled in system settings.</Text> : null}
+        {activity.error ? <ErrorNotice message={activity.error} /> : null}
       </View>
       {push.error ? <ErrorNotice message={push.error} /> : null}
       {state?.pending.length ? (

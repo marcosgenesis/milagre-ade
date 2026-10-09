@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { ArrowLeft01Icon, ArrowRight01Icon, ArrowUp01Icon, Cancel01Icon, PencilEdit02Icon, ShieldAlertIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { AgentQuestion, PermissionDecision, PermissionRequest, QuestionAnswers, QuestionRequest } from "@milagre/shared/model";
+import { takeActivityDraft } from "./activity-drafts";
 import { Icon } from "./icons";
 import { IconButton, PillButton, useStyles } from "./ui";
 import { useTheme } from "./theme";
@@ -15,16 +16,23 @@ const RECOMMENDED = /\s*\((recommended)\)\s*$/i;
 export function Questions({
   request,
   busy,
+  initialAnswers = {},
   submit,
 }: {
   request: QuestionRequest;
   busy: boolean;
+  initialAnswers?: QuestionAnswers;
   submit: (answers: QuestionAnswers | null, summary: string) => void;
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const [page, setPage] = useState(0);
-  const [picked, setPicked] = useState<QuestionAnswers>({});
+  const [page, setPage] = useState(() =>
+    Math.max(
+      0,
+      request.questions.findIndex((q) => !initialAnswers[q.id]?.length),
+    ),
+  );
+  const [picked, setPicked] = useState<QuestionAnswers>(initialAnswers);
   const [typed, setTyped] = useState<Record<string, string>>({});
   const questions = request.questions;
   const question = questions[Math.min(page, questions.length - 1)];
@@ -244,4 +252,9 @@ export function Approval({ approval, busy, respond }: { approval: PermissionRequ
       )}
     </View>
   );
+}
+
+export function ActivityQuestions(props: Parameters<typeof Questions>[0] & { hostId: string; projectPath: string; sessionId: number }) {
+  const [initialAnswers] = useState(() => takeActivityDraft(props.hostId, props.projectPath, props.sessionId, props.request.requestId));
+  return <Questions {...props} initialAnswers={initialAnswers} />;
 }

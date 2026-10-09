@@ -45,6 +45,7 @@ export function mergeTail(current: ChatPage, tail: ChatPage): ChatPage | null {
 const sameMessage = (a: ChatMessage, b: ChatMessage) => a === b || JSON.stringify(a) === JSON.stringify(b);
 
 const busy = new Map<string, Promise<void>>();
+const earlierLoads = new Map<string, Promise<void>>();
 // A refresh asked for while a read is on its way runs once more when it ends: that read may predate the change.
 const again = new Map<string, () => Promise<void>>();
 function run(key: string, work: () => Promise<void>): Promise<void> {
@@ -76,9 +77,12 @@ async function refreshTail(key: string, client: PageClient, projectPath: string,
   const current = windows.get(key);
   if (!current || current.loading) return load(key, client, projectPath, chatId);
   try {
-    const merged = mergeTail(current, await client.chatMessages(projectPath, chatId, { turns: TAIL }));
+    const tail = await client.chatMessages(projectPath, chatId, { turns: TAIL });
+    // Earlier messages can arrive while the tail is on its way; merge into the window that holds them now.
+    const latest = windows.get(key) ?? current;
+    const merged = mergeTail(latest, tail);
     if (!merged) return load(key, client, projectPath, chatId);
-    if (merged !== current) set(key, { ...merged, loading: false });
+    if (merged !== latest) set(key, { ...merged, loading: false });
   } catch {}
 }
 
@@ -108,14 +112,22 @@ export function useChatPage(
     if (!key) return;
     void run(key, () => (windows.has(key) ? refreshTail(key, client!, projectPath!, chatId!) : load(key, client!, projectPath!, chatId!)));
   }, [key, client, projectPath, chatId, changed]);
-  const loadEarlier = useCallback(async () => {
-    if (!key) return;
+  const loadEarlier = useCallback(() => {
+    if (!key) return Promise.resolve();
+    const pending = earlierLoads.get(key);
+    if (pending) return pending;
     const current = windows.get(key);
-    if (!current?.hasMore || !current.messages.length) return;
-    const earlier = await client!.chatMessages(projectPath!, chatId!, { before: current.messages[0].id, turns: TURNS });
-    const latest = windows.get(key) ?? current;
-    const known = new Set(latest.messages.map((message) => message.id));
-    set(key, { ...latest, messages: [...earlier.messages.filter((message) => !known.has(message.id)), ...latest.messages], hasMore: earlier.hasMore });
+    if (!current?.hasMore || !current.messages.length) return Promise.resolve();
+    const request = client!
+      .chatMessages(projectPath!, chatId!, { before: current.messages[0].id, turns: TURNS })
+      .then((earlier) => {
+        const latest = windows.get(key) ?? current;
+        const known = new Set(latest.messages.map((message) => message.id));
+        set(key, { ...latest, messages: [...earlier.messages.filter((message) => !known.has(message.id)), ...latest.messages], hasMore: earlier.hasMore });
+      })
+      .finally(() => earlierLoads.delete(key));
+    earlierLoads.set(key, request);
+    return request;
   }, [key, client, projectPath, chatId]);
   return { ...page, loadEarlier };
 }

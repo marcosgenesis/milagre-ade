@@ -20,6 +20,10 @@ const { createConfinement } = require("./confine.cjs");
 // Characters of a data URL the phone gets for a Project's icon (about 450 KB of image).
 const MAX_PROJECT_IMAGE = 600_000;
 const METHODS = new Set([
+  "live-activity:state",
+  "live-activity:open",
+  "live-activity:answer",
+  "live-activity:forget",
   "push:register",
   "push:unregister",
   "push:focus",

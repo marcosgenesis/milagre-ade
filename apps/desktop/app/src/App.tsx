@@ -798,6 +798,7 @@ function App() {
               )
             : [],
           failed: Boolean(failed) || summary.lastOutcome === "failed",
+          lastAt: summary.lastAt,
           ports: project ? agentPorts[chatKey(project.path, session.id)] : undefined,
         },
       };

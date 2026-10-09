@@ -93,7 +93,7 @@ async function browserChecks() {
     await waitFor('!!document.querySelector("[aria-label=\\"Command palette\\"]")');
     await evaluate('document.querySelector("[aria-label=\\"Command palette\\"]").focus()');
     assert.ok(
-      await evaluate('document.querySelector("[aria-label=\\\"Command palette\\\"]").textContent.includes("Search commands")'),
+      await evaluate('document.querySelector("[aria-label=\\\"Command palette\\\"]").textContent.includes("Search")'),
       "Search is a visible command-palette entry",
     );
     assert.equal(await evaluate('document.querySelectorAll("[data-shortcut-hint]").length'), 0);

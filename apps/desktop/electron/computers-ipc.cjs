@@ -46,6 +46,15 @@ function readOffline(cache, id, method, args) {
  * }} options
  */
 function registerComputers({ ipcMain, computers, thisMac, send, cache = null }) {
+  // A cache that fails never fails a call, but it says so once per computer and kind of error.
+  const warned = new Set();
+  const warn = (computerId, error) => {
+    const kind = String(error?.code ?? error?.name ?? "error");
+    if (warned.has(`${computerId}\n${kind}`)) return;
+    warned.add(`${computerId}\n${kind}`);
+    console.warn(`Computer ${computerId}: its offline copy failed (${kind}): ${error instanceof Error ? error.message : String(error)}`);
+  };
+  const paired = (computerId) => computers.list().some((item) => item.id === computerId);
   const snapshot = () => ({ thisMac: thisMac(), computers: computers.list() });
 
   ipcMain.handle("computers:list", async () => {
@@ -97,42 +106,49 @@ function registerComputers({ ipcMain, computers, thisMac, send, cache = null }) 
     // Away (or off): its last copy answers what it can; nothing is sent.
     if (computer && computer.state !== "online") {
       let kept = null;
-      try {
-        kept = cache ? readOffline(cache, computerId, method, bare) : null;
-      } catch {
-        /* an unreadable copy reads as no copy */
+      // An unreadable copy is deleted by the cache, so a second look reads as no copy.
+      for (let attempt = 0; attempt < (cache ? 2 : 0) && kept === null; attempt++) {
+        try {
+          kept = readOffline(cache, computerId, method, bare);
+          break;
+        } catch (error) {
+          warn(computerId, error);
+        }
       }
       if (kept === null) throw new Error(`${computer.name} is offline.`);
       return qualifyResult(computerId, method, kept);
     }
     const result = await computers.invoke(computerId, method, bare);
     try {
-      if (cache && KEPT_LISTS[method] && Array.isArray(result)) cache.put(computerId, KEPT_LISTS[method], "", result);
-      if (cache && OPENED.has(method) && result?.state && typeof result.path === "string")
+      // Removed while the call was out: its folder stays gone.
+      if (cache && paired(computerId) && KEPT_LISTS[method] && Array.isArray(result)) cache.put(computerId, KEPT_LISTS[method], "", result);
+      if (cache && paired(computerId) && OPENED.has(method) && result?.state && typeof result.path === "string")
         cache.put(computerId, "scope", result.path, { name: result.name ?? nameOf(result.path, cache.get(computerId, "recent", "")), state: result.state });
-    } catch {
-      /* the cache is a copy: a failed write never fails the call */
+    } catch (error) {
+      warn(computerId, error); // the cache is a copy: a failed write never fails the call
     }
     return qualifyResult(computerId, method, result);
   });
   // The window forwards a remote scope's whole state and a chat's window as they change (offline-cache.ts).
   ipcMain.handle("computers:remember", (_event, id, entry) => {
     const computerId = String(id);
-    if (!cache || !entry || typeof entry !== "object" || typeof entry.scope !== "string") return;
+    if (!cache || !entry || typeof entry !== "object" || typeof entry.scope !== "string" || !paired(computerId)) return;
     const scope = stripComputer(computerId, entry.scope);
-    if (JSON.stringify(entry).length > MAX_REMEMBERED_CHARS) return;
     try {
       if (entry.kind === "state" && entry.state && typeof entry.state === "object") {
         const recent = cache.get(computerId, "recent", "");
-        cache.put(computerId, "scope", scope, { name: nameOf(scope, recent), state: stripComputer(computerId, entry.state) });
-      } else if (entry.kind === "chat" && Number.isSafeInteger(entry.chatId) && Array.isArray(entry.window?.messages))
-        cache.put(computerId, "chat", `${scope}#${entry.chatId}`, {
+        const text = JSON.stringify({ name: nameOf(scope, recent), state: stripComputer(computerId, entry.state) });
+        if (text.length <= MAX_REMEMBERED_CHARS) cache.put(computerId, "scope", scope, null, text);
+      } else if (entry.kind === "chat" && Number.isSafeInteger(entry.chatId) && Array.isArray(entry.window?.messages)) {
+        const text = JSON.stringify({
           messages: entry.window.messages.slice(-200),
           hasMore: Boolean(entry.window.hasMore),
           total: Number(entry.window.total) || entry.window.messages.length,
         });
-    } catch {
-      /* the cache is a copy */
+        if (text.length <= MAX_REMEMBERED_CHARS) cache.put(computerId, "chat", `${scope}#${entry.chatId}`, null, text);
+      }
+    } catch (error) {
+      warn(computerId, error);
     }
   });
 

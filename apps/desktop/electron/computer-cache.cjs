@@ -35,41 +35,70 @@ function createComputerCaches({ dir, now = Date.now }) {
     let handle = open.get(id);
     if (!handle) {
       fs.mkdirSync(path.join(dir, id), { recursive: true, mode: 0o700 });
-      handle = new (database().DatabaseSync)(path.join(dir, id, "cache.sqlite"));
-      handle.exec(SCHEMA);
+      const raw = new (database().DatabaseSync)(path.join(dir, id, "cache.sqlite"));
+      raw.exec(SCHEMA);
+      handle = {
+        handle: raw,
+        upsert: raw.prepare(
+          "INSERT INTO entries (kind, key, payload, at) VALUES (?, ?, ?, ?) ON CONFLICT (kind, key) DO UPDATE SET payload = excluded.payload, at = excluded.at",
+        ),
+        trim: raw.prepare("DELETE FROM entries WHERE kind = 'chat' AND key NOT IN (SELECT key FROM entries WHERE kind = 'chat' ORDER BY at DESC LIMIT ?)"),
+        read: raw.prepare("SELECT payload FROM entries WHERE kind = ? AND key = ?"),
+      };
       open.set(id, handle);
     }
     return handle;
   }
+  const CORRUPT = /^(SQLITE_CORRUPT|SQLITE_NOTADB)/;
+  const isCorrupt = (error) =>
+    error instanceof SyntaxError || CORRUPT.test(String(error?.code ?? error?.errstr ?? "")) || /malformed|not a database/i.test(String(error?.message));
+  /** A damaged copy is closed and deleted so it rebuilds; the error still goes on to the caller. */
+  function reset(id) {
+    try {
+      open.get(id)?.handle.close();
+    } catch {
+      /* already unusable */
+    }
+    open.delete(id);
+    fs.rmSync(path.join(dir, id), { recursive: true, force: true, maxRetries: 5 });
+  }
+  /** @template T @param {string} id @param {() => T} work @returns {T} */
+  function guarded(id, work) {
+    try {
+      return work();
+    } catch (error) {
+      if (isCorrupt(error)) reset(id);
+      throw error;
+    }
+  }
   return {
-    /** @param {string} computerId @param {string} kind @param {string} key @param {unknown} value */
-    put(computerId, kind, key, value) {
-      const handle = db(computerId);
-      handle
-        .prepare(
-          "INSERT INTO entries (kind, key, payload, at) VALUES (?, ?, ?, ?) ON CONFLICT (kind, key) DO UPDATE SET payload = excluded.payload, at = excluded.at",
-        )
-        .run(kind, key, JSON.stringify(value), now());
-      if (kind === "chat")
-        handle
-          .prepare("DELETE FROM entries WHERE kind = 'chat' AND key NOT IN (SELECT key FROM entries WHERE kind = 'chat' ORDER BY at DESC LIMIT ?)")
-          .run(MAX_CHATS);
+    /** @param {string} computerId @param {string} kind @param {string} key @param {unknown} value @param {string} [text] `value` already serialized */
+    put(computerId, kind, key, value, text) {
+      const id = checked(computerId);
+      guarded(id, () => {
+        const { upsert, trim } = db(id);
+        upsert.run(kind, key, text ?? JSON.stringify(value), now());
+        if (kind === "chat") trim.run(MAX_CHATS);
+      });
     },
     /** @param {string} computerId @param {string} kind @param {string} key */
     get(computerId, kind, key) {
-      if (!fs.existsSync(path.join(dir, checked(computerId), "cache.sqlite"))) return null;
-      const row = db(computerId).prepare("SELECT payload FROM entries WHERE kind = ? AND key = ?").get(kind, key);
-      return row ? JSON.parse(String(row.payload)) : null;
+      const id = checked(computerId);
+      if (!fs.existsSync(path.join(dir, id, "cache.sqlite"))) return null;
+      return guarded(id, () => {
+        const row = db(id).read.get(kind, key);
+        return row ? JSON.parse(String(row.payload)) : null;
+      });
     },
     /** Removing a computer deletes its folder. @param {string} computerId */
     async remove(computerId) {
       const id = checked(computerId);
-      open.get(id)?.close();
+      open.get(id)?.handle.close();
       open.delete(id);
       await fs.promises.rm(path.join(dir, id), { recursive: true, force: true, maxRetries: 5 });
     },
     close() {
-      for (const handle of open.values()) handle.close();
+      for (const { handle } of open.values()) handle.close();
       open.clear();
     },
   };

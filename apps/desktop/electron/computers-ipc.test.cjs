@@ -92,10 +92,11 @@ test("while a computer isn't online, the window's reads come from its cache; any
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   let state = "online";
+  let listed = true;
   const removed = [];
   const { call } = setup(
     {
-      list: () => [{ ...studio, id: ID, state }],
+      list: () => (listed ? [{ ...studio, id: ID, state }] : []),
       invoke: async (_id, method) =>
         method === "project:recent"
           ? [{ path: "/p", name: "p" }]
@@ -142,4 +143,42 @@ test("while a computer isn't online, the window's reads come from its cache; any
   await call("computers:remove", ID);
   assert.deepEqual(removed, [ID]);
   assert.equal(cache.get(ID, "recent", ""), null, "its cache went with it");
+
+  // A write the window had held back arrives after Remove: the folder stays gone.
+  state = "online";
+  listed = false;
+  await call("computers:remember", ID, { kind: "chat", scope: `${ID}|/p`, chatId: 4, window: { messages: [], hasMore: false, total: 0 } });
+  await call("computers:invoke", ID, "project:recent", []);
+  await assert.rejects(fs.stat(path.join(dir, ID)), { code: "ENOENT" });
+});
+
+test("a damaged cache file is deleted so it rebuilds, warns once, and never fails the call", async (t) => {
+  const fs = require("node:fs/promises");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { createComputerCaches } = require("./computer-cache.cjs");
+  const ID = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "computers-ipc-corrupt-"));
+  const cache = createComputerCaches({ dir });
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (...args) => void warnings.push(args.join(" "));
+  t.after(async () => {
+    console.warn = original;
+    cache.close();
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  });
+  cache.put(ID, "recent", "", [{ path: "/p", name: "p" }]);
+  cache.close();
+  await fs.writeFile(path.join(dir, ID, "cache.sqlite"), Buffer.alloc(4096, 7));
+  let state = "offline";
+  const { call } = setup({ list: () => [{ ...studio, id: ID, state }], invoke: async () => [{ path: "/p", name: "p" }] }, { cache });
+  await assert.rejects(call("computers:invoke", ID, "chat:send", [{}]), { message: "studio is offline." });
+  assert.equal(await call("computers:invoke", ID, "chat:messages", [`${ID}|/p`, 1, {}]).then((r) => r.total), 0);
+  await call("computers:invoke", ID, "project:recent", []);
+  await assert.rejects(fs.stat(path.join(dir, ID, "cache.sqlite")), { code: "ENOENT" }, "the damaged copy was deleted");
+  assert.equal(warnings.length, 1, "warned once for this computer and kind of error");
+  state = "online";
+  await call("computers:invoke", ID, "project:recent", []);
+  assert.deepEqual(cache.get(ID, "recent", ""), [{ path: "/p", name: "p" }], "it rebuilds");
 });

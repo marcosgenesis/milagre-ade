@@ -348,8 +348,11 @@ async function startDesktop() {
     quitPrepared ??= (async () => {
       notifier.closeAll();
       // Each computer's channels close too; nothing on the other Macs stops.
-      await Promise.all([runtime.close(), computers.close()]);
-      computerCaches.close();
+      try {
+        await Promise.all([runtime.close(), computers.close()]);
+      } finally {
+        computerCaches.close();
+      }
     })().catch((error) => {
       quitPrepared = null;
       quitting = false;

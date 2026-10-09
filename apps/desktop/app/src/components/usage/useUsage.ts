@@ -9,7 +9,9 @@ const lastSnapshots = new Map<string, UsageSnapshot>();
 
 export function useUsage(scopeKey?: string) {
   // Accounts and their usage stay on their own computer (ADR-0005).
-  const localScope = isRemoteKey(scopeKey) ? undefined : scopeKey;
+  // A remote scope shows no usage at all: reading with no scope would show this Mac's accounts under that computer.
+  const remote = isRemoteKey(scopeKey);
+  const localScope = remote ? undefined : scopeKey;
   const currentScope = useRef(scopeKey);
   currentScope.current = scopeKey;
   const [snapshotScope, setSnapshotScope] = useState(scopeKey);
@@ -20,6 +22,7 @@ export function useUsage(scopeKey?: string) {
   const inFlight = useRef<Promise<void> | null>(null);
 
   const refresh = useCallback(() => {
+    if (remote) return Promise.resolve();
     if (inFlight.current) return inFlight.current;
     setLoading(true);
     const version = generation.current;
@@ -43,7 +46,7 @@ export function useUsage(scopeKey?: string) {
         }
       });
     return inFlight.current;
-  }, [scopeKey]);
+  }, [scopeKey, remote]);
 
   const refreshIfStale = useCallback(
     (maxAgeMs: number) => {
@@ -56,6 +59,12 @@ export function useUsage(scopeKey?: string) {
     generation.current++;
     inFlight.current = null;
     lastReadAt.current = 0;
+    if (remote) {
+      setSnapshotScope(scopeKey);
+      setSnapshot(null);
+      setLoading(false);
+      return;
+    }
     const last = scopeKey ? lastSnapshots.get(scopeKey) : undefined;
     setSnapshotScope(scopeKey);
     setSnapshot(last ?? null);
@@ -92,7 +101,7 @@ export function useUsage(scopeKey?: string) {
     };
   }, [refresh]);
 
-  return { snapshot: snapshotScope === scopeKey ? snapshot : null, loading, refresh, refreshIfStale };
+  return { snapshot: !remote && snapshotScope === scopeKey ? snapshot : null, loading, refresh, refreshIfStale };
 }
 
 export type UsageState = ReturnType<typeof useUsage>;

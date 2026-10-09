@@ -131,9 +131,11 @@ async function browserChecks() {
     await waitFor("window.calls.sent.length === 2");
     await immediate("Check the local project");
     assert.equal(await evaluate("window.calls.created"), 1, "Local still uses the selected worktree");
+    await evaluate(`window.firstSendTranscript = ${transcript}`);
     await evaluate("window.saveSend(); window.ackSend()");
     await waitFor(acknowledged);
     assert.equal(await occurrences("Check the local project"), 1);
+    assert.equal(await evaluate(`window.firstSendTranscript === ${transcript}`), true, "saving a first message keeps the transcript mounted");
 
     await newChat("New worktree");
     await evaluate(`(() => {
@@ -328,6 +330,28 @@ async function browserChecks() {
     await delay(100);
     assert.equal(await rows("Reply before state"), 1);
     assert.equal(await occurrences("Reply before state"), 1, "the saved message replaces the preview");
+    // A Chat summary can arrive before its first message page, including before the send acknowledgement.
+    await window.loadURL(process.argv[2] + "?lean=1");
+    await waitFor(`!!document.querySelector('[aria-label="New chat"]')`);
+    await newChat("Local");
+    await send("Keep the first message visible");
+    await immediate("Keep the first message visible");
+    await evaluate(`window.firstSendTranscript = ${transcript}; window.holdPages = true; window.saveSend()`);
+    await waitFor("typeof window.releasePages === 'function'");
+    assert.equal(await occurrences("Keep the first message visible"), 1, "summary arrival keeps the input while its page loads");
+    await evaluate("window.ackSend()");
+    await delay(100);
+    assert.equal(await occurrences("Keep the first message visible"), 1, "acknowledgement keeps the input while its page loads");
+    assert.equal(await evaluate(`window.firstSendTranscript === ${transcript}`), true);
+    await screenshot("first-message-loading");
+    await evaluate("window.releasePages()");
+    await delay(100);
+    assert.equal(await occurrences("Keep the first message visible"), 1);
+    assert.equal(await evaluate(`window.firstSendTranscript === ${transcript}`), true);
+    await evaluate(`[...document.querySelectorAll('aside [data-row]')].find(row => row.textContent.includes('Previous chat')).click()`);
+    await waitFor(`${transcript}?.textContent.includes('Previous chat')`);
+    assert.equal(await occurrences("Keep the first message visible"), 0, "another Chat must not inherit the retained transcript");
+
     // A host that keeps messages by Chat: the newest turns come as a page, and Show earlier reads the next one.
     await window.loadURL(process.argv[2] + "?long=1&lean=1");
     await waitFor(`document.querySelectorAll('[data-slot="message"]').length === 40`);

@@ -217,8 +217,13 @@ function ScopeHeader({
         <span data-scope-name className={`min-w-0 flex-1 truncate text-[13px] ${current ? "font-medium text-ink" : "text-ink-2"}`}>
           {name}
         </span>
-        {attention && <AttentionDot />}
       </button>
+      {/* Rests at the right edge; slides left when hover reveals the actions it would sit under. */}
+      {attention && (
+        <AttentionDot
+          className={`pointer-events-none absolute right-3 transition-transform duration-150 ease-out ${menu.length > 0 ? "group-hover/scope:-translate-x-[52px] group-has-[:focus-visible]/scope:-translate-x-[52px]" : "group-hover/scope:-translate-x-[26px] group-has-[:focus-visible]/scope:-translate-x-[26px]"}`}
+        />
+      )}
       <div className="absolute right-1 flex items-center gap-0.5">
         {menu.length > 0 && <ScopeMenuButton name={name} items={menu} />}
         <Tooltip label="New chat" shortcut={current ? "⌘N" : undefined} align="end">

@@ -71,3 +71,19 @@ export function modelForChat(selected: ModelOption, provider: ModelProvider | un
   const lastUsed = [...messages].reverse().find((message) => catalog.some((option) => option.id === message.model && option.provider === provider));
   return catalog.find((option) => option.id === lastUsed?.model) ?? catalog.find((option) => option.provider === provider) ?? selected;
 }
+
+/**
+ * The model the picker shows for an open chat: the one picked in that chat, else the one its last turn ran, else the
+ * fallback (the default for new chats). A pick or turn on another provider than the chat's own doesn't count.
+ */
+export function modelForOpenChat(
+  picked: string | undefined,
+  provider: ModelProvider | undefined,
+  messages: ChatMessage[],
+  catalog: ModelOption[],
+  fallback: ModelOption,
+): ModelOption {
+  const usable = (id: string | null | undefined) => catalog.find((option) => option.id === id && (!provider || option.provider === provider));
+  const lastUsed = [...messages].reverse().find((message) => usable(message.model));
+  return usable(picked) ?? usable(lastUsed?.model) ?? modelForChat(fallback, provider, [], catalog);
+}

@@ -46,7 +46,7 @@ import {
   chatsRunning,
   chatsWaitingForUser,
   lastUserModel,
-  modelForChat,
+  modelForOpenChat,
   projectOfKey,
   sentDecision,
   sentReply,
@@ -147,6 +147,16 @@ const NO_REFS: string[] = [];
 // `sent`: the main process saved the message; the preview stays until the saved message reaches the window's state.
 type PendingSend = PendingChat & { view: number; projectPath: string; originSessionId: number | null; originWorktreeId: number; sent?: boolean };
 const NO_WORKTREE = -1;
+// The model picked in each open chat, by chat key.
+const CHAT_MODELS_KEY = "milagre.chatModels";
+function readChatModels(): Record<string, string> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(CHAT_MODELS_KEY) ?? "{}");
+    return saved && typeof saved === "object" ? (saved as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
 type PreparedSendTarget = { view: number; projectPath: string; sessionId: number | null; worktreeId: number };
 type FailedSend = PendingSend & { draft: string; error: string; target: PreparedSendTarget | null };
 
@@ -283,10 +293,18 @@ function App() {
       nextSelection(models, current, { defaultId: getSettings().defaultModelId, applyDefault, preferredProvider: preferredProviderRef.current }),
     );
   }, [models]);
+  // A pick in an open Project chat stays with that chat; elsewhere (the new-chat screen, a Link) it becomes the default.
+  const chatModels = useRef<Record<string, string>>(readChatModels());
   const chooseModel = (model: ModelOption) => {
     pickedModel.current = true;
     setSelectedModel(model);
-    updateSettings({ defaultModelId: model.id });
+    const sessionId = selectedSessionRef.current;
+    if (sessionId === null || !projectRef.current || selectedLinkRef.current) {
+      updateSettings({ defaultModelId: model.id });
+      return;
+    }
+    chatModels.current = { ...chatModels.current, [chatKey(projectRef.current.path, sessionId)]: model.id };
+    localStorage.setItem(CHAT_MODELS_KEY, JSON.stringify(chatModels.current));
   };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
@@ -596,12 +614,15 @@ function App() {
     void agentRuns.answerQuestion(chatKey(project.path, selectedSession.id), pendingQuestion.requestId, answers).catch(() => {});
   }
 
-  // A chat stays on the agent it started with; the picker follows the open chat.
+  // The picker follows the open chat: the model picked there, else the one it last ran, on the agent it's bound to.
   useEffect(() => {
-    if (!selectedSession?.provider) return;
-    const next = modelForChat(selectedModel, selectedSession.provider, messages, models);
+    if (!project || !selectedSession) return;
+    const own = messages.filter((message) => message.session_id === selectedSession.id);
+    const picked = chatModels.current[chatKey(project.path, selectedSession.id)];
+    const fallback = resolveModel(models, defaultModelId, providerForId(defaultModelId));
+    const next = modelForOpenChat(picked, selectedSession.provider, own, models, fallback);
     if (next.id !== selectedModel.id) setSelectedModel(next);
-  }, [selectedSession?.id, selectedSession?.provider]);
+  }, [project?.path, selectedSession?.id, selectedSession?.provider, messages, models]);
 
   function receiveState(projectPath: string, next: CoordinatorState | LinkState) {
     if (isLinkScopeKey(projectPath)) {

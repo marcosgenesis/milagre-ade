@@ -17,5 +17,12 @@
     "allowImportingTsExtensions": true,
     "jsx": "react-jsx"
   },
-  "include": ["electron/main.cjs", "electron/preload.cjs", "electron/computers.cjs", "electron/computers-ipc.cjs", "electron/own-host.cjs"]
+  "include": [
+    "electron/main.cjs",
+    "electron/preload.cjs",
+    "electron/computers.cjs",
+    "electron/computers-ipc.cjs",
+    "electron/computer-routing.cjs",
+    "electron/own-host.cjs"
+  ]
 }

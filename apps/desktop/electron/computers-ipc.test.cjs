@@ -57,11 +57,23 @@ test("adding tells the asking window when the other Mac asks its owner, and a re
   assert.deepEqual(calls.at(-1), ["plain", { name: undefined }], "a name that isn't text is left out");
 });
 
-test("a computer's runtime events reach every window tagged with it, and a call goes to its runtime", async () => {
+test("a call to a computer goes out without its id and comes back naming it, and its events reach every window named too", async () => {
+  const ID = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
   const invoked = [];
-  const { ipc, call, sent } = setup({ invoke: async (id, method, args) => (invoked.push([id, method, args]), { ok: 1 }) });
-  ipc.event("c1", "project:state", { path: "/p" });
-  assert.deepEqual(sent, [["computers:event", { computerId: "c1", channel: "project:state", payload: { path: "/p" } }]]);
-  assert.deepEqual(await call("computers:invoke", "c1", "project:recent", undefined), { ok: 1 });
-  assert.deepEqual(invoked, [["c1", "project:recent", []]]);
+  const { ipc, call, sent } = setup({
+    invoke: async (id, method, args) => {
+      invoked.push([id, method, args]);
+      return method === "project:switch" ? { path: "/p", name: "p", state: {} } : null;
+    },
+  });
+  ipc.event(ID, "project:state", { path: "/p" });
+  assert.deepEqual(sent, [["computers:event", { computerId: ID, channel: "project:state", payload: { path: `${ID}|/p` } }]]);
+  assert.deepEqual(await call("computers:invoke", ID, "project:switch", [`${ID}|/p`]), { path: `${ID}|/p`, name: "p", state: {} });
+  await call("computers:invoke", ID, "project:open-at", [`${ID}|/q`, { takeNotice: true }]);
+  assert.deepEqual(invoked, [
+    [ID, "project:switch", ["/p"]],
+    [ID, "project:open", ["/q", { takeNotice: true }]],
+  ]);
+  await assert.rejects(call("computers:invoke", ID, "project:reveal", ["/p"]), { message: "Not available on a remote computer" });
+  assert.equal(invoked.length, 2, "a local-only call never reaches the computer");
 });

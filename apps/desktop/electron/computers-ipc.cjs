@@ -1,3 +1,5 @@
+const { ALIASES, NOT_REMOTE, isLocalOnly, qualifyEvent, qualifyResult, stripComputer } = require("./computer-routing.cjs");
+
 /**
  * The window's side of computers.cjs (spec "This Mac (Electron main) › Computers"): the IPC the preload's
  * window.milagre.computers calls, the list pushed to every window after each change (computers:changed), and each
@@ -49,12 +51,20 @@ function registerComputers({ ipcMain, computers, thisMac, send }) {
     return snapshot();
   });
   ipcMain.handle("computers:set-enabled", (_event, on) => computers.setEnabled(on === true));
-  ipcMain.handle("computers:invoke", (_event, id, method, args) => computers.invoke(String(id), String(method), Array.isArray(args) ? args : []));
+  // One call on a computer: this Mac's own actions are refused, its id leaves the arguments, and what comes back names it.
+  ipcMain.handle("computers:invoke", async (_event, id, channel, args) => {
+    const computerId = String(id);
+    const name = String(channel);
+    if (isLocalOnly(name)) throw new Error(NOT_REMOTE);
+    const method = ALIASES[name] ?? name;
+    const result = await computers.invoke(computerId, method, stripComputer(computerId, Array.isArray(args) ? args : []));
+    return qualifyResult(computerId, method, result);
+  });
 
   return {
     changed: () => send("computers:changed", snapshot()),
     /** @param {string} computerId @param {string} channel @param {unknown} payload */
-    event: (computerId, channel, payload) => send("computers:event", { computerId, channel, payload }),
+    event: (computerId, channel, payload) => send("computers:event", { computerId, channel, payload: qualifyEvent(computerId, channel, payload) }),
   };
 }
 

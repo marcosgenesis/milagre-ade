@@ -5,10 +5,10 @@ import { updateSettings, useResolvedScheme, useSettings } from "../../lib/settin
 import { Select } from "../primitives/Select";
 
 const HEX = /^#[0-9a-f]{6}$/i;
-const FIELDS: { key: keyof ThemeSeeds; name: string; hint: string }[] = [
-  { key: "background", name: "Background", hint: "Sidebar, panes and lines are derived from it" },
-  { key: "text", name: "Text", hint: "Chat and interface text" },
-  { key: "accent", name: "Accent", hint: "Buttons, links, selection, cursor" },
+const FIELDS: { key: keyof ThemeSeeds; name: string }[] = [
+  { key: "background", name: "Background" },
+  { key: "text", name: "Text" },
+  { key: "accent", name: "Accent" },
 ];
 const save = (next: CustomTheme) => updateSettings({ customTheme: next, colorTheme: "custom" });
 const NO_CLIPBOARD = "Could not read the clipboard.";
@@ -36,7 +36,7 @@ function Segment({ value, onChange }: { value: Scheme; onChange: (scheme: Scheme
   );
 }
 
-function ColorRow({ name, hint, value, onCommit }: { name: string; hint: string; value: string; onCommit: (hex: string) => void }) {
+function ColorRow({ name, value, onCommit }: { name: string; value: string; onCommit: (hex: string) => void }) {
   // The field keeps what is typed; it commits as soon as the text is a full hex color.
   const [draft, setDraft] = useState<{ source: string; text: string } | null>(null);
   const text = draft && draft.source === value ? draft.text : value;
@@ -59,10 +59,7 @@ function ColorRow({ name, hint, value, onCommit }: { name: string; hint: string;
   );
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-2.5">
-      <div className="grid min-w-0 gap-0.5">
-        <span className="text-[13.5px] font-medium text-ink">{name}</span>
-        <span className="text-[12px] text-ink-3">{hint}</span>
-      </div>
+      <span className="text-[13.5px] font-medium text-ink">{name}</span>
       <div className="flex shrink-0 items-center gap-2">
         <input
           type="color"
@@ -151,7 +148,7 @@ export function CustomThemeEditor() {
       <div className="flex items-start gap-4">
         <div className="min-w-0 flex-1 divide-y divide-line rounded-[10px] bg-field/50">
           {FIELDS.map((field) => (
-            <ColorRow key={field.key} name={field.name} hint={field.hint} value={seeds[field.key]} onCommit={(hex) => edit(field.key, hex)} />
+            <ColorRow key={field.key} name={field.name} value={seeds[field.key]} onCommit={(hex) => edit(field.key, hex)} />
           ))}
         </div>
         <Preview theme={theme} scheme={editing} />

@@ -36,7 +36,10 @@ function createMcp({ accounts, routing, cwd, clientVersion, checkers = {}, timeo
       }, timeoutMs);
     });
     try {
-      const result = await Promise.race([run[provider]({ command: cli.command, env: cli.env, cwd, clientVersion, signal: controller.signal }), cap]);
+      const result = await Promise.race([
+        run[provider]({ command: cli.command, env: cli.env, cwd, clientVersion, signal: controller.signal, timeoutMs: Math.max(0, timeoutMs - 5000) }),
+        cap,
+      ]);
       return result === TIMEOUT_PROBLEM ? answer(TIMEOUT_PROBLEM) : answer(null, result);
     } catch (error) {
       return answer(error instanceof Error ? error.message : String(error));

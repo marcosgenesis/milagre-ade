@@ -46,6 +46,7 @@ async function checkClaude({
   const session = query({ prompt: idle, options: { pathToClaudeCodeExecutable: command, cwd, ...(env ? { env } : {}) } });
   const onAbort = () => session.close?.();
   signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) onAbort();
   try {
     const deadline = now() + timeoutMs;
     let list = await session.mcpServerStatus();

@@ -106,3 +106,33 @@ test("an unknown account or provider is a problem, not a throw", async () => {
   assert.equal((await mcp.check("codex", "nope")).problem, "Account not found. Refresh and try again.");
   assert.equal((await mcp.check("antigravity", "default")).problem, "Account not found. Refresh and try again.");
 });
+
+test("the checker gets a deadline 5 s inside the cap", async () => {
+  let seen = null;
+  const mcp = createMcp({
+    accounts,
+    routing,
+    cwd: "/",
+    checkers: {
+      claude: async (options) => {
+        seen = options;
+        return [];
+      },
+    },
+  });
+  await mcp.check("claude", "default");
+  assert.equal(seen.timeoutMs, 25_000);
+});
+
+test("a checker that answers just under the cap keeps its server list", async () => {
+  const mcp = createMcp({
+    accounts,
+    routing,
+    cwd: "/",
+    timeoutMs: 100,
+    checkers: { claude: () => new Promise((resolve) => setTimeout(() => resolve([report]), 50)) },
+  });
+  const result = await mcp.check("claude", "default");
+  assert.equal(result.problem, null);
+  assert.deepEqual(result.servers, [report]);
+});

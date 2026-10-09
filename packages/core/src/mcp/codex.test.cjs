@@ -102,3 +102,12 @@ test("aborting the signal closes the app-server while the check hangs", async ()
   controller.abort();
   assert.equal(rpc.closed, true);
 });
+
+test("a signal that is already aborted closes the app-server right away", async () => {
+  const rpc = fakeRpc([]);
+  rpc.request = () => new Promise(() => {});
+  const controller = new AbortController();
+  controller.abort();
+  void checkCodex({ command: "codex", cwd: "/", signal: controller.signal, createRpc: () => rpc }).catch(() => {});
+  assert.equal(rpc.closed, true);
+});

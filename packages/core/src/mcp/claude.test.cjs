@@ -102,3 +102,17 @@ test("aborting the signal closes the session while the check hangs", async () =>
   controller.abort();
   assert.equal(closed, true);
 });
+
+test("a signal that is already aborted closes the session right away", async () => {
+  let closed = false;
+  const controller = new AbortController();
+  controller.abort();
+  void checkClaude({
+    command: "c",
+    cwd: "/",
+    signal: controller.signal,
+    loadSdk: async () => ({ query: () => ({ mcpServerStatus: () => new Promise(() => {}), close: () => void (closed = true) }) }),
+  }).catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closed, true);
+});

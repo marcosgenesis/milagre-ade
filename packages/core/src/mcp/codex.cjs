@@ -22,6 +22,7 @@ async function checkCodex({ command, env, cwd, clientVersion = "0.0.0", signal, 
   rpc.start();
   const onAbort = () => rpc.close();
   signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) onAbort();
   try {
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null });
     rpc.notify("initialized");

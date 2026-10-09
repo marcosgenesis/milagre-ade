@@ -1,5 +1,6 @@
 // Settings > Experimental > Linear in Electron: the switch reveals the connections, one row per workspace; Connect adds
-// the first, Add another, and each workspace disconnects on its own.
+// the first, Add another, and each workspace disconnects on its own. Moving issues to In Progress is on by default, and a
+// workspace signed in before write access says it can't move them yet.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -11,17 +12,19 @@ import { createRoot } from 'react-dom/client';
 import { SettingsNav, SettingsPanel } from '/src/components/Settings';
 import '/src/styles.css';
 let enabled = false;
+window.__moveToStarted = true;
 let status = { connected: false, workspaces: [] };
 const listeners = new Set();
-const acme = { id: 'acme', viewer: { name: 'Victor', email: 'v@x' }, organization: { name: 'Acme', urlKey: 'acme' } };
-const beta = { id: 'beta', viewer: { name: 'Vic', email: 'v@beta' }, organization: { name: 'Beta Labs', urlKey: 'beta' } };
+const acme = { id: 'acme', viewer: { name: 'Victor', email: 'v@x' }, organization: { name: 'Acme', urlKey: 'acme' }, canWrite: true };
+const beta = { id: 'beta', viewer: { name: 'Vic', email: 'v@beta' }, organization: { name: 'Beta Labs', urlKey: 'beta' }, canWrite: false };
 const statusOf = (workspaces) =>
   workspaces.length ? { connected: true, viewer: workspaces[0].viewer, organization: workspaces[0].organization, workspaces } : { connected: false, workspaces: [] };
 // A Mac that predates workspaces sends its one connection without a list.
 const connected = { connected: true, viewer: acme.viewer, organization: acme.organization };
 window.milagre = {
   listEditors: async () => [], listRecentProjects: async () => [], listProjects: async () => [],
-  readLinearEnabled: async () => ({ enabled }),
+  readLinearEnabled: async () => ({ enabled, moveToStarted: window.__moveToStarted }),
+  saveLinearMoveToStarted: async (value) => ({ moveToStarted: (window.__moveToStarted = value) }),
   saveLinearEnabled: async (value) => ({ enabled: (enabled = value) }),
   readLinearStatus: async () => status,
   connectLinear: (options) =>
@@ -134,6 +137,20 @@ async function browserChecks() {
     assert.match(await evaluate(text), /Beta LabsSigned in as Vic/);
     await evaluate(`document.querySelector('[data-linear-connect]').scrollIntoView({ block: 'center' })`);
     await screenshot("two-workspaces");
+    // Moving issues is on by default; only the read-only sign-in says it can't, and only while the switch is on.
+    const moveSwitch = `document.querySelector('[role="switch"][aria-label="Move issues to In Progress"]')`;
+    assert.equal(await evaluate(`${moveSwitch}.getAttribute('aria-checked')`), "true");
+    const readOnly = /Beta LabsSigned in as Vic\. Can't move issues yet\. Sign in to this workspace again with Add workspace to allow it\./;
+    assert.match(await evaluate(text), readOnly);
+    assert.doesNotMatch(await evaluate(text), /Signed in as Victor\. Can't/);
+    await evaluate(`${moveSwitch}.scrollIntoView({ block: 'center' })`);
+    await screenshot("move-to-in-progress");
+    await evaluate(`${moveSwitch}.click()`);
+    await waitFor(`window.__moveToStarted === false`);
+    await waitFor(`${moveSwitch}.getAttribute('aria-checked') === 'false'`);
+    assert.doesNotMatch(await evaluate(text), /Can't move issues yet/);
+    await evaluate(`${moveSwitch}.click()`);
+    await waitFor(`window.__moveToStarted === true`);
     // Disconnect ends only its own workspace.
     await evaluate(`document.querySelector('[data-linear-workspace="acme"]').click()`);
     await waitFor(`document.querySelectorAll('[data-linear-workspace]').length === 1`);

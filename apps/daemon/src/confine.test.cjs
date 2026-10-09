@@ -581,6 +581,7 @@ test("a confined phone reads Linear status and the switch but can't change it", 
   await confine.checkCall("linear:status", []);
   await confine.checkCall("linear:enabled:read", []);
   await assert.rejects(confine.checkCall("linear:enabled:save", [true]), { status: 403, message: REFUSED });
+  await assert.rejects(confine.checkCall("linear:move-to-started:save", [true]), { status: 403, message: REFUSED });
 });
 
 test("a confined phone reads Linear issues, and only its own Project's worktree issues", async () => {

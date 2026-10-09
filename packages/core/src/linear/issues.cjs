@@ -15,6 +15,13 @@ const ASSIGNED = `query Assigned {
 const SEARCH = `query Search($q: String!) { searchIssues(term: $q, first: 25) { nodes { ${ISSUE_FIELDS} } } }`;
 const ONE = `query One($id: String!) { issue(id: $id) { ${ISSUE_FIELDS} } }`;
 const TEAMS = "query Teams { teams(first: 100) { nodes { key } } }";
+// The issue's state and its team's started states; the first by position is the one Linear calls In Progress.
+const STARTED_STATES = `query Started($id: String!) {
+  issue(id: $id) { id state { type } team { states(filter: { type: { eq: "started" } }) { nodes { id position } } } }
+}`;
+const MOVE = "mutation Move($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }";
+// Only work not yet begun moves; started, done and canceled issues keep their status.
+const NOT_STARTED = new Set(["triage", "backlog", "unstarted"]);
 
 function toIssue(node) {
   if (!node || typeof node !== "object") return null;
@@ -198,7 +205,26 @@ function createLinearIssues({ linear, now = Date.now }) {
     }
   }
 
-  return { list, readIssue, worktreeIssues };
+  // Moves an issue a Chat just started from to its team's first started status. Says what happened and never throws:
+  // "moved", "kept" (already begun, or the team has no started status) or "failed".
+  async function markStarted(key, workspace) {
+    try {
+      const data = await linear.query(workspace, STARTED_STATES, { id: key });
+      const issue = data?.issue;
+      if (!issue || !NOT_STARTED.has(issue.state?.type)) return "kept";
+      const [target] = [...(issue.team?.states?.nodes ?? [])].sort((a, b) => a.position - b.position);
+      if (!target) return "kept";
+      const moved = await linear.query(workspace, MOVE, { id: issue.id, stateId: target.id });
+      if (moved?.issueUpdate?.success !== true) return "failed";
+      // The chips read the new status on their next poll, not a minute later.
+      cache.delete(`${workspace}:${String(key).toUpperCase()}`);
+      return "moved";
+    } catch {
+      return "failed";
+    }
+  }
+
+  return { list, readIssue, worktreeIssues, markStarted };
 }
 
 module.exports = { createLinearIssues };

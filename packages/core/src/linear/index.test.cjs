@@ -56,7 +56,7 @@ test("connect signs in through the browser and saves who connected", async (t) =
   const status = await service.connect();
   const viewer = { name: "Victor", email: "v@x" };
   const organization = { name: "ACME", urlKey: "acme" };
-  assert.deepEqual(status, { connected: true, viewer, organization, workspaces: [{ id: "acme", viewer, organization }] });
+  assert.deepEqual(status, { connected: true, viewer, organization, workspaces: [{ id: "acme", viewer, organization, canWrite: true }] });
   assert.deepEqual(service.status(), status);
   assert.equal(changes(), 1);
 });

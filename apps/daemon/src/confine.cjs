@@ -97,10 +97,11 @@ const PATHS = Object.freeze({
   // The global default names no folder. Changing it reaches every Project on the Mac, so a confined phone only reads it.
   "main-sync:default:read": none,
   "main-sync:default:save": denied,
-  // The Mac's Linear connection names no folder. A confined phone reads it; the switch reaches every Project, so it can't flip it.
+  // The Mac's Linear connection names no folder. A confined phone reads it; the switches reach every Project, so it can't flip them.
   "linear:status": none,
   "linear:enabled:read": none,
   "linear:enabled:save": denied,
+  "linear:move-to-started:save": denied,
   // Issues name no folder. A Project's worktree issues name the Project's folder, like its other reads.
   "linear:issues": none,
   "linear:worktree-issues": ([projectPath]) => [projectPath],

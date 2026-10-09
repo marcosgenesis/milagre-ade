@@ -1,9 +1,10 @@
 ---
-// Real recordings of the desktop app and the iPhone app on one scripted run (scripts/site-demo/record.cjs):
-// the agent stops for an approval, it is approved on the phone, and the Mac finishes.
+// Real recordings of the desktop app and the phone app on one scripted run (scripts/site-demo/record.cjs):
+// the agent stops for an approval, it is approved on the phone, and the Mac finishes. Android visitors see the
+// Android app; everyone else the iPhone app.
 ---
 <p class="demo-description">
-  Video: Milagre on a Mac and an iPhone showing the same Chat. The agent asks to run the mobile checks, the request is approved on the iPhone, and the agent finishes on the Mac.
+  Video: Milagre on a Mac and a phone showing the same Chat. The agent asks to run the mobile checks, the request is approved on the phone, and the agent finishes on the Mac.
 </p>
 <div class="demo" aria-hidden="true" data-demo>
   <div class="glow"></div>
@@ -23,6 +24,11 @@
   const phone = demo?.querySelector<HTMLVideoElement>("[data-phone]");
 
   if (demo && stage && desktop && phone) {
+    if (document.documentElement.dataset.platform === "android") {
+      demo.classList.add("android");
+      phone.poster = "/demo/android.jpg";
+      phone.src = "/demo/android.mp4";
+    }
     const narrow = matchMedia("(max-width: 700px)");
     // The demo is a fixed-size canvas, scaled so its top part, down to both approval cards (y 565 of the canvas), ends
     // just above the download button at the bottom of the page; the rest runs under the button and the blurred fade.
@@ -97,10 +103,13 @@
   .lights i:nth-child(3) { background: #28c840; }
   .phone { position: absolute; right: 0; bottom: 0; width: 290px; aspect-ratio: 1206 / 2622; box-sizing: content-box; padding: 11px; border-radius: 52px; background: #0b0b0c; box-shadow: inset 0 0 0 1.5px oklch(1 0 0 / 0.16), 0 0 0 1px oklch(0 0 0 / 0.6), 0 30px 70px oklch(0 0 0 / 0.6); }
   .phone-video { border-radius: 41px; }
+  /* Android draws its status bar close to the corners, so the screen is less rounded than the iPhone's. */
+  .demo.android .phone { aspect-ratio: 1080 / 2400; border-radius: 28px; }
+  .demo.android .phone-video { border-radius: 17px; }
 
   @keyframes breathe { 0%, 100% { opacity: 0.7; transform: scale(1); } 50% { opacity: 1; transform: scale(1.06); } }
 
-  /* On a phone-sized screen, the iPhone alone. */
+  /* On a phone-sized screen, the phone alone. */
   @media (max-width: 700px) {
     .demo { width: 312px; height: 678px; }
     .mac { display: none; }

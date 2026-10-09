@@ -135,6 +135,29 @@ const checks = [
     },
   },
   {
+    name: "an Android phone gets the Android beta and the Android recording",
+    async run(open, evaluate, shot) {
+      const pixel = "Mozilla/5.0 (Linux; Android 16; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
+      const window = await open({ width: 412, height: 915, mobile: true, userAgent: pixel });
+      const visible = `[...document.querySelectorAll(".cta a")].filter((a) => a.offsetParent).map((a) => a.getAttribute("href"))`;
+      assert.deepEqual(await evaluate(window, visible), ["/download/android"]);
+      assert.equal(
+        await evaluate(window, `[...document.querySelectorAll(".cta .button")].find((a) => a.offsetParent).textContent.trim()`),
+        "Download Android beta",
+      );
+      assert.equal(await evaluate(window, `new URL(document.querySelector("[data-phone]").src).pathname`), "/demo/android.mp4");
+      await waitFor(
+        evaluate,
+        window,
+        `(() => { const v = document.querySelector("[data-phone]"); return !v.paused && v.currentTime > 1; })()`,
+        "Android recording playing",
+      );
+      await assertOneScreen(evaluate, window);
+      await shot(window, "android.png");
+      window.destroy();
+    },
+  },
+  {
     name: "Linux gets the AppImage with .deb and .rpm links, Windows gets its own button, and Macs only the Mac builds",
     async run(open, evaluate, shot) {
       const linux = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -192,7 +215,7 @@ const checks = [
       const window = await open({ width: 1440, height: 900 });
       assert.equal(await evaluate(window, `document.querySelector(".demo").getAttribute("aria-hidden")`), "true");
       assert.ok(
-        await evaluate(window, `document.querySelector(".demo-description").textContent.includes("approved on the iPhone")`),
+        await evaluate(window, `document.querySelector(".demo-description").textContent.includes("approved on the phone")`),
         "described for screen readers",
       );
       await waitFor(evaluate, window, `[...document.querySelectorAll(".demo video")].every((v) => !v.paused && v.currentTime > 1.5)`, "videos playing");

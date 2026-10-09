@@ -16,6 +16,7 @@ const MEDIA_TYPES = {
 const HEIC_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"]);
 const CODES = { 400: "BAD_REQUEST", 403: "NOT_SERVED", 404: "NOT_FOUND", 413: "TOO_LARGE", 415: "NOT_AN_IMAGE" };
 const inside = (root, target) => target === root || target.startsWith(root + path.sep);
+const PHONE_REFUSAL = "This file is not available to the mobile app";
 const failure = (status, message) => Object.assign(new Error(message), { status, code: CODES[status] });
 const validScope = (owner) => typeof owner === "string" && (isLinkScopeKey(owner) || path.isAbsolute(owner));
 const realOrNull = async (file) => {
@@ -86,16 +87,16 @@ async function openMedia({ scope, requested }, { dataDir, scopeRoots, chatImage,
     const lexical = path.resolve(requested);
     throw roots.some((root) => inside(root, lexical)) || candidates.some((root) => inside(path.resolve(root), lexical))
       ? failure(404, "Image not found")
-      : failure(403, "This file is not available to the mobile app");
+      : failure(403, PHONE_REFUSAL);
   }
-  if (!roots.some((root) => inside(root, real))) throw failure(403, "This file is not available to the mobile app");
+  if (!roots.some((root) => inside(root, real))) throw failure(403, PHONE_REFUSAL);
   if (MEDIA_TYPES[path.extname(real).toLowerCase()] !== type) throw failure(415, "Only png, jpeg, gif, webp and heic images are served");
   const handle = await fs.open(real, "r").catch((error) => {
-    throw failure(error.code === "ENOENT" ? 404 : 403, error.code === "ENOENT" ? "Image not found" : "This file is not available to the mobile app");
+    throw failure(error.code === "ENOENT" ? 404 : 403, error.code === "ENOENT" ? "Image not found" : PHONE_REFUSAL);
   });
   try {
     const info = await handle.stat();
-    if (!info.isFile()) throw failure(403, "This file is not available to the mobile app");
+    if (!info.isFile()) throw failure(403, PHONE_REFUSAL);
     if (info.size > MAX_MEDIA) throw failure(413, "Images must be 15 MiB or smaller");
     const head = Buffer.alloc(12);
     const { bytesRead } = await handle.read(head, 0, 12, 0);
@@ -109,11 +110,21 @@ async function openMedia({ scope, requested }, { dataDir, scopeRoots, chatImage,
 
 /** media:read for a paired desktop: the same image, whole, as base64 (a large one travels in result pages). */
 async function readMedia(request, options) {
-  const { handle, type, size } = await openMedia({ scope: request?.scope, requested: request?.path }, options);
+  const { handle, type, size } = await openMedia({ scope: request?.scope, requested: request?.path }, options).catch((error) => {
+    // The phone's wording names the mobile app; a desktop is told the same refusal without it.
+    if (error?.message === PHONE_REFUSAL) error.message = "This file is not available";
+    throw error;
+  });
   try {
     const bytes = Buffer.alloc(size);
-    await handle.read(bytes, 0, size, 0);
-    return { type, size, base64: bytes.toString("base64") };
+    let read = 0;
+    // A read can return fewer bytes than asked; a file that shrank since stat ends early rather than padding zeros.
+    while (read < size) {
+      const { bytesRead } = await handle.read(bytes, read, size - read, read);
+      if (!bytesRead) break;
+      read += bytesRead;
+    }
+    return { type, size: read, base64: bytes.subarray(0, read).toString("base64") };
   } finally {
     await handle.close().catch(() => {});
   }

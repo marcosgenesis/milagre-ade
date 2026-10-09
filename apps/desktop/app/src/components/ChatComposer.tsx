@@ -368,6 +368,8 @@ const MessageTranscript = memo(function MessageTranscript({
 });
 
 interface ChatComposerProps {
+  /** The chat's computer is away: the composer is disabled and says so. */
+  offlineName?: string | null;
   /** Sends a comment on a design, or the design the user chose, to the agent; resolves whether it went. */
   onSendDesignMessage?: (text: string) => Promise<boolean>;
   scopeKind?: "project" | "link";
@@ -631,6 +633,7 @@ function NewChatHeader({
 const EMPTY_SUBAGENTS: Subagent[] = [];
 
 export function ChatComposer({
+  offlineName,
   scopeKind,
   imageDraft,
   projectPath,
@@ -896,6 +899,7 @@ export function ChatComposer({
             {notice && <Notice onDismiss={onDismissNotice}>{notice}</Notice>}
             {approval && <div className="mb-2 w-full">{approval}</div>}
             <PromptComposer
+              offlineName={offlineName}
               imageDraft={imageDraft}
               projectPath={projectPath}
               draft={draft}

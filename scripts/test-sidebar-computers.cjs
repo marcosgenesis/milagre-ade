@@ -25,6 +25,12 @@ const remoteState = (title, body) => ({ next_id: 9, projects: { 1: { id: 1, name
 const remoteProjects = {
   "c-arketa": { path: "c-arketa|/Users/a/arketa-web", name: "arketa-web", state: remoteState("Fix flaky deploy check", "The deploy check fails about one run in five.") },
   "c-studio": { path: "c-studio|/Users/s/homelab", name: "homelab", state: remoteState("Backup rotation", "Rotate the nightly backups.") },
+  "c-studio-lean": {
+    path: "c-studio|/Users/s/notes",
+    name: "notes",
+    // A host that keeps messages by Chat sends none in its state; the Chat's summary lists it in the sidebar.
+    state: { ...remoteState("Never opened here", ""), messages: [], messagesInChats: true, sessions: { 4: { id: 4, worktree_id: 1, agent_name: "Claude", provider: "claude", status: "Idle", title: "Never opened here", summary: { count: 3, firstId: 1, lastId: 3 } } } },
+  },
 };
 window.sent = [];
 // Each computer's bridge, as main would answer it: keys already name the computer.
@@ -147,8 +153,12 @@ async function browserChecks() {
     const inScope = (scope, rest) => `[data-sidebar-scope="${scope}"] ${rest}`;
     const computerLines = (scope) =>
       evaluate(`[...document.querySelectorAll(${JSON.stringify(inScope(scope, "[data-chat-computer]"))})].map((line) => line.textContent.trim())`);
-    await waitFor(`document.querySelectorAll('[data-sidebar-scope]').length === 3`);
-    assert.deepEqual(await scopes(), ["c-arketa|/Users/a/arketa-web", "c-studio|/Users/s/homelab", "/work/milagre-ade"], "one list, by Project name");
+    await waitFor(`document.querySelectorAll('[data-sidebar-scope]').length === 4`);
+    assert.deepEqual(
+      await scopes(),
+      ["c-arketa|/Users/a/arketa-web", "c-studio|/Users/s/homelab", "/work/milagre-ade", "c-studio|/Users/s/notes"],
+      "one list, by Project name",
+    );
     await waitFor(`document.querySelectorAll('[data-chat-computer]').length >= 3`);
     assert.deepEqual(await computerLines("/work/milagre-ade"), ["victor-mbp"]);
     assert.deepEqual(await computerLines("c-arketa|/Users/a/arketa-web"), ["arketa"]);
@@ -218,6 +228,50 @@ async function browserChecks() {
     await waitFor(`!document.querySelector('dialog[open]')`);
     console.log("PASS: a remote chat's menus and commands leave out Finder and the editor; this Mac's keep them");
     console.log("PASS: a remote computer's chat opens from the merged list");
+
+    await evaluate(
+      `[...document.querySelectorAll('[data-sidebar-scope="c-studio|/Users/s/homelab"] [data-chat-id] button')].find((b) => b.textContent.includes('Backup rotation')).click()`,
+    );
+    await waitFor(`!!document.querySelector('[data-offline-banner]')`);
+    assert.equal(
+      await evaluate(`document.querySelector('[data-offline-banner]').textContent.trim()`),
+      "studio is offline. This is the last copy it sent, 2h ago. You can read it until studio is back.",
+    );
+    assert.equal(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').disabled`), true);
+    assert.match(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').placeholder`), / \(studio is offline\)$/);
+    assert.equal(await evaluate(`!!document.querySelector('[data-offline-empty]')`), false, "a cached chat shows its copy");
+    assert.ok(await evaluate(`document.querySelector('[data-chat-pane]').textContent.includes('Rotate the nightly backups.')`));
+    await screenshot("offline-chat");
+    console.log("PASS: an offline computer's chat shows the last copy under the banner, with the composer off");
+
+    await evaluate(
+      `[...document.querySelectorAll('[data-sidebar-scope="c-studio|/Users/s/notes"] [data-chat-id] button')].find((b) => b.textContent.includes('Never opened here')).click()`,
+    );
+    await waitFor(`!!document.querySelector('[data-offline-empty]')`);
+    assert.equal(await evaluate(`document.querySelector('[data-offline-empty]').textContent.trim()`), "No copy of this chat on this Mac yet.");
+    await screenshot("offline-chat-empty");
+    await evaluate(
+      `[...document.querySelectorAll('[data-sidebar-scope="c-studio|/Users/s/homelab"] [data-chat-id] button')].find((b) => b.textContent.includes('Backup rotation')).click()`,
+    );
+    await waitFor(`document.querySelector('[data-chat-pane]').textContent.includes('Rotate the nightly backups.')`);
+
+    // The computer comes back: the banner goes and sending works, to that computer.
+    await evaluate(
+      `window.setComputers(window.computerList.map((c) => c.id === 'c-studio' ? { ...c, state: 'online', route: 'relay', lastSeen: Date.now() } : c))`,
+    );
+    await waitFor(`!document.querySelector('[data-offline-banner]') && !document.querySelector('textarea[aria-label="Prompt"]').disabled`);
+    await evaluate(
+      `(() => { const box = document.querySelector('textarea[aria-label="Prompt"]'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(box, "Keep 8 dailies"); box.dispatchEvent(new Event("input", { bubbles: true })); box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); })()`,
+    );
+    await waitFor(`window.sent.length === 1`);
+    assert.equal(await evaluate(`window.sent[0].projectPath`), "c-studio|/Users/s/homelab", "the send goes to studio's bridge, with the key main strips");
+    console.log("PASS: back online, the composer sends to that computer");
+
+    // Removing the computer whose chat is open brings this Mac's Project back.
+    await evaluate(`window.setComputers(window.computerList.filter((c) => c.id !== 'c-studio'))`);
+    await waitFor(`!document.querySelector('[data-sidebar-scope="c-studio|/Users/s/homelab"]') && !document.querySelector('[data-offline-banner]')`);
+    await waitFor(`document.querySelector('[data-sidebar-scope][data-current]')?.dataset.sidebarScope === '/work/milagre-ade'`);
+    console.log("PASS: removing the open chat's computer goes back to this Mac's Project");
 
     await evaluate(`window.setOther(false)`);
     await waitFor(`!document.querySelector('[data-chat-computer]')`);

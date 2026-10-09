@@ -95,7 +95,8 @@ import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
-import { useApplyOtherComputers, useComputers } from "./lib/computers";
+import { isDimmed, isReadOnly, offlineBanner, useApplyOtherComputers, useComputers } from "./lib/computers";
+import { OfflineBanner } from "./components/OfflineBanner";
 import { settingsCommands } from "./lib/settings-commands";
 import type { Command } from "./lib/commands";
 import { messageCommands, messageCommandsFrom } from "./lib/message-commands";
@@ -421,6 +422,18 @@ function App() {
     forgetBridge(computerId);
     void loadInitialProject();
   }, [knownComputers]);
+  // The open Project's computer, when it is another Mac: read-only while it isn't online, with the banner while it is away.
+  const openComputer = project && isRemoteKey(project.path) ? pairedComputers.find((computer) => computer.id === computerOfKey(project.path)) : undefined;
+  const readOnly = Boolean(project && isRemoteKey(project.path) && isReadOnly(openComputer));
+  const [bannerNow, setBannerNow] = useState(() => Date.now());
+  const away = Boolean(openComputer && isDimmed(openComputer));
+  useEffect(() => {
+    if (!away) return;
+    setBannerNow(Date.now());
+    const timer = setInterval(() => setBannerNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, [away, openComputer?.lastSeen]);
+  const awayBanner = openComputer && away ? offlineBanner(openComputer, bannerNow) : null;
   useEffect(() => stateEvents.onLinkState((update) => setLinkStates((previous) => ({ ...previous, [update.linkId]: update.state }))), []);
 
   useEffect(() => {
@@ -1255,6 +1268,10 @@ function App() {
     // A file attached from this Mac is a path the other Mac can't read; pasted images travel as data and still go.
     if (isRemoteKey(project.path) && files.length) {
       setNotice(REMOTE_FILES_NOTICE);
+      return false;
+    }
+    if (readOnly) {
+      setNotice(`${openComputer?.name ?? "That computer"} is offline.`);
       return false;
     }
     sendInFlight.current = true;
@@ -2109,6 +2126,9 @@ function App() {
               className={`min-h-0 flex-1 flex-col overflow-hidden ${view === "chat" && !diffPresence.occupied ? "flex" : "hidden"}`}
               style={{ animation: "fade-in 160ms ease-out" }}
             >
+              {awayBanner && (
+                <OfflineBanner text={awayBanner} empty={Boolean(lean && selectedSession && !chatWindow.loading && chatWindow.messages.length === 0)} />
+              )}
               <EditorLinks root={isRemoteKey(project.path) ? "" : (selectedWorktree?.path ?? project.path)}>
                 <DraftChatComposer
                   key={project.path}
@@ -2135,7 +2155,8 @@ function App() {
                       : undefined
                   }
                   isSending={isSending}
-                  sendBlocked={preparing}
+                  sendBlocked={preparing || readOnly}
+                  offlineName={readOnly ? (openComputer?.name ?? "That computer") : null}
                   runStartedAt={run?.startedAt ?? (pendingHere ? pendingSend?.startedAt : undefined)}
                   streamingText={run?.text}
                   streamingSteps={run?.steps}

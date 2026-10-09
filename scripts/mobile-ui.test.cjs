@@ -1254,6 +1254,44 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   return { state, session, routes, secondaryRoutes, opened, calls, external, render, rows, row, open, more, filter };
 }
 
+test("mobile chat titles use summaries before transcripts load and switch to generated or renamed titles", () => {
+  const nav = navigationHost(Promise.resolve());
+  const chat = { id: 3, agent_name: "main", summary: { count: 2, titleLine: "Fix the login redirect" } };
+  nav.state.project.state.sessions[3] = chat;
+  nav.state.project.state.messages = [];
+  const title = () => find(nav.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.children;
+  assert.equal(title(), "Fix the login redirect");
+  const search = () => find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats");
+  search().props.onChangeText("login redirect");
+  assert.equal(nav.rows().props.data.filter((item) => item.kind === "chat").length, 1, "the summary title is searchable without message bodies");
+  search().props.onChangeText("");
+  nav.state.project.state.sessions = { 3: { ...chat, generatedTitle: "Repair login navigation" } };
+  nav.session.snapshot = { ...nav.state };
+  assert.equal(title(), "Repair login navigation");
+  nav.state.project.state.sessions = { 3: { ...chat, generatedTitle: "Repair login navigation", title: "  My login fix  " } };
+  nav.session.snapshot = { ...nav.state };
+  assert.equal(title(), "My login fix");
+
+  const host = chatHost();
+  host.params.id = "3";
+  host.session.snapshot.project.state.sessions[3] = chat;
+  const screen = find(host.render(), (node) => node.type === "Screen");
+  assert.equal(screen.props.options.title, "Fix the login redirect", "the Chat header uses the summary while the transcript is loading");
+});
+
+test("mobile chat titles fall back to messages from an older host, including message search results", () => {
+  const nav = navigationHost(Promise.resolve());
+  nav.state.project.state.sessions[3] = { id: 3, agent_name: "main" };
+  nav.state.project.state.messages = [
+    { id: 6, session_id: 99, role: "user", body: "Another Chat's title" },
+    { id: 7, session_id: 3, role: "user", body: "Fix login\nCheck the callback URL" },
+    { id: 8, session_id: 3, role: "assistant", body: "Check the wrangler configuration" },
+  ];
+  assert.equal(find(nav.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.children, "Fix login");
+  find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats").props.onChangeText("wrangler");
+  assert.equal(nav.row("message").props.accessibilityLabel, "Check the wrangler configuration, in Fix login");
+});
+
 test("mobile chat rows keep unread emphasis during a running turn and match desktop read title contrast", () => {
   const nav = navigationHost(Promise.resolve());
   const titleStyle = () => Object.assign({}, ...find(nav.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.style);

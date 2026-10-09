@@ -91,7 +91,8 @@ export function ComputersButton({
   const close = () => setOpen(false);
   useDismiss(open, close, (target) => !!target.closest("[data-computers-button], [data-computers-panel]"), place);
   useLayoutEffect(() => {
-    if (open) panelRef.current?.querySelector<HTMLElement>("[data-menu-row]")?.focus();
+    // The gears show on hover, so the first control seen is Add computer, not This Mac's invisible gear.
+    if (open) panelRef.current?.querySelector<HTMLElement>("[data-add-computer-row]")?.focus();
   }, [open]);
   if (!otherComputers) return null;
 

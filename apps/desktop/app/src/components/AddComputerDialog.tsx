@@ -70,6 +70,8 @@ export function AddComputerDialog({ onClose, onAdded }: { onClose: () => void; o
     const result: AddComputerResult = await window.milagre.computers
       .add(link.trim(), { name: name.trim() || preview.name })
       .catch((cause: unknown) => ({ ok: false as const, code: "failed", message: ipcErrorMessage(cause) }));
+    // Cleared before onAdded unmounts the dialog, or the unmount cleanup would cancel a pairing that already succeeded.
+    addingNow.current = false;
     setAdding(false);
     setWaiting(false);
     if (result.ok) onAdded(result.computer);

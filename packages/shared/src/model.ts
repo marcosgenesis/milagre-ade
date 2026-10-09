@@ -561,6 +561,13 @@ export interface OpenProject {
   restoredChats?: RestoredChats[];
 }
 
+/** worktree:link-issue's answer: `renamed` when the branch took the issue's name, `stored` when only the key was kept. */
+export interface LinkIssueResult {
+  project: OpenProject;
+  mode: "renamed" | "stored";
+  branch: string;
+}
+
 export function sortedWorktrees(state: CoordinatorState) {
   return Object.values(state.worktrees).sort((a, b) => a.id - b.id);
 }

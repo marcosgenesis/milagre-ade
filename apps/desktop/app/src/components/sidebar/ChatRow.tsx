@@ -1,6 +1,7 @@
 import { ChatTitle } from "./ChatTitle";
-import { issueChipLabel, type LinearIssue } from "@milagre/shared/linear";
+import { issueChipLabel, LINK_PR_HINT, type LinearIssue } from "@milagre/shared/linear";
 import { LinearLogo } from "../ProviderLogo";
+import { LinearIssuePicker } from "../LinearIssuePicker";
 import { SpinnerRing } from "../primitives/SpinnerRing";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -61,6 +62,10 @@ type ChatDetails = {
   pullRequests?: PullRequest[];
   /** The Linear issue the chat's Worktree was started from or names. */
   linearIssue?: LinearIssue;
+  /** The key the chat's Worktree is stored as linked to (Worktree.linearIssue). Only while Linear is on. */
+  linearKey?: string;
+  /** The chat has its own Worktree that another chat doesn't share, so "Link issue…" is offered. Only while Linear is on. */
+  linkable?: boolean;
   /** The chat's last turn failed. */
   failed?: boolean;
   /** Ports the chat's commands listen on. */
@@ -96,6 +101,10 @@ export type ChatRowActions = {
   /** Looks at the chat's worktree when "Archive" is clicked, to decide what the confirm step offers. */
   onArchiveCheck?: (id: string) => Promise<ArchivePlan>;
   onArchive?: (id: string, mode: ArchiveMode, plan: ArchivePlan) => Promise<unknown> | void;
+  /** Links the chat's Worktree to a Linear issue by key. */
+  onLinkIssue?: (id: string, key: string) => void;
+  /** Removes the Worktree's stored Linear issue link. */
+  onUnlinkIssue?: (id: string) => void;
 };
 
 /** What the confirm step offers when nothing is known about the worktree: only hide the chat. */
@@ -117,7 +126,16 @@ const ROW_PR_LIMIT = 2;
 const HOVER_CARD_WIDTH = 256;
 const MENU_WIDTH = 240;
 
-type MenuEntry = { key: string; label: string; icon: HugeIconData; onSelect: () => void; disabled?: boolean; danger?: boolean; archiveChoice?: boolean };
+type MenuEntry = {
+  key: string;
+  label: string;
+  icon?: HugeIconData;
+  /** Drawn instead of `icon`, e.g. a brand mark. */ leading?: ReactNode;
+  onSelect: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  archiveChoice?: boolean;
+};
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
 
@@ -201,6 +219,8 @@ export const ChatRow = memo(function ChatRow({
   const hoverTimer = useRef<number | null>(null);
   const [card, setCard] = useState<{ top: number; left: number; flip: boolean } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // The issue picker opened from the menu's "Link issue…", at the menu's place.
+  const [linking, setLinking] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
 
   const clearHover = () => {
@@ -365,6 +385,7 @@ export const ChatRow = memo(function ChatRow({
             trigger={triggerRef}
             onClose={() => setMenu(null)}
             onRename={() => setRenaming(true)}
+            onLink={() => setLinking(menu)}
             actions={{
               ...actions,
               onArchive: actions.onArchive
@@ -381,6 +402,16 @@ export const ChatRow = memo(function ChatRow({
                   }
                 : undefined,
             }}
+          />
+        )}
+        {linking && (
+          <LinkIssuePopover
+            position={linking}
+            onPick={(issue) => {
+              setLinking(null);
+              actions.onLinkIssue?.(item.id, issue.key);
+            }}
+            onClose={() => setLinking(null)}
           />
         )}
       </div>
@@ -646,6 +677,13 @@ function ChatHoverCard({
             </a>
           </CardLine>
         )}
+        {details.linearKey && !(details.branch ?? "").toLowerCase().includes(details.linearKey.toLowerCase()) && (
+          <CardLine icon={<LinearLogo size={13} />}>
+            <span data-chat-card-link-hint className="min-w-0 whitespace-normal text-[12px] leading-snug text-ink-3">
+              {LINK_PR_HINT(details.linearKey)}
+            </span>
+          </CardLine>
+        )}
         {details.path && (
           <CardLine icon={<HugeIcon icon={Folder01Icon} size={14} />}>
             <span className="truncate">{folderName(details.path)}</span>
@@ -676,12 +714,40 @@ function CardLine({ icon, children }: { icon: ReactNode; children: ReactNode }) 
  * From the row's ⋮ button or a right-click. Archive hides the
  * chat for good (there is no archived list), so it asks twice.
  * ───────────────────────────────────────────────────────── */
+/** The issue list over the menu's place, for "Link issue…". Picking an issue hands its key up and closes. */
+function LinkIssuePopover({ position, onPick, onClose }: { position: { x: number; y: number }; onPick: (issue: LinearIssue) => void; onClose: () => void }) {
+  useDismiss(true, onClose, (target) => !!target.closest("[data-picker-panel]"));
+  const ref = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState(position.y);
+  // Opens above the menu's place when there isn't room below, and never above the window's top edge.
+  // Measured again as the issue list fills in, since its height isn't known on the first paint.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const place = () => {
+      const height = element.getBoundingClientRect().height;
+      setTop(position.y + height > window.innerHeight - 8 ? Math.max(8, position.y - height - 8) : position.y);
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [position.y]);
+  return createPortal(
+    <div ref={ref} data-linear-link-picker className="fixed z-[70]" style={{ top, left: Math.min(position.x, window.innerWidth - 420 - 8) }}>
+      <LinearIssuePicker className="w-[420px] max-w-[calc(100vw-2rem)]" title="Link a Linear issue" onPick={onPick} onClose={onClose} />
+    </div>,
+    document.body,
+  );
+}
+
 function ChatMenu({
   item,
   position,
   trigger,
   onClose,
   onRename,
+  onLink,
   actions,
 }: {
   item: SidebarRecent;
@@ -690,6 +756,7 @@ function ChatMenu({
   trigger: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onRename: () => void;
+  onLink: () => void;
   actions: ChatRowActions;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -774,6 +841,20 @@ function ChatMenu({
     { key: "copy-path", label: "Copy path", icon: Copy01Icon, onSelect: copy(details.path ?? ""), disabled: !details.path },
     { key: "copy-branch", label: "Copy branch name", icon: GitBranchIcon, onSelect: copy(details.branch ?? ""), disabled: !details.branch },
     { key: "rename", label: "Rename chat", icon: PencilEdit02Icon, onSelect: run(onRename), disabled: !actions.onRename },
+    // Unlink and Link are offered on the same Worktrees (own, not shared, not the main checkout), as on the phone.
+    ...(details.linkable
+      ? details.linearKey
+        ? [
+            {
+              key: "unlink-issue",
+              label: "Unlink issue",
+              leading: <LinearLogo size={14} />,
+              onSelect: run(() => actions.onUnlinkIssue?.(item.id)),
+              disabled: !actions.onUnlinkIssue,
+            },
+          ]
+        : [{ key: "link-issue", label: "Link issue…", leading: <LinearLogo size={14} />, onSelect: run(onLink), disabled: !actions.onLinkIssue }]
+      : []),
     item.unread
       ? { key: "read", label: "Mark as read", icon: Tick02Icon, onSelect: run(() => actions.onMarkUnread?.(item.id, false)), disabled: !actions.onMarkUnread }
       : {
@@ -854,7 +935,7 @@ function ChatMenu({
               className={`relative z-10 flex w-full items-center gap-2 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40 ${entry.archiveChoice ? "min-h-8 py-1.5" : "h-8"} ${entry.danger ? "text-red" : "text-ink"}`}
             >
               <span className={`flex size-5 shrink-0 items-center justify-center ${entry.danger ? "text-red" : "text-ink-2"}`}>
-                <HugeIcon icon={entry.icon} size={16} />
+                {entry.leading ?? (entry.icon && <HugeIcon icon={entry.icon} size={16} />)}
               </span>
               <span className={`min-w-0 flex-1 text-[13px] ${entry.archiveChoice ? "leading-snug" : "truncate"}`}>{entry.label}</span>
             </button>

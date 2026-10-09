@@ -17,11 +17,12 @@ import {
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
-import type { ChatMessage, PullRequestActionContext } from "@milagre/shared/model";
+import type { ChatMessage, LinkIssueResult, PullRequestActionContext } from "@milagre/shared/model";
 import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
 import { messageSender } from "@milagre/shared/advisor-result";
 import { messageNavigationIndices } from "@milagre/shared/message-navigation";
-import { issueChipLabel, issueFirstMessage, type LinearIssue, type LinearIssuesResult } from "@milagre/shared/linear";
+import { LINK_PR_HINT, issueChipLabel, issueFirstMessage, type LinearIssue, type LinearIssuesResult } from "@milagre/shared/linear";
+import { worktreeShared } from "@milagre/shared/archive";
 import type { Client, OpenProject } from "../client";
 import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
 import { pullRequestBlockers } from "@milagre/shared/pr-blockers";
@@ -48,6 +49,8 @@ import { useDotBackground } from "../dot-background";
 import { Approval, Questions } from "../questions";
 import { AgentControls, PermissionChip } from "../agent-controls";
 import { afterSend, modelsFor, selectedModel, sendOptions, turnTarget } from "../turn-options";
+// Linear's mark as a template image, so iOS tints it like the SF Symbols beside it in menus.
+import LINEAR_MARK from "../../assets/linear-mark.png";
 import { Icon, LinearLogo } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
@@ -84,6 +87,16 @@ export default function ChatScreen() {
   const [picking, setPicking] = useState(false);
   const [dockHeight, setDockHeight] = useState(140);
   const [error, setError] = useState("");
+  // Bumped after a link or unlink so the Linear issues of the Worktrees are read again.
+  const [linkVersion, setLinkVersion] = useState(0);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
   const [isolation, setIsolation] = useState<"local" | "worktree">("local");
   const [baseBranch, setBaseBranch] = useState("");
   const [branchList, setBranchList] = useState<{ client: Client; path: string; items: string[]; error?: string } | null>(null);
@@ -131,7 +144,7 @@ export default function ChatScreen() {
   const projectPath = session.snapshot?.project.path;
   // Linear is read only while the Mac has it on and connected; a linked Chat has no Worktrees of its own.
   const { active: linearActive } = useLinear(connected);
-  const linearIssues = useWorktreeLinearIssues(connected, linearActive && projectPath && !session.snapshot?.project.link ? [projectPath] : []);
+  const linearIssues = useWorktreeLinearIssues(connected, linearActive && projectPath && !session.snapshot?.project.link ? [projectPath] : [], linkVersion);
   const targetMatches = (!params.projectPath || params.projectPath === projectPath) && (!params.hostId || params.hostId === connected?.url);
   const originChatId = `${projectPath}#${params.id ?? `new:${params.worktreeId}`}`;
   const pending = targetMatches
@@ -390,6 +403,10 @@ export default function ChatScreen() {
   startIssue.current = (issue) => void send(issueFirstMessage(issue, draft), true, undefined, issue.key);
   /** Lists the open issues in the choice sheet; picking one starts the Chat from it. */
   async function chooseIssue() {
+    await pickLinearIssue("Start from a Linear issue", (issue) => startIssue.current(issue));
+  }
+  /** Shows the open issues in the choice sheet under `title` and hands the picked one to `onPick`. */
+  async function pickLinearIssue(title: string, onPick: (issue: LinearIssue) => void) {
     if (targetDisabled || !client) return;
     setError("");
     let result: LinearIssuesResult;
@@ -405,14 +422,14 @@ export default function ChatScreen() {
     }
     const issues = result.issues;
     showChoiceSheet({
-      title: "Start from a Linear issue",
+      title,
       placeholder: "Search issues",
       emptyLabel: "No issues found.",
       leading: <LinearLogo size={18} tone="ink" />,
       items: issues.map((issue) => ({ id: issue.key, title: `${issue.key} ${issue.title}`, subtitle: issue.state.name })),
       onSelect: (key) => {
         const issue = issues.find((item) => item.key === key);
-        if (issue) startIssue.current(issue);
+        if (issue) onPick(issue);
       },
     });
   }
@@ -662,6 +679,45 @@ export default function ChatScreen() {
     // oxlint-disable-next-line unicorn/prefer-string-starts-ends-with -- the issue comes from the host's JSON, so url may be missing and startsWith would throw
     if (/^https:\/\//.test(url)) void Linking.openURL(url).catch(() => {});
   }
+  // A Chat's own Worktree (not the main checkout, not one another Chat shares) can link an issue; a stored one is shown
+  // with its hint when Linear can't see it. Nothing about the link shows while Linear is off.
+  const canLink = linearActive && !!chat && !project.link && !!worktree?.path && worktree.path !== project.path && !worktreeShared(project.state, chat.id);
+  const storedIssue = linearActive ? worktree?.linearIssue : undefined;
+  const linkHint = storedIssue && !(worktree?.name ?? "").toLowerCase().includes(storedIssue.toLowerCase()) ? LINK_PR_HINT(storedIssue) : null;
+  /** Picks an issue from the list and links it to this Chat's Worktree. */
+  /** A short confirmation over the transcript that goes away on its own, for results that need no answer. */
+  function showToast(message: string) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(message);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
+  }
+  function linkIssue() {
+    if (!worktree) return;
+    void pickLinearIssue("Link a Linear issue", (issue) => void linkWorktreeIssue(issue.key));
+  }
+  async function linkWorktreeIssue(key: string) {
+    if (!worktree) return;
+    setError("");
+    try {
+      const result = await client.call<LinkIssueResult>("worktree:link-issue", [{ projectPath: project.path, worktreeId: worktree.id, key }]);
+      await session.refresh();
+      setLinkVersion((version) => version + 1);
+      showToast(result.mode === "renamed" ? `Branch renamed to ${result.branch}.` : `Issue linked. ${LINK_PR_HINT(key)}`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function unlinkWorktreeIssue() {
+    if (!worktree) return;
+    setError("");
+    try {
+      await client.call("worktree:unlink-issue", [{ projectPath: project.path, worktreeId: worktree.id }]);
+      await session.refresh();
+      setLinkVersion((version) => version + 1);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   const header = (
     <>
       <View style={{ alignItems: "center", maxWidth: 230 }}>
@@ -704,8 +760,13 @@ export default function ChatScreen() {
           >{`Pull request #${pr.number}`}</Stack.Toolbar.MenuAction>
         )}
         {linearIssue && (
-          <Stack.Toolbar.MenuAction icon="link" onPress={() => openLinearIssue(linearIssue.url)}>
+          <Stack.Toolbar.MenuAction icon={LINEAR_MARK} iconRenderingMode="template" onPress={() => openLinearIssue(linearIssue.url)}>
             {issueChipLabel(linearIssue)}
+          </Stack.Toolbar.MenuAction>
+        )}
+        {linkHint && (
+          <Stack.Toolbar.MenuAction icon="info.circle" disabled>
+            {linkHint}
           </Stack.Toolbar.MenuAction>
         )}
         {agents.length > 0 && (
@@ -718,6 +779,16 @@ export default function ChatScreen() {
             <Stack.Toolbar.MenuAction icon="pencil" onPress={() => headerAction("rename")}>
               Rename
             </Stack.Toolbar.MenuAction>
+            {canLink &&
+              (storedIssue ? (
+                <Stack.Toolbar.MenuAction icon={LINEAR_MARK} iconRenderingMode="template" disabled={busy} onPress={() => void unlinkWorktreeIssue()}>
+                  Unlink issue
+                </Stack.Toolbar.MenuAction>
+              ) : (
+                <Stack.Toolbar.MenuAction icon={LINEAR_MARK} iconRenderingMode="template" disabled={busy} onPress={linkIssue}>
+                  Link issue…
+                </Stack.Toolbar.MenuAction>
+              ))}
             <Stack.Toolbar.MenuAction icon={chat.archived ? "tray.and.arrow.up" : "archivebox"} disabled={busy} onPress={() => headerAction("archive")}>
               {chat.archived ? "Restore" : "Archive"}
             </Stack.Toolbar.MenuAction>
@@ -870,6 +941,16 @@ export default function ChatScreen() {
         transcript's top padding does and gradually strengthens toward the status bar. */}
         <EdgeFade edge="top" height={insets.top + 84} />
         <AttentionPill projectPath={project.path} />
+        {toast ? (
+          <View pointerEvents="none" style={{ position: "absolute", left: 16, right: 16, top: insets.top + 64, alignItems: "center" }}>
+            <View
+              accessibilityLiveRegion="polite"
+              style={{ maxWidth: 360, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.ink }}
+            >
+              <Text style={{ color: colors.surface, fontSize: 14 }}>{toast}</Text>
+            </View>
+          </View>
+        ) : null}
         <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
         <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
           {showJumpToBottom && (

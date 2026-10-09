@@ -143,4 +143,31 @@ async function renameWorktreeBranch({ worktreePath, branch, slug }) {
   }
 }
 
-module.exports = { DEFAULT_WORKTREE_ROOT, createWorktree, issueBranch, listBranches, newSuffix, renameWorktreeBranch, slugify };
+// Whether a branch has been pushed: an upstream is set, or a copy of it exists on origin. Renaming such a branch
+// would split it from its remote, so the caller leaves it alone.
+async function branchPushed(worktreePath, branch) {
+  const upstream = await client.read.checked(worktreePath, ["rev-parse", "--abbrev-ref", "--quiet", `${branch}@{u}`]).then(
+    () => true,
+    () => false,
+  );
+  return upstream || (await client.read.refExists(worktreePath, `refs/remotes/origin/${branch}`));
+}
+
+// Gives a worktree's branch an explicit name, e.g. the branch a Linear issue names (see issueBranch). The folder keeps
+// its name. Git's refusal (the branch moved, or the name is taken) throws.
+async function moveWorktreeBranch({ worktreePath, from, to }) {
+  await client.write.checked(worktreePath, ["branch", "-m", from, to]);
+  return to;
+}
+
+module.exports = {
+  DEFAULT_WORKTREE_ROOT,
+  branchPushed,
+  createWorktree,
+  issueBranch,
+  listBranches,
+  moveWorktreeBranch,
+  newSuffix,
+  renameWorktreeBranch,
+  slugify,
+};

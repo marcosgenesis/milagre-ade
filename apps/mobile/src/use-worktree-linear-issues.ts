@@ -10,8 +10,9 @@ type Loaded = Record<string, Record<string, LinearIssue>>;
 /**
  * The Linear issue of each Worktree in these Projects, keyed by Worktree path. Read while focused, every 30 s and when the app
  * comes back to the foreground, like the Pull request chips. Pass no paths to stop reading (Linear off or no client).
+ * Changing `refreshKey` (after a link or unlink) reads again at once.
  */
-export function useWorktreeLinearIssues(client: Client | null, projectPaths: string[]): Record<string, LinearIssue> {
+export function useWorktreeLinearIssues(client: Client | null, projectPaths: string[], refreshKey = 0): Record<string, LinearIssue> {
   const [loaded, setLoaded] = useState<Loaded>({});
   const pathsKey = JSON.stringify(projectPaths);
   useFocusEffect(
@@ -39,7 +40,9 @@ export function useWorktreeLinearIssues(client: Client | null, projectPaths: str
         clearInterval(timer);
         subscription.remove();
       };
-    }, [client, pathsKey]),
+      // refreshKey is a dependency on purpose: a link or unlink changes it and the effect reads again.
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
+    }, [client, pathsKey, refreshKey]),
   );
   return useMemo(() => {
     const merged: Record<string, LinearIssue> = {};

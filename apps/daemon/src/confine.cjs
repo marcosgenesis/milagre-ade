@@ -138,6 +138,8 @@ const PATHS = Object.freeze({
   "skills:list": ([projectPath]) => [projectPath],
   "skills:read": ([projectPath, file]) => [projectPath, file],
   "worktree:create": ([value]) => [value?.projectPath],
+  "worktree:link-issue": ([value]) => [value?.projectPath],
+  "worktree:unlink-issue": ([value]) => [value?.projectPath],
   "git:diff-files": ([value]) => [value?.cwd],
   "git:diff-file": ([value]) => [value?.cwd],
   // The roots name no path the phone sent; the answer is cut down to the folder (filterResult).

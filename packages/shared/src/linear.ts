@@ -28,6 +28,9 @@ export function issueFirstMessage(issue: LinearIssue, typed?: string): string {
   );
 }
 
+/** Shown when a linked Worktree's branch doesn't name its issue, so Linear can't see the work until the PR says so. */
+export const LINK_PR_HINT = (key: string) => `Add "Fixes ${key}" to the PR description so Linear tracks it.`;
+
 export function issueChipLabel(issue: LinearIssue): string {
   return `${issue.key} · ${issue.state.name}`;
 }

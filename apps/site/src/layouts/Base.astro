@@ -1,0 +1,39 @@
+---
+import "../styles/global.css";
+interface Props { title: string; description: string }
+const { title, description } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const ogImage = new URL("/og.png", Astro.site);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/app-icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/app-icon-512.png" />
+    <meta name="color-scheme" content="dark" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script is:inline>
+      // Each device sees its own download (and Android its own recording), chosen before first paint; anything else gets the Mac one. iPadOS reports itself as a Mac with touch.
+      const ua = navigator.userAgent;
+      if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) document.documentElement.dataset.platform = "ios";
+      else if (/Android/.test(ua)) document.documentElement.dataset.platform = "android";
+      else if (/Windows/.test(ua)) document.documentElement.dataset.platform = "windows";
+      else if (/Linux|X11/.test(ua) && !/Android/.test(ua)) document.documentElement.dataset.platform = "linux";
+    </script>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

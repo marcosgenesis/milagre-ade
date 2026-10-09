@@ -12,8 +12,8 @@ const description = "Milagre runs Claude Code and Codex on your Mac, one Git Wor
     <Nav />
     <main class="hero container">
       <h1>Your agents keep working. Answer them from anywhere.</h1>
-      <DownloadButtons />
       <div class="stage"><HeroDemo /></div>
+      <div class="cta"><DownloadButtons /></div>
     </main>
   </div>
 </Base>
@@ -21,10 +21,18 @@ const description = "Milagre runs Claude Code and Codex on your Mac, one Git Wor
 <style>
   /* One screen, no scroll: the scene scales into whatever height is left. */
   .page { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
-  .hero { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 22px; min-height: 0; padding: 24px 0 32px; text-align: center; }
+  .hero { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; gap: 28px; min-height: 0; padding-top: 24px; text-align: center; }
   h1 { max-width: 24ch; font-size: clamp(30px, min(4.4vw, 5.4vh), 56px); font-weight: 700; }
-  .stage { position: relative; flex: 1; width: 100%; min-height: 0; margin-top: 12px; }
+  /* The devices run past the bottom of the screen, under the download band. */
+  .stage { position: relative; flex: 1; width: 100%; min-height: 0; }
+  /* A band that blurs the devices more the lower it goes, then fades to the page, with the download on top. */
+  .cta { position: absolute; inset: auto calc(50% - 50vw) 0; display: flex; justify-content: center; padding: 140px 20px 36px; }
+  .cta::before, .cta::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
+  .cta::before { backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); mask-image: linear-gradient(to bottom, transparent, black 60%); -webkit-mask-image: linear-gradient(to bottom, transparent, black 60%); }
+  .cta::after { background: linear-gradient(to bottom, transparent, color-mix(in oklch, var(--page) 70%, transparent) 55%, var(--page)); }
+  .cta :global(.downloads) { position: relative; z-index: 1; }
   @media (max-width: 700px) {
-    .hero { gap: 18px; padding: 8px 0 20px; }
+    .hero { gap: 20px; padding-top: 8px; }
+    .cta { padding: 110px 20px 28px; }
   }
 </style>

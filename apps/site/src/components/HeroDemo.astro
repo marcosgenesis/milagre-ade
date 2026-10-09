@@ -23,15 +23,18 @@
   const phone = demo?.querySelector<HTMLVideoElement>("[data-phone]");
 
   if (demo && stage && desktop && phone) {
-    // The demo is a fixed-size canvas scaled to whatever room the page leaves it.
+    const narrow = matchMedia("(max-width: 700px)");
+    // The demo is a fixed-size canvas scaled to the room the page leaves it. On a wide screen it runs a fifth past the
+    // bottom, where the download band blurs it away; the phone alone stays smaller, so its approval card clears the band.
     const fit = () => {
-      const scale = Math.min(1.25, stage.clientWidth / demo.offsetWidth, stage.clientHeight / demo.offsetHeight);
+      const reach = narrow.matches ? 0.92 : 1.22;
+      const scale = Math.min(1.25, stage.clientWidth / demo.offsetWidth, (stage.clientHeight * reach) / demo.offsetHeight);
       demo.style.setProperty("--scale", String(Math.max(scale, 0.1)));
     };
     new ResizeObserver(fit).observe(stage);
+    narrow.addEventListener("change", fit);
     fit();
 
-    const narrow = matchMedia("(max-width: 700px)");
     const still = matchMedia("(prefers-reduced-motion: reduce)");
     // The desktop video is the clock; on a phone-sized screen only the phone plays.
     const clock = () => (narrow.matches ? phone : desktop);
@@ -78,7 +81,7 @@
 <style>
   .demo-description { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   /* Design size: a 1000×625 Mac window with the iPhone overlapping its lower right corner. */
-  .demo { position: absolute; top: 50%; left: 50%; width: 1220px; height: 700px; transform: translate(-50%, -50%) scale(var(--scale, 1)); }
+  .demo { position: absolute; top: 0; left: 50%; width: 1220px; height: 700px; transform: translateX(-50%) scale(var(--scale, 1)); transform-origin: top center; }
   /* The loop fades the screens, not the device frames: a see-through frame would show the glow behind it. */
   .mac-video, .phone-video { transition: opacity 450ms var(--ease-out-strong); }
   .demo.fading .mac-video, .demo.fading .phone-video { opacity: 0.2; }

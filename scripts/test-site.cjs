@@ -56,7 +56,8 @@ async function waitFor(evaluate, window, code, description) {
   throw new Error(`Timed out: ${description}`);
 }
 
-// The page is one screen: nothing scrolls, and the scene sits inside the viewport.
+// The page is one screen: nothing scrolls, the devices start on screen and run under the download band, and the
+// visible download button sits fully inside the viewport, above the devices.
 async function assertOneScreen(evaluate, window) {
   const size = await evaluate(
     window,
@@ -64,11 +65,18 @@ async function assertOneScreen(evaluate, window) {
   );
   assert.ok(size.sw <= size.w, `scrollWidth ${size.sw} > ${size.w}`);
   assert.ok(size.sh <= size.h, `scrollHeight ${size.sh} > ${size.h}`);
-  const box = await evaluate(
+  const demo = await evaluate(
     window,
     `(() => { const r = document.querySelector(".demo").getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; })()`,
   );
-  assert.ok(box.top >= 0 && box.left >= 0 && box.bottom <= size.h + 1 && box.right <= size.w + 1, `scene outside the viewport: ${JSON.stringify(box)}`);
+  assert.ok(demo.top >= 0 && demo.top < size.h / 2 && demo.left >= 0 && demo.right <= size.w + 1, `devices misplaced: ${JSON.stringify(demo)}`);
+  const button = await evaluate(
+    window,
+    `(() => { const a = [...document.querySelectorAll(".cta .button")].find((el) => el.offsetParent); const r = a.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { top: r.top, bottom: r.bottom, onTop: a.contains(hit) }; })()`,
+  );
+  assert.ok(button.top >= 0 && button.bottom <= size.h, `download button off screen: ${JSON.stringify(button)}`);
+  assert.ok(button.onTop, "the download button is drawn above the devices");
+  assert.ok(demo.bottom > button.top, "the devices run under the download band");
 }
 
 const checks = [
@@ -77,8 +85,8 @@ const checks = [
     async run(open, evaluate, shot) {
       const window = await open({ width: 1440, height: 900 });
       assert.equal(await evaluate(window, `document.querySelector("h1").textContent.trim()`), HERO_TITLE);
-      assert.ok(await evaluate(window, `!!document.querySelector('.hero a[href="/download/mac-arm64"]')`), "Apple Silicon download");
-      assert.ok(await evaluate(window, `!!document.querySelector('.hero a[href="/download/mac-x64"]')`), "Intel download");
+      assert.ok(await evaluate(window, `!!document.querySelector('.cta a[href="/download/mac-arm64"]')`), "Apple Silicon download");
+      assert.ok(await evaluate(window, `!!document.querySelector('.cta a[href="/download/mac-x64"]')`), "Intel download");
       assert.equal(await evaluate(window, `document.querySelector(".stars").getAttribute("href")`), "https://github.com/the-ptf/milagre-ade");
       await waitFor(evaluate, window, `!document.querySelector("[data-stars]").hidden`, "star count");
       assert.equal(await evaluate(window, `document.querySelector("[data-stars]").textContent`), "1.2K");
@@ -109,18 +117,18 @@ const checks = [
     },
   },
   {
-    name: "an iPhone gets the iPhone beta instead of the Mac download",
+    name: "an iPhone gets the iOS beta instead of the Mac download",
     async run(open, evaluate, shot) {
       const iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1";
       const window = await open({ width: 390, height: 844, mobile: true, userAgent: iphone });
       const visible = (selector) => `[...document.querySelectorAll('${selector}')].filter((a) => a.offsetParent).length`;
-      assert.equal(await evaluate(window, visible('.hero a[href="https://testflight.apple.com/join/K9ExV7bV"]')), 1);
-      assert.equal(await evaluate(window, visible('.hero a[href="/download/mac-arm64"]')), 0);
+      assert.equal(await evaluate(window, visible('.cta a[href="https://testflight.apple.com/join/K9ExV7bV"]')), 1);
+      assert.equal(await evaluate(window, visible('.cta a[href="/download/mac-arm64"]')), 0);
       await assertOneScreen(evaluate, window);
       await shot(window, "iphone.png");
       window.destroy();
       const mac = await open({ width: 1440, height: 900 });
-      assert.equal(await evaluate(mac, visible('.hero a[href="https://testflight.apple.com/join/K9ExV7bV"]')), 0);
+      assert.equal(await evaluate(mac, visible('.cta a[href="https://testflight.apple.com/join/K9ExV7bV"]')), 0);
       mac.destroy();
     },
   },

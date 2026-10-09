@@ -1,5 +1,5 @@
 import { ansi, syntax } from "./build.ts";
-import { contrastRatio, fromOklch, hexToOklch, isHex, mix } from "./color.ts";
+import { contrastRatio, fromOklch, hexToOklch, mix } from "./color.ts";
 import { getTheme } from "./registry.ts";
 import type { CustomTheme, Scheme, ThemeId, ThemeSeeds, ThemeSource } from "./types.ts";
 
@@ -46,8 +46,10 @@ export function customSource({ background, text, accent }: ThemeSeeds, scheme: S
   };
 }
 
+const SEED = /^#[0-9a-f]{6}$/i;
+const isSeed = (v: unknown): v is string => typeof v === "string" && SEED.test(v);
 const isSeeds = (v: unknown): v is ThemeSeeds =>
-  !!v && typeof v === "object" && isHex((v as ThemeSeeds).background) && isHex((v as ThemeSeeds).text) && isHex((v as ThemeSeeds).accent);
+  !!v && typeof v === "object" && isSeed((v as ThemeSeeds).background) && isSeed((v as ThemeSeeds).text) && isSeed((v as ThemeSeeds).accent);
 
 /** Accepts an object or a JSON string; returns normalized (lowercase) seeds or null. */
 export function parseCustomTheme(value: unknown): CustomTheme | null {

@@ -47,6 +47,7 @@ test("rejects malformed input", () => {
     JSON.stringify({ light: theme.light }),
     JSON.stringify({ ...theme, dark: { ...theme.dark, accent: "#12" } }),
     JSON.stringify({ ...theme, light: { ...theme.light, text: "red" } }),
+    JSON.stringify({ ...theme, dark: { ...theme.dark, background: "#1d1430cc" } }),
     42,
     undefined,
   ])

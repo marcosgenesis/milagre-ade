@@ -14,10 +14,11 @@ export const isThemeChoice = (value: unknown): value is ThemeChoice => value ===
 /** The palette to show. `custom` without a custom theme, or an unknown id, falls back to Milagre Blue. */
 export function resolvePalette(choice: string, scheme: Scheme, custom?: CustomTheme | null): ThemePalette {
   if (choice === "custom" && custom) {
-    const key = `custom:${scheme}:${JSON.stringify(custom[scheme])}`;
+    const { background, text, accent } = custom[scheme];
+    const key = `custom:${scheme}:${background}|${text}|${accent}`;
     let palette = cache.get(key);
     if (!palette) {
-      if (cache.size > 64) cache.clear();
+      if (cache.size > 64) for (const k of cache.keys()) if (k.startsWith("custom:")) cache.delete(k);
       cache.set(key, (palette = buildPalette(customSource(custom[scheme], scheme), scheme)));
     }
     return palette;

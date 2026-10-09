@@ -32,8 +32,9 @@ interface Spec {
   radius: number;
   screenWidth: number;
   screenRadius: number;
-  /** Black display margin around the recording; 0 means the recording fills the screen. */
-  screenInset?: number;
+  /** A margin of the app's own background around the recording, so a recording with its status bar right at the
+   *  edge (the Android emulator's) clears the screen's rounded corners. Without it the recording fills the screen. */
+  margin?: { color: string; top: number; side: number; bottom: number };
   body: { color: string; metalness: number; roughness: number };
 }
 
@@ -51,16 +52,16 @@ const SPECS: Record<PhoneKind, Spec & { screenAspect: number }> = {
     screenAspect: 2622 / 1206,
     body: { color: "#2c2f36", metalness: 1, roughness: 0.32 },
   },
-  // An even 0.04 border all round: 0.026 of glass plus the display's 0.014 black margin, so the recording's status bar
-  // clears the screen's rounded corners (the emulator draws it right at the edge). Corners follow the body's curve.
+  // An even 0.026 glass border, display corners that follow the body's curve, and the recording set into a margin of
+  // the app's background (#121b27, sampled from the recording) so the emulator's edge-to-edge status bar isn't clipped.
   android: {
     width: 0.72,
-    height: 0.64 * (2400 / 1080) + 0.028 + 0.052,
+    height: (0.668 - 0.036) * (2400 / 1080) + 0.03 + 0.01 + 0.052,
     depth: 0.085,
     radius: 0.1,
     screenWidth: 0.668,
     screenRadius: 0.074,
-    screenInset: 0.014,
+    margin: { color: "#121b27", top: 0.03, side: 0.018, bottom: 0.01 },
     screenAspect: 2400 / 1080,
     body: { color: "#26282c", metalness: 0.85, roughness: 0.45 },
   },
@@ -119,15 +120,15 @@ function buildPhone(kind: PhoneKind, video: HTMLVideoElement) {
   glass.position.z = front;
   phone.add(glass);
 
-  // The screen, playing the recording, inside the display's black margin when there is one.
-  const inset = spec.screenInset ?? 0;
-  const videoWidth = spec.screenWidth - inset * 2;
+  // The screen, playing the recording, set into its margin when there is one.
+  const margin = spec.margin;
+  const videoWidth = spec.screenWidth - (margin ? margin.side * 2 : 0);
   const videoHeight = videoWidth * spec.screenAspect;
-  const screenHeight = videoHeight + inset * 2;
-  if (inset) {
+  const screenHeight = videoHeight + (margin ? margin.top + margin.bottom : 0);
+  if (margin) {
     const display = new Mesh(
       new ShapeGeometry(roundedRect(spec.screenWidth, screenHeight, spec.screenRadius), 40),
-      new MeshBasicMaterial({ color: "#000000" }),
+      new MeshBasicMaterial({ color: margin.color, toneMapped: false }),
     );
     display.position.z = front + 0.0004;
     phone.add(display);
@@ -135,8 +136,8 @@ function buildPhone(kind: PhoneKind, video: HTMLVideoElement) {
   const texture = new VideoTexture(video);
   texture.colorSpace = SRGBColorSpace;
   const screenMaterial = new MeshBasicMaterial({ map: texture, toneMapped: false });
-  const screen = new Mesh(screenGeometry(videoWidth, videoHeight, inset ? 0.018 : spec.screenRadius), screenMaterial);
-  screen.position.z = front + 0.0008;
+  const screen = new Mesh(screenGeometry(videoWidth, videoHeight, margin ? 0.012 : spec.screenRadius), screenMaterial);
+  screen.position.set(0, margin ? (margin.bottom - margin.top) / 2 : 0, front + 0.0008);
   phone.add(screen);
 
   // A faint reflection across the glass.
@@ -156,7 +157,7 @@ function buildPhone(kind: PhoneKind, video: HTMLVideoElement) {
   } else {
     // The punch-hole front camera.
     const camera = new Mesh(new CircleGeometry(0.017, 32), black);
-    camera.position.set(0, screenHeight / 2 - 0.036, front + 0.0012);
+    camera.position.set(0, screenHeight / 2 - 0.03, front + 0.0012);
     phone.add(camera);
   }
 

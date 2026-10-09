@@ -624,6 +624,10 @@ function App() {
 
   function answerApproval(decision: PermissionDecision) {
     if (!project || !selectedSession || !pendingApproval) return;
+    if (readOnly) {
+      setNotice(`${openComputer?.name ?? "That computer"} is offline.`);
+      return;
+    }
     // The run keeps the answer; if it doesn't reach the agent, the card goes back to pending.
     void agentRuns.respond(chatKey(project.path, selectedSession.id), pendingApproval.requestId, decision).catch(() => {});
   }
@@ -631,6 +635,10 @@ function App() {
   /** Sends the answers to the open question, or dismisses it (null). */
   function answerQuestion(answers: QuestionAnswers | null) {
     if (!project || !selectedSession || !pendingQuestion) return;
+    if (readOnly) {
+      setNotice(`${openComputer?.name ?? "That computer"} is offline.`);
+      return;
+    }
     void agentRuns.answerQuestion(chatKey(project.path, selectedSession.id), pendingQuestion.requestId, answers).catch(() => {});
   }
 
@@ -784,6 +792,10 @@ function App() {
   function controlAdvisor(action: "stop" | "retry", id: string) {
     const current = projectRef.current;
     const parentId = selectedSessionRef.current;
+    if (readOnly) {
+      setNotice(`${openComputer?.name ?? "That computer"} is offline.`);
+      return;
+    }
     if (current && parentId !== null)
       void reportChatAction(
         (action === "stop" ? bridgeForKey(current.path).stopAdvisor : bridgeForKey(current.path).retryAdvisor)(`${current.path}#${parentId}`, id),

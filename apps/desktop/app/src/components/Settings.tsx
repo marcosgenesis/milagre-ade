@@ -20,6 +20,7 @@ import {
   TestTube01Icon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
+import { DOT_COLOR, computerTone, routeLine, seenAgo, useComputers } from "../lib/computers";
 import type { FilesToCopy as FilesToCopyResult, PairedDevice, PhoneStatus, ReleaseChannel, UpdateState, WorktreeSetupSettings } from "../electron";
 import { DEFAULT_FILES_TO_COPY, parsePatterns, previewSentence } from "../lib/files-to-copy";
 import { PERMISSION_MODES } from "../model";
@@ -50,7 +51,17 @@ function Icon({ icon, size = 18 }: { icon: IconData; size?: number }) {
   return <HugeiconsIcon icon={icon} size={size} strokeWidth={1.8} color="currentColor" />;
 }
 
-export type SettingsSection = "general" | "project-accounts" | "accounts" | "appearance" | "skills" | "devices" | "experimental" | "about" | "project";
+export type SettingsSection =
+  | "general"
+  | "project-accounts"
+  | "accounts"
+  | "appearance"
+  | "skills"
+  | "devices"
+  | "experimental"
+  | "about"
+  | "project"
+  | "computer";
 
 const SECTIONS: Array<{ key: SettingsSection; label: string; icon: IconData }> = [
   { key: "general", label: "General", icon: Settings01Icon },
@@ -69,12 +80,16 @@ export function SettingsNav({
   section,
   project,
   current,
+  computerId,
   onSelect,
+  onSelectComputer,
   onSelectProject,
   onBack,
   showProjectSettings = true,
 }: {
   showProjectSettings?: boolean;
+  computerId?: string;
+  onSelectComputer?: (id: string) => void;
   section: SettingsSection;
   project?: SettingsProject;
   current?: SettingsProject;
@@ -83,6 +98,7 @@ export function SettingsNav({
   onBack: () => void;
 }) {
   const [recent, setRecent] = useState<RecentProject[]>([]);
+  const { thisMac, computers } = useComputers();
   useEffect(() => {
     window.milagre.listRecentProjects().then(
       (list) => setRecent(list ?? []),
@@ -104,6 +120,23 @@ export function SettingsNav({
           <RailButton key={item.key} icon={<Icon icon={item.icon} />} label={item.label} active={section === item.key} onClick={() => onSelect(item.key)} />
         ))}
       </GlideGroup>
+      {computers.length > 0 && (
+        <div data-settings-computers>
+          <div className="mx-2 mt-2 flex h-8 items-center px-2 text-[12.5px] font-medium text-ink-3">Computers</div>
+          <GlideGroup>
+            <RailButton icon={<ComputerDot tone="online" />} label={thisMac} active={false} onClick={() => onSelect("devices")} />
+            {computers.map((computer) => (
+              <RailButton
+                key={computer.id}
+                icon={<ComputerDot tone={computerTone(computer)} />}
+                label={computer.name}
+                active={section === "computer" && computerId === computer.id}
+                onClick={() => onSelectComputer?.(computer.id)}
+              />
+            ))}
+          </GlideGroup>
+        </div>
+      )}
       {showProjectSettings && (
         <>
           <div className="mx-2 mt-2 flex h-8 shrink-0 items-center px-2 text-[12.5px] font-medium text-ink-3">Projects</div>
@@ -127,6 +160,181 @@ export function SettingsNav({
         </>
       )}
     </aside>
+  );
+}
+
+function ComputerDot({ tone }: { tone: keyof typeof DOT_COLOR }) {
+  return <span aria-hidden className="mx-[5px] block size-2 rounded-full" style={{ background: DOT_COLOR[tone] }} />;
+}
+
+/** The pill beside a route: the one carrying the connection now, one that would, or one there is none of. */
+function RoutePill({ state }: { state: "In use" | "Ready" | "Not available" }) {
+  return (
+    <span
+      data-connection-state
+      className="rounded-full px-2 py-0.5 text-[11.5px]"
+      style={state === "In use" ? { background: "var(--green-tint)", color: "var(--green)" } : { background: "var(--hover)", color: "var(--ink-3)" }}
+    >
+      {state}
+    </span>
+  );
+}
+
+/**
+ * A paired computer's settings (design computer-settings v1): its name on this Mac, how it is reached, what lives there,
+ * and Remove. The gear in the computers popover opens it.
+ */
+function ComputerSettings({ id, onRemoved }: { id: string; onRemoved: () => void }) {
+  const { computers } = useComputers();
+  const computer = computers.find((item) => item.id === id);
+  const [name, setName] = useState(computer?.name ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // "seen 2h ago" keeps counting while the section stays open.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const [about, setAbout] = useState<{ version: string | null; projects: string[] } | null>(null);
+  useEffect(() => setName(computer?.name ?? ""), [computer?.name]);
+  useEffect(() => {
+    setConfirming(false);
+    setError(null);
+    setAbout(null);
+  }, [id]);
+  // What lives there: asked while it is online, kept while it is away.
+  useEffect(() => {
+    if (computer?.state !== "online") return;
+    let live = true;
+    void Promise.all([
+      window.milagre.computers.invoke(id, "daemon:status").catch(() => null),
+      window.milagre.computers.invoke(id, "project:recent").catch(() => []),
+    ]).then(([status, recent]) => {
+      if (!live) return;
+      const projects = (Array.isArray(recent) ? recent : []).filter((project) => !project?.hidden).map((project) => String(project.name));
+      setAbout({ version: typeof status?.version === "string" ? status.version : null, projects });
+    });
+    return () => {
+      live = false;
+    };
+  }, [id, computer?.state]);
+  if (!computer) return <p className="mt-6 text-[13px] text-ink-3">This computer was removed.</p>;
+
+  const paired = computer.addedAt ? `paired ${new Date(computer.addedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : null;
+  const status = [computer.state === "online" ? "Connected" : routeLine(computer, now), about?.version ? `Milagre ${about.version}` : null, paired]
+    .filter(Boolean)
+    .join(" · ");
+  const lanState = computer.state === "online" && computer.route === "lan" ? "In use" : computer.lanRoutes.length > 0 ? "Ready" : "Not available";
+  const relayState = computer.state === "online" && computer.route === "relay" ? "In use" : "Ready";
+  const rename = async () => {
+    const next = name.trim();
+    if (!next || next === computer.name) {
+      setName(computer.name);
+      return;
+    }
+    try {
+      await window.milagre.computers.rename(computer.id, next);
+      setError(null);
+    } catch (cause) {
+      setError(ipcErrorMessage(cause));
+      setName(computer.name);
+    }
+  };
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await window.milagre.computers.remove(computer.id);
+      onRemoved();
+    } catch (cause) {
+      setError(ipcErrorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div data-computer-settings>
+      <p data-computer-status className="mt-1 text-[13px] text-ink-3">
+        {status}
+      </p>
+      <Group title="General">
+        <Row label="Name" description="Shown on its chats in the sidebar. Only on this Mac.">
+          <input
+            aria-label="Name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={() => void rename()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className="h-[30px] w-[220px] rounded-[8px] bg-field px-2.5 text-[13px] text-ink outline-none ring-1 ring-line-strong focus-visible:ring-accent"
+          />
+        </Row>
+      </Group>
+      <Group title="Connection">
+        <div data-connection="lan">
+          <Row
+            label="Same network"
+            description={computer.lanRoutes[0] ? `${computer.lanRoutes[0]}, end-to-end encrypted` : "Not reached on a shared network yet"}
+          >
+            <RoutePill state={lanState} />
+          </Row>
+        </div>
+        <div data-connection="relay">
+          <Row label="Relay" description={`${computer.relayHost}, used away from that network`}>
+            <RoutePill state={relayState} />
+          </Row>
+        </div>
+      </Group>
+      <Group title={`On ${computer.name}`}>
+        <div data-computer-projects>
+          {computer.state === "online" ? (
+            <Row
+              label={about ? `${about.projects.length} ${about.projects.length === 1 ? "Project" : "Projects"}` : "Reading…"}
+              description={
+                about ? `${about.projects.length ? `${about.projects.join(", ")}. ` : ""}Accounts and simulators stay on ${computer.name}.` : undefined
+              }
+            >
+              {null}
+            </Row>
+          ) : (
+            <Row
+              label={`${computer.name} is offline`}
+              description={seenAgo(computer.lastSeen, now) ? `Last seen ${seenAgo(computer.lastSeen, now)}.` : undefined}
+            >
+              {null}
+            </Row>
+          )}
+        </div>
+      </Group>
+      {error && (
+        <p role="alert" className="mt-3 text-[13px] text-red">
+          {error}
+        </p>
+      )}
+      <Group title="Remove">
+        <Row
+          label={`Remove ${computer.name}`}
+          description={`Its chats leave this sidebar and this Mac forgets its keys. Nothing changes on ${computer.name}; pair again with a new link.`}
+        >
+          {confirming ? (
+            <span className="flex gap-2">
+              <button type="button" className={SECONDARY_BUTTON} disabled={busy} onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+              <button type="button" data-computer-remove-confirm className={DANGER_BUTTON} disabled={busy} onClick={() => void remove()}>
+                Remove {computer.name}
+              </button>
+            </span>
+          ) : (
+            <button type="button" data-computer-remove className={DANGER_BUTTON} onClick={() => setConfirming(true)}>
+              Remove
+            </button>
+          )}
+        </Row>
+      </Group>
+    </div>
   );
 }
 
@@ -1406,7 +1614,9 @@ export function SettingsPanel({
   update,
   onSectionChange,
   accountScope,
+  computerId,
 }: {
+  computerId?: string;
   onSectionChange?: (section: SettingsSection) => void;
   accountScope?: string;
   section: SettingsSection;
@@ -1414,7 +1624,13 @@ export function SettingsPanel({
   models: ModelOption[];
   update: UpdateState | null;
 }) {
-  const title = section === "project" ? project?.name : SECTIONS.find((item) => item.key === section)?.label;
+  const { computers } = useComputers();
+  const title =
+    section === "project"
+      ? project?.name
+      : section === "computer"
+        ? (computers.find((computer) => computer.id === computerId)?.name ?? "Computer")
+        : SECTIONS.find((item) => item.key === section)?.label;
   return (
     <ScrollArea className="h-full">
       <div className="mx-auto w-full max-w-[640px] px-6 pt-14 pb-10">
@@ -1433,6 +1649,7 @@ export function SettingsPanel({
           ))}
         {section === "devices" && <DevicesSettings />}
         {section === "experimental" && <ExperimentalSettings />}
+        {section === "computer" && computerId && <ComputerSettings key={computerId} id={computerId} onRemoved={() => onSectionChange?.("devices")} />}
         {section === "about" && <AboutSettings update={update} />}
         {section === "project" && project && <ProjectSettings key={project.path} project={project} onManageAccounts={() => onSectionChange?.("accounts")} />}
       </div>

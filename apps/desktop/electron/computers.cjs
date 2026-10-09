@@ -263,18 +263,20 @@ function createComputers({
     }
     const computer = store.get(entry.id);
     if (!computer) throw new Error("This computer was removed.");
-    // The runtime redials every reconnectMs; a computer that keeps failing is dialed less and less often (a first start has its own backoff).
-    if (entry.runtime && entry.failures > 0) await backoff(entry);
+    // The runtime redials every reconnectMs; a computer that keeps failing is dialed less and less often (a first start has
+    // its own backoff). Every attempt counts, not only a dial that throws: a channel can open and its first calls
+    // (daemon:status, state patches, project:open, the snapshot's limits) still fail. online() starts the count over.
+    if (entry.runtime) {
+      if (entry.failures > 0) await backoff(entry);
+      entry.failures++;
+    }
     try {
       return adopt(entry, await dial(entry, computer.relay), "relay");
     } catch (error) {
       entry.switching = false;
       // The runtime would retry this forever: a refusal retrying can't fix stops the computer instead.
       if (isFinal(error)) refuse(entry, error);
-      else {
-        entry.lastError = error;
-        entry.failures++;
-      }
+      else entry.lastError = error;
       throw error;
     }
   }

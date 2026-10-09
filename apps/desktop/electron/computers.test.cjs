@@ -564,3 +564,23 @@ test("a keychain that can't be opened for a computer already here is shown and r
   assert.equal(mac.urls.length, opened + 1);
   assert.equal(computers.list()[0].message, null);
 });
+
+test("a computer whose calls fail after its channel opens is dialed less and less often", async (t) => {
+  const mac = fakeMac();
+  const steps = [150, 300, 600];
+  const { computers, state } = await paired(t, mac, { backoffMs: steps, reconnectMs: 5, offlineAfterMs: 60_000 });
+  await computers.add(macLink(mac), { name: "studio" });
+  await computers.setEnabled(true);
+  await until(() => state() === "online", "online");
+  // Every hello is accepted, but the snapshot a reconnect reads fails each time.
+  mac.failing = "daemon:snapshot";
+  const from = mac.urls.length;
+  mac.drop();
+  await until(() => mac.urls.length >= from + 3, "three redials");
+  const [first, second, third] = mac.times.slice(from, from + 3);
+  assert.ok(second - first >= steps[0] - 10, `then it waits ${steps[0]}: ${second - first}ms`);
+  assert.ok(third - second >= steps[1] - 10, `then ${steps[1]}: ${third - second}ms`);
+  assert.equal(state(), "reconnecting");
+  mac.failing = null;
+  await until(() => state() === "online", "online again", 3000);
+});

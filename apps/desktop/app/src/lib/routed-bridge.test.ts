@@ -9,6 +9,7 @@ const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // notifications, image menus over local bytes) and the raw listeners that take every computer's events. Any other call
 // goes through bridgeFor / bridgeForKey / useBridge, so it reaches the computer of the Project or chat it is about.
 const ALLOWED: Record<string, string[]> = {
+  "lib/offline-cache.ts": ["computers"],
   "App.tsx": [
     "onAccountsChanged",
     "listRecentProjects",

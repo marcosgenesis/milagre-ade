@@ -1,3 +1,4 @@
+import { rememberChat } from "./offline-cache.ts";
 import { bridgeForKey } from "./computer-bridge.ts";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type { ChatMessage } from "../model.ts";
@@ -35,6 +36,11 @@ function set(key: string, next: ChatWindow) {
   }
   // A copy: a listener can resubscribe while it is told, and a live Set would then be walked forever.
   for (const listener of [...(listeners.get(key) ?? [])]) listener();
+  // A remote chat's window is its computer's offline copy too.
+  if (!next.loading && !next.error) {
+    const at = key.lastIndexOf("#");
+    rememberChat(key.slice(0, at), Number(key.slice(at + 1)), next);
+  }
 }
 
 /** `messages` with `changes` for Chat `chatId` applied: a known message replaced, a new one placed after the one before it. */

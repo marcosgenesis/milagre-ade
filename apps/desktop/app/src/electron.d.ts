@@ -141,6 +141,13 @@ export type ComputersApi = {
   setEnabled: (on: boolean) => Promise<void>;
   /** One daemon call on the computer. */
   invoke: (id: string, method: string, args?: unknown[]) => Promise<any>;
+  /** Keeps a remote scope's state or a chat's window as its offline copy. */
+  remember: (
+    id: string,
+    entry:
+      | { kind: "state"; scope: string; state: unknown }
+      | { kind: "chat"; scope: string; chatId: number; window: { messages: unknown[]; hasMore: boolean; total: number } },
+  ) => Promise<void>;
 };
 
 import type { DiffMode, DiffFilesResult, DiffFileResult } from "@milagre/shared/git-diff";

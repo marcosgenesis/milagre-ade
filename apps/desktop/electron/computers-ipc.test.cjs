@@ -17,7 +17,7 @@ const studio = {
 };
 
 /** ipcMain as computers-ipc.cjs uses it, and a window that records what it is sent. */
-function setup(computers) {
+function setup(computers, { cache } = {}) {
   const handlers = new Map();
   const sent = [];
   const windowSent = [];
@@ -26,6 +26,7 @@ function setup(computers) {
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     computers: { loaded: Promise.resolve(), list: () => [studio], ...computers },
     thisMac: () => "victor-mbp",
+    cache,
     send: (channel, payload) => sent.push([channel, payload]),
   });
   const call = (channel, ...args) => handlers.get(channel)({ sender }, ...args);
@@ -76,4 +77,69 @@ test("a call to a computer goes out without its id and comes back naming it, and
   ]);
   await assert.rejects(call("computers:invoke", ID, "project:reveal", ["/p"]), { message: "Not available on a remote computer" });
   assert.equal(invoked.length, 2, "a local-only call never reaches the computer");
+});
+
+test("while a computer isn't online, the window's reads come from its cache; anything else says it is offline", async (t) => {
+  const fs = require("node:fs/promises");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { createComputerCaches } = require("./computer-cache.cjs");
+  const ID = "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "computers-ipc-cache-"));
+  const cache = createComputerCaches({ dir });
+  t.after(async () => {
+    cache.close();
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  });
+  let state = "online";
+  const removed = [];
+  const { call } = setup(
+    {
+      list: () => [{ ...studio, id: ID, state }],
+      invoke: async (_id, method) =>
+        method === "project:recent"
+          ? [{ path: "/p", name: "p" }]
+          : method === "project:switch"
+            ? { path: "/p", name: "p", state: { sessions: { 4: { id: 4 } } } }
+            : null,
+      remove: async (id) => void removed.push(id),
+    },
+    { cache },
+  );
+  // Online: answers go through, and the lists and states they carry are kept.
+  assert.deepEqual(await call("computers:invoke", ID, "project:recent", []), [{ path: `${ID}|/p`, name: "p" }]);
+  await call("computers:invoke", ID, "project:switch", [`${ID}|/p`]);
+  await call("computers:remember", ID, {
+    kind: "chat",
+    scope: `${ID}|/p`,
+    chatId: 4,
+    window: { messages: [{ id: 9, body: "kept" }], hasMore: true, total: 30 },
+  });
+  await call("computers:remember", ID, { kind: "state", scope: `${ID}|/p`, state: { sessions: { 4: { id: 4, title: "newer" } } } });
+
+  state = "offline";
+  assert.deepEqual(await call("computers:invoke", ID, "project:recent", []), [{ path: `${ID}|/p`, name: "p" }]);
+  assert.deepEqual(await call("computers:invoke", ID, "project:switch", [`${ID}|/p`]), {
+    path: `${ID}|/p`,
+    name: "p",
+    state: { sessions: { 4: { id: 4, title: "newer" } } },
+  });
+  assert.deepEqual(await call("computers:invoke", ID, "chat:messages", [`${ID}|/p`, 4, { turns: 20 }]), {
+    messages: [{ id: 9, body: "kept" }],
+    hasMore: false,
+    total: 30,
+  });
+  assert.deepEqual(
+    await call("computers:invoke", ID, "chat:messages", [`${ID}|/p`, 5, { turns: 20 }]),
+    { messages: [], hasMore: false, total: 0 },
+    "a chat never kept reads empty",
+  );
+  assert.deepEqual(await call("computers:invoke", ID, "chat:messages", [`${ID}|/p`, 4, { before: 9 }]), { messages: [], hasMore: false, total: 30 });
+  assert.deepEqual(await call("computers:invoke", ID, "chat:runs", []), { runs: {}, seq: 0 });
+  await assert.rejects(call("computers:invoke", ID, "project:switch", [`${ID}|/never`]), { message: "studio is offline." });
+  await assert.rejects(call("computers:invoke", ID, "chat:send", [{ projectPath: `${ID}|/p` }]), { message: "studio is offline." });
+
+  await call("computers:remove", ID);
+  assert.deepEqual(removed, [ID]);
+  assert.equal(cache.get(ID, "recent", ""), null, "its cache went with it");
 });

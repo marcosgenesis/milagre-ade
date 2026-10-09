@@ -236,9 +236,12 @@ async function startDesktop() {
     onChange: () => computersIpc?.changed(),
     emit: (id, channel, payload) => computersIpc?.event(id, channel, payload),
   });
+  const { createComputerCaches } = require("./computer-cache.cjs");
+  const computerCaches = createComputerCaches({ dir: path.join(app.getPath("userData"), "computers") });
   computersIpc = registerComputers({
     ipcMain,
     computers,
+    cache: computerCaches,
     thisMac: () => (thisMacName ??= computerName()),
     send: (channel, payload) => {
       for (const window of BrowserWindow.getAllWindows())
@@ -346,6 +349,7 @@ async function startDesktop() {
       notifier.closeAll();
       // Each computer's channels close too; nothing on the other Macs stops.
       await Promise.all([runtime.close(), computers.close()]);
+      computerCaches.close();
     })().catch((error) => {
       quitPrepared = null;
       quitting = false;

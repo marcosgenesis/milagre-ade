@@ -95,6 +95,7 @@ import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
+import { startOfflineCache } from "./lib/offline-cache";
 import { isDimmed, isReadOnly, offlineBanner, useApplyOtherComputers, useComputers } from "./lib/computers";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { settingsCommands } from "./lib/settings-commands";
@@ -386,6 +387,7 @@ function App() {
   } | null>(null);
   useApplyTheme();
   useApplyOtherComputers();
+  useEffect(() => startOfflineCache(), []);
   useEffect(() => {
     const idle = window.requestIdleCallback ?? ((run: () => void) => window.setTimeout(run, 1000));
     idle(() => {

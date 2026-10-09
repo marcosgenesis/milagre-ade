@@ -1,5 +1,38 @@
 const { ALIASES, NOT_REMOTE, isLocalOnly, qualifyEvent, qualifyResult, stripComputer } = require("./computer-routing.cjs");
 
+// Kept as they pass (main sees whole lists and the states a Project opens with); the window forwards the rest.
+const KEPT_LISTS = { "project:recent": "recent", "link:list": "links", "project:registry": "registry" };
+const OPENED = new Set(["project:read", "project:switch", "project:open", "project:current"]);
+// What a window reads that a computer's last copy can answer while it is away.
+const MAX_REMEMBERED_CHARS = 32 * 1024 * 1024;
+const nameOf = (projectPath, recent) =>
+  recent?.find?.((project) => project.path === projectPath)?.name ?? projectPath.split("/").filter(Boolean).at(-1) ?? projectPath;
+
+/** A read answered from the cache, or null when the cache can't answer it. A chat with no copy reads empty, never pending. */
+function readOffline(cache, id, method, args) {
+  if (KEPT_LISTS[method]) return cache.get(id, KEPT_LISTS[method], "") ?? [];
+  if (OPENED.has(method)) {
+    const scope = args[0];
+    const kept = typeof scope === "string" ? cache.get(id, "scope", scope) : null;
+    return kept ? { path: scope, name: kept.name, state: kept.state } : null;
+  }
+  if (method === "link:snapshot" || method === "link:open") {
+    const kept = typeof args[0] === "string" ? cache.get(id, "scope", `milagre-link:${args[0]}`) : null;
+    if (!kept) return null;
+    const link = { id: args[0], name: kept.name, projectIds: [], createdAt: "" };
+    return method === "link:open" ? { link, state: kept.state, projects: [] } : { link, state: kept.state };
+  }
+  if (method === "chat:messages") {
+    const [scope, chatId, options] = args;
+    const kept = typeof scope === "string" ? cache.get(id, "chat", `${scope}#${chatId}`) : null;
+    if (options?.before !== undefined) return { messages: [], hasMore: false, total: kept?.total ?? 0 };
+    return kept ? { messages: kept.messages, hasMore: false, total: kept.total } : { messages: [], hasMore: false, total: 0 };
+  }
+  if (method === "chat:runs") return { runs: {}, seq: 0 };
+  if (method === "agent:ports") return {};
+  return null;
+}
+
 /**
  * The window's side of computers.cjs (spec "This Mac (Electron main) › Computers"): the IPC the preload's
  * window.milagre.computers calls, the list pushed to every window after each change (computers:changed), and each
@@ -8,10 +41,11 @@ const { ALIASES, NOT_REMOTE, isLocalOnly, qualifyEvent, qualifyResult, stripComp
  *   ipcMain: { handle: (channel: string, handler: (event: any, ...args: any[]) => any) => void };
  *   computers: any;
  *   thisMac: () => string;
+ *   cache?: any;
  *   send: (channel: string, payload: unknown) => void;
  * }} options
  */
-function registerComputers({ ipcMain, computers, thisMac, send }) {
+function registerComputers({ ipcMain, computers, thisMac, send, cache = null }) {
   const snapshot = () => ({ thisMac: thisMac(), computers: computers.list() });
 
   ipcMain.handle("computers:list", async () => {
@@ -48,6 +82,7 @@ function registerComputers({ ipcMain, computers, thisMac, send }) {
   });
   ipcMain.handle("computers:remove", async (_event, id) => {
     await computers.remove(String(id));
+    await cache?.remove(String(id)).catch(() => {});
     return snapshot();
   });
   ipcMain.handle("computers:set-enabled", (_event, on) => computers.setEnabled(on === true));
@@ -57,8 +92,48 @@ function registerComputers({ ipcMain, computers, thisMac, send }) {
     const name = String(channel);
     if (isLocalOnly(name)) throw new Error(NOT_REMOTE);
     const method = ALIASES[name] ?? name;
-    const result = await computers.invoke(computerId, method, stripComputer(computerId, Array.isArray(args) ? args : []));
+    const bare = stripComputer(computerId, Array.isArray(args) ? args : []);
+    const computer = computers.list().find((item) => item.id === computerId);
+    // Away (or off): its last copy answers what it can; nothing is sent.
+    if (computer && computer.state !== "online") {
+      let kept = null;
+      try {
+        kept = cache ? readOffline(cache, computerId, method, bare) : null;
+      } catch {
+        /* an unreadable copy reads as no copy */
+      }
+      if (kept === null) throw new Error(`${computer.name} is offline.`);
+      return qualifyResult(computerId, method, kept);
+    }
+    const result = await computers.invoke(computerId, method, bare);
+    try {
+      if (cache && KEPT_LISTS[method] && Array.isArray(result)) cache.put(computerId, KEPT_LISTS[method], "", result);
+      if (cache && OPENED.has(method) && result?.state && typeof result.path === "string")
+        cache.put(computerId, "scope", result.path, { name: result.name ?? nameOf(result.path, cache.get(computerId, "recent", "")), state: result.state });
+    } catch {
+      /* the cache is a copy: a failed write never fails the call */
+    }
     return qualifyResult(computerId, method, result);
+  });
+  // The window forwards a remote scope's whole state and a chat's window as they change (offline-cache.ts).
+  ipcMain.handle("computers:remember", (_event, id, entry) => {
+    const computerId = String(id);
+    if (!cache || !entry || typeof entry !== "object" || typeof entry.scope !== "string") return;
+    const scope = stripComputer(computerId, entry.scope);
+    if (JSON.stringify(entry).length > MAX_REMEMBERED_CHARS) return;
+    try {
+      if (entry.kind === "state" && entry.state && typeof entry.state === "object") {
+        const recent = cache.get(computerId, "recent", "");
+        cache.put(computerId, "scope", scope, { name: nameOf(scope, recent), state: stripComputer(computerId, entry.state) });
+      } else if (entry.kind === "chat" && Number.isSafeInteger(entry.chatId) && Array.isArray(entry.window?.messages))
+        cache.put(computerId, "chat", `${scope}#${entry.chatId}`, {
+          messages: entry.window.messages.slice(-200),
+          hasMore: Boolean(entry.window.hasMore),
+          total: Number(entry.window.total) || entry.window.messages.length,
+        });
+    } catch {
+      /* the cache is a copy */
+    }
   });
 
   return {

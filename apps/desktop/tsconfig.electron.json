@@ -23,6 +23,7 @@
     "electron/computers.cjs",
     "electron/computers-ipc.cjs",
     "electron/computer-routing.cjs",
+    "electron/computer-cache.cjs",
     "electron/own-host.cjs"
   ]
 }

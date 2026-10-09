@@ -33,7 +33,7 @@ export function Attachments({
   // A remote chat's images come from its computer; its other files have no preview here.
   const scope = useScope();
   const remote = isRemoteKey(scope);
-  const remoteSources = useRemoteMedia(remote ? scope : null, [
+  const { sources: remoteSources } = useRemoteMedia(remote ? scope : null, [
     ...images.flatMap((image) => (image.dataUrl || !image.path ? [] : [image.path])),
     ...files.filter((path) => mediaKind(path) === "image"),
   ]);
@@ -76,7 +76,7 @@ export function Attachments({
               }}
               type="button"
               aria-label={`Preview ${item.name}`}
-              onClick={() => setOpen(media.findIndex((entry) => entry.id === item.id))}
+              onClick={item.src ? () => setOpen(media.findIndex((entry) => entry.id === item.id)) : undefined}
               onContextMenu={
                 item.file
                   ? (event) => {
@@ -87,7 +87,9 @@ export function Attachments({
               }
               className="block rounded focus-visible:outline-2 focus-visible:outline-accent-ink"
             >
-              {item.kind === "image" ? (
+              {item.kind === "image" && !item.src ? (
+                <span aria-hidden className="block size-20 animate-pulse rounded bg-hover" />
+              ) : item.kind === "image" ? (
                 <img src={item.src} alt={item.name} className={`size-20 rounded object-contain ${showing(item.id) ? "opacity-0" : ""}`} />
               ) : (
                 <span className={`relative block ${showing(item.id) ? "opacity-0" : ""}`}>

@@ -50,11 +50,13 @@ export const GeneratedImage = memo(function GeneratedImage({ step }: { step: Cha
   }, [copied]);
   const scope = useScope();
   const remote = isRemoteKey(scope);
-  const remoteSources = useRemoteMedia(remote && step.file ? scope : null, step.file ? [step.file] : []);
+  const { sources: remoteSources, failed: remoteFailed } = useRemoteMedia(remote && step.file ? scope : null, step.file ? [step.file] : []);
   // On another Mac the image comes through media:read; copy, save and the menu then act on its bytes.
   const file = step.file ? (remote ? remoteSources[step.file] : step.file) : undefined;
   const src = file && !broken ? (remote ? file : mediaUrl(file)) : null;
-  if (step.status === "failed" || (step.status === "done" && !src))
+  // A remote image's bytes may still be on their way; only a failed read (or a broken file) is a failed row.
+  const pending = remote && !!step.file && !file && !remoteFailed[step.file];
+  if (step.status === "failed" || (step.status === "done" && !src && !pending))
     return <StepRow step={step.status === "failed" ? step : { ...step, status: "failed", title: "Couldn't show the generated image" }} />;
   const status: ImageGenerationStatus = step.status === "done" && size ? "complete" : "generating";
   const copy = () => {

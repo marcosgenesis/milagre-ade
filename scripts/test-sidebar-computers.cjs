@@ -34,6 +34,8 @@ window.milagre = new Proxy({
   getAppVersion: async () => "0.0.0",
   getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   getRuns: async () => ({ runs: {}, seq: 0 }),
+  // A paired computer's bridge: the app asks it for its turns once it is online.
+  on: () => window.milagre,
   getPhoneStatus: async () => ({ enabled: false, state: "off", remote: "none" }),
   listDevices: async () => [],
   onComputersChanged: (callback) => ((computersChanged = callback), () => {}),

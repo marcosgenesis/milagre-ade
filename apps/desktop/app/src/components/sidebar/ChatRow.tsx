@@ -13,6 +13,7 @@ import {
   FileEditIcon,
   Folder01Icon,
   FolderOpenIcon,
+  LaptopIcon,
   GitBranchIcon,
   GitMergeIcon,
   GitPullRequestIcon,
@@ -62,6 +63,9 @@ type ChatDetails = {
   /** Ports the chat's commands listen on. */
   ports?: AgentPort[];
 };
+
+/** The computer a row's chat lives on, shown on its second line once there are two or more computers. */
+export type RowComputer = { name: string; offline: boolean };
 
 export type SidebarRecent = {
   id: string;
@@ -171,6 +175,7 @@ export const ChatRow = memo(function ChatRow({
   onPick,
   actions,
   shortcutHint,
+  computer,
   dragging = false,
 }: {
   item: SidebarRecent;
@@ -179,6 +184,7 @@ export const ChatRow = memo(function ChatRow({
   onPick: (item: SidebarRecent) => void;
   actions: ChatRowActions;
   shortcutHint?: string;
+  computer?: RowComputer;
   /** The row is being dragged to a new place. */
   dragging?: boolean;
 }) {
@@ -189,6 +195,7 @@ export const ChatRow = memo(function ChatRow({
   const hasPullRequests = pullRequests.length > 0;
   const shownPullRequests = pullRequests.slice(0, ROW_PR_LIMIT);
   const hiddenPullRequests = pullRequests.length - shownPullRequests.length;
+  const twoLines = hasPullRequests || item.worktreeCount !== undefined || Boolean(computer);
   const rowRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -238,7 +245,7 @@ export const ChatRow = memo(function ChatRow({
       <div
         ref={rowRef}
         data-chat-id={item.id}
-        className={`group/row relative ${dragging ? "opacity-50" : ""}`}
+        className={`group/row relative ${dragging ? "opacity-50" : ""} ${computer?.offline ? "opacity-50" : ""}`}
         onPointerEnter={showCardSoon}
         onPointerLeave={hideCardSoon}
         onPointerDown={hideCard}
@@ -267,7 +274,7 @@ export const ChatRow = memo(function ChatRow({
             aria-busy={archiving || undefined}
             aria-label={archiving ? `Archiving ${item.label}` : undefined}
             aria-current={active ? "page" : undefined}
-            className={`sidebar-row relative z-10 mx-2 flex ${hasPullRequests || item.worktreeCount !== undefined ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
+            className={`sidebar-row relative z-10 mx-2 flex ${twoLines ? "h-[46px] items-start pt-1.5" : "h-8 items-center"} rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${
               active ? "bg-hover-2" : "hover:bg-hover-2"
             } ${archiving ? "opacity-30" : ""}`}
           >
@@ -281,23 +288,39 @@ export const ChatRow = memo(function ChatRow({
                 mark !== "idle" && <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-surface" />
               )}
             </span>
-            <ChatMarkDot mark={mark} topAligned={hasPullRequests || item.worktreeCount !== undefined} />
+            <ChatMarkDot mark={mark} topAligned={twoLines} />
             <span
               className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasPullRequests ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
                 item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
               }`}
             >
               <ChatTitle label={item.label} />
-              {item.worktreeCount !== undefined && <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>}
+              {item.worktreeCount !== undefined && !computer && (
+                <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>
+              )}
             </span>
           </button>
         )}
 
-        {hasPullRequests && !renaming && (
+        {(hasPullRequests || computer) && !renaming && (
           <div
             data-chat-prs
             className={`sidebar-copy absolute bottom-1 left-9 z-20 flex max-w-[calc(100%-72px)] min-w-0 items-center gap-2 ${archiving ? "opacity-30" : ""}`}
           >
+            {computer && (
+              <span data-chat-computer className="flex min-w-0 shrink items-center gap-1 truncate text-[12px] leading-4 text-ink-3">
+                <HugeiconsIcon icon={LaptopIcon} size={12} strokeWidth={2} color="currentColor" className="shrink-0" />
+                {computer.offline ? `${computer.name}, offline` : computer.name}
+              </span>
+            )}
+            {computer && item.worktreeCount !== undefined && (
+              <span className="shrink-0 text-[12px] leading-4 text-ink-3">· {item.worktreeCount} Worktrees</span>
+            )}
+            {computer && hasPullRequests && (
+              <span aria-hidden className="text-[12px] leading-4 text-ink-3 opacity-60">
+                ·
+              </span>
+            )}
             {shownPullRequests.map((pr) => (
               <PullRequestChip key={pr.url} pr={pr} labelled={pullRequests.length === 1} />
             ))}
@@ -342,7 +365,7 @@ export const ChatRow = memo(function ChatRow({
               if (menu) setMenu(null);
               else openMenu(rect.left, rect.bottom + 4);
             }}
-            className={`absolute right-3 ${hasPullRequests ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
+            className={`absolute right-3 ${twoLines ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
               menu ? "bg-hover text-ink opacity-100" : "opacity-0"
             }`}
           >

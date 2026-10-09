@@ -14,18 +14,42 @@ import { createRoot } from "react-dom/client";
 import { updateSettings } from "/src/lib/settings";
 import "/src/styles.css";
 const HOUR = 3600000;
-const local = { next_id: 3, projects: { 1: { id: 1, name: "milagre-ade" } }, worktrees: { 1: { id: 1, name: "main", path: "/work/milagre-ade", project_id: 1 } }, sessions: { 2: { id: 2, worktree_id: 1, agent_name: "Claude", provider: "claude", status: "Idle", title: "Desktop connect sidebar" } }, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
+const local = { next_id: 3, projects: { 1: { id: 1, name: "milagre-ade" } }, worktrees: { 1: { id: 1, name: "main", path: "/work/milagre-ade", project_id: 1 } }, sessions: { 2: { id: 2, worktree_id: 1, agent_name: "Claude", provider: "claude", status: "Idle", title: "Desktop connect sidebar" } }, connections: {}, events: [], messages: [{ id: 2, session_id: 2, role: "user", body: "Connect the sidebar" }], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 window.computerList = [
   { id: "c-arketa", name: "arketa", hostId: "a".repeat(22), relayHost: "relay.milagre.cloud", state: "online", route: "lan", lastSeen: Date.now(), addedAt: 1, message: null, lan: true, lanRoutes: ["ws://192.168.0.24:8798"] },
   { id: "c-studio", name: "studio", hostId: "s".repeat(22), relayHost: "relay.milagre.cloud", state: "offline", route: null, lastSeen: Date.now() - 2 * HOUR, addedAt: 1, message: null, lan: false, lanRoutes: [] },
 ];
 let computersChanged = () => {};
 window.setComputers = (list) => { window.computerList = list; computersChanged({ thisMac: "victor-mbp", computers: list }); };
+const remoteState = (title, body) => ({ next_id: 9, projects: { 1: { id: 1, name: "p" } }, worktrees: { 1: { id: 1, name: "main", path: "/remote", project_id: 1 } }, sessions: { 4: { id: 4, worktree_id: 1, agent_name: "Claude", provider: "claude", status: "Idle", title } }, connections: {}, events: [], messages: [{ id: 4, session_id: 4, role: "user", body }], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] });
+const remoteProjects = {
+  "c-arketa": { path: "c-arketa|/Users/a/arketa-web", name: "arketa-web", state: remoteState("Fix flaky deploy check", "The deploy check fails about one run in five.") },
+  "c-studio": { path: "c-studio|/Users/s/homelab", name: "homelab", state: remoteState("Backup rotation", "Rotate the nightly backups.") },
+};
+window.sent = [];
+// Each computer's bridge, as main would answer it: keys already name the computer.
+const projectsOf = (id) => Object.values(remoteProjects).filter((project) => project.path.startsWith(id + "|"));
+const projectAt = async (key) => Object.values(remoteProjects).find((project) => project.path === key);
+const remote = (id) => new Proxy({
+  listRecentProjects: async () => projectsOf(id).map(({ path, name }) => ({ path, name })),
+  listNamedLinks: async () => [],
+  readProject: projectAt,
+  switchProject: projectAt,
+  // As main's offline cache answers a chat it kept nothing of (Task 20).
+  readChatMessages: async () => ({ messages: [], hasMore: false, total: 0 }),
+  getRuns: async () => ({ runs: {}, seq: 0 }),
+  listBranches: async () => ["main"],
+  sendMessage: async (request) => (window.sent.push(request), { sessionId: 4 }),
+}, { get(target, key) { return target[key] ?? (String(key).startsWith("on") ? () => () => {} : async () => null); } });
+const remotes = { "c-arketa": remote("c-arketa"), "c-studio": remote("c-studio") };
 window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
   getAgentPorts: async () => ({}),
   getCurrentProject: async () => ({ path: "/work/milagre-ade", name: "milagre-ade", state: local }),
   listRecentProjects: async () => [{ path: "/work/milagre-ade", name: "milagre-ade" }],
+  // Back to this Mac's Project once Other computers is off (Task 16).
+  readProject: async () => ({ path: "/work/milagre-ade", name: "milagre-ade", state: local }),
+  switchProject: async () => ({ path: "/work/milagre-ade", name: "milagre-ade", state: local }),
   listBranches: async () => ["main"],
   listEditors: async () => [],
   getCachedUsage: async () => ({ providers: [] }),
@@ -35,7 +59,7 @@ window.milagre = new Proxy({
   getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
   getRuns: async () => ({ runs: {}, seq: 0 }),
   // A paired computer's bridge: the app asks it for its turns once it is online.
-  on: () => window.milagre,
+  on: (id) => remotes[id],
   getPhoneStatus: async () => ({ enabled: false, state: "off", remote: "none" }),
   listDevices: async () => [],
   onComputersChanged: (callback) => ((computersChanged = callback), () => {}),
@@ -118,6 +142,39 @@ async function browserChecks() {
     await waitFor(`!!document.querySelector('[data-computers-button]')`);
     console.log("PASS: a computer's gear opens its settings, and This Mac's opens Settings › Devices");
 
+    const scopes = () => evaluate(`[...document.querySelectorAll('[data-sidebar-scope]')].map((section) => section.dataset.sidebarScope)`);
+    // Scope keys hold "|" and "/", which a double-quoted attribute selector takes as they are.
+    const inScope = (scope, rest) => `[data-sidebar-scope="${scope}"] ${rest}`;
+    const computerLines = (scope) =>
+      evaluate(`[...document.querySelectorAll(${JSON.stringify(inScope(scope, "[data-chat-computer]"))})].map((line) => line.textContent.trim())`);
+    await waitFor(`document.querySelectorAll('[data-sidebar-scope]').length === 3`);
+    assert.deepEqual(await scopes(), ["c-arketa|/Users/a/arketa-web", "c-studio|/Users/s/homelab", "/work/milagre-ade"], "one list, by Project name");
+    await waitFor(`document.querySelectorAll('[data-chat-computer]').length >= 3`);
+    assert.deepEqual(await computerLines("/work/milagre-ade"), ["victor-mbp"]);
+    assert.deepEqual(await computerLines("c-arketa|/Users/a/arketa-web"), ["arketa"]);
+    assert.deepEqual(await computerLines("c-studio|/Users/s/homelab"), ["studio, offline"]);
+    assert.equal(
+      await evaluate(`document.querySelector('[data-sidebar-scope="c-studio|/Users/s/homelab"]').hasAttribute('data-offline')`),
+      true,
+      "the offline computer's Project is dimmed",
+    );
+    assert.equal(await evaluate(`document.querySelector('[data-sidebar-scope="c-arketa|/Users/a/arketa-web"]').hasAttribute('data-offline')`), false);
+    await screenshot("merged-list");
+    console.log("PASS: every computer's Projects in one list by name, each row naming its computer, the offline one dimmed");
+
+    await evaluate(
+      `[...document.querySelectorAll('[data-sidebar-scope="c-arketa|/Users/a/arketa-web"] [data-chat-id] button')].find((b) => b.textContent.includes('Fix flaky deploy check')).click()`,
+    );
+    await waitFor(`document.querySelector('[data-chat-pane]')?.textContent.includes('The deploy check fails about one run in five.')`);
+    await screenshot("remote-chat");
+    console.log("PASS: a remote computer's chat opens from the merged list");
+
+    await evaluate(`window.setOther(false)`);
+    await waitFor(`!document.querySelector('[data-chat-computer]')`);
+    await waitFor(`!document.querySelector('[data-computers-button]')`);
+    await evaluate(`window.setOther(true)`);
+    await waitFor(`!!document.querySelector('[data-computers-button]')`);
+    console.log("PASS: with only this Mac, rows have no computer line");
     await openPopover();
     await evaluate(`document.querySelector('[data-add-computer-row]').click()`);
     await waitFor(`document.querySelector('dialog[data-add-computer]')?.open && !document.querySelector('[data-computers-panel]')`);

@@ -159,6 +159,14 @@ async function browserChecks() {
       "the offline computer's Project is dimmed",
     );
     assert.equal(await evaluate(`document.querySelector('[data-sidebar-scope="c-arketa|/Users/a/arketa-web"]').hasAttribute('data-offline')`), false);
+    // Dimmed once: the section is at 0.5 and its row adds no opacity of its own.
+    assert.deepEqual(
+      await evaluate(
+        `(() => { const section = document.querySelector('[data-sidebar-scope="c-studio|/Users/s/homelab"]'); return [getComputedStyle(section).opacity, getComputedStyle(section.querySelector('[data-chat-id]')).opacity]; })()`,
+      ),
+      ["0.5", "1"],
+      "an offline row is dimmed once",
+    );
     await screenshot("merged-list");
     console.log("PASS: every computer's Projects in one list by name, each row naming its computer, the offline one dimmed");
 

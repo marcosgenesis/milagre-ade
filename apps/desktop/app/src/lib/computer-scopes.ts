@@ -33,6 +33,11 @@ export function mergeScopes<T extends { key: string; name: string; link: unknown
   );
 }
 
+/** Remote scopes minus those the window already holds as its own (the open Project of another computer is among the local ones). */
+export function withoutLocal<T extends { key: string }>(remote: T[], local: { key: string }[]): T[] {
+  return remote.filter((scope) => !local.some((item) => item.key === scope.key));
+}
+
 /**
  * Each paired computer's Projects and Links, read from it (from its cache in main while it is away), again when its
  * state changes, and when a Project is hidden or shown. A failed read keeps the last list.
@@ -48,6 +53,12 @@ export function useComputerScopes(computers: ComputerView[]): ComputerScope[] {
   }, []);
   useEffect(() => {
     let live = true;
+    // A computer turned off keeps no scopes.
+    const off = computers.filter((computer) => computer.state === "off").map((computer) => computer.id);
+    if (off.length > 0)
+      setByComputer((previous) =>
+        off.some((id) => id in previous) ? Object.fromEntries(Object.entries(previous).filter(([id]) => !off.includes(id))) : previous,
+      );
     for (const computer of computers) {
       if (computer.state === "off") continue;
       const bridge = bridgeFor(computer.id);

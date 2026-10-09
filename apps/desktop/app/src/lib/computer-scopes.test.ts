@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 (globalThis as any).window = { milagre: {}, addEventListener() {}, removeEventListener() {} };
-const { computerScopes, mergeScopes } = await import("./computer-scopes.ts");
+const { computerScopes, mergeScopes, withoutLocal } = await import("./computer-scopes.ts");
 
 const A = "c-arketa";
 const S = "c-studio";
@@ -42,4 +42,9 @@ test("every computer's scopes in one list: Projects by name, then Links; on a ti
     merged.map((item) => item.key),
     ["/work/app", `${A}|/a/app`, `${S}|/s/app`, `${A}|/a/web`, `${S}|/s/homelab`, "/work/milagre-ade", "milagre-link:x"],
   );
+});
+
+test("the open Project of another computer is kept once, as the local list holds it", () => {
+  const remote = [{ key: `${A}|/a/web` }, { key: `${A}|/a/app` }];
+  assert.deepEqual(withoutLocal(remote, [{ key: `${A}|/a/web` }, { key: "/work/x" }]), [{ key: `${A}|/a/app` }]);
 });

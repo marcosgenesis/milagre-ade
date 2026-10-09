@@ -47,7 +47,7 @@ import { projectRows, stableOrder, type ProjectRow, type RecentProject } from "@
 import { ComputersButton } from "./sidebar/ComputersButton";
 import { ChatRow, type ChatRowActions, type RowComputer, type SidebarRecent } from "./sidebar/ChatRow";
 import { useComputers, isDimmed } from "../lib/computers";
-import { mergeScopes, useComputerScopes } from "../lib/computer-scopes";
+import { mergeScopes, useComputerScopes, withoutLocal } from "../lib/computer-scopes";
 import { LOCAL_COMPUTER, computerOfKey } from "@milagre/shared/chat-scopes";
 import { useDismiss } from "../lib/use-dismiss";
 import { dropIntent, pinOrderAt, type DropIntent, type DropZone } from "@/lib/chat-list";
@@ -954,7 +954,7 @@ export default memo(function SidebarNav({
   const scopes = multi
     ? mergeScopes(
         // The open Project of another computer is already among the local ones, under its qualified key.
-        [...localScopes, ...remoteScopes.filter((scope) => !localScopes.some((local) => local.key === scope.key))],
+        [...localScopes, ...withoutLocal(remoteScopes, localScopes)],
         computers.map((computer) => computer.id),
       )
     : localScopes;
@@ -1325,7 +1325,7 @@ export default memo(function SidebarNav({
                       .filter((group) => group.pinned.length > 0)
                       .map((group) => (
                         <div key={group.scope.key} data-pinned-scope={group.scope.key}>
-                          <ChatList recents={group.pinned} {...group.list} pinnedHeader={false} header={null} />
+                          <ChatList recents={group.pinned} {...group.list} dimOffline pinnedHeader={false} header={null} />
                         </div>
                       ))}
                   </div>
@@ -1524,6 +1524,7 @@ function ChatList({
   onPick,
   linkProjectId,
   computer,
+  dimOffline,
   header,
   pinnedHeader = true,
   hintOffset = 0,
@@ -1537,6 +1538,8 @@ function ChatList({
   /** The open Project's id on the canvas; null when its chats can't be linked from here. */
   linkProjectId: string | null;
   computer?: RowComputer;
+  /** The rows dim themselves for an offline computer (the Pinned list; a dimmed section does it for the rest). */
+  dimOffline?: boolean;
   /** The "Chats" header, between the pinned chats and the rest. */
   header: ReactNode;
   /** False when the caller shows one Pinned heading over several lists (the all-Projects sidebar). */
@@ -1881,6 +1884,7 @@ function ChatList({
       shortcutHint={showHints && hintOffset + index < 9 ? `${shortcutModifier}${hintOffset + index + 1}` : undefined}
       onPick={onPick}
       computer={computer}
+      dimOffline={dimOffline}
       dragging={drag?.id === item.id}
     />
   );

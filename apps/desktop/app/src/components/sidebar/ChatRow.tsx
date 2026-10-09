@@ -176,6 +176,7 @@ export const ChatRow = memo(function ChatRow({
   actions,
   shortcutHint,
   computer,
+  dimOffline = false,
   dragging = false,
 }: {
   item: SidebarRecent;
@@ -185,6 +186,8 @@ export const ChatRow = memo(function ChatRow({
   actions: ChatRowActions;
   shortcutHint?: string;
   computer?: RowComputer;
+  /** Dim the row itself when its computer is offline; false inside a section that is already dimmed. */
+  dimOffline?: boolean;
   /** The row is being dragged to a new place. */
   dragging?: boolean;
 }) {
@@ -196,6 +199,8 @@ export const ChatRow = memo(function ChatRow({
   const shownPullRequests = pullRequests.slice(0, ROW_PR_LIMIT);
   const hiddenPullRequests = pullRequests.length - shownPullRequests.length;
   const twoLines = hasPullRequests || item.worktreeCount !== undefined || Boolean(computer);
+  // This Mac alone keeps the single-Project placement; the computer line is what changes it.
+  const prLines = hasPullRequests || Boolean(computer);
   const rowRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -245,7 +250,7 @@ export const ChatRow = memo(function ChatRow({
       <div
         ref={rowRef}
         data-chat-id={item.id}
-        className={`group/row relative ${dragging ? "opacity-50" : ""} ${computer?.offline ? "opacity-50" : ""}`}
+        className={`group/row relative ${dragging ? "opacity-50" : ""} ${computer?.offline && dimOffline ? "opacity-50" : ""}`}
         onPointerEnter={showCardSoon}
         onPointerLeave={hideCardSoon}
         onPointerDown={hideCard}
@@ -290,7 +295,7 @@ export const ChatRow = memo(function ChatRow({
             </span>
             <ChatMarkDot mark={mark} topAligned={twoLines} />
             <span
-              className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${hasPullRequests ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
+              className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] ${prLines ? "leading-5" : ""} transition-[padding] duration-150 ${shortcutHint ? "pr-12" : "group-hover/row:pr-6"} ${menu ? "pr-6" : ""} ${
                 item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
               }`}
             >
@@ -365,7 +370,7 @@ export const ChatRow = memo(function ChatRow({
               if (menu) setMenu(null);
               else openMenu(rect.left, rect.bottom + 4);
             }}
-            className={`absolute right-3 ${twoLines ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
+            className={`absolute right-3 ${prLines ? "top-1" : "top-1/2 -translate-y-1/2"} z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover/row:opacity-100 ${
               menu ? "bg-hover text-ink opacity-100" : "opacity-0"
             }`}
           >

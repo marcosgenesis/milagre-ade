@@ -301,4 +301,4 @@ async function startSiteDemo({ port = 8913, log = () => {} } = {}) {
   };
 }
 
-module.exports = { startSiteDemo, HERO, VERSION };
+module.exports = { startSiteDemo };

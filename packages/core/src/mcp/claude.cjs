@@ -30,6 +30,7 @@ async function checkClaude({
   env,
   cwd,
   loadSdk = () => import("@anthropic-ai/claude-agent-sdk"),
+  signal,
   timeoutMs = 30_000,
   pollMs = 250,
   now = Date.now,
@@ -43,6 +44,8 @@ async function checkClaude({
     },
   };
   const session = query({ prompt: idle, options: { pathToClaudeCodeExecutable: command, cwd, ...(env ? { env } : {}) } });
+  const onAbort = () => session.close?.();
+  signal?.addEventListener("abort", onAbort, { once: true });
   try {
     const deadline = now() + timeoutMs;
     let list = await session.mcpServerStatus();
@@ -53,6 +56,7 @@ async function checkClaude({
     const timedOut = now() >= deadline;
     return list.map((status) => claudeServer(status, { timedOut })).filter(Boolean);
   } finally {
+    signal?.removeEventListener("abort", onAbort);
     session.close?.();
   }
 }

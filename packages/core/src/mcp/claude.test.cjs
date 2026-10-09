@@ -87,3 +87,18 @@ test("checkClaude stops polling at the cap", async () => {
   assert.equal(servers[0].error, "Timed out after 30 s");
   assert.equal(sdk.calls.closed, true);
 });
+
+test("aborting the signal closes the session while the check hangs", async () => {
+  let closed = false;
+  const controller = new AbortController();
+  void checkClaude({
+    command: "c",
+    cwd: "/",
+    signal: controller.signal,
+    loadSdk: async () => ({ query: () => ({ mcpServerStatus: () => new Promise(() => {}), close: () => void (closed = true) }) }),
+  }).catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closed, false);
+  controller.abort();
+  assert.equal(closed, true);
+});

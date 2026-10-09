@@ -17,9 +17,11 @@ function codexServer(status, configured) {
   };
 }
 
-async function checkCodex({ command, env, cwd, clientVersion = "0.0.0", createRpc = (options) => new CodexRpc(options) }) {
+async function checkCodex({ command, env, cwd, clientVersion = "0.0.0", signal, createRpc = (options) => new CodexRpc(options) }) {
   const rpc = createRpc({ command, cwd, ...(env ? { env } : {}) });
   rpc.start();
+  const onAbort = () => rpc.close();
+  signal?.addEventListener("abort", onAbort, { once: true });
   try {
     await rpc.request("initialize", { clientInfo: { name: "milagre", title: "Milagre", version: clientVersion }, capabilities: null });
     rpc.notify("initialized");
@@ -33,6 +35,7 @@ async function checkCodex({ command, env, cwd, clientVersion = "0.0.0", createRp
     } while (cursor);
     return servers;
   } finally {
+    signal?.removeEventListener("abort", onAbort);
     rpc.close();
   }
 }

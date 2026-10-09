@@ -91,3 +91,14 @@ test("checkCodex reads every page and closes the app-server", async () => {
   assert.equal(rpc.options.env.CODEX_HOME, "/x");
   assert.equal(rpc.closed, true);
 });
+
+test("aborting the signal closes the app-server while the check hangs", async () => {
+  const rpc = fakeRpc([]);
+  rpc.request = (method) => (method === "mcpServerStatus/list" ? new Promise(() => {}) : Promise.resolve(method === "config/read" ? { config: {} } : {}));
+  const controller = new AbortController();
+  void checkCodex({ command: "codex", cwd: "/", signal: controller.signal, createRpc: () => rpc }).catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(rpc.closed, false);
+  controller.abort();
+  assert.equal(rpc.closed, true);
+});

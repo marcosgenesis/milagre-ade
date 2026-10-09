@@ -108,6 +108,7 @@ function fakeMac({ lan = [], hello = "accept" } = {}) {
     urls: [],
     times: [],
     calls: [],
+    focus: [],
     accepts: [],
     held: [],
     hold: null,
@@ -121,6 +122,7 @@ function fakeMac({ lan = [], hello = "accept" } = {}) {
   mac.open = () => mac.sockets.filter((socket) => !socket.closed);
   const answer = (frame) => {
     mac.calls.push(frame.method);
+    if (frame.method === "daemon:focus") mac.focus.push(frame.args?.[0]?.focused);
     if (frame.method === mac.failing) return { v: 1, id: frame.id, error: { code: "EFAIL", message: "no" } };
     const result =
       frame.method === "daemon:status"
@@ -614,4 +616,23 @@ test("a call already on the relay when the LAN opens finishes there, and the run
     changes.some((list) => list[0]?.state === "reconnecting"),
     false,
   );
+});
+
+test("the window's focus reaches the computer's daemon, now and after every reconnect, and wins over the runtime's own replay", async (t) => {
+  const mac = fakeMac();
+  const { computers, state } = await paired(t, mac);
+  await computers.add(macLink(mac), { name: "studio" });
+  computers.setFocused(true);
+  await computers.setEnabled(true);
+  await until(() => state() === "online", "online");
+  await until(() => mac.focus.at(-1) === true, "focus told after connecting");
+  computers.setFocused(false);
+  await until(() => mac.focus.at(-1) === false, "blur told");
+  computers.setFocused(true);
+  await until(() => mac.focus.at(-1) === true, "focus told");
+  mac.drop();
+  const before = mac.calls.length;
+  await until(() => mac.calls.length > before && mac.calls.includes("daemon:snapshot-page") && mac.focus.length > 3, "replayed");
+  await delay(50);
+  assert.equal(mac.focus.at(-1), true, "the reconnect replays the window's state");
 });

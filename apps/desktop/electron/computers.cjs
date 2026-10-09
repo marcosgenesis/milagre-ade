@@ -115,6 +115,8 @@ function createComputers({
   const entries = new Map();
   let enabled = false;
   let closed = false;
+  // Whether this window is focused: every computer's daemon is told (its unread marks and notifications depend on it).
+  let focused = false;
   /** @type {AbortController | null} */
   let adding = null;
   let checkTimer = null;
@@ -417,6 +419,9 @@ function createComputers({
         }
         entry.runtime = runtime;
         entry.attempts = 0;
+        // The runtime replayed focus:false while connecting; the window's real state goes after it, and the runtime
+        // keeps it for every later reconnect.
+        if (focused) void runtime.setFocused(true).catch(() => {});
         online(entry);
       } catch (error) {
         handed?.close();
@@ -583,6 +588,11 @@ function createComputers({
       }
       if (!entry?.runtime) throw new Error(`${store.get(id)?.name ?? "That computer"} is offline.`);
       return entry.runtime.invoke(method, args);
+    },
+    /** The window gained or lost focus: every connected computer's daemon is told, and a later connection is too. */
+    setFocused(value) {
+      focused = value === true;
+      for (const entry of entries.values()) void entry.runtime?.setFocused(focused).catch(() => {});
     },
     async setEnabled(on) {
       await ready;

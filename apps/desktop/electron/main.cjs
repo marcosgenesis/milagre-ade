@@ -330,9 +330,11 @@ async function startDesktop() {
     void runtime.resumeRecentProjects().catch((error) => console.warn(error.message));
     app.on("browser-window-focus", () => {
       void runtime.setFocused(true).catch(() => {});
+      computers.setFocused(true);
     });
     app.on("browser-window-blur", () => {
       void runtime.setFocused(false).catch(() => {});
+      computers.setFocused(false);
     });
     if (app.isPackaged) watchAppUpdates(updates, { app, powerMonitor });
     else void updates.check();

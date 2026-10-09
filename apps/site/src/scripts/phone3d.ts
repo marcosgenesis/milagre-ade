@@ -39,8 +39,8 @@ interface Spec {
 }
 
 // Proportions in metres/10 from the real devices: iPhone 17 Pro (71.9 × 150 × 8.75 mm, natural titanium-like dark
-// finish) and a Pixel 9 class phone (72 × 152 × 8.5 mm, matte aluminium frame). Screen widths keep the recordings'
-// aspect ratios (1206 × 2622 and 1080 × 2400).
+// finish) and a Pixel 9 (72 × 152 × 8.5 mm, matte aluminium frame). Screen widths keep the recordings'
+// aspect ratios (1206 × 2622 and 1080 × 2424).
 const SPECS: Record<PhoneKind, Spec & { screenAspect: number }> = {
   iphone: {
     width: 0.719,
@@ -52,17 +52,16 @@ const SPECS: Record<PhoneKind, Spec & { screenAspect: number }> = {
     screenAspect: 2622 / 1206,
     body: { color: "#2c2f36", metalness: 1, roughness: 0.32 },
   },
-  // An even 0.026 glass border, display corners that follow the body's curve, and the recording set into a margin of
-  // the app's background (#121b27, sampled from the recording) so the emulator's edge-to-edge status bar isn't clipped.
+  // A Pixel 9: an even 0.026 glass border and display corners that follow the body's curve. The recording comes from a
+  // Pixel 9 emulator (1080 × 2424), whose status bar already sits clear of the rounded corners and the camera.
   android: {
     width: 0.72,
-    height: (0.668 - 0.036) * (2400 / 1080) + 0.03 + 0.01 + 0.052,
+    height: 0.668 * (2424 / 1080) + 0.052,
     depth: 0.085,
     radius: 0.1,
     screenWidth: 0.668,
     screenRadius: 0.074,
-    margin: { color: "#121b27", top: 0.03, side: 0.018, bottom: 0.01 },
-    screenAspect: 2400 / 1080,
+    screenAspect: 2424 / 1080,
     body: { color: "#26282c", metalness: 0.85, roughness: 0.45 },
   },
 };
@@ -157,7 +156,8 @@ function buildPhone(kind: PhoneKind, video: HTMLVideoElement) {
   } else {
     // The punch-hole front camera.
     const camera = new Mesh(new CircleGeometry(0.017, 32), black);
-    camera.position.set(0, screenHeight / 2 - 0.03, front + 0.0012);
+    // Centred in the status bar (142 of the recording's 2424 rows), where Android leaves room for it.
+    camera.position.set(0, screenHeight / 2 - screenHeight * (71 / 2424), front + 0.0012);
     phone.add(camera);
   }
 

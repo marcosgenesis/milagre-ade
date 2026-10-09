@@ -1,18 +1,24 @@
 import { ansi, syntax } from "./build.ts";
 import { contrastRatio, fromOklch, hexToOklch, mix } from "./color.ts";
 import { getTheme } from "./registry.ts";
-import type { CustomTheme, Scheme, ThemeId, ThemeSeeds, ThemeSource } from "./types.ts";
+import type { CustomTheme, ThemeId, ThemeSeeds, ThemeSource } from "./types.ts";
 
-/** A status hue at a lightness that reads on this background. */
-function status(hue: number, chroma: number, background: string, scheme: Scheme) {
+/** A status hue at a lightness that reads on this background: lighter on dark backgrounds, darker on light ones, judged by the background itself. */
+function status(hue: number, chroma: number, background: string) {
   const bgL = hexToOklch(background).l;
-  return fromOklch(scheme === "dark" ? Math.max(0.68, bgL + 0.45) : Math.min(0.58, bgL - 0.38), chroma, hue);
+  const lighter = bgL < 0.5;
+  let l = lighter ? Math.max(0.68, bgL + 0.45) : Math.min(0.58, bgL - 0.38);
+  let color = fromOklch(l, chroma, hue);
+  for (let i = 0; i < 30 && contrastRatio(color, background) < 3; i++) {
+    l = Math.min(1, Math.max(0, l + (lighter ? 0.02 : -0.02)));
+    color = fromOklch(l, chroma, hue);
+  }
+  return color;
 }
 
-export function customSource({ background, text, accent }: ThemeSeeds, scheme: Scheme): ThemeSource {
-  const dark = scheme === "dark";
-  const surface = dark ? mix(background, text, 0.06) : mix(background, "#ffffff", 0.6);
-  const s = (hue: number, chroma = 0.16) => status(hue, chroma, background, scheme);
+export function customSource({ background, text, accent }: ThemeSeeds): ThemeSource {
+  const surface = hexToOklch(background).l < 0.5 ? mix(background, text, 0.06) : mix(background, "#ffffff", 0.6);
+  const s = (hue: number, chroma = 0.16) => status(hue, chroma, background);
   const [red, green, yellow, blue, magenta, cyan, orange] = [s(25), s(150), s(85, 0.14), s(255), s(320), s(200, 0.12), s(55)] as [
     string,
     string,

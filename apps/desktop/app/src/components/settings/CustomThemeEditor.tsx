@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { customContrast, DEFAULT_THEME_ID, parseCustomTheme, resolvePalette, seedsFrom, serializeCustomTheme, themes } from "@milagre/shared/themes";
 import type { CustomTheme, Scheme, ThemeId, ThemeSeeds } from "@milagre/shared/themes";
 import { updateSettings, useResolvedScheme, useSettings } from "../../lib/settings";
@@ -11,6 +11,7 @@ const FIELDS: { key: keyof ThemeSeeds; name: string; hint: string }[] = [
   { key: "accent", name: "Accent", hint: "Buttons, links, selection, cursor" },
 ];
 const save = (next: CustomTheme) => updateSettings({ customTheme: next, colorTheme: "custom" });
+const NO_CLIPBOARD = "Could not read the clipboard.";
 const BAD_PASTE = "That isn't a Milagre theme. It needs light and dark, each with background, text and accent hex colors.";
 
 function Segment({ value, onChange }: { value: Scheme; onChange: (scheme: Scheme) => void }) {
@@ -39,6 +40,23 @@ function ColorRow({ name, hint, value, onCommit }: { name: string; hint: string;
   // The field keeps what is typed; it commits as soon as the text is a full hex color.
   const [draft, setDraft] = useState<{ source: string; text: string } | null>(null);
   const text = draft && draft.source === value ? draft.text : value;
+  // Dragging in the picker fires on every tick; the swatch follows each one, the settings write once per frame.
+  const [picked, setPicked] = useState<{ source: string; hex: string } | null>(null);
+  const swatch = picked && picked.source === value ? picked.hex : value;
+  const frame = useRef<number | null>(null);
+  const latest = useRef<string>(value);
+  const commit = useRef(onCommit);
+  useEffect(() => {
+    commit.current = onCommit;
+  });
+  useEffect(
+    () => () => {
+      if (frame.current === null) return;
+      window.cancelAnimationFrame(frame.current);
+      commit.current(latest.current);
+    },
+    [],
+  );
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-2.5">
       <div className="grid min-w-0 gap-0.5">
@@ -49,8 +67,17 @@ function ColorRow({ name, hint, value, onCommit }: { name: string; hint: string;
         <input
           type="color"
           aria-label={name}
-          value={value}
-          onChange={(event) => onCommit(event.target.value.toLowerCase())}
+          value={swatch}
+          onChange={(event) => {
+            const hex = event.target.value.toLowerCase();
+            setPicked({ source: value, hex });
+            latest.current = hex;
+            if (frame.current !== null) return;
+            frame.current = window.requestAnimationFrame(() => {
+              frame.current = null;
+              commit.current(latest.current);
+            });
+          }}
           className="size-7 cursor-pointer rounded-[7px] border-0 bg-transparent p-0"
         />
         <input
@@ -104,14 +131,14 @@ export function CustomThemeEditor() {
   const onScreen = useResolvedScheme();
   const [editing, setEditing] = useState<Scheme>(onScreen);
   const [base, setBase] = useState<ThemeId>(DEFAULT_THEME_ID);
-  const [pasteError, setPasteError] = useState(false);
+  const [pasteError, setPasteError] = useState<string | null>(null);
   const theme = settings.customTheme ?? seedsFrom(DEFAULT_THEME_ID);
   const seeds = theme[editing];
   const contrast = customContrast(seeds);
   const weak = contrast.text < 4.5 || contrast.accent < 3;
 
   const edit = (key: keyof ThemeSeeds, hex: string) => {
-    setPasteError(false);
+    setPasteError(null);
     save({ ...theme, [editing]: { ...seeds, [key]: hex } });
   };
 
@@ -140,7 +167,7 @@ export function CustomThemeEditor() {
           value={base}
           onChange={(id) => {
             setBase(id);
-            setPasteError(false);
+            setPasteError(null);
             save(seedsFrom(id));
           }}
           options={themes.map((item) => ({ value: item.id, label: item.name, group: item.group }))}
@@ -152,15 +179,22 @@ export function CustomThemeEditor() {
             [
               "Paste JSON",
               async () => {
-                const parsed = parseCustomTheme(await navigator.clipboard.readText().catch(() => ""));
-                setPasteError(!parsed);
+                let clipboard: string;
+                try {
+                  clipboard = await navigator.clipboard.readText();
+                } catch {
+                  setPasteError(NO_CLIPBOARD);
+                  return;
+                }
+                const parsed = parseCustomTheme(clipboard);
+                setPasteError(parsed ? null : BAD_PASTE);
                 if (parsed) save(parsed);
               },
             ],
             [
               "Reset",
               () => {
-                setPasteError(false);
+                setPasteError(null);
                 setBase(DEFAULT_THEME_ID);
                 save(seedsFrom(DEFAULT_THEME_ID));
               },
@@ -177,7 +211,7 @@ export function CustomThemeEditor() {
           </button>
         ))}
       </div>
-      {pasteError && <p className="text-[12px] text-red">{BAD_PASTE}</p>}
+      {pasteError && <p className="text-[12px] text-red">{pasteError}</p>}
     </div>
   );
 }

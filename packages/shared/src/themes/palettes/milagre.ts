@@ -114,7 +114,7 @@ const grayDark: ThemeSource = {
   ink: "#f2f3f4",
   ink2: "#a5a8ad",
   ink3: "#6c6f75",
-  onAccent: "#ffffff",
+  onAccent: "#17181a",
   line: "#2e3033",
   lineStrong: "#3a3c40",
   lineSoft: fromOklch(0.278, 0.006, 258.354),

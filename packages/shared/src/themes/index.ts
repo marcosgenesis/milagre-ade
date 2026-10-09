@@ -19,7 +19,7 @@ export function resolvePalette(choice: string, scheme: Scheme, custom?: CustomTh
     let palette = cache.get(key);
     if (!palette) {
       if (cache.size > 64) for (const k of cache.keys()) if (k.startsWith("custom:")) cache.delete(k);
-      cache.set(key, (palette = buildPalette(customSource(custom[scheme], scheme), scheme)));
+      cache.set(key, (palette = buildPalette(customSource(custom[scheme]), scheme)));
     }
     return palette;
   }

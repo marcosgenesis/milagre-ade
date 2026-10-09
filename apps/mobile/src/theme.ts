@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { Appearance, Platform, useColorScheme } from "react-native";
-import { resolvePalette, withAlpha, type ThemePalette } from "@milagre/shared/themes";
+import { onColor, resolvePalette, withAlpha, type ThemePalette } from "@milagre/shared/themes";
 import { readThemeSettings, saveThemeSettings } from "./hosts-native";
 import { getThemeSettings, initThemeStore, setThemeSettings, subscribeTheme, type PhoneThemeSettings } from "./theme-store";
 
@@ -39,7 +39,7 @@ function extend(p: ThemePalette, scheme: "light" | "dark"): Palette {
     text: p.ink,
     muted: p.ink2,
     error: p.red,
-    onInk: p.onAccent,
+    onInk: onColor(p.ink, p.page),
     idleDot: withAlpha(p.ink3, 0.4),
     backdrop: scheme === "dark" ? "#00000066" : "#00000033",
   };

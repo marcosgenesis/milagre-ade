@@ -461,7 +461,7 @@ export function CircleButton({ label, icon, onPress, filled = false }: { label: 
         borderColor: colors.lineStrong,
       }}
     >
-      <Icon icon={icon} size={20} tone={filled ? "onInk" : "ink"} />
+      <Icon icon={icon} size={20} tone={filled ? "onAccent" : "ink"} />
     </View>
   );
   if (!onPress) return body;

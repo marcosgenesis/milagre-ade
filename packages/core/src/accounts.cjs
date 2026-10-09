@@ -438,6 +438,7 @@ function createAccounts({
   }
   return {
     list,
+    snapshot,
     select,
     add,
     login,

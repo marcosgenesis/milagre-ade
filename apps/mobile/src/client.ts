@@ -66,6 +66,8 @@ const decoder = new TextDecoder();
 const MEDIA_AT_ONCE = 4;
 // Creating a worktree can fetch and copy files; removing one with big ignored folders can take minutes.
 const LONG_CALLS = new Set(["worktree:create", "worktree:remove", "link:send", "link:open"]);
+// Settings › MCP: the Mac caps one check at 30 s (packages/core/src/mcp/index.cjs); wait a little longer for its answer.
+const MCP_CALLS = new Set(["mcp:accounts", "mcp:check"]);
 
 /**
  * One request through a transport, the relay's or the LAN's. The relay's own failures, and a phone key that can't be read, carry copy for the
@@ -230,7 +232,8 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
       if (value?.v !== 1) throw new Error("Incompatible daemon response. Update the app and daemon together.");
       // The Mac's channel holds 16 requests at once (phone-channels.cjs); a busy Mac fills it with slow ones.
       if (response.status === 429) throw new Error("Your computer is busy right now. Try again in a moment.");
-      if (!response.ok || value.error) throw new Error(value.error?.message || `Request failed (${response.status})`);
+      if (!response.ok || value.error)
+        throw Object.assign(new Error(value.error?.message || `Request failed (${response.status})`), { status: response.status });
       if (body === undefined && response.etag) cached.set(route, { etag: response.etag, value: value.result });
       return value.result as T;
     });
@@ -322,7 +325,11 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
     upload: (projectPath: string, name: string, base64: string) => request<{ path: string; name: string }>("/attachments", { projectPath, name, base64 }),
     // Git fetches, worktree setup and removing a worktree get the same deadline as the desktop daemon client.
     call: <T>(method: string, args: unknown[] = []) =>
-      request<T>("/rpc", { v: 1, method, args }, LONG_CALLS.has(method) ? Math.max(timeoutMs, 330000) : timeoutMs),
+      request<T>(
+        "/rpc",
+        { v: 1, method, args },
+        LONG_CALLS.has(method) ? Math.max(timeoutMs, 330000) : MCP_CALLS.has(method) ? Math.max(timeoutMs, 45000) : timeoutMs,
+      ),
     media,
     /** A relay computer's image, fetched once into the cache folder; resolves to its file:// URI. */
     mediaFile: (projectPath: string, path: string) => relayImage(projectPath, path).then((source) => source.uri),

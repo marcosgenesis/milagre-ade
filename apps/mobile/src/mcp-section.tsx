@@ -30,9 +30,14 @@ function McpForComputer() {
     let accounts: McpAccount[];
     try {
       accounts = await client.call<McpAccount[]>("mcp:accounts", []);
-    } catch {
-      // An older Mac, or the demo computer, refuses the method.
-      if (id === run.current) setError("Not available on this computer. Update Milagre on the Mac, then refresh.");
+    } catch (cause) {
+      // The demo computer (or an older Mac) refuses the method with a 403; anything else is a lost connection.
+      if (id === run.current)
+        setError(
+          (cause as { status?: number }).status === 403
+            ? "Not available on this computer. Update Milagre on the Mac, then refresh."
+            : "Could not reach the computer. Check the connection, then refresh.",
+        );
       return;
     }
     if (id !== run.current) return;
@@ -57,17 +62,15 @@ function McpForComputer() {
   const { user, other } = groupMcpRows(checks);
   const pending = (entries ?? []).filter((entry) => !entry.check).map((entry) => entry.account);
   const problems = checks.filter((check) => check.problem);
+  const listing = entries === null && !error;
+  const checking = listing || pending.length > 0;
 
   return (
     <View style={{ gap: 16 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 4 }}>
-        <Text style={[styles.muted, { flexShrink: 1 }]}>
-          {pending.length
-            ? `Checking ${pending.length} account${pending.length === 1 ? "" : "s"}...`
-            : "The MCP servers each account loads in its Chats, checked now."}
-        </Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Refresh" disabled={pending.length > 0} onPress={() => void refresh()} hitSlop={10}>
-          <Icon icon={RefreshIcon} tone={pending.length ? "ink3" : "ink"} size={20} />
+        <Text style={[styles.muted, { flexShrink: 1 }]}>{listing ? "Checking accounts…" : "The MCP servers each account loads in its Chats."}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Refresh" disabled={checking} onPress={() => void refresh()} hitSlop={10}>
+          <Icon icon={RefreshIcon} tone={checking ? "ink3" : "ink"} size={20} />
         </Pressable>
       </View>
       {error ? (
@@ -90,7 +93,7 @@ function McpForComputer() {
           <Rows rows={other} pending={[]} />
         </View>
       ) : null}
-      {entries && !pending.length && !user.length && !other.length && !problems.length ? (
+      {entries && !checking && !user.length && !other.length && !problems.length ? (
         <Text style={styles.muted}>No MCP servers yet. Add one with the Claude or Codex CLI on the Mac.</Text>
       ) : null}
     </View>

@@ -31,7 +31,10 @@ window.milagre = {
   listRecentProjects: async () => [],
   onAccountsChanged: () => () => {},
   mcp: {
-    accounts: async () => accounts,
+    accounts: async () => {
+      if (!window.accountsOpened) await new Promise((resolve) => { window.releaseAccounts = () => { window.accountsOpened = true; resolve(); }; });
+      return accounts;
+    },
     check: async (provider, accountId) => {
       window.checks++;
       const key = provider + ':' + accountId;
@@ -69,6 +72,11 @@ async function browserChecks() {
   };
   try {
     await win.loadURL(process.argv[2]);
+    // Before the account list arrives: a loading line, and Refresh is disabled.
+    await waitFor(`!!window.releaseAccounts`);
+    assert.match(await text(), /Checking accounts…/);
+    assert.equal(await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent === 'Refresh').disabled`), true);
+    await evaluate("window.releaseAccounts()");
     // Claude answered, Codex is still checking: finished chips and a spinner chip side by side.
     await waitFor(`document.body.textContent.includes('pencil')`);
     await waitFor(`!!document.querySelector('[data-mcp-chip="codex:default"][data-state="pending"]')`);

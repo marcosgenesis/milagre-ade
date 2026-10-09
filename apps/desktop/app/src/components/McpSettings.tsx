@@ -19,7 +19,7 @@ const DOT: Record<McpChip["state"], string> = {
 
 type Entry = { account: McpAccount; check: McpAccountCheck | null };
 
-/** Settings › MCP for one Mac: this one by default, or a paired Mac's bridge on its computer page. */
+/** Settings › MCP for one computer: this one by default, or a paired Mac's bridge on its computer page. */
 export function McpSettings({ bridge = window.milagre }: { bridge?: MilagreBridge }) {
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [error, setError] = useState("");
@@ -31,7 +31,7 @@ export function McpSettings({ bridge = window.milagre }: { bridge?: MilagreBridg
     try {
       accounts = await bridge.mcp.accounts();
     } catch (cause) {
-      if (id === run.current) setError(cause instanceof Error ? cause.message : "Could not read this Mac's accounts.");
+      if (id === run.current) setError(cause instanceof Error ? cause.message : "Could not reach the computer. Check the connection, then refresh.");
       return;
     }
     if (id !== run.current) return;
@@ -55,12 +55,13 @@ export function McpSettings({ bridge = window.milagre }: { bridge?: MilagreBridg
   const { user, other } = groupMcpRows(checks);
   const pending = (entries ?? []).filter((entry) => !entry.check).map((entry) => entry.account);
   const problems = checks.filter((check) => check.problem);
-  const checking = pending.length > 0;
+  const listing = entries === null && !error;
+  const checking = listing || pending.length > 0;
 
   return (
     <div className="mt-6 space-y-6">
       <div className="flex items-center justify-between gap-4">
-        <p className="text-[13px] text-ink-3">The MCP servers each account loads in its Chats, checked now.</p>
+        <p className="text-[13px] text-ink-3">{listing ? "Checking accounts…" : "The MCP servers each account loads in its Chats."}</p>
         <button className={button} disabled={checking} onClick={() => void refresh()}>
           <HugeiconsIcon icon={RefreshIcon} size={14} strokeWidth={1.8} color="currentColor" />
           Refresh
@@ -87,7 +88,7 @@ export function McpSettings({ bridge = window.milagre }: { bridge?: MilagreBridg
         </details>
       )}
       {entries && !checking && user.length === 0 && other.length === 0 && problems.length === 0 && (
-        <p className="text-[13px] text-ink-3">No MCP servers yet. Add one with the Claude or Codex CLI on this Mac.</p>
+        <p className="text-[13px] text-ink-3">No MCP servers yet. Add one with the Claude or Codex CLI on the Mac.</p>
       )}
     </div>
   );

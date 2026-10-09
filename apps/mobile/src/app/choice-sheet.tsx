@@ -166,7 +166,8 @@ export default function ChoiceSheet() {
         onChangeText={(event) => setQuery(event.nativeEvent.text)}
         onCancelButtonPress={() => setQuery("")}
       />
-      <Stack.Toolbar placement="right">
+      {/* HIG: a sheet's close button sits on the leading edge. */}
+      <Stack.Toolbar placement="left">
         <Stack.Toolbar.Button icon="xmark" onPress={() => close(null)}>
           Close
         </Stack.Toolbar.Button>

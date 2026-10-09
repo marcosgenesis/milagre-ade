@@ -28,13 +28,13 @@ const description = "Milagre runs Claude Code and Codex on your Mac, one Git Wor
   h1 em { display: block; font-family: var(--font-serif); font-size: 1.12em; font-weight: 400; letter-spacing: -0.01em; color: oklch(0.86 0.06 255); }
   .stage { position: relative; flex: 1; width: 100%; min-height: 0; margin-top: clamp(8px, 2.5vh, 28px); }
   /* Blurs the devices more the lower they go, then fades them into the page, under the download button. */
-  .fade { position: absolute; inset: auto 0 0; height: var(--fade, 150px); pointer-events: none; }
-  .cta { position: absolute; inset: auto 0 0; z-index: 2; display: flex; justify-content: center; padding: 0 20px clamp(20px, 4vh, 36px); }
+  .fade { position: absolute; inset: auto 0 0; height: var(--fade, 240px); pointer-events: none; }
+  .cta { position: absolute; inset: auto 0 0; z-index: 2; display: flex; justify-content: center; padding: 0 20px clamp(40px, calc(4vh + 20px), 56px); }
   .fade::before, .fade::after { content: ""; position: absolute; inset: 0; }
   .fade::before { backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); mask-image: linear-gradient(to bottom, transparent, black 70%); -webkit-mask-image: linear-gradient(to bottom, transparent, black 70%); }
   .fade::after { background: linear-gradient(to bottom, transparent, color-mix(in oklch, var(--page) 75%, transparent) 60%, var(--page)); }
   @media (max-width: 700px) {
     .hero { gap: 20px; padding-top: 16px; }
-    .page { --fade: 120px; }
+    .page { --fade: 180px; }
   }
 </style>

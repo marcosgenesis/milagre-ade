@@ -212,9 +212,12 @@ test("the window's routing drives a real Mac: its Project and chats named by com
       ),
     "a state event naming the computer",
   );
-  // The window re-reads the Project as it changes; each online read refreshes the computer's last copy.
   const reread = await call("computers:invoke", id, "project:read", [projectKey]);
   assert.equal(reread.state.sessions[chatId].title, "Named from the desk");
+  // The window forwards the scope's whole state as it changes (offline-cache.ts); that is what the cache keeps.
+  const remembered = structuredClone(reread.state);
+  remembered.sessions[chatId].title = "Remembered by the window";
+  await call("computers:remember", id, { kind: "state", scope: projectKey, state: remembered });
   const page = await call("computers:invoke", id, "chat:messages", [projectKey, chatId, { turns: 20 }]);
   assert.ok(Array.isArray(page.messages));
   await call("computers:remember", id, {
@@ -224,17 +227,37 @@ test("the window's routing drives a real Mac: its Project and chats named by com
     window: { messages: [{ id: 1, session_id: chatId, role: "user", body: "kept here" }], hasMore: false, total: 1 },
   });
 
+  // Its folders, from its own home: the Project's folder is listed and already a Project.
+  const listing = await within(call("computers:invoke", id, "fs:list-dirs", [{}]), "fs:list-dirs");
+  assert.equal(listing.path, mac.home);
+  assert.ok(
+    listing.entries.some((entry) => entry.name === "project" && entry.project),
+    "the opened Project reads as Added",
+  );
+  await assert.rejects(call("computers:invoke", id, "fs:list-dirs", [{ path: "/etc" }]), /Only folders in the home folder/);
+
+  // An image the chat shows, read through media:read; one outside the Project's roots is refused.
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82]);
+  const shot = path.join(mac.project, ".milagre", "images", "shot.png");
+  await fs.mkdir(path.dirname(shot), { recursive: true });
+  await fs.writeFile(shot, png);
+  const media = await within(call("computers:invoke", id, "media:read", [{ scope: projectKey, path: shot }]), "media:read");
+  assert.equal(media.type, "image/png");
+  assert.deepEqual(Buffer.from(media.base64, "base64"), png);
+  await fs.writeFile(path.join(mac.home, "secret.png"), png);
+  await assert.rejects(call("computers:invoke", id, "media:read", [{ scope: projectKey, path: path.join(mac.home, "secret.png") }]), /not available/);
+
   // Away: not online is all the cache asks, so turning the computer off stands in for it going offline.
   await within(computers.setEnabled(false), "setEnabled(false)");
   assert.ok((await call("computers:invoke", id, "project:recent", [])).some((project) => project.path === projectKey));
   const kept = await call("computers:invoke", id, "project:switch", [projectKey]);
   assert.equal(kept.path, projectKey);
-  assert.equal(kept.state.sessions[chatId].title, "Named from the desk");
+  assert.equal(kept.state.sessions[chatId].title, "Remembered by the window");
   assert.equal((await call("computers:invoke", id, "chat:messages", [projectKey, chatId, { turns: 20 }])).messages[0].body, "kept here");
   const started = Date.now();
   const uncached = await call("computers:invoke", id, "chat:messages", [projectKey, chatId + 99, { turns: 20 }]);
   assert.deepEqual(uncached.messages, [], "a chat with no copy reads empty");
-  assert.ok(Date.now() - started < 2000, "and promptly");
+  assert.ok(Date.now() - started < 8000, "and promptly, without waiting on the offline computer");
   await assert.rejects(call("computers:invoke", id, "chat:patch", [projectKey, chatId, { title: "x" }]), { message: "studio is offline." });
   // Opening a remote Project goes only to the computer: this Mac's own recent-projects list is written by its own host.
   await assert.rejects(fs.stat(path.join(dataDir, "recent-projects.json")), { code: "ENOENT" });

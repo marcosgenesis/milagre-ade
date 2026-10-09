@@ -380,6 +380,7 @@ async function startTestMac(t, { autoAllow = true, lan = true } = {}) {
   const relay = await startLocalRelay(t);
   daemon = await startDaemon({
     dataDir,
+    homeDir: directory,
     version: "9.8.7",
     runtimeOptions: { cwd: project, environmentReady: Promise.resolve(), titleModels: {}, readPullRequests: async (_worktree, refs) => refs },
     phoneOptions: {
@@ -411,7 +412,7 @@ async function startTestMac(t, { autoAllow = true, lan = true } = {}) {
     sockets.push(socket);
     return socket;
   };
-  return { clock, client, project, identity, token, dial, relay, dataDir };
+  return { clock, client, project, identity, token, dial, relay, dataDir, home: directory };
 }
 
 module.exports = {

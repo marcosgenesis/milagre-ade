@@ -4,10 +4,12 @@ import { Stack, router } from "expo-router";
 import type { SkillOption } from "@milagre/shared/model";
 import { SKILL_PROVIDERS, SKILL_SCOPES, filterSkills, groupSkills, shadowedBy, shortenHome, skillProviderLabel } from "@milagre/shared/skill-catalog";
 import type { SkillScope } from "@milagre/shared/skill-catalog";
-import { overrides, skillBadge, useSkillCatalog } from "../use-skills";
-import { ErrorNotice, Field, PageScroll, PullDown, colors, styles } from "../ui";
+import { overrides, useSkillBadge, useSkillCatalog } from "../use-skills";
+import { ErrorNotice, Field, PageScroll, PullDown, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 export default function SkillsScreen() {
+  const styles = useStyles();
   const { projectPath, data, error, loading, refresh, connected } = useSkillCatalog();
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<SkillScope | "all">("all");
@@ -90,6 +92,9 @@ export default function SkillsScreen() {
 }
 
 function SkillRow({ skill, hidden, onPress }: { skill: SkillOption; hidden: number; onPress: () => void }) {
+  const skillBadge = useSkillBadge();
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -128,6 +133,7 @@ function FilterMenu({
   options: { value: string; title: string }[];
   onChange: (value: string) => void;
 }) {
+  const styles = useStyles();
   return (
     <PullDown
       label={label}

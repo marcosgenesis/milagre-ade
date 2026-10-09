@@ -8,7 +8,7 @@ import { useAppUpdates } from "../update-sheet";
 import { Icon } from "../icons";
 import { useSession } from "../session";
 import { ProjectIcon } from "../project-icon";
-import { ErrorNotice, ListRow, PageScroll, Toggle, styles } from "../ui";
+import { ErrorNotice, ListRow, PageScroll, Toggle, useStyles } from "../ui";
 import { useAttentionButton } from "../attention";
 
 type SettingsPage = "notifications" | "usage" | "accounts" | "project-accounts" | "skills" | "experimental";
@@ -26,6 +26,7 @@ export default function SettingsScreen() {
 
 /** Settings pages stay on the native stack for the header and interactive back gesture. */
 export function SettingsView({ onOpen }: { onOpen: (page: SettingsPage) => void }) {
+  const styles = useStyles();
   const push = usePush();
   const [attentionButton, setAttentionButton] = useAttentionButton();
   const updates = useAppUpdates();

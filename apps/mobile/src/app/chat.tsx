@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Reanimated from "react-native-reanimated";
-import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { LiquidGlassView } from "@sbaiahmed1/react-native-blur";
 import { UltracodeGlow } from "../ultracode-glow";
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
@@ -56,10 +56,10 @@ import { Icon, LinearLogo } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
 import { useOpenProject } from "../use-open-project";
-import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from "../ui";
+import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, useStyles } from "../ui";
 import { PromptField } from "../prompt-field";
 import { ContextRing } from "../context-ring";
-import { hex } from "../theme";
+import { useTheme } from "../theme";
 import { archiveFromPhone, showArchiveNotice } from "../archive";
 import { confirmSheet } from "../confirm-store";
 import { randomUUID } from "expo-crypto";
@@ -74,13 +74,14 @@ import { showChoiceSheet } from "../choice-store";
 const PAGE = 40;
 
 export default function ChatScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const navigation = useNavigation<NavigationProp<{ chat: { worktreeId?: string } }, "chat">>();
   const params = useLocalSearchParams<{ id?: string; worktreeId?: string; projectPath?: string; hostId?: string }>();
   const session = useSession();
   const composer = useComposer();
   const pendingStore = usePendingChats();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
   const [actionBusy, setBusy] = useState(false);
   // Answers just sent: the card leaves and the answers show at once, until the host's copy arrives.
   const [sentAnswers, setSentAnswers] = useState<{ requestId: string; message: ChatMessage | null; count: number } | null>(null);
@@ -1038,7 +1039,7 @@ export default function ChatScreen() {
                   pointerEvents="none"
                   glassType="clear"
                   isInteractive={false}
-                  reducedTransparencyFallbackColor={hex(scheme).surface}
+                  reducedTransparencyFallbackColor={colors.surface}
                   style={[StyleSheet.absoluteFill, { borderRadius: 24, borderCurve: "continuous" }]}
                 />
                 {/* With Ultracode on, the composer takes its purple: a breathing tint and border, and a glow. */}

@@ -3,9 +3,10 @@ import { Text } from "react-native";
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useSession } from "../session";
 import { ArchiveProgress } from "../archive-progress";
-import { Button, ErrorNotice, Field, PageScroll, styles } from "../ui";
+import { Button, ErrorNotice, Field, PageScroll, useStyles } from "../ui";
 
 export default function ChatDetails() {
+  const styles = useStyles();
   const { id } = useLocalSearchParams<{ id: string }>();
   const session = useSession();
   const chat = session.snapshot?.project.state.sessions[Number(id)];

@@ -4,7 +4,8 @@ import { Notification01Icon } from "@hugeicons/core-free-icons";
 import { usePush } from "../push";
 import { useSession } from "../session";
 import { Icon } from "../icons";
-import { ErrorNotice, PageScroll, PillButton, Toggle, colors, styles } from "../ui";
+import { ErrorNotice, PageScroll, PillButton, Toggle, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 export default function NotificationsScreen() {
   return (
@@ -17,6 +18,8 @@ export default function NotificationsScreen() {
 
 /** Notification controls for the native Settings stack. */
 export function NotificationsView() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const push = usePush();
   const session = useSession();
   const state = push.state;

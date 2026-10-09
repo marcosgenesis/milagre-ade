@@ -5,9 +5,10 @@ import { Stack, useLocalSearchParams } from "expo-router";
 import { useSession } from "../session";
 import { useRpc } from "../use-rpc";
 import { FileCode } from "../file-code";
-import { ErrorNotice, PageScroll, styles } from "../ui";
+import { ErrorNotice, PageScroll, useStyles } from "../ui";
 
 export default function FilePreview() {
+  const styles = useStyles();
   const { path, uri, name: localName } = useLocalSearchParams<{ path?: string; uri?: string; name?: string }>();
   const { client } = useSession();
   const remote = useRpc<{ text: string; binary: boolean; truncated: boolean }>(path ? client : null, "attachment:preview", [path]);

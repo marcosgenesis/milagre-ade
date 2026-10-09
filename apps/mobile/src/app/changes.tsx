@@ -9,7 +9,7 @@ import { useRpc } from "../use-rpc";
 import { Counts } from "../diff-ui";
 import { ChangeTree as Tree } from "../change-tree";
 import { LinkChangesView } from "../link-changes";
-import { ErrorNotice, PageScroll, Segmented, styles } from "../ui";
+import { ErrorNotice, PageScroll, Segmented, useStyles } from "../ui";
 
 const MODES = [
   { value: "uncommitted", title: "Uncommitted" },
@@ -40,6 +40,7 @@ export function ChangesView(props: { worktreeId: number; header?: React.ReactNod
 
 /** The Worktree's changed files as a folder tree with counts and status boxes; a file opens its diff, as a page unless `onOpen` shows it. */
 function ProjectChangesView({ worktreeId, header, onOpen }: { worktreeId: number; header?: React.ReactNode; onOpen?: (target: DiffTarget) => void }) {
+  const styles = useStyles();
   const session = useSession();
   const worktree = session.snapshot?.project.state.worktrees[worktreeId];
   const [mode, setMode] = useState<DiffMode>("uncommitted");

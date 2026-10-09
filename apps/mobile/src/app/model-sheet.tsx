@@ -42,6 +42,10 @@ export default function ModelSheet() {
   const [closing, setClosing] = useState(false);
   // Bumped each time Ultracode turns on; the Fatality overlay plays once per bump (Settings › Experimental).
   const [fatality, setFatality] = useState(0);
+  // The settings panel floats over the bottom of the models list (the sheet stretches its ScrollView to the full
+  // sheet), so the list pads its end by the panel's height and every model can scroll above it.
+  const [panelHeight, setPanelHeight] = useState(0);
+  const hasSettings = model.efforts.length > 0 || model.fastMode || model.ultracode;
   const [fatalityOn] = useUltracodeFatality();
   usePreventRemove(dirty && !closing, ({ data }) =>
     Alert.alert("Discard changes?", "Your model and effort picks will not be applied.", [
@@ -66,7 +70,12 @@ export default function ModelSheet() {
     // hand it every row below (RNScreens warns "expects at most 2 subviews") and misplace the list.
     <View collapsable={false} style={styles.screen}>
       {/* The header and provider chips ride inside the models scroller as one pinned block. */}
-      <ScrollView style={{ flex: 1 }} stickyHeaderIndices={[0]} contentContainerStyle={{ paddingBottom: 16 }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        stickyHeaderIndices={[0]}
+        contentContainerStyle={{ paddingBottom: 16 + (hasSettings ? panelHeight : 0) }}
+        scrollIndicatorInsets={{ bottom: hasSettings ? panelHeight : 0 }}
+      >
         <View style={{ backgroundColor: colors.page }}>
           <View
             style={{
@@ -169,9 +178,14 @@ export default function ModelSheet() {
           ))}
         </View>
       </ScrollView>
-      {(levels.length > 0 || model.fastMode || model.ultracode) && (
+      {hasSettings && (
         <View
+          onLayout={(event) => setPanelHeight(event.nativeEvent.layout.height)}
           style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
             backgroundColor: colors.canvas,
             borderTopWidth: StyleSheet.hairlineWidth,
             borderTopColor: colors.line,

@@ -30,7 +30,7 @@ const arketa = { listDirs: async ({ path } = {}) => (window.listed.push(path ?? 
 window.milagre = {
   openProject: async () => (window.localDialogs++, null),
   on: (id) => (id === "c-arketa" ? arketa : {}),
-  onComputersChanged: () => () => {},
+  onComputersChanged: (callback) => ((window.pushComputers = (computers) => callback({ thisMac: "victor-mbp", computers })), () => {}),
   computers: { list: async () => ({ thisMac: "victor-mbp", computers: [
     { id: "c-arketa", name: "arketa", hostId: "a".repeat(22), relayHost: "relay.milagre.cloud", state: "online", route: "lan", lastSeen: Date.now(), addedAt: 1, message: null, lan: true, lanRoutes: [] },
     { id: "c-studio", name: "studio", hostId: "s".repeat(22), relayHost: "relay.milagre.cloud", state: "offline", route: null, lastSeen: Date.now() - 7200000, addedAt: 1, message: null, lan: false, lanRoutes: [] },
@@ -39,7 +39,12 @@ window.milagre = {
 updateSettings({ otherComputers: true });
 function Fixture() {
   const [open, setOpen] = useState(true);
-  return open ? <AddProjectDialog onClose={() => setOpen(false)} onOpened={(project) => { window.added = project.path; setOpen(false); }} /> : <output data-closed />;
+  return (
+    <>
+      <button data-reopen onClick={() => setOpen(true)}>Reopen</button>
+      {open ? <AddProjectDialog onClose={() => setOpen(false)} onOpened={(project) => { window.added = project.path; setOpen(false); }} /> : <output data-closed />}
+    </>
+  );
 }
 createRoot(document.getElementById("root")).render(<Fixture />);
 `;
@@ -104,8 +109,46 @@ async function browserChecks() {
     await evaluate(`[...document.querySelectorAll('dialog button')].find((b) => b.textContent.trim() === 'Add billing-service').click()`);
     await waitFor(`window.added === 'c-arketa|/Users/a/Code/billing-service' && !!document.querySelector('[data-closed]')`);
     assert.deepEqual(await evaluate(`window.opened`), ["/Users/a/Code/billing-service"]);
-    assert.deepEqual(errors, []);
     console.log("PASS: another computer's folders are browsed there, tagged, and the chosen checkout opens on it");
+
+    // An Added folder is opened (switched to), not added a second time.
+    const button = (label) => `[...document.querySelectorAll('dialog button')].find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
+    await evaluate(`document.querySelector('[data-reopen]').click()`);
+    await waitFor(`document.querySelector('dialog[data-add-project]')?.open`);
+    await evaluate(`${on("c-arketa")}.click()`);
+    await waitFor(`!!document.querySelector('[data-folder="Code"]')`);
+    await evaluate(`document.querySelector('[data-folder="Code"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    await waitFor(`!!document.querySelector('[data-folder="arketa-web"]')`);
+    await evaluate(`document.querySelector('[data-folder="arketa-web"]').click()`);
+    await waitFor(`!!${button("Open arketa-web")} && !${button("Open arketa-web")}.disabled`);
+    await evaluate(`${button("Open arketa-web")}.click()`);
+    await waitFor(`window.added === 'c-arketa|/Users/a/Code/arketa-web' && !!document.querySelector('[data-closed]')`);
+
+    // The chosen computer going offline stops the browser and disables Add; removing it falls back to This Mac.
+    const computerList = (state) =>
+      `[{ id: "c-arketa", name: "arketa", hostId: "a".repeat(22), relayHost: "relay.milagre.cloud", state: ${JSON.stringify(state)}, route: null, lastSeen: Date.now(), addedAt: 1, message: null, lan: false, lanRoutes: [] }]`;
+    await evaluate(`document.querySelector('[data-reopen]').click()`);
+    await waitFor(`document.querySelector('dialog[data-add-project]')?.open`);
+    await evaluate(`${on("c-arketa")}.click()`);
+    await waitFor(`!!document.querySelector('[data-folder="Code"]')`);
+    await evaluate(`document.querySelector('[data-folder="Code"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    await waitFor(`!!document.querySelector('[data-folder="billing-service"]')`);
+    await evaluate(`document.querySelector('[data-folder="billing-service"]').click()`);
+    await waitFor(`!${button("Add billing-service")}.disabled`);
+    await evaluate(`window.pushComputers(${computerList("offline")})`);
+    await waitFor(`!!document.querySelector('[data-add-project-away]')`);
+    const reads = await evaluate(`window.listed.length`);
+    assert.equal(await evaluate(`${button("Add billing-service")}.disabled`), true, "Add waits for the computer to be online");
+    await evaluate(`window.pushComputers([])`);
+    await waitFor(`!!${button("Choose folder…")} && !document.querySelector('[data-add-project-away]')`);
+    assert.equal(await evaluate(`window.listed.length`), reads, "nothing is read from an offline computer");
+    console.log("PASS: an Added folder opens, and an offline or removed computer stops the browser");
+
+    // A press on the scrim closes the dialog.
+    await evaluate(`document.querySelector('dialog[data-add-project]').dispatchEvent(new MouseEvent('click', { bubbles: true }))`);
+    await waitFor(`!!document.querySelector('[data-closed]')`);
+    assert.deepEqual(errors, []);
+    console.log("PASS: a press on the scrim closes the dialog");
     app.exit(0);
   } catch (error) {
     console.error(error);

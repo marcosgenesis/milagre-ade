@@ -258,7 +258,26 @@ export type PullRequestBlocker = "conflicts" | "changes-requested" | "checks-fai
 /** A PR-blocker pill the user clicked. Milagre wrote the message and the skill prompt the agent got. */
 export type PullRequestActionContext = { kind: "pr-action"; action: PullRequestBlocker; pr: number; url: string };
 
-export type ChatContext = AdvisorResultContext | LinkedContext | { kind: "git-action" } | HandoffContext | PullRequestActionContext | "handover" | null;
+/** A Chat started from a Linear issue. Milagre read the issue and wrote the message and prompt; `note` is what the user typed. */
+export type LinearIssueContext = {
+  kind: "linear-issue";
+  key: string;
+  title: string;
+  url: string;
+  state: { name: string; type: "triage" | "backlog" | "unstarted" | "started" | "completed" | "canceled"; color: string };
+  workspace?: string;
+  note?: string;
+};
+
+export type ChatContext =
+  | AdvisorResultContext
+  | LinkedContext
+  | { kind: "git-action" }
+  | HandoffContext
+  | PullRequestActionContext
+  | LinearIssueContext
+  | "handover"
+  | null;
 
 /**
  * What a message no person typed is (`ChatMessage.context`): a Delegation from another Chat, a Delegation
@@ -526,6 +545,8 @@ export interface ChatSendRequest {
   tldrEnabled?: boolean;
   /** A PR-blocker pill's action. Milagre checks it and writes the body, prompt and context itself, ignoring the ones sent. */
   prAction?: { action: PullRequestBlocker; pr: number; url: string };
+  /** The first message of a Chat started from an issue. Milagre reads the issue and writes the body, prompt and context itself. */
+  linearIssue?: { key: string; workspace?: string; note?: string };
 }
 
 /** A code editor found on this Mac. */

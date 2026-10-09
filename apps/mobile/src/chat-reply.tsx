@@ -18,6 +18,8 @@ import { AnswerCard } from "./answer-card";
 import { useMuriloMode } from "./murilo-mode";
 import { PullRequestActionCard } from "./pr-action-card";
 import { isPullRequestAction } from "@milagre/shared/pr-action";
+import { isLinearIssueContext } from "@milagre/shared/linear-issue";
+import { LinearIssueCard } from "./linear-issue-card";
 import { useTheme } from "./theme";
 import { useStyles } from "./ui";
 import { showImages, type MediaValue, type ViewerImage } from "./viewer-store";
@@ -222,6 +224,8 @@ export const ChatReply = memo(function ChatReply({
   const feedback = message?.role === "user" ? parseDesignFeedback(text) : null;
   // So does a PR-blocker pill's action, instead of the skill prompt the agent read.
   const prAction = message?.role === "user" && isPullRequestAction(message.context) ? message.context : null;
+  // And a Chat's first message when it was started from a Linear issue.
+  const issue = message?.role === "user" && isLinearIssueContext(message.context) ? message.context : null;
   // What the agent concluded only in thinking, once the turn ends or stops on a question.
   const thought = !run || run.questions.length ? unspokenThought(text, steps) : "";
   const advisor = typeof message?.context === "object" && message.context?.kind === "advisor-result" ? message.context : null;
@@ -243,6 +247,8 @@ export const ChatReply = memo(function ChatReply({
           ))}
         {prAction ? (
           <PullRequestActionCard action={prAction} />
+        ) : issue ? (
+          <LinearIssueCard issue={issue} />
         ) : feedback ? (
           <DesignFeedbackCard feedback={feedback} chatId={chatId} moved={designsMoved} />
         ) : message.answered?.length ? (

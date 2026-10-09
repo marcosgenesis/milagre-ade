@@ -80,6 +80,7 @@ import { useWorktreePullRequests } from "./components/useWorktreePullRequests";
 import { useLinear } from "./components/useLinear";
 import { useWorktreeLinearIssues } from "./components/useWorktreeLinearIssues";
 import { issueFirstMessage, LINK_PR_HINT, restoredDraft, type LinearIssue } from "@milagre/shared/linear";
+import { linearIssueContext, linearIssueRequest } from "@milagre/shared/linear-issue";
 import { chatPullRequests, pullRequestRefsCache } from "./lib/chat-pull-requests";
 import { REMOTE_FILES_NOTICE, usePastedImages } from "./components/usePastedImages";
 import { DotBackground } from "./components/DotBackground";
@@ -1336,7 +1337,7 @@ function App() {
     files: string[] = imageDraft.files,
     preserveComposer = false,
     prAction?: PullRequestActionContext,
-    issue?: IssueRef,
+    issue?: LinearIssue,
   ): Promise<boolean> {
     if ((!body && !images.length && !files.length) || !state || !selectedWorktree || !project || sendInFlight.current || imageDraft.loading) return false;
     // A file attached from this Mac is a path the other Mac can't read; pasted images travel as data and still go.
@@ -1369,7 +1370,7 @@ function App() {
       files,
       model: model.id,
       provider: model.provider,
-      context: prAction ?? null,
+      context: issue ? linearIssueContext(issue, submittedDraft) : (prAction ?? null),
     });
     setPendingSend({
       ...preview,
@@ -1415,6 +1416,8 @@ function App() {
         prompt: prAction ? pullRequestActionPrompt(prAction) : attachmentPrompt(body, files),
         ...options,
         ...(prAction ? { prAction: { action: prAction.action, pr: prAction.pr, url: prAction.url } } : {}),
+        // A Mac that predates issue cards ignores linearIssue and sends the body as a plain message.
+        ...(issue ? { linearIssue: linearIssueRequest({ key: issue.key, workspace: issue.workspace, note: submittedDraft })! } : {}),
       });
       if (preparedTarget.current?.view === view) preparedTarget.current = null;
       sent = true;

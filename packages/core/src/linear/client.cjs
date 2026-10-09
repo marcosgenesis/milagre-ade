@@ -102,7 +102,28 @@ function createLinearClient({ store, clientId, apiBase, fetchImpl = globalThis.f
       const saved = await current();
       return attempt(saved, (accessToken) => postGraphql({ fetchImpl, apiBase, accessToken, query: document, variables }));
     },
+    /** A file uploaded to Linear (uploads.linear.app), which answers only to a signed-in user: its type and bytes. */
+    async download(url, { maxBytes }) {
+      const saved = await current();
+      return attempt(saved, (accessToken) => getUpload({ fetchImpl, url, accessToken, maxBytes }));
+    },
   };
+}
+
+async function getUpload({ fetchImpl, url, accessToken, maxBytes }) {
+  let response;
+  try {
+    response = await fetchImpl(url, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(30_000) });
+  } catch (error) {
+    throw new LinearError(`Couldn't reach Linear: ${error.message}`, "offline");
+  }
+  if (response.status === 401) throw new LinearError("Linear isn't connected.", "revoked");
+  if (response.status === 403 || response.status === 404) throw new LinearError("This workspace has no such file.", "not-found");
+  if (!response.ok) throw new LinearError(`Linear answered ${response.status}.`, "failed");
+  if (Number(response.headers.get("content-length")) > maxBytes) throw new LinearError("That file is too big to download.", "failed");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > maxBytes) throw new LinearError("That file is too big to download.", "failed");
+  return { type: response.headers.get("content-type") ?? "", bytes };
 }
 
 module.exports = { postGraphql, createLinearClient };

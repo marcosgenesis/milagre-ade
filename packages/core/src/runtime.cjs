@@ -7,6 +7,7 @@ const { registerLinkRuntime } = require("./link-runtime.cjs");
 const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { PROVIDERS } = require("@milagre/shared/providers");
 const { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } = require("@milagre/shared/pr-action");
+const { issueFirstMessage, linearIssueContext, linearIssuePrompt, linearIssueRequest } = require("@milagre/shared/linear-issue");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { createGit } = require("./git/client.cjs");
 const { syncMainBranch } = require("./main-sync.cjs");
@@ -55,6 +56,7 @@ const { emptyState, reconcileState, markDisconnectedSubagents } = require("./pro
 const { migrateWorktreeChats } = require("./worktree-chats.cjs");
 const { createLinear } = require("./linear/index.cjs");
 const { createLinearIssues } = require("./linear/issues.cjs");
+const { createLinearTools, linearToolDefinitions } = require("./linear/tools.cjs");
 const { isIssueKey } = require("./linear/links.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
@@ -969,6 +971,7 @@ function createRuntime(options) {
   });
   // Issues are read through the same connection; both answer without throwing (see linear/issues.cjs).
   const linearIssues = createLinearIssues({ linear });
+  const linearTools = createLinearTools({ linear, issues: linearIssues });
   commands.handle("linear:issues", (_event, value) => linearIssues.list(value?.query, { fresh: value?.fresh === true, workspace: value?.workspace }));
   commands.handle("linear:worktree-issues", async (_event, projectPath) => {
     try {
@@ -1011,18 +1014,38 @@ function createRuntime(options) {
     knownFolders: () => scopeStates.worktreePaths(),
   });
 
-  commands.handle("chat:send", (_event, request) => {
+  commands.handle("chat:send", async (_event, request) => {
     if (isLinkScopeKey(request?.projectPath) || !scopeStates.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
-    // Only Milagre marks a message as coming from another Chat. A PR-blocker pill is the one context a renderer can ask
-    // for, and Milagre checks it and writes its message and skill prompt itself.
-    const { prAction, ...rest } = request;
+    // Only Milagre marks a message as coming from another Chat. A PR-blocker pill and a Chat started from a Linear issue
+    // are the contexts a renderer can ask for, and Milagre checks them and writes their message and prompt itself.
+    const { prAction, linearIssue, ...rest } = request;
     const action = prAction === undefined ? null : pullRequestActionContext(prAction);
     if (prAction !== undefined && !action) throw new Error("That pull request action isn't valid.");
     const message = action
       ? { ...rest, body: pullRequestActionBody(action), prompt: pullRequestActionPrompt(action), images: [], files: [], context: action }
-      : { ...rest, context: undefined };
+      : linearIssue !== undefined
+        ? await linearIssueMessage(rest, linearIssue)
+        : { ...rest, context: undefined };
     return chats.send(message).then(({ sessionId }) => ({ sessionId }));
   });
+  // The issue is read again here, so the card and prompt are Linear's copy. If Linear can't answer now, the Chat still
+  // starts, with the text the renderer sent as a plain message.
+  async function linearIssueMessage(rest, request) {
+    const ask = linearIssueRequest(request);
+    if (!ask) throw new Error("That Linear issue isn't valid.");
+    const issue = await readLinearIssue(ask.key, ask.workspace).catch((error) => {
+      console.warn(`Milagre couldn't read ${ask.key} for its card:`, error.message);
+      return null;
+    });
+    if (!issue) return { ...rest, context: undefined };
+    const files = Array.isArray(rest.files) ? rest.files : [];
+    return {
+      ...rest,
+      body: issueFirstMessage(issue, ask.note),
+      prompt: linearIssuePrompt(issue, ask.note) + (files.length ? `\n\nAttached files:\n${files.join("\n")}` : ""),
+      context: linearIssueContext(issue, ask.note),
+    };
+  }
   commands.handle("chat:resume", (_event, projectPath, sessionId) => {
     if (!scopeStates.has(projectPath)) throw new Error("Open the project before continuing its chats.");
     return chats.resumeChat(projectPath, Number(sessionId));
@@ -1179,6 +1202,8 @@ function createRuntime(options) {
       ...simulatorToolDefinitions(chatId, simulators),
       ...artifactToolDefinitions(chatId, artifacts),
       ...require("./advisor-tools.cjs").advisorToolDefinitions(chatId, advisors),
+      // Milagre's own Linear sign-in, so agents don't reach for a Linear MCP or connector.
+      ...(linear.enabled() ? linearToolDefinitions(linearTools) : []),
     ],
   });
   const advisorStore = require("./advisor-store.cjs").createAdvisorStore({ dataDir });

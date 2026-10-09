@@ -38,6 +38,10 @@
       "types": "./src/live-activity.d.mts",
       "default": "./src/live-activity.mjs"
     },
+    "./linear-issue": {
+      "types": "./src/linear-issue.d.mts",
+      "default": "./src/linear-issue.mjs"
+    },
     "./pr-action": {
       "types": "./src/pr-action.d.mts",
       "default": "./src/pr-action.mjs"

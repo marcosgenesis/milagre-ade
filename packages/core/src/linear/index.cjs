@@ -109,6 +109,8 @@ function createLinear({
     workspaces,
     /** Queries one workspace as its connected user. */
     query: (workspace, document, variables) => clientOf(workspace).query(document, variables),
+    /** Downloads a Linear upload as one workspace's connected user. */
+    download: (workspace, url, options) => clientOf(workspace).download(url, options),
     /** `window`: sign in from the Mac app's own window with an empty session (Add workspace), not the browser. */
     async connect({ window = false } = {}) {
       if (!clientId) throw new LinearError("Linear sign-in isn't set up in this build.", "not-configured");

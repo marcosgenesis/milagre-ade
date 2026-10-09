@@ -32,7 +32,7 @@ export function groupMcpRows(checks: McpAccountCheck[]): { user: McpRow[]; other
       rows.set(server.name, row);
     }
   }
-  const sorted = [...rows.values()].toSorted((a, b) => a.name.localeCompare(b.name));
+  const sorted = [...rows.values()].sort((a, b) => a.name.localeCompare(b.name));
   return { user: sorted.filter((row) => row.editable), other: sorted.filter((row) => !row.editable) };
 }
 
@@ -46,7 +46,8 @@ const STATE_COPY: Record<McpChipState, string> = {
 
 /** "Connected" for a single chip, "1 of 2 connected" for several. */
 export function mcpSummary(row: McpRow): string {
-  if (row.chips.length === 1) return STATE_COPY[row.chips[0].state];
+  const [only] = row.chips;
+  if (only && row.chips.length === 1) return STATE_COPY[only.state];
   const connected = row.chips.filter((chip) => chip.state === "connected").length;
   return `${connected} of ${row.chips.length} connected`;
 }

@@ -329,6 +329,7 @@ function markdownHost({ media, basePath } = {}) {
     "./viewer-store": viewer,
     "./chat-presentation": require("../apps/mobile/src/chat-presentation.ts"),
     "./markdown-image": require("../apps/mobile/src/markdown-image.ts"),
+    "@milagre/shared/file-link": require("../packages/shared/src/file-link.ts"),
     "./ui": { PageScroll: "PageScroll", colors: {}, styles: { muted: {}, code: {} } },
   });
   function expand(node) {
@@ -364,6 +365,21 @@ test("plain URLs in mobile replies render as links and open the exact address", 
       await link.props.onPress();
       assert.deepEqual(screen.links, [url]);
     }
+  }
+});
+
+test("links to files on the computer open the file preview", () => {
+  for (const [text, path] of [
+    ["The [written design](/Users/me/repo/docs/spec.md) is committed.", "/Users/me/repo/docs/spec.md"],
+    ["See [the spec](docs/spec.md#L4).", "/worktrees/feature/docs/spec.md"],
+    ["See [main](src/main.ts:12).", "/worktrees/feature/src/main.ts"],
+  ]) {
+    const screen = markdownHost({ basePath: "/worktrees/feature" });
+    const link = find(screen.render(text), (node) => node.props?.accessibilityRole === "link");
+    assert.ok(link, `Missing link in ${text}`);
+    link.props.onPress();
+    assert.equal(JSON.stringify(screen.routes), JSON.stringify([{ pathname: "/file-preview", params: { path } }]));
+    assert.deepEqual(screen.links, [], "a file link never goes to the phone's browser");
   }
 });
 
@@ -4092,6 +4108,8 @@ test("mobile file preview renders text and reports unreadable, empty, and trunca
       },
     },
     "../file-code": { FileCode: "FileCode" },
+    "../markdown": { Markdown: "Markdown" },
+    "@milagre/shared/file-link": require("../packages/shared/src/file-link.ts"),
     "../ui": { colors: {}, styles: {}, ErrorNotice: "ErrorNotice", PageScroll: "PageScroll" },
   });
   const render = () => {
@@ -4110,6 +4128,44 @@ test("mobile file preview renders text and reports unreadable, empty, and trunca
   assert.ok(text("This file does not have a text preview."));
   result = { ...result, data: null, error: "File no longer exists." };
   assert.equal(find(render(), (node) => node.type === "ErrorNotice").props.message, result.error);
+});
+
+test("mobile file preview shows Markdown formatted, with the source a tap away", () => {
+  const react = hookHost();
+  const result = { data: { text: "# Spec\n\nSee [goals](goals.md).", binary: false, truncated: false }, error: "", refresh() {} };
+  const { default: FilePreview } = load("app/file-preview.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    // oxlint-disable-next-line typescript/no-extraneous-class -- empty stub standing in for expo-file-system's File constructor
+    "expo-file-system": { File: class {}, FileMode: { ReadOnly: "readOnly" } },
+    "react-native": { Platform: { OS: "ios" }, Text: "Text", View: "View" },
+    "expo-router": {
+      Stack: { Screen: "Screen", Toolbar: Object.assign(() => null, { Button: "ToolbarButton" }) },
+      useLocalSearchParams: () => ({ path: "/project/docs/spec.md" }),
+    },
+    "../session": { useSession: () => ({ client: {} }) },
+    "../use-rpc": { useRpc: () => result },
+    "../file-code": { FileCode: "FileCode" },
+    "../markdown": { Markdown: "Markdown" },
+    "@milagre/shared/file-link": require("../packages/shared/src/file-link.ts"),
+    "../ui": { colors: {}, styles: {}, ErrorNotice: "ErrorNotice", PageScroll: "PageScroll" },
+  });
+  const render = () => {
+    react.begin();
+    return FilePreview();
+  };
+  const formatted = find(render(), (node) => node.type === "Markdown");
+  assert.equal(formatted.props.text, result.data.text);
+  assert.equal(formatted.props.basePath, "/project/docs", "relative links in the file resolve against its folder");
+  const toggle = find(render(), (node) => node.type === "ToolbarButton");
+  assert.equal(toggle.props.children, "Source");
+  toggle.props.onPress();
+  assert.equal(
+    find(render(), (node) => node.type === "Markdown"),
+    undefined,
+  );
+  assert.equal(find(render(), (node) => node.type === "FileCode").props.text, result.data.text);
+  assert.equal(find(render(), (node) => node.type === "ToolbarButton").props.children, "Formatted");
 });
 
 test("mobile picked files preview locally before sending", async () => {
@@ -4150,6 +4206,8 @@ test("mobile picked files preview locally before sending", async () => {
       },
     },
     "../file-code": { FileCode: "FileCode" },
+    "../markdown": { Markdown: "Markdown" },
+    "@milagre/shared/file-link": require("../packages/shared/src/file-link.ts"),
     "../ui": { colors: {}, styles: {}, ErrorNotice: "ErrorNotice", PageScroll: "PageScroll" },
   });
   react.begin();

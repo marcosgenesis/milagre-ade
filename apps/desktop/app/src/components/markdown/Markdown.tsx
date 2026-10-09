@@ -1,14 +1,18 @@
-import { Children, isValidElement, memo } from "react";
+import { Children, isValidElement, memo, useState } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { codeLanguageFromClassName } from "../../lib/code-languages";
 import { fileLinkTarget } from "../../lib/file-links";
-import { useFileOpener } from "../editor-links";
+import { localFileLink } from "@milagre/shared/file-link";
+import { useFileOpener, useFilesRoot } from "../editor-links";
+import { lazyView } from "../../lib/lazy-view";
 import { closeOpenMarkdown } from "../../lib/streaming-markdown";
 import { CodeBlock } from "./CodeBlock";
 import { splitStreamingBlocks } from "./streaming-blocks";
+
+const AttachmentPreview = lazyView(() => import("../AttachmentPreview").then((module) => module.AttachmentPreview));
 
 const CODE_CLASS = "rounded-[4px] bg-field px-1 py-px font-mono text-[0.92em] text-ink";
 
@@ -31,6 +35,40 @@ function InlineCode({ children }: { children?: ReactNode }) {
   );
 }
 
+const LINK_CLASS = "text-accent-ink underline decoration-accent-ink/40 underline-offset-2 hover:decoration-accent-ink";
+
+// A link to a file on the chat's computer (an absolute path, a file:// URL or a path relative to the chat's folder)
+// opens it in the file viewer; a browser would get nothing. Web and mail links leave the app as before.
+function Link({ href, children }: { href?: string; children?: ReactNode }) {
+  const root = useFilesRoot();
+  const [open, setOpen] = useState(false);
+  const file = href ? localFileLink(href, root ?? undefined) : null;
+  if (!file)
+    return (
+      <a href={href} title={href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
+        {children}
+      </a>
+    );
+  const name = file.path.split("/").pop() || file.path;
+  return (
+    <>
+      <a
+        href={href}
+        title={file.path}
+        onClick={(event) => {
+          event.preventDefault();
+          setOpen(true);
+        }}
+        onMouseEnter={AttachmentPreview.preload}
+        className={`${LINK_CLASS} cursor-pointer`}
+      >
+        {children}
+      </a>
+      {open && <AttachmentPreview path={file.path} name={name} close={() => setOpen(false)} />}
+    </>
+  );
+}
+
 // Raw HTML in a reply is shown as text (react-markdown's default), and unsafe link protocols are dropped.
 const components: Components = {
   pre({ children }) {
@@ -40,17 +78,7 @@ const components: Components = {
   },
   code: InlineCode,
   a({ href, children }) {
-    return (
-      <a
-        href={href}
-        title={href}
-        target="_blank"
-        rel="noreferrer"
-        className="text-accent-ink underline decoration-accent-ink/40 underline-offset-2 hover:decoration-accent-ink"
-      >
-        {children}
-      </a>
-    );
+    return <Link href={href}>{children}</Link>;
   },
   // Remote images in a reply would load without asking; show them as links instead.
   img({ src, alt }) {

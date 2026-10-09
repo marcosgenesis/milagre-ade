@@ -12,8 +12,8 @@ import '/src/styles.css';
 const state = { next_id: 1, projects: { 1: { id: 1, name: 'Milagre' } }, worktrees: {}, sessions: {}, connections: {}, events: [], messages: [], approvals: [], tasks: {}, artifacts: {}, outputs: [], conflicts: [] };
 state.worktrees = { 1: { id: 1, name: 'main', path: '/fixture', project_id: 1 } };
 state.sessions = { 3: { id: 3, worktree_id: 1, agent_name: 'Claude', provider: 'claude', status: 'Idle' }, 5: { id: 5, worktree_id: 1, agent_name: 'Other', provider: 'codex', status: 'Idle' } };
-state.messages = [{ id: 4, session_id: 3, role: 'user', body: 'Attachment test', context: null, images: [{id:'old',name:'legacy.png',dataUrl:'data:image/png;base64,'+window.imageBytes},{id:'new',name:'stored.png',path:'/fixture/.milagre/images/photo.png'}] }, { id: 6, session_id: 5, role: 'user', body: 'Other chat', context: null }];
-state.next_id = 7;
+state.messages = [{ id: 4, session_id: 3, role: 'user', body: 'Attachment test', context: null, images: [{id:'old',name:'legacy.png',dataUrl:'data:image/png;base64,'+window.imageBytes},{id:'new',name:'stored.png',path:'/fixture/.milagre/images/photo.png'}] }, { id: 6, session_id: 5, role: 'user', body: 'Other chat', context: null }, { id: 7, session_id: 3, role: 'assistant', body: 'The [written design](/fixture/docs/spec.md) is committed. See [the helper](src/greeting.ts#L3) and [the site](https://example.com).', context: null }];
+state.next_id = 8;
 window.calls = []; window.searches = []; window.notices = []; window.synced = []; window.listeners = [];
 window.stateListeners = [];
 // Stands in for the main process: it saves every project's state, and tells the window.
@@ -34,7 +34,7 @@ window.milagre = new Proxy({
  getLinkedWork: async () => ({ delegations: [], negotiations: [], receiveOnly: [] }),
  onQuitFailed: fn => {window.quitFailed=fn;return ()=>{};},
  retryQuit: async () => {window.retriedQuit=true;},
- readAttachment: async file => { (window.fileReads ??= []).push(file); if (file.endsWith('missing.txt')) throw new Error('File no longer exists.'); return { text: file.endsWith('empty.txt') ? '' : 'export const greeting = "hello";', truncated: false, binary: false }; },
+ readAttachment: async file => { (window.fileReads ??= []).push(file); if (file.endsWith('missing.txt')) throw new Error('File no longer exists.'); if (file.endsWith('.md')) return { text: '# Live activities\\n\\nThe **plan** has [goals](goals.md).\\n\\n- One\\n- Two', truncated: false, binary: false }; return { text: file.endsWith('empty.txt') ? '' : 'export const greeting = "hello";', truncated: false, binary: false }; },
  showImageMenu: async (file, name) => { (window.imageMenus ??= []).push([file, name]); },
  onOpenChat: fn => { window.openNotification = fn; return () => {}; },
  switchProject: async root => ({ path: root, name: 'Other project', state: { ...state, sessions: { 10: { id: 10, worktree_id: 1, agent_name: 'Notified', status: 'Idle' } }, messages: [{ id: 11, session_id: 10, body: 'Notification destination', role: 'user', context: null }], next_id: 12 } }),
@@ -140,6 +140,37 @@ async function browserChecks() {
     assert.ok(await evaluate(`document.querySelector('article [aria-label="Preview legacy.png"] img').src.startsWith('data:image/png')`));
     assert.ok(await evaluate(`document.querySelector('article [aria-label="Preview stored.png"] img').src.startsWith('milagre-media:')`));
     await screenshot("legacy-and-stored-images");
+
+    // A reply's link to a file on this computer opens the file viewer; markdown opens formatted, with the source a click away.
+    const replyLink = (text) => `[...document.querySelectorAll('article a')].find(a => a.textContent === ${JSON.stringify(text)})`;
+    assert.equal(await evaluate(`${replyLink("the site")}.target`), "_blank", "Web links still leave the app");
+    await evaluate(`${replyLink("written design")}.click()`);
+    await waitFor(`!!document.querySelector('dialog[open] h1')`);
+    assert.equal(await evaluate(`document.querySelector('dialog[open] h1').textContent`), "Live activities");
+    assert.equal(await evaluate(`document.querySelector('dialog[open] strong').textContent`), "plan");
+    assert.equal(await evaluate("window.fileReads.at(-1)"), "/fixture/docs/spec.md");
+    assert.equal(await evaluate(`document.querySelector('dialog[open] [aria-pressed=true]').textContent`), "Formatted");
+    await screenshot("markdown-link-formatted");
+    // A relative link inside the document resolves against the document's folder.
+    await evaluate(`[...document.querySelectorAll('dialog[open] a')].find(a => a.textContent === 'goals').click()`);
+    await waitFor(`window.fileReads.at(-1) === '/fixture/docs/goals.md'`);
+    await waitFor(`document.querySelectorAll('dialog[open]').length === 2`);
+    await key("Escape");
+    await waitFor(`document.querySelectorAll('dialog[open]').length === 1`);
+    await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b => b.textContent === 'Source').click()`);
+    await waitFor(`!!document.querySelector('dialog[open] [data-file-code]')`);
+    assert.ok(await evaluate(`document.querySelector('dialog[open] [data-file-code]').textContent.startsWith('# Live activities')`));
+    await screenshot("markdown-link-source");
+    await key("Escape");
+    await waitFor(`!document.querySelector('dialog')`);
+    // A relative link in a reply resolves against the chat's worktree; other files open as code.
+    await evaluate(`${replyLink("the helper")}.click()`);
+    await waitFor(`!!document.querySelector('dialog[open] [data-file-code]')`);
+    assert.equal(await evaluate("window.fileReads.at(-1)"), "/fixture/src/greeting.ts");
+    assert.equal(await evaluate(`document.querySelector('dialog[open] [aria-pressed]')`), null, "Only markdown offers the formatted view");
+    await key("Escape");
+    await waitFor(`!document.querySelector('dialog')`);
+    await evaluate("window.fileReads = []");
 
     await evaluate(`document.querySelector('input[type=file]').addEventListener('click', e => { window.pickerOpened=true; e.preventDefault(); });`);
     await click('[aria-label="Add attachments and sources"]');

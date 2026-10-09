@@ -24,6 +24,7 @@
     "src/terminal.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
+    "src/file-link.ts",
     "src/message-search.mjs",
     "src/message-search.d.mts",
     "src/agent-activity.ts",
@@ -142,6 +143,7 @@
     "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
     "./artifact": "./src/artifact.ts",
+    "./file-link": "./src/file-link.ts",
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
       "default": "./src/simulator-receiver.mjs"

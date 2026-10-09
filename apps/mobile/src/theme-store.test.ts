@@ -46,3 +46,9 @@ test("changes persist and notify", async () => {
   assert.equal(JSON.parse(stored!).colorTheme, "dracula");
   assert.equal(JSON.parse(stored!).mode, "dark");
 });
+
+test("custom with an empty customTheme loads Milagre Blue", () => {
+  const settings = parsePhoneThemeSettings(JSON.stringify({ colorTheme: "custom", customThemeEnabled: true, customTheme: {} }));
+  assert.equal(settings.colorTheme, "milagre-blue");
+  assert.equal(settings.customTheme, null);
+});

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { MODEL_CATALOG, PERMISSION_MODES } from "../model.ts";
 import type { PermissionMode } from "../model";
-import { DEFAULT_THEME_ID, isHex, resolvePalette, resolveThemeSettings } from "@milagre/shared/themes";
+import { DEFAULT_THEME_ID, parseCustomTheme, resolvePalette, resolveThemeSettings } from "@milagre/shared/themes";
 import type { CustomTheme, ThemeChoice } from "@milagre/shared/themes";
 import type { ChatOrder } from "./chat-list";
 import { THEME_EVENT, applyPalette } from "./theme-sheet.ts";
@@ -96,27 +96,19 @@ const DEFAULTS: AppSettings = {
   translucentDots: true,
 };
 
-function isCustomTheme(value: unknown): value is CustomTheme {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  return ["light", "dark"].every((scheme) => {
-    const seeds = record[scheme] as Record<string, unknown> | undefined;
-    return !!seeds && ["background", "text", "accent"].every((key) => typeof seeds[key] === "string" && isHex(seeds[key]));
-  });
-}
-
 function load(): AppSettings {
   try {
     const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}") as Partial<AppSettings>;
     const legacyTheme = window.localStorage.getItem(LEGACY_THEME_KEY);
     const theme = saved.theme ?? legacyTheme;
+    const customTheme = parseCustomTheme(saved.customTheme);
     return {
       theme: THEMES.includes(theme as ThemePreference) ? (theme as ThemePreference) : DEFAULTS.theme,
       // Any saved id is kept: the agents report models the maintained list lacks, and App falls back
       // to a provider's recommended model when the saved one isn't offered.
       customThemeEnabled: typeof saved.customThemeEnabled === "boolean" ? saved.customThemeEnabled : DEFAULTS.customThemeEnabled,
-      customTheme: isCustomTheme(saved.customTheme) ? saved.customTheme : null,
-      colorTheme: resolveThemeSettings(saved),
+      customTheme,
+      colorTheme: resolveThemeSettings({ ...saved, customTheme }),
       defaultModelId: typeof saved.defaultModelId === "string" && saved.defaultModelId ? saved.defaultModelId : DEFAULTS.defaultModelId,
       defaultPermissionMode: PERMISSION_MODES.some((mode) => mode.id === saved.defaultPermissionMode)
         ? saved.defaultPermissionMode!
@@ -179,7 +171,7 @@ function subscribeSystemTheme(listener: () => void) {
   return () => darkQuery.removeEventListener("change", listener);
 }
 
-function useResolvedScheme(): "light" | "dark" {
+export function useResolvedScheme(): "light" | "dark" {
   const { theme } = useSettings();
   const systemDark = useSyncExternalStore(subscribeSystemTheme, () => darkQuery.matches);
   return theme === "system" ? (systemDark ? "dark" : "light") : theme;

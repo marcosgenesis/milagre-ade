@@ -79,3 +79,6 @@ export function contrastRatio(a: string, b: string) {
   const lo = Math.min(la, lb);
   return (hi + 0.05) / (lo + 0.05);
 }
+
+/** The better of white and `page` as text on `background`. */
+export const onColor = (background: string, page: string) => (contrastRatio("#ffffff", background) >= contrastRatio(page, background) ? "#ffffff" : page);

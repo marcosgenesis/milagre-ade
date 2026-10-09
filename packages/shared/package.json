@@ -96,6 +96,10 @@
       "types": "./src/providers.d.mts",
       "default": "./src/providers.mjs"
     },
+    "./stable-order": {
+      "types": "./src/stable-order.d.mts",
+      "default": "./src/stable-order.mjs"
+    },
     "./limits": {
       "types": "./src/limits.d.mts",
       "default": "./src/limits.mjs"

@@ -516,6 +516,7 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
     {
       react,
       "@milagre/shared/reconcile": require("@milagre/shared/reconcile"),
+      "@milagre/shared/stable-order": require("@milagre/shared/stable-order"),
       "react/jsx-runtime": { jsx },
       "react-native": { AppState },
       "./client": {
@@ -578,6 +579,25 @@ test("pairing through the relay builds the client from the pairing and saves the
     "asks the Mac for its LAN route after connecting",
   );
   assert.equal(render().hostName, "Mac");
+});
+
+test("reloading Projects keeps their order when opening a Chat moves its Project to the top of the host's list", async () => {
+  let recent = [{ path: "A" }, { path: "B" }, { path: "C" }];
+  const render = sessionHost({ call: async (method) => (method === "project:recent" ? recent : {}) });
+  await render().connect({ address: "address", token: "token" });
+  recent = [{ path: "C" }, { path: "A" }, { path: "B" }];
+  await render().reloadProjects();
+  assert.deepEqual(
+    render().recent.map((item) => item.path),
+    ["A", "B", "C"],
+  );
+  recent = [{ path: "D" }, { path: "C" }, { path: "B" }];
+  await render().reloadProjects();
+  assert.deepEqual(
+    render().recent.map((item) => item.path),
+    ["D", "B", "C"],
+    "a new Project goes on top and a removed one leaves",
+  );
 });
 
 test("a poll from the previous Project cannot restore it after another Project opens", async () => {

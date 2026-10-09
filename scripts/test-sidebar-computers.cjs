@@ -45,6 +45,8 @@ const remote = (id) => new Proxy({
   readChatMessages: async () => ({ messages: [], hasMore: false, total: 0 }),
   getRuns: async () => ({ runs: {}, seq: 0 }),
   listBranches: async () => ["main"],
+  // A computer answers with its own list; this Mac's must not become it.
+  forgetProject: async (key) => ((window.forgotten ??= []).push(key), projectsOf(id).filter((project) => project.path !== key).map(({ path, name }) => ({ path, name }))),
   sendMessage: async (request) => (window.sent.push(request), { sessionId: 4 }),
 }, { get(target, key) { return target[key] ?? (String(key).startsWith("on") ? () => () => {} : async () => null); } });
 const remotes = { "c-arketa": remote("c-arketa"), "c-studio": remote("c-studio") };
@@ -179,6 +181,18 @@ async function browserChecks() {
     );
     await screenshot("merged-list");
     console.log("PASS: every computer's Projects in one list by name, each row naming its computer, the offline one dimmed");
+
+    // Removing a computer's Project from the list asks that computer, and leaves this Mac's list as it was.
+    await evaluate(`document.querySelector('[data-sidebar-scope="c-arketa|/Users/a/arketa-web"] [data-scope-menu]').click()`);
+    await waitFor(`!!document.querySelector('[data-scope-menu-panel]')`);
+    await evaluate(
+      `[...document.querySelectorAll('[data-scope-menu-panel] [role="menuitem"]')].find((item) => item.textContent.includes('Remove from list')).click()`,
+    );
+    await waitFor(`(window.forgotten ?? []).includes('c-arketa|/Users/a/arketa-web')`);
+    await waitFor(`!document.querySelector('[data-scope-menu-panel]')`);
+    assert.ok((await scopes()).includes("/work/milagre-ade"), "this Mac's Project is still listed");
+    assert.equal(await evaluate(`document.querySelectorAll('[data-sidebar-scope="/work/milagre-ade"] [data-chat-id]').length`), 1, "and keeps its chat");
+    console.log("PASS: removing a computer's Project from the list leaves this Mac's list alone");
 
     await evaluate(
       `[...document.querySelectorAll('[data-sidebar-scope="c-arketa|/Users/a/arketa-web"] [data-chat-id] button')].find((b) => b.textContent.includes('Fix flaky deploy check')).click()`,

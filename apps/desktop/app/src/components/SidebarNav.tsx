@@ -1055,7 +1055,9 @@ export default memo(function SidebarNav({
       .forgetProject(path)
       .then(
         (list) => {
-          if (Array.isArray(list)) setRecentProjects(list);
+          // A computer's answer is its own list; this Mac's list stays, and the computer's scopes read it again.
+          if (isRemoteKey(path)) window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
+          else if (Array.isArray(list)) setRecentProjects(list);
         },
         () => {},
       );
@@ -1068,7 +1070,7 @@ export default memo(function SidebarNav({
       .setProjectHidden(path, !show)
       .then(
         (list) => {
-          if (Array.isArray(list)) setRecentProjects(list);
+          if (!isRemoteKey(path) && Array.isArray(list)) setRecentProjects(list);
           window.dispatchEvent(new Event(RECENT_PROJECTS_CHANGED));
         },
         () => setListsChanged((count) => count + 1),

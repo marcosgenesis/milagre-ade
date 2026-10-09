@@ -1,6 +1,5 @@
 // Linear issues for the Mac's Chat list, the issue picker and each Worktree's chip (see the Linear spec, Issues).
-// Every method reads through the Mac's one connection; `linear` is that connection (query, status, enabled).
-const { LinearError } = require("./errors.cjs");
+// Every method reads through the Mac's connections; `linear` holds them (workspaces, query by workspace, enabled).
 const { isIssueKey, issueKeyInBranch } = require("./links.cjs");
 
 const ISSUE_TTL_MS = 60_000;
@@ -37,21 +36,28 @@ function isNotFound(error) {
 }
 
 function createLinearIssues({ linear, now = Date.now }) {
-  const cache = new Map(); // key -> { at, issue }, the issue null when Linear has no such key
-  let teams = null; // { at, keys }, the workspace's team keys in upper case
+  const cache = new Map(); // "workspace:KEY" -> { at, issue }, the issue null when that workspace has no such key
+  const teams = new Map(); // workspace -> { at, keys }, its team keys in upper case
+  const assigned = new Map(); // workspace -> { at, account, issues }, the viewer's open issues the picker opens on
 
   // Why issues can't be read right now, or null when they can.
   function unavailable() {
     if (!linear.enabled()) return { error: OFF, notConnected: true };
-    if (!linear.status().connected) return { error: DISCONNECTED, notConnected: true };
+    if (!linear.workspaces().length) return { error: DISCONNECTED, notConnected: true };
     return null;
   }
 
+  // Every issue says which workspace it came from, so picking it reads the same workspace again.
+  const fromWorkspace = (workspace, node) => {
+    const issue = toIssue(node);
+    return issue ? { ...issue, workspace } : null;
+  };
+
   // A key the workspace doesn't have is a missing issue, not a failed read. Any other failure is thrown.
-  async function fetchOne(key) {
+  async function fetchOne(workspace, key) {
     try {
-      const data = await linear.query(ONE, { id: key });
-      return toIssue(data?.issue);
+      const data = await linear.query(workspace, ONE, { id: key });
+      return fromWorkspace(workspace, data?.issue);
     } catch (error) {
       if (isNotFound(error)) return null;
       throw error;
@@ -59,65 +65,98 @@ function createLinearIssues({ linear, now = Date.now }) {
   }
 
   // One query for every key. Linear fails the whole batch when one key is missing, so then each key is asked alone.
-  async function fetchBatch(keys) {
+  async function fetchBatch(workspace, keys) {
     const aliases = keys.map((key, index) => `i${index}: issue(id: ${JSON.stringify(key)}) { ${ISSUE_FIELDS} }`).join("\n");
     try {
-      const data = await linear.query(`query Issues {\n${aliases}\n}`);
-      return new Map(keys.map((key, index) => [key, toIssue(data?.[`i${index}`])]));
+      const data = await linear.query(workspace, `query Issues {\n${aliases}\n}`);
+      return new Map(keys.map((key, index) => [key, fromWorkspace(workspace, data?.[`i${index}`])]));
     } catch (error) {
       if (error.code !== "failed") throw error;
     }
     const found = new Map();
-    for (const key of keys) found.set(key, await fetchOne(key));
+    for (const key of keys) found.set(key, await fetchOne(workspace, key));
     return found;
   }
 
-  async function readIssues(keys, { fresh = false } = {}) {
-    const wanted = [...new Set(keys.filter(isIssueKey).map((key) => key.toUpperCase()))];
+  // `wanted` holds [workspace, KEY] pairs; the answer maps "workspace:KEY" to the issue or null.
+  async function readIssues(wanted, { fresh = false } = {}) {
     const result = new Map();
-    const missing = [];
-    for (const key of wanted) {
-      const hit = fresh ? null : cache.get(key);
-      if (hit && now() - hit.at < ISSUE_TTL_MS) result.set(key, hit.issue);
-      else missing.push(key);
+    const missing = new Map(); // workspace -> keys to fetch
+    for (const [workspace, key] of wanted) {
+      const id = `${workspace}:${key}`;
+      if (result.has(id)) continue;
+      const hit = fresh ? null : cache.get(id);
+      if (hit && now() - hit.at < ISSUE_TTL_MS) result.set(id, hit.issue);
+      else if (!missing.get(workspace)?.includes(key)) missing.set(workspace, [...(missing.get(workspace) ?? []), key]);
     }
-    if (missing.length) {
-      const found = await fetchBatch(missing);
-      for (const key of missing) {
+    for (const [workspace, keys] of missing) {
+      const found = await fetchBatch(workspace, keys);
+      for (const key of keys) {
         const issue = found.get(key) ?? null;
-        cache.set(key, { at: now(), issue });
-        result.set(key, issue);
+        cache.set(`${workspace}:${key}`, { at: now(), issue });
+        result.set(`${workspace}:${key}`, issue);
       }
     }
     return result;
   }
 
-  async function readIssue(key) {
-    return (await readIssues([key], { fresh: true })).get(String(key).toUpperCase()) ?? null;
-  }
-
-  async function teamKeys() {
-    if (teams && now() - teams.at < TEAMS_TTL_MS) return teams.keys;
-    const data = await linear.query(TEAMS);
+  async function teamKeys(workspace) {
+    const hit = teams.get(workspace);
+    if (hit && now() - hit.at < TEAMS_TTL_MS) return hit.keys;
+    const data = await linear.query(workspace, TEAMS);
     const keys = new Set((data?.teams?.nodes ?? []).map((team) => String(team.key).toUpperCase()));
-    teams = { at: now(), keys };
+    teams.set(workspace, { at: now(), keys });
     return keys;
   }
 
-  // The Chat list's picker: the issue picker shows the assigned issues, or the workspace matches for a query.
-  async function list(query) {
+  // The connected workspaces to ask about a key, best guess first: the one named, else those with the key's team,
+  // else every one in order (a workspace whose teams can't be read right now is still tried).
+  async function candidates(key, workspace) {
+    const ids = linear.workspaces().map((item) => item.id);
+    if (typeof workspace === "string" && ids.includes(workspace.toLowerCase())) return [workspace.toLowerCase()];
+    if (ids.length < 2) return ids;
+    const team = key.split("-")[0];
+    const owners = [];
+    for (const id of ids) if ((await teamKeys(id).catch(() => null))?.has(team)) owners.push(id);
+    return owners.length ? owners : ids;
+  }
+
+  // A current copy of one issue, from the named workspace or the first one that has the key. Null when none has it.
+  async function readIssue(key, workspace) {
+    const upper = String(key).toUpperCase();
+    if (!isIssueKey(upper)) return null;
+    for (const id of await candidates(upper, workspace)) {
+      const issue = (await readIssues([[id, upper]], { fresh: true })).get(`${id}:${upper}`);
+      if (issue) return issue;
+    }
+    return null;
+  }
+
+  // The Chat list's picker: one workspace's assigned issues, or its matches for a query. With no workspace named it is
+  // the first one connected. The assigned list is kept for a minute so reopening the picker is instant; `fresh` (its
+  // refresh button) reads it again. `workspaces` lets the picker show one tab per workspace.
+  async function list(query, { fresh = false, workspace } = {}) {
     const unready = unavailable();
     if (unready) return unready;
+    const connected = linear.workspaces();
+    const chosen = connected.find((item) => item.id === String(workspace ?? "").toLowerCase()) ?? connected[0];
+    const named = { workspace: chosen.id, workspaces: connected.map((item) => ({ id: item.id, name: item.organization.name })) };
     const text = typeof query === "string" ? query.trim() : "";
     try {
       if (!text) {
-        const data = await linear.query(ASSIGNED);
-        return { issues: (data?.viewer?.assignedIssues?.nodes ?? []).map(toIssue) };
+        // Another sign-in to the same workspace is another account's issues.
+        const account = chosen.viewer?.email ?? "";
+        const hit = assigned.get(chosen.id);
+        if (!fresh && hit?.account === account && now() - hit.at < ISSUE_TTL_MS) return { issues: hit.issues, ...named };
+        const data = await linear.query(chosen.id, ASSIGNED);
+        const issues = (data?.viewer?.assignedIssues?.nodes ?? []).map((node) => fromWorkspace(chosen.id, node));
+        assigned.set(chosen.id, { at: now(), account, issues });
+        return { issues, ...named };
       }
-      const exact = isIssueKey(text) ? await fetchOne(text.toUpperCase()) : null;
-      const data = await linear.query(SEARCH, { q: text });
-      const matches = (data?.searchIssues?.nodes ?? []).map(toIssue).filter((issue) => issue && issue.key !== exact?.key);
-      return { issues: exact ? [exact, ...matches] : matches };
+      const exact = isIssueKey(text) ? await fetchOne(chosen.id, text.toUpperCase()) : null;
+      const data = await linear.query(chosen.id, SEARCH, { q: text });
+      const matches = (data?.searchIssues?.nodes ?? []).map((node) => fromWorkspace(chosen.id, node)).filter((issue) => issue && issue.key !== exact?.key);
+      return { issues: exact ? [exact, ...matches] : matches, ...named };
     } catch (error) {
       return { error: error.message, ...(NOT_CONNECTED_CODES.has(error.code) ? { notConnected: true } : {}) };
     }
@@ -127,22 +166,30 @@ function createLinearIssues({ linear, now = Date.now }) {
   async function worktreeIssues(worktrees) {
     if (unavailable()) return {};
     try {
-      const named = [];
-      let known = null;
+      const ids = linear.workspaces().map((item) => item.id);
+      const named = []; // [path, workspace, KEY]
       for (const worktree of worktrees) {
         if (worktree.linearIssue) {
-          named.push([worktree.path, String(worktree.linearIssue).toUpperCase()]);
+          const key = String(worktree.linearIssue).toUpperCase();
+          const stored = String(worktree.linearWorkspace ?? "").toLowerCase();
+          // A link saved before workspaces names no workspace: the one whose teams have the key reads it.
+          const workspace = ids.includes(stored) ? stored : (await candidates(key).catch(() => ids))[0];
+          if (workspace) named.push([worktree.path, workspace, key]);
           continue;
         }
-        // Best effort: without the team keys only the worktrees that store their issue still resolve.
-        known ??= await teamKeys().catch(() => new Set());
-        const key = issueKeyInBranch(worktree.name, known);
-        if (key) named.push([worktree.path, key]);
+        // Best effort: a workspace whose team keys can't be read recognizes no branch.
+        for (const id of ids) {
+          const key = issueKeyInBranch(worktree.name, await teamKeys(id).catch(() => new Set()));
+          if (key) {
+            named.push([worktree.path, id, key]);
+            break;
+          }
+        }
       }
-      const issues = await readIssues(named.map(([, key]) => key));
+      const issues = await readIssues(named.map(([, workspace, key]) => [workspace, key]));
       const result = {};
-      for (const [path, key] of named) {
-        const issue = issues.get(key);
+      for (const [path, workspace, key] of named) {
+        const issue = issues.get(`${workspace}:${key}`);
         if (issue) result[path] = issue;
       }
       return result;
@@ -151,7 +198,7 @@ function createLinearIssues({ linear, now = Date.now }) {
     }
   }
 
-  return { list, readIssue, readIssues, worktreeIssues };
+  return { list, readIssue, worktreeIssues };
 }
 
 module.exports = { createLinearIssues };

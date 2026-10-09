@@ -8,7 +8,7 @@ import { createRoot } from "react-dom/client";
 import { ChatRow } from "/src/components/sidebar/ChatRow";
 import { chatTitle } from "/src/lib/chat-list";
 import "/src/styles.css";
-const initial = { sessions: { 1: { id: 1, worktree_id: 1, agent_name: "main", status: "Created", titlePending: true } }, messages: [{ id: 2, session_id: 1, role: "user", body: "when i navigate between chats the scroll jumps" }] };
+const initial = { sessions: { 1: { id: 1, worktree_id: 1, agent_name: "main", status: "Created", titlePending: true, summary: { count: 1, titleLine: "when i navigate between chats the scroll jumps" } } }, messages: [] };
 function Fixture() {
   const [state, setState] = useState(initial);
   const [mounted, setMounted] = useState(true);
@@ -48,6 +48,11 @@ async function browserChecks() {
   try {
     await win.loadURL(process.argv[2]);
     await waitFor("!!window.resolveTitle");
+    assert.equal(
+      await evaluate('document.querySelector(".chat-title-current").textContent'),
+      "when i navigate between chats the scroll jumps",
+      "The saved summary names a Chat before its transcript loads",
+    );
     if (capture) {
       await captureTransition(win, evaluate);
       app.exit(0);

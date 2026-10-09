@@ -4,10 +4,13 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { contextSummary } from "@milagre/shared/usage";
 import { useSession } from "../session";
-import { colors, styles } from "../ui";
+import { useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /** Desktop's context card as a sheet: how full the Chat's context window is. Reads the live numbers, so it fills while a turn runs. */
 export default function ContextSheet() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const session = useSession();

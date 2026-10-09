@@ -15,6 +15,7 @@ test("npm discovers the desktop and shared packages from the repository root", (
     "@milagre/mobile",
     "@milagre/relay",
     "@milagre/shared",
+    "@milagre/site",
     "milagre",
   ]);
 });

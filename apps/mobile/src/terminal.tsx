@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import { Alert, AppState, Pressable, ScrollView, Text, View, useColorScheme } from "react-native";
+import { Alert, AppState, Pressable, ScrollView, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
@@ -12,8 +12,8 @@ import { followTerminal, type TerminalFollower } from "@milagre/shared/terminal-
 import type { Client } from "./client";
 import { useSession } from "./session";
 import { Icon } from "./icons";
-import { hex } from "./theme";
-import { CircleButton, PillButton, colors, styles } from "./ui";
+import { useTheme } from "./theme";
+import { CircleButton, PillButton, useStyles } from "./ui";
 import { createTerminalHtml, scriptValue, xtermTheme, type TerminalTheme, type TerminalViewMessage } from "./terminal-receiver";
 
 /** A Worktree a new Terminal can start in; a shared Chat has one per member Project. */
@@ -67,6 +67,7 @@ function useTerminals(client: Client | null, chatId: string | undefined) {
 
 /** Same border, height and icon size as the Ports pill. Shown for every sent Chat on a Mac that has Terminals. */
 export function TerminalChip({ chatId, places }: { chatId?: string; places?: TerminalPlace[] }) {
+  const { colors } = useTheme();
   const { client } = useSession();
   const { terminals } = useTerminals(client, chatId);
   if (!client || !chatId || !terminals) return null;
@@ -120,6 +121,8 @@ const KEYS: { label: string; send: string }[] = [
 type ViewHandle = { send(data: string): void; holdCtrl(held: boolean): void };
 
 export function TerminalSheet({ hostId, chatId, places }: { hostId?: string; chatId?: string; places?: TerminalPlace[] }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { client } = useSession();
   const insets = useSafeAreaInsets();
   const source = client && (!hostId || hostId === client.url) ? client : null;
@@ -333,6 +336,7 @@ export function TerminalSheet({ hostId, chatId, places }: { hostId?: string; cha
 }
 
 function KeyButton({ label, onPress, held = false }: { label: string; onPress(): void; held?: boolean }) {
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -349,7 +353,7 @@ function KeyButton({ label, onPress, held = false }: { label: string; onPress():
         backgroundColor: held ? colors.accent : pressed ? colors.hover : colors.inset,
       })}
     >
-      <Text style={{ color: held ? colors.onInk : colors.ink, fontSize: 14, fontFamily: "Menlo" }}>{label}</Text>
+      <Text style={{ color: held ? colors.onAccent : colors.ink, fontSize: 14, fontFamily: "Menlo" }}>{label}</Text>
     </Pressable>
   );
 }
@@ -369,11 +373,20 @@ function TerminalView({
   onCtrlUsed(): void;
   onInfo(terminal: TerminalInfo): void;
 }) {
-  const scheme = useColorScheme();
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const theme = useMemo<TerminalTheme>(() => {
-    const palette = hex(scheme);
-    return { scheme: scheme === "dark" ? "dark" : "light", background: palette.page, ink: palette.ink, ink3: palette.ink3, accent: palette.accent };
-  }, [scheme]);
+    return {
+      scheme,
+      background: colors.page,
+      ink: colors.ink,
+      ink3: colors.ink3,
+      accent: colors.accent,
+      ansi: [...colors.ansi],
+      cursor: colors.cursor,
+      selection: colors.selection,
+    };
+  }, [colors, scheme]);
   const latestTheme = useRef(theme);
   const view = useRef<DomWebViewRef>(null);
   const follower = useRef<TerminalFollower | null>(null);

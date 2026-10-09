@@ -3,7 +3,7 @@ import { Image, View } from "react-native";
 import { Folder01Icon } from "@hugeicons/core-free-icons";
 import type { Client } from "./client";
 import { Icon } from "./icons";
-import { colors } from "./theme";
+import { useTheme } from "./theme";
 
 // Desktop's project avatars: the repository's own icon or favicon, else its GitHub owner's avatar. Read once per
 // computer and Project for the app's life; a Mac without project:image, or a Project without one, keeps the folder.
@@ -38,6 +38,7 @@ function projectImage(client: Client, path: string) {
 }
 
 export function ProjectIcon({ client, path, size = 28 }: { client: Client | null; path: string; size?: number }) {
+  const { colors } = useTheme();
   const [source, setSource] = useState<{ key: string; uri: string | null } | null>(null);
   const changed = useSyncExternalStore(subscribe, () => version);
   const key = client ? `${client.url}|${path}` : "";

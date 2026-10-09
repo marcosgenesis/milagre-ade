@@ -153,9 +153,14 @@ async function main() {
     const receiver = await server.ssrLoadModule(path.join(root, "apps/mobile/src/terminal-receiver.ts"));
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "milagre-mobile-terminal-page-"));
     const page = path.join(scratch, "terminal.html");
-    // The phone's dark palette (apps/mobile/src/theme.ts).
-    const dark = { scheme: "dark", background: "#17181a", ink: "#f4f5f6", ink3: "#7f828a", accent: "#2b95ff" };
-    const light = { scheme: "light", background: "#fafafb", ink: "#1f2124", ink3: "#9a9da3", accent: "#0285ff" };
+    // The phone's Gray palettes, from the shared theme registry like apps/mobile/src/theme.ts.
+    const { resolvePalette } = await server.ssrLoadModule(path.join(root, "packages/shared/src/themes/index.ts"));
+    const terminalTheme = (scheme) => {
+      const p = resolvePalette("gray", scheme);
+      return { scheme, background: p.page, ink: p.ink, ink3: p.ink3, accent: p.accent, ansi: [...p.ansi], cursor: p.cursor, selection: p.selection };
+    };
+    const dark = terminalTheme("dark");
+    const light = terminalTheme("light");
     fs.writeFileSync(page, receiver.createTerminalHtml(dark));
     const themes = path.join(scratch, "themes.json");
     fs.writeFileSync(themes, JSON.stringify({ light: receiver.xtermTheme(light) }));

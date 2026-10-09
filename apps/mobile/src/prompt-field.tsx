@@ -5,7 +5,8 @@ import type { SkillCatalog } from "@milagre/shared/model";
 import { promptSkillAtSelection, promptSkillParts, promptSkillQuery } from "@milagre/shared/prompt-skills";
 import type { Client } from "./client";
 import { useRpc } from "./use-rpc";
-import { Field, ListRow, PageScroll, colors } from "./ui";
+import { Field, ListRow, PageScroll } from "./ui";
+import { useTheme } from "./theme";
 import { useImagePaste } from "./use-image-paste";
 import type { PastedImage } from "./attachment-picker";
 
@@ -28,6 +29,7 @@ export function PromptField({
   onChangeText: (value: string) => void;
   onImagePaste?: (image: PastedImage) => void;
 }) {
+  const { colors } = useTheme();
   const paste = useImagePaste(onImagePaste);
   const { data, loading, error, refresh } = useRpc<SkillCatalog>(projectPath ? client : null, "skills:list", [projectPath]);
   const skills = data?.skills;

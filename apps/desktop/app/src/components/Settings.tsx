@@ -3,7 +3,19 @@ import { ProjectAccountsGroup, ProjectAccountsSettings } from "./ProjectAccounts
 import { AccountsSettings } from "./AccountsSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { ipcErrorMessage } from "@milagre/shared/result";
-import { LINEAR_CONNECTING, LINEAR_HINT, LINEAR_TITLE, linearStatusLine, type LinearStatus } from "@milagre/shared/linear";
+import {
+  LINEAR_ADD_WORKSPACE,
+  LINEAR_ADD_WORKSPACE_HINT,
+  LINEAR_CONNECTING,
+  LINEAR_CONNECTING_WINDOW,
+  LINEAR_HINT,
+  LINEAR_SIGN_IN_REPLACED,
+  LINEAR_USE_BROWSER,
+  LINEAR_TITLE,
+  linearStatusLine,
+  linearWorkspaces,
+  type LinearStatus,
+} from "@milagre/shared/linear";
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -29,7 +41,7 @@ import { providerForId, resolveModel } from "../lib/models";
 import { updateSettings, useSettings } from "../lib/settings";
 import { PANEL_TRANSLUCENCY_RANGE, WINDOW_TRANSLUCENCY_RANGE } from "../lib/settings";
 import { RangeSlider } from "./primitives/RangeSlider";
-import type { ClaudeReplies, ThemePreference, UsageDisplay } from "../lib/settings";
+import type { ClaudeReplies, UsageDisplay } from "../lib/settings";
 import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
 import { bridgeForKey } from "../lib/computer-bridge";
@@ -37,6 +49,9 @@ import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneSta
 import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from "../lib/devices";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
+import { ModeControl, ThemePicker } from "./settings/ThemePicker";
+import { CustomThemeEditor } from "./settings/CustomThemeEditor";
+import { DEFAULT_THEME_ID, seedsFrom } from "@milagre/shared/themes";
 import { ProviderLogo } from "./ProviderLogo";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { WorkspaceIcon } from "./WorkspaceIcon";
@@ -429,8 +444,27 @@ function ExperimentalSettings() {
         >
           <Switch label="Ultracode Fatality" checked={settings.ultracodeFatality} onChange={(ultracodeFatality) => updateSettings({ ultracodeFatality })} />
         </Row>
+        <Row label="Custom theme" description={'Build a theme from a few colors. It shows up as "Custom" in Appearance.'}>
+          <Switch
+            label="Custom theme"
+            checked={settings.customThemeEnabled}
+            onChange={(customThemeEnabled) => {
+              if (!customThemeEnabled) {
+                updateSettings({ customThemeEnabled, ...(settings.colorTheme === "custom" ? { colorTheme: DEFAULT_THEME_ID } : {}) });
+              } else {
+                const from = settings.colorTheme === "custom" ? DEFAULT_THEME_ID : settings.colorTheme;
+                updateSettings({ customThemeEnabled, customTheme: settings.customTheme ?? seedsFrom(from), colorTheme: "custom" });
+              }
+            }}
+          />
+        </Row>
         <LinearSettings />
       </Group>
+      {settings.customThemeEnabled && (
+        <Group title="Custom theme">
+          <CustomThemeEditor />
+        </Group>
+      )}
       {navigator.platform.startsWith("Mac") && (
         <Group title="Window">
           <Row label="Translucent window" description="Let what's behind Milagre show through, blurred.">
@@ -611,20 +645,14 @@ function AppearanceSettings() {
   const settings = useSettings();
   return (
     <>
-      <Group title="Theme">
-        <Row label="Theme" description="System follows your macOS appearance. Press ⌘⇧T to switch between light and dark.">
-          <Select<ThemePreference>
-            label="Theme"
-            value={settings.theme}
-            onChange={(theme) => updateSettings({ theme })}
-            options={[
-              { value: "system", label: "System" },
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-            ]}
-          />
+      <Group title="Mode">
+        <Row label="Mode" description="System follows macOS. Every theme has a light and a dark version. ⌘⇧T switches.">
+          <ModeControl value={settings.theme} onChange={(theme) => updateSettings({ theme })} />
         </Row>
       </Group>
+      <section className="mt-6">
+        <ThemePicker />
+      </section>
     </>
   );
 }
@@ -1467,14 +1495,17 @@ export function MainSyncDefaultSetting() {
   );
 }
 
-// Experimental > Linear: the daemon keeps the switch (phones share it) and the Mac's one connection.
+// Experimental > Linear: the daemon keeps the switch (phones share it) and the Mac's connections, one per workspace.
 function LinearSettings() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [status, setStatus] = useState<LinearStatus | null>(null);
-  const [connecting, setConnecting] = useState(false);
+  // "window": Add workspace's own sign-in window; "browser": the first Connect, or the fallback from the window.
+  const [connecting, setConnecting] = useState<false | "window" | "browser">(false);
   const [error, setError] = useState<string | null>(null);
   // Connect again replaces a waiting sign-in; only the latest attempt may update the row.
   const attempt = useRef(0);
+  const known = useRef(0); // workspaces connected, to tell a finished sign-in from another workspace's disconnect
+  known.current = linearWorkspaces(status).length;
   useEffect(() => {
     let live = true;
     // Started inside a promise so a bridge without the command (an older host) reads as off instead of throwing.
@@ -1492,8 +1523,9 @@ function LinearSettings() {
       );
     const stop = window.milagre.onLinearStatusChanged?.((next) => {
       if (!live) return;
+      const grew = linearWorkspaces(next).length > known.current;
       setStatus(next);
-      if (next.connected) {
+      if (grew) {
         // The sign-in finished: a connect still waiting is over, and a late failure of it must not show.
         attempt.current++;
         setConnecting(false);
@@ -1515,23 +1547,25 @@ function LinearSettings() {
       setError(ipcErrorMessage(failure));
     }
   }
-  async function connect() {
+  async function connect(inWindow: boolean) {
     const id = ++attempt.current;
     setError(null);
-    setConnecting(true);
+    setConnecting(inWindow ? "window" : "browser");
     try {
-      const next = await window.milagre.connectLinear();
+      const next = await window.milagre.connectLinear(inWindow ? { window: true } : undefined);
       if (id === attempt.current) setStatus(next);
     } catch (failure) {
-      if (id === attempt.current) setError(ipcErrorMessage(failure));
+      // Closing the sign-in window ends it; the row going back to Add says enough.
+      const message = ipcErrorMessage(failure);
+      if (id === attempt.current && !message.includes(LINEAR_SIGN_IN_REPLACED)) setError(message);
     } finally {
       if (id === attempt.current) setConnecting(false);
     }
   }
-  async function disconnect() {
+  async function disconnect(workspace: string) {
     setError(null);
     try {
-      setStatus(await window.milagre.disconnectLinear());
+      setStatus(await window.milagre.disconnectLinear(workspace));
     } catch (failure) {
       setError(ipcErrorMessage(failure));
     }
@@ -1541,17 +1575,38 @@ function LinearSettings() {
       <Row label={LINEAR_TITLE} description={LINEAR_HINT}>
         <Switch label={LINEAR_TITLE} checked={enabled === true} onChange={(next) => void changeEnabled(next)} />
       </Row>
-      {enabled && status && (
-        <Row label={linearStatusLine(status, "mac")} description={connecting ? LINEAR_CONNECTING : undefined}>
-          {status.connected ? (
-            <button type="button" className={SECONDARY_BUTTON} onClick={() => void disconnect()}>
+      {enabled &&
+        linearWorkspaces(status).map((workspace) => (
+          <Row key={workspace.id} label={workspace.organization.name} description={`Signed in as ${workspace.viewer.name}`}>
+            <button type="button" data-linear-workspace={workspace.id} className={SECONDARY_BUTTON} onClick={() => void disconnect(workspace.id)}>
               Disconnect
             </button>
-          ) : (
-            <button type="button" className={SECONDARY_BUTTON} onClick={() => void connect()}>
-              {connecting ? "Start again" : "Connect"}
+          </Row>
+        ))}
+      {enabled && status && (
+        <Row
+          label={status.connected ? LINEAR_ADD_WORKSPACE : linearStatusLine(status, "mac")}
+          description={
+            connecting === "window" ? LINEAR_CONNECTING_WINDOW : connecting ? LINEAR_CONNECTING : status.connected ? LINEAR_ADD_WORKSPACE_HINT : undefined
+          }
+        >
+          <div className="flex shrink-0 items-center gap-2">
+            {connecting === "window" && (
+              <button type="button" data-linear-use-browser className={SECONDARY_BUTTON} onClick={() => void connect(false)}>
+                {LINEAR_USE_BROWSER}
+              </button>
+            )}
+            {/* Connecting the first workspace keeps the browser's Linear login; another one signs in afresh. Start again
+                keeps whichever way the waiting sign-in went. */}
+            <button
+              type="button"
+              data-linear-connect
+              className={SECONDARY_BUTTON}
+              onClick={() => void connect(connecting ? connecting === "window" : status.connected)}
+            >
+              {connecting ? "Start again" : status.connected ? "Add" : "Connect"}
             </button>
-          )}
+          </div>
         </Row>
       )}
       {error && <p className="px-4 pb-3 break-words text-[12px] text-red">{error}</p>}

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Stack, router } from "expo-router";
-import { useColorScheme } from "react-native";
 import { ThemeProvider, DarkTheme, DefaultTheme } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -9,7 +8,7 @@ import { SessionProvider, useSession } from "../session";
 import { ActivityProvider } from "../live-activity";
 import { PushProvider } from "../push";
 import { StartupSplash } from "../startup-splash";
-import { hex } from "../theme";
+import { useTheme } from "../theme";
 import { UpdateShell } from "../update-sheet";
 import { SidePanelsHost, SidePanelsProvider } from "../side-panels";
 import { setConfirmPresenter } from "../confirm-store";
@@ -20,8 +19,7 @@ setConfirmPresenter(() => router.push("/confirm-sheet"));
 setChoicePresenter(() => router.push("/choice-sheet"));
 
 export default function Layout() {
-  const scheme = useColorScheme();
-  const palette = hex(scheme);
+  const { colors: palette, scheme } = useTheme();
   const base = scheme === "dark" ? DarkTheme : DefaultTheme;
   const theme = {
     ...base,
@@ -62,6 +60,7 @@ export default function Layout() {
                       <Stack.Screen name="project-accounts" options={{ title: "Project Accounts" }} />
                       <Stack.Screen name="accounts" options={{ title: "Accounts" }} />
                       <Stack.Screen name="settings" options={{ title: "Settings" }} />
+                      <Stack.Screen name="appearance" options={{ title: "Appearance" }} />
                       <Stack.Screen name="update-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                       <Stack.Screen name="confirm-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                       {/* Native search needs the header visible at presentation: enabling it later remounts the sheet. */}
@@ -83,7 +82,8 @@ export default function Layout() {
                       <Stack.Screen name="chat" options={{ title: "Chat" }} />
                       <Stack.Screen name="context-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />
                       <Stack.Screen name="permission-sheet" options={{ ...sheet, sheetAllowedDetents: [0.42, 0.6], sheetInitialDetentIndex: 0 }} />
-                      <Stack.Screen name="model-sheet" options={{ ...sheet, sheetAllowedDetents: [0.55, 1], sheetInitialDetentIndex: 0 }} />
+                      {/* Full height: the effort, Fast and Ultracode panel pinned at the bottom leaves a half-height sheet room for one model. */}
+                      <Stack.Screen name="model-sheet" options={{ ...sheet, sheetAllowedDetents: [1] }} />
                       <Stack.Screen name="agents" options={{ ...sheet, sheetAllowedDetents: [0.5, 1], sheetInitialDetentIndex: 0 }} />
                       <Stack.Screen name="ports-sheet" options={{ ...sheet, sheetAllowedDetents: [0.5, 1] }} />
                       {/* A full-screen page, not a sheet: a downward drag on the simulator must reach the device, not dismiss the viewer. */}

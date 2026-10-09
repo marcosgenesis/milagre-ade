@@ -4,7 +4,7 @@ import { router, useNavigationContainerRef } from "expo-router";
 import * as Updates from "expo-updates";
 import type { NavigationState, PartialState } from "expo-router/react-navigation";
 import { createUpdateController, watchUpdates, type UpdateState } from "./update-controller";
-import { colors } from "./theme";
+import { useTheme } from "./theme";
 import { PillButton } from "./ui";
 
 const AppUpdates = createContext<{ state: UpdateState; check: (force?: boolean) => Promise<void>; install: () => Promise<void>; dismiss: () => void } | null>(
@@ -119,6 +119,7 @@ export function useUpdatePresentation(state: UpdateState) {
 }
 
 export function UpdateSheet({ state, onUpdate, onRetry, onDismiss }: { state: UpdateState; onUpdate: () => void; onRetry: () => void; onDismiss: () => void }) {
+  const { colors } = useTheme();
   const actionable = state.status === "ready" || state.status === "error";
   const busy = state.status === "checking" || state.status === "downloading" || state.status === "restarting";
   const title =

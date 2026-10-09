@@ -82,6 +82,8 @@ export interface Worktree {
   base?: string;
   /** The Linear issue this Worktree was started from (its key); the branch may also name one. */
   linearIssue?: string;
+  /** The Linear workspace (its URL key) `linearIssue` belongs to; links saved before workspaces have none. */
+  linearWorkspace?: string;
   /** Lines changed against the base, refreshed in the background so the hover card shows it at once. */
   diff?: DiffStat;
   sharedChat?: { linkId: string; sessionId: number };
@@ -428,6 +430,8 @@ export interface Subagent {
   retryable?: boolean;
   archived?: boolean;
   parentId?: string;
+  /** Launched by the chat to run in the background: its result wakes the chat with a turn of its own. */
+  background?: boolean;
   title: string;
   prompt?: string;
   status: "initializing" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "unknown";
@@ -535,6 +539,8 @@ export interface WorktreeRequest {
   baseBranch: string;
   prompt: string;
   issueKey?: string;
+  /** The Linear workspace the issue was picked from. */
+  issueWorkspace?: string;
 }
 
 export interface CoordinatorState {

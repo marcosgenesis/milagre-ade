@@ -12,5 +12,6 @@
     "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
-  "include": ["src/model.ts", "src/*.d.mts"]
+  "include": ["src/model.ts", "src/*.d.mts", "src/themes/**/*.ts"],
+  "exclude": ["src/themes/**/*.test.ts"]
 }

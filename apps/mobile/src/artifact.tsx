@@ -21,7 +21,8 @@ import { postDesignMessage } from "./design-outbox";
 import { File, Paths } from "expo-file-system";
 import { useSession } from "./session";
 import { Icon } from "./icons";
-import { CircleButton, PillButton, colors, styles } from "./ui";
+import { CircleButton, PillButton, useStyles } from "./ui";
+import { useTheme } from "./theme";
 
 /** Feedback the user sent on the designs, as what it was: the design they chose, then each comment and its design. */
 export function DesignFeedbackCard({
@@ -34,6 +35,7 @@ export function DesignFeedbackCard({
   /** Changes as the Chat moves on, to read the agent's resolutions again. */
   moved?: number;
 }) {
+  const { colors } = useTheme();
   const { client } = useSession();
   // The agent's notes on the comments it resolved, by comment id.
   const [resolutions, setResolutions] = useState<Map<string, string>>(() => new Map());
@@ -135,6 +137,7 @@ export function DesignFeedbackCard({
 
 /** The designs one reply showed: a card for one, one card naming them all for several, which opens at the first. */
 export function ArtifactCards({ steps, chatId, chosen }: { steps: ArtifactStep[]; chatId?: string; chosen?: string }) {
+  const { colors } = useTheme();
   const { client } = useSession();
   if (steps.length === 0) return null;
   if (steps.length === 1) return <ArtifactCard step={steps[0]!} chatId={chatId} chosen={chosen} />;
@@ -181,6 +184,7 @@ export function ArtifactCards({ steps, chatId, chosen }: { steps: ArtifactStep[]
 
 /** A design the agent showed. It opens the Chat's designs full screen; a saved Chat is needed to read them. */
 function ArtifactCard({ step, chatId, chosen }: { step: ArtifactStep; chatId?: string; chosen?: string }) {
+  const { colors } = useTheme();
   const { client } = useSession();
   const { id, version, title } = step.artifact;
   const openable = !!client && !!chatId && !chatId.includes("#new:");
@@ -232,6 +236,8 @@ function ArtifactCard({ step, chatId, chosen }: { step: ArtifactStep; chatId?: s
  * them to the Chat as one message for the agent.
  */
 export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?: string; chatId?: string; id?: string; version?: string; chosen?: string }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { client } = useSession();
   const insets = useSafeAreaInsets();
   const source = client && chatId && id && (!hostId || hostId === client.url) ? client : null;
@@ -405,6 +411,7 @@ export function ArtifactSheet({ hostId, chatId, id, version, chosen }: { hostId?
  * off, and nothing the page posts is read.
  */
 function ArtifactWebView({ html }: { html: string }) {
+  const { colors } = useTheme();
   const [crashed, setCrashed] = useState(false);
   // Written while rendering, so the page is there on the first frame; each design gets a file of its own, removed
   // when the design changes or goes.

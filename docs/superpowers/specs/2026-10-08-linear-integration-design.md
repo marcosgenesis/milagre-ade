@@ -192,4 +192,14 @@ each ships as an OTA update.
 ## Out of scope
 
 Agent tools that read or comment on the issue, Milagre moving issue status, creating issues from Milagre,
-mapping Projects to Linear teams, connecting from the phone, and more than one Linear workspace per Computer.
+mapping Projects to Linear teams, and connecting from the phone.
+
+## Several workspaces (added 2026-10-09, PR #360)
+
+A Computer can connect more than one Linear workspace. Each is named by its URL key (`acme`) and keeps its own
+token in `linear/workspaces/<key>.json`; the single `linear/token.json` from before moves there on first read.
+Signing in to a workspace already connected replaces its token and revokes the old grant. Settings lists one row
+per workspace with its own Disconnect, plus Add workspace. The issue picker shows a tab per workspace (only with
+two or more) and opens on the last one used. Every issue carries `workspace`; a Worktree stores
+`linearWorkspace` next to `linearIssue`, and an older link without it resolves through the workspace whose team
+keys own the key's prefix. Branch names are matched against each workspace's team keys in connection order.

@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { issueChipLabel, issueFirstMessage, LINK_PR_HINT, linearStatusLine, restoredDraft, type LinearIssue, type LinearStatus } from "./linear.ts";
+import {
+  issueChipLabel,
+  issueFirstMessage,
+  LINK_PR_HINT,
+  linearStatusLine,
+  linearWorkspaceLine,
+  linearWorkspaces,
+  restoredDraft,
+  type LinearIssue,
+  type LinearStatus,
+} from "./linear.ts";
 
 const connected: LinearStatus = {
   connected: true,
@@ -11,6 +21,18 @@ const connected: LinearStatus = {
 test("a connected status names the user and the workspace on both platforms", () => {
   assert.equal(linearStatusLine(connected, "mac"), "Connected as Victor to Acme");
   assert.equal(linearStatusLine(connected, "phone"), "Connected as Victor to Acme");
+});
+
+test("several workspaces are counted, and a Mac without workspaces still lists its one", () => {
+  const beta = { id: "beta", viewer: { name: "Victor", email: "v@b" }, organization: { name: "Beta", urlKey: "beta" } };
+  const both: LinearStatus = { ...connected, workspaces: [{ id: "acme", viewer: connected.viewer, organization: connected.organization }, beta] };
+  assert.equal(linearStatusLine(both, "mac"), "Connected to 2 workspaces");
+  assert.deepEqual(
+    linearWorkspaces(connected).map((workspace) => workspace.id),
+    ["acme"],
+  );
+  assert.deepEqual(linearWorkspaces({ connected: false }), []);
+  assert.equal(linearWorkspaceLine(beta), "Beta, as Victor");
 });
 
 test("a disconnected phone is told to connect on the Mac", () => {

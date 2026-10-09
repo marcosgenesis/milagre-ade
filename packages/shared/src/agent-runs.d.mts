@@ -10,6 +10,7 @@ import type {
   PermissionRequest,
   QuestionAnswers,
   QuestionRequest,
+  Subagent,
 } from "./model.ts";
 
 /** What the user sent for a request the turn waits on: an approval decision, or a question answered or dismissed. */
@@ -53,6 +54,7 @@ export function projectOfKey(key: string): string;
 export function chatInProject(projectPath: string, key: string): boolean;
 export function startRun(runs: AgentRuns, chatId: string, model: string): AgentRuns;
 export function isTurnEnd(event: AgentEvent): boolean;
+export function subagentActive(agent: Pick<Subagent, "status"> | undefined): boolean;
 export function runStatus(run: AgentRun | undefined): "idle" | "working" | "waiting";
 export function applyRunEvent(runs: AgentRuns, chatId: string, event: AgentEvent, model?: string): AgentRuns;
 export function applyAgentEvent<T extends TranscriptState>(state: T, runs: AgentRuns, projectPath: string, chatId: string, event: AgentEvent): AppliedEvent<T>;

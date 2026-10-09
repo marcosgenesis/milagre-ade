@@ -4,11 +4,13 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { projectOfKey, sessionIdFromKey } from "@milagre/shared/agent-runs";
+import { chatTitle } from "@milagre/shared/chats";
 import { attentionLabel } from "@milagre/shared/attention";
 import { readAttentionButton, saveAttentionButton } from "./hosts-native";
 import { useSession } from "./session";
 import { Icon } from "./icons";
-import { PullDown, colors } from "./ui";
+import { PullDown } from "./ui";
+import { useTheme } from "./theme";
 
 const NONE: string[] = [];
 /** Chat keys, in every Project, whose turn waits on an approval or question. A Mac from before /attention gives none. */
@@ -67,11 +69,13 @@ export function useAttentionButton(): [boolean, (on: boolean) => void] {
 }
 
 export function AttentionDot() {
+  const { colors } = useTheme();
   return <View accessibilityLabel="Needs attention" style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.orange }} />;
 }
 
 /** Under the header's right edge. One waiting Chat opens on tap; several open a menu to pick one, oldest first. */
 export function AttentionPill({ projectPath }: { projectPath: string }) {
+  const { colors } = useTheme();
   const { client, recent, cachedProject } = useSession();
   const insets = useSafeAreaInsets();
   const [enabled] = useAttentionButton();
@@ -114,8 +118,18 @@ export function AttentionPill({ projectPath }: { projectPath: string }) {
     );
   // A Project the phone hasn't loaded yet has no titles here, so its rows read "Chat".
   const items = waiting.map((key) => {
-    const chat = cachedProject(projectOfKey(key))?.project.state.sessions[sessionIdFromKey(key)];
-    return { id: key, title: chat?.title || chat?.generatedTitle || "Chat", subtitle: name(projectOfKey(key)) };
+    const state = cachedProject(projectOfKey(key))?.project.state;
+    const chat = state?.sessions[sessionIdFromKey(key)];
+    return {
+      id: key,
+      title: chat
+        ? chatTitle(
+            chat,
+            state?.messages.filter((message) => message.session_id === chat.id),
+          )
+        : "Chat",
+      subtitle: name(projectOfKey(key)),
+    };
   });
   return (
     <PullDown label={`${label}. Choose a Chat.`} title="Waiting for you" sections={[{ items }]} onSelect={open} style={place}>

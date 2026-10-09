@@ -3,7 +3,7 @@ import { ArrowDataTransferHorizontalIcon } from "@hugeicons/core-free-icons";
 import type { HandoffContext } from "@milagre/shared/model";
 import { Icon, ProviderLogo, SpinnerRing } from "./icons";
 import { handoffSides } from "./handoff-sides";
-import { colors } from "./ui";
+import { useTheme } from "./theme";
 
 /** A provider switch inside the Chat, as on desktop. Tapping it opens the brief the new provider was sent. */
 export function HandoffDivider({
@@ -15,6 +15,7 @@ export function HandoffDivider({
   models: { id: string; name: string }[];
   onOpen: (brief: string) => void;
 }) {
+  const { colors } = useTheme();
   const sides = handoffSides(context, models);
   const brief = context.status === "done" ? context.brief : undefined;
   return (

@@ -13,6 +13,7 @@ import {
   sessionIdFromKey,
   splitRunForSteer,
   startRun,
+  subagentActive,
 } from "./agent-runs.mjs";
 import type { AgentRuns } from "./agent-runs.mjs";
 
@@ -642,4 +643,10 @@ test("a chat key names its computer when it is another Mac's", () => {
   assert.equal(computerOfKey(remote), id);
   assert.equal(chatInProject(`${id}|/p`, remote), true);
   assert.equal(chatInProject("/p", remote), false, "this Mac's /p is another Project");
+});
+
+test("subagentActive: one still at work or waiting on an approval is active; one that ended is not", () => {
+  for (const status of ["initializing", "running", "waiting"] as const) assert.equal(subagentActive({ status }), true);
+  for (const status of ["completed", "failed", "cancelled", "unknown"] as const) assert.equal(subagentActive({ status }), false);
+  assert.equal(subagentActive(undefined), false);
 });

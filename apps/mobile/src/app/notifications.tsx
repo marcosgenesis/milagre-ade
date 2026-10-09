@@ -5,7 +5,8 @@ import { useActivity } from "../live-activity";
 import { usePush } from "../push";
 import { useSession } from "../session";
 import { Icon } from "../icons";
-import { ErrorNotice, PageScroll, PillButton, PullDown, Toggle, colors, styles } from "../ui";
+import { ErrorNotice, PageScroll, PillButton, PullDown, Toggle, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 export default function NotificationsScreen() {
   return (
@@ -18,6 +19,8 @@ export default function NotificationsScreen() {
 
 /** Notification controls for the native Settings stack. */
 export function NotificationsView() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const push = usePush();
   const activity = useActivity();
   const session = useSession();

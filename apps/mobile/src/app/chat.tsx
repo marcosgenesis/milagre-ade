@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Reanimated from "react-native-reanimated";
-import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { LiquidGlassView } from "@sbaiahmed1/react-native-blur";
 import { UltracodeGlow } from "../ultracode-glow";
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
@@ -19,7 +19,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
 import type { ChatMessage, LinkIssueResult, PullRequestActionContext } from "@milagre/shared/model";
-import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
+import { chatTitle, createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
 import { messageSender } from "@milagre/shared/advisor-result";
 import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 import { LINK_PR_HINT, issueChipLabel, issueFirstMessage, type LinearIssue, type LinearIssuesResult } from "@milagre/shared/linear";
@@ -56,10 +56,10 @@ import { Icon, LinearLogo } from "../icons";
 import { PanelSwipe, useSidePanels } from "../side-panels";
 import { LoadingLogo } from "../loading-logo";
 import { useOpenProject } from "../use-open-project";
-import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, colors, styles } from "../ui";
+import { ErrorNotice, GlassIconButton, IconButton, PageScroll, PillButton, PullDown, useStyles } from "../ui";
 import { PromptField } from "../prompt-field";
 import { ContextRing } from "../context-ring";
-import { hex } from "../theme";
+import { useTheme } from "../theme";
 import { archiveFromPhone, showArchiveNotice } from "../archive";
 import { confirmSheet } from "../confirm-store";
 import { randomUUID } from "expo-crypto";
@@ -73,14 +73,24 @@ import { showChoiceSheet } from "../choice-store";
 
 const PAGE = 40;
 
+/** A row's id: two workspaces can both have an ENG-1. A Mac that predates workspaces sends the key alone. */
+const issueChoiceId = (issue: LinearIssue) => (issue.workspace ? `${issue.workspace}:${issue.key}` : issue.key);
+/** The choice sheet's rows for a list of Linear issues. */
+function issueChoices(issues: LinearIssue[]) {
+  return issues.map((issue) => ({ id: issueChoiceId(issue), title: `${issue.key} ${issue.title}`, subtitle: issue.state.name }));
+}
+/** The workspace the issue sheet showed last, so it opens there again. */
+let lastLinearWorkspace: string | undefined;
+
 export default function ChatScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const navigation = useNavigation<NavigationProp<{ chat: { worktreeId?: string } }, "chat">>();
   const params = useLocalSearchParams<{ id?: string; worktreeId?: string; projectPath?: string; hostId?: string }>();
   const session = useSession();
   const composer = useComposer();
   const pendingStore = usePendingChats();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
   const [actionBusy, setBusy] = useState(false);
   // Answers just sent: the card leaves and the answers show at once, until the host's copy arrives.
   const [sentAnswers, setSentAnswers] = useState<{ requestId: string; message: ChatMessage | null; count: number } | null>(null);
@@ -394,7 +404,7 @@ export default function ChatScreen() {
   const branchDisabled = targetDisabled || (newWorktree && !branches?.items.length);
   const branchName = newWorktree ? base || "Choose branch" : worktree?.name || "Choose branch";
   const unavailable = session.cliStatus?.[actualProvider]?.state !== undefined && session.cliStatus[actualProvider].state !== "ready";
-  const title = chat?.title || chat?.generatedTitle || pending?.preview.session.title || "New Chat";
+  const title = chat ? chatTitle(chat, messages) : pending?.preview.session.title || "New Chat";
   async function action(work: () => Promise<unknown>, allowPending = false) {
     if (actionBusy || (!allowPending && pending)) return false;
     setBusy(true);
@@ -459,7 +469,7 @@ export default function ChatScreen() {
     });
   };
   // eslint-disable-next-line react-hooks/refs -- latest-callback ref, read only when an issue is picked in the choice sheet.
-  startIssue.current = (issue) => void send(issueFirstMessage(issue, draft), true, undefined, issue.key);
+  startIssue.current = (issue) => void send(issueFirstMessage(issue, draft), true, undefined, issue);
   /** Lists the open issues in the choice sheet; picking one starts the Chat from it. */
   async function chooseIssue() {
     await pickLinearIssue("Start from a Linear issue", (issue) => startIssue.current(issue));
@@ -470,7 +480,7 @@ export default function ChatScreen() {
     setError("");
     let result: LinearIssuesResult;
     try {
-      result = await client.call<LinearIssuesResult>("linear:issues", [{}]);
+      result = await client.call<LinearIssuesResult>("linear:issues", [lastLinearWorkspace ? { workspace: lastLinearWorkspace } : {}]);
     } catch (e) {
       setError((e as Error).message);
       return;
@@ -479,21 +489,38 @@ export default function ChatScreen() {
       setError(result.error);
       return;
     }
-    const issues = result.issues;
+    // Every list read from any tab, so a pick resolves to the issue on the row that was tapped.
+    const seen = new Map<string, LinearIssue>();
+    const keep = (list: LinearIssue[]) => {
+      for (const issue of list) seen.set(issueChoiceId(issue), issue);
+      return issueChoices(list);
+    };
+    lastLinearWorkspace = result.workspace;
     showChoiceSheet({
       title,
       placeholder: "Search issues",
       emptyLabel: "No issues found.",
       leading: <LinearLogo size={18} tone="ink" />,
-      items: issues.map((issue) => ({ id: issue.key, title: `${issue.key} ${issue.title}`, subtitle: issue.state.name })),
-      onSelect: (key) => {
-        const issue = issues.find((item) => item.key === key);
+      items: keep(result.issues),
+      // One tab per workspace when there are several; a Mac that predates workspaces sends none.
+      tabs: result.workspaces?.map((workspace) => ({ id: workspace.id, label: workspace.name })),
+      tab: result.workspace,
+      // The Mac keeps each list for a minute; a pull reads it from Linear again.
+      load: async (workspace, fresh) => {
+        const next = await client.call<LinearIssuesResult>("linear:issues", [{ fresh, ...(workspace ? { workspace } : {}) }]);
+        if ("error" in next) throw new Error(next.error);
+        if (next.workspace) lastLinearWorkspace = next.workspace;
+        return keep(next.issues);
+      },
+      onSelect: (id) => {
+        const issue = seen.get(id);
         if (issue) onPick(issue);
       },
     });
   }
   /** Whether the message went: "busy" when it wasn't tried, the Chat being busy. An issue key starts the Chat in its own new worktree. */
-  async function send(body = draft, withAttachments = true, prAction?: PullRequestActionContext, issueKey?: string): Promise<boolean | "busy"> {
+  async function send(body = draft, withAttachments = true, prAction?: PullRequestActionContext, issue?: LinearIssue): Promise<boolean | "busy"> {
+    const issueKey = issue?.key;
     // A turn running now takes this message as a steer, on the provider it already runs.
     const steered = Boolean(run);
     if (!body && !(withAttachments && attachments.length)) return false;
@@ -549,7 +576,12 @@ export default function ChatScreen() {
         let ready = preparedTarget.current;
         if (!ready || ready.client !== client || ready.path !== sendingProjectPath || ready.base !== base || ready.issueKey !== issueKey) {
           const created = await client.call<{ project: OpenProject; worktreeId: number }>("worktree:create", [
-            { projectPath: sendingProjectPath, baseBranch: base, prompt: sent, ...(issueKey !== undefined ? { issueKey } : {}) },
+            {
+              projectPath: sendingProjectPath,
+              baseBranch: base,
+              prompt: sent,
+              ...(issueKey !== undefined ? { issueKey, ...(issue?.workspace ? { issueWorkspace: issue.workspace } : {}) } : {}),
+            },
           ]);
           const chat = sessionForWorktree(created.project.state, created.worktreeId);
           if (!chat) throw new Error("No Chat was created for the new worktree.");
@@ -752,13 +784,15 @@ export default function ChatScreen() {
   }
   function linkIssue() {
     if (!worktree) return;
-    void pickLinearIssue("Link a Linear issue", (issue) => void linkWorktreeIssue(issue.key));
+    void pickLinearIssue("Link a Linear issue", (issue) => void linkWorktreeIssue(issue.key, issue.workspace));
   }
-  async function linkWorktreeIssue(key: string) {
+  async function linkWorktreeIssue(key: string, workspace?: string) {
     if (!worktree) return;
     setError("");
     try {
-      const result = await client.call<LinkIssueResult>("worktree:link-issue", [{ projectPath: project.path, worktreeId: worktree.id, key }]);
+      const result = await client.call<LinkIssueResult>("worktree:link-issue", [
+        { projectPath: project.path, worktreeId: worktree.id, key, ...(workspace ? { workspace } : {}) },
+      ]);
       await session.refresh();
       setLinkVersion((version) => version + 1);
       showToast(result.mode === "renamed" ? `Branch renamed to ${result.branch}.` : `Issue linked. ${LINK_PR_HINT(key)}`);
@@ -1103,14 +1137,14 @@ export default function ChatScreen() {
                   paddingHorizontal: 8,
                   paddingBottom: 6,
                   gap: 4,
-                  boxShadow: ultracodeOn ? `0 4px 22px ${hex(scheme).purple}47` : "0 4px 20px #0000000f",
+                  boxShadow: ultracodeOn ? `0 4px 22px ${colors.purple}47` : "0 4px 20px #0000000f",
                 }}
               >
                 <LiquidGlassView
                   pointerEvents="none"
                   glassType="clear"
                   isInteractive={false}
-                  reducedTransparencyFallbackColor={hex(scheme).surface}
+                  reducedTransparencyFallbackColor={colors.surface}
                   style={[StyleSheet.absoluteFill, { borderRadius: 24, borderCurve: "continuous" }]}
                 />
                 {/* With Ultracode on, the composer takes its purple: a breathing tint and border, and a glow. */}

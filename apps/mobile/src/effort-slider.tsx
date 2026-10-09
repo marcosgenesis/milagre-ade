@@ -4,7 +4,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { ReduceMotion, useAnimatedStyle, useSharedValue, withSpring, type SharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import * as Haptics from "expo-haptics";
-import { colors } from "./ui";
+import { useTheme } from "./theme";
 
 const HEIGHT = 32;
 const HANDLE = 4;
@@ -26,6 +26,7 @@ export function EffortSlider({
   valueText: string;
   onChange: (index: number) => void;
 }) {
+  const { colors } = useTheme();
   const [width, setWidth] = useState(0);
   const span = Math.max(1, width - INSET * 2);
   const steps = Math.max(1, count - 1);

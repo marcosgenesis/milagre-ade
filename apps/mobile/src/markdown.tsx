@@ -2,18 +2,24 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, Linking, Pressable, Text, View, type ImageSourcePropType, type TextStyle } from "react-native";
 import { router } from "expo-router";
 import type { Token } from "markdown-it";
+import { localFileLink } from "@milagre/shared/file-link";
 import { markdownChunks, markdownTokens, safeLink } from "./chat-presentation";
-import { PageScroll, colors, styles } from "./ui";
+import { PageScroll, useStyles, type Styles } from "./ui";
 import { showImages, type MediaValue, type ThumbRect } from "./viewer-store";
 
 import { resolveMarkdownImage } from "./markdown-image";
+import { useTheme, type Palette } from "./theme";
 
 type ImageOptions = { media?: (path: string) => MediaValue; basePath?: string };
+/** What the plain render helpers need from the theme; components pass it in from their hooks. `basePath` resolves relative file links. */
+type MarkdownTheme = { colors: Palette; styles: Styles; basePath?: string };
 
 // Chat reading size: desktop uses 13px at 1.55; a phone reads best a little larger.
-const body = { color: colors.ink, fontSize: 15, lineHeight: 22 };
+const bodyOf = (colors: Palette) => ({ color: colors.ink, fontSize: 15, lineHeight: 22 });
 
 function MarkdownImage({ src, alt, media, basePath }: { src: string; alt: string } & ImageOptions) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const target = useMemo(() => resolveMarkdownImage(src, basePath), [src, basePath]);
   const [attempt, setAttempt] = useState(0);
   const source = useMemo(() => {
@@ -131,11 +137,11 @@ function tree(tokens: Token[]) {
   }
   return root;
 }
-function inline(tokens: Token[]) {
-  return inlineNodes(tree(tokens));
+function inline(tokens: Token[], t: MarkdownTheme) {
+  return inlineNodes(tree(tokens), t);
 }
 /** Images need their own native View; split text runs while preserving open emphasis and links. */
-function inlineContent(tokens: Token[], style: TextStyle = body, heading = false, images: ImageOptions = {}) {
+function inlineContent(tokens: Token[], t: MarkdownTheme, style: TextStyle = bodyOf(t.colors), heading = false, images: ImageOptions = {}) {
   const parts: React.ReactNode[] = [];
   const open: Token[] = [];
   let text: Token[] = [];
@@ -143,7 +149,7 @@ function inlineContent(tokens: Token[], style: TextStyle = body, heading = false
     if (text.some((token) => token.nesting === 0 && token.content.trim()))
       parts.push(
         <Text key={`text-${parts.length}`} selectable accessibilityRole={heading ? "header" : undefined} style={style}>
-          {inline(text)}
+          {inline(text, t)}
         </Text>,
       );
   };
@@ -162,10 +168,10 @@ function inlineContent(tokens: Token[], style: TextStyle = body, heading = false
   flush();
   return <View style={{ gap: 8 }}>{parts}</View>;
 }
-function inlineNodes(nodes: Node[]): React.ReactNode {
+function inlineNodes(nodes: Node[], t: MarkdownTheme): React.ReactNode {
   return nodes.map(({ token, children }, i) => {
     if (token.type === "softbreak" || token.type === "hardbreak") return "\n";
-    const text = children.length ? inlineNodes(children) : token.content;
+    const text = children.length ? inlineNodes(children, t) : token.content;
     const style: TextStyle =
       token.type === "strong_open"
         ? { fontWeight: "600" }
@@ -174,25 +180,35 @@ function inlineNodes(nodes: Node[]): React.ReactNode {
           : token.type === "s_open"
             ? { textDecorationLine: "line-through" }
             : token.type === "code_inline"
-              ? { fontFamily: styles.code.fontFamily, backgroundColor: colors.field, fontSize: 13.5 }
+              ? { fontFamily: t.styles.code.fontFamily, backgroundColor: t.colors.field, fontSize: 13.5 }
               : {};
-    const url = token.type === "link_open" ? safeLink(String(token.attrGet("href") || "")) : null;
+    const href = token.type === "link_open" ? String(token.attrGet("href") || "") : "";
+    const url = href ? safeLink(href) : null;
+    // A link to a file on the computer opens the file preview; the phone's browser can't reach it.
+    const file = href && !url ? localFileLink(href, t.basePath) : null;
+    const onPress = url
+      ? () => void Linking.openURL(url).catch(() => Alert.alert("Cannot open link", "Try opening this address in your browser."))
+      : file
+        ? () => router.push({ pathname: "/file-preview", params: { path: file.path } })
+        : undefined;
     return (
       <Text
         key={i}
-        style={[style, url ? { color: colors.accent, textDecorationLine: "underline" } : {}]}
-        accessibilityRole={url ? "link" : undefined}
-        onPress={url ? () => void Linking.openURL(url).catch(() => Alert.alert("Cannot open link", "Try opening this address in your browser.")) : undefined}
+        style={[style, onPress ? { color: t.colors.accent, textDecorationLine: "underline" } : {}]}
+        accessibilityRole={onPress ? "link" : undefined}
+        onPress={onPress}
       >
         {text}
       </Text>
     );
   });
 }
-function blocks(nodes: Node[], images: ImageOptions): React.ReactNode {
+function blocks(nodes: Node[], images: ImageOptions, t: MarkdownTheme): React.ReactNode {
+  const { colors, styles } = t;
+  const body = bodyOf(colors);
   return nodes.map(({ token, children }, index) => {
     const key = `${token.type}-${index}`;
-    if (token.type === "inline") return <View key={key}>{inlineContent(token.children || [], body, false, images)}</View>;
+    if (token.type === "inline") return <View key={key}>{inlineContent(token.children || [], t, body, false, images)}</View>;
     if (token.type === "fence" || token.type === "code_block")
       return (
         <View key={key} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: "continuous", overflow: "hidden" }}>
@@ -209,6 +225,7 @@ function blocks(nodes: Node[], images: ImageOptions): React.ReactNode {
         <View key={key}>
           {inlineContent(
             children.flatMap((n) => n.token.children || []),
+            t,
             { color: colors.ink, fontWeight: "600", lineHeight: 23, fontSize: token.tag === "h1" ? 17 : token.tag === "h2" ? 16 : 15 },
             true,
             images,
@@ -221,7 +238,7 @@ function blocks(nodes: Node[], images: ImageOptions): React.ReactNode {
           {children.map((child, i) => (
             <View key={i} style={{ flexDirection: "row", gap: 10 }}>
               <Text style={body}>{token.type === "ordered_list_open" ? `${Number(token.attrGet("start") || 1) + i}.` : "•"}</Text>
-              <View style={{ flex: 1, gap: 8 }}>{blocks(child.children, images)}</View>
+              <View style={{ flex: 1, gap: 8 }}>{blocks(child.children, images, t)}</View>
             </View>
           ))}
         </View>
@@ -229,7 +246,7 @@ function blocks(nodes: Node[], images: ImageOptions): React.ReactNode {
     if (token.type === "blockquote_open")
       return (
         <View key={key} style={{ borderLeftWidth: 3, borderColor: colors.line, paddingLeft: 14, gap: 8 }}>
-          {blocks(children, images)}
+          {blocks(children, images, t)}
         </View>
       );
     if (token.type === "hr") return <View key={key} style={{ height: 1, backgroundColor: colors.line }} />;
@@ -238,7 +255,7 @@ function blocks(nodes: Node[], images: ImageOptions): React.ReactNode {
         <View key={key} style={{ flexDirection: "row", gap: 12, paddingVertical: 8, borderBottomWidth: 0.5, borderColor: colors.line }}>
           {children.map((child, i) => (
             <View key={i} style={{ flex: 1 }}>
-              {blocks(child.children, images)}
+              {blocks(child.children, images, t)}
             </View>
           ))}
         </View>
@@ -246,7 +263,7 @@ function blocks(nodes: Node[], images: ImageOptions): React.ReactNode {
     return (
       <View key={key} style={{ gap: 8 }}>
         {children.length ? (
-          blocks(children, images)
+          blocks(children, images, t)
         ) : (
           <Text selectable style={body}>
             {token.content}
@@ -258,8 +275,10 @@ function blocks(nodes: Node[], images: ImageOptions): React.ReactNode {
 }
 /** One top-level block; unchanged blocks skip parsing and rendering while the reply streams. */
 const Chunk = memo(function Chunk({ text, streaming, media, basePath }: { text: string; streaming: boolean } & ImageOptions) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const nodes = useMemo(() => tree(markdownTokens(text, streaming)), [text, streaming]);
-  return <>{blocks(nodes, { media, basePath })}</>;
+  return <>{blocks(nodes, { media, basePath }, { colors, styles, basePath })}</>;
 });
 export const Markdown = memo(function Markdown({ text, streaming = false, media, basePath }: { text: string; streaming?: boolean } & ImageOptions) {
   const chunks = useMemo(() => markdownChunks(text), [text]);

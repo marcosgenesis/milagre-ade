@@ -5,7 +5,7 @@ import { ArrowDown01Icon, FlashIcon, Shield01Icon, ShieldAlertIcon, SecurityChec
 import type { PermissionMode } from "@milagre/shared/model";
 import type { MobileModel } from "./turn-options";
 import { Icon, ProviderLogo } from "./icons";
-import { colors } from "./ui";
+import { useTheme } from "./theme";
 
 /** The composer's model chip: provider logo, model name, the effort ("· Medium", or Ultra while Ultracode is on) and a bolt while fast
  * mode is on. All of them change in the model sheet. */
@@ -25,6 +25,7 @@ export function AgentControls({
   disabled?: boolean;
   onToggle: () => void;
 }) {
+  const { colors } = useTheme();
   const level = effortFor(model, effort ?? "");
   const ultracodeOn = model.ultracode && !!ultracode;
   const fast = model.fastMode && !!fastMode;
@@ -67,6 +68,7 @@ export function AgentControls({
 const SHORT: Record<PermissionMode, string> = { ask: "Ask", auto: "Auto", full: "Full" };
 /** The composer's permission chip; it opens the permission sheet. A plain button, so nothing React sits in a native menu. */
 export function PermissionChip({ mode, disabled, onPress }: { mode: PermissionMode; disabled?: boolean; onPress: () => void }) {
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"

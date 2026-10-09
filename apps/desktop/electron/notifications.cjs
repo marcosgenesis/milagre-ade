@@ -1,4 +1,4 @@
-const { isTurnEnd: isTerminal } = require("@milagre/shared/agent-runs");
+const { isTurnEnd: isTerminal, subagentActive } = require("@milagre/shared/agent-runs");
 const { computerOfKey } = require("@milagre/shared/chat-scopes");
 
 const MAX_TITLE = 120;
@@ -14,6 +14,9 @@ const keyOf = (chatId, requestId) => `${chatId}\n${requestId}`;
 // System notifications for chats that wait on the user: an approval or a question. Every agent event
 // is observed, so the notifier knows which requests are still open, and notify names the chat. One shows only while no Milagre window has focus, once per
 // request, and closes when its request is answered or its turn ends. Clicking it opens the chat.
+// A turn's end is announced too (notifyCompletion), unless a subagent the chat runs in the background is still at work:
+// its result wakes the chat with a turn of its own, whose end is the one announced. A completion held that way shows
+// once the last of them ends with no turn to take its result.
 /** A remote chat's subtitle, its computer first (spec "Routing": notifications labeled with the computer). */
 function labelFor(subtitle, computerName) {
   if (!computerName) return subtitle;
@@ -44,6 +47,11 @@ class AttentionNotifier {
     this.showDockBadge = true;
     // Requests the agents wait on, by key, with the notification shown for each (or null).
     this.open = new Map();
+    // Chats whose turn runs; per chat, the ids of its background subagents still at work; and the completions held
+    // while they do ({ title, subtitle, result }).
+    this.running = new Set();
+    this.background = new Map();
+    this.held = new Map();
   }
 
   /** @param {{ projectPath?: string; activeChatId?: string | null; unread?: string[]; notifyOnCompletion?: boolean; showDockBadge?: boolean }} [state] */
@@ -75,10 +83,23 @@ class AttentionNotifier {
     if (event.type === "turn-started") {
       this.previews.delete(chatId);
       this.completed.delete(chatId);
+      // The turn that takes a background subagent's result announces its own end.
+      this.held.delete(chatId);
+      this.running.add(chatId);
     } else if (event.type === "text-delta") {
       this.previews.set(chatId, ((this.previews.get(chatId) || "") + event.text).slice(-MAX_BODY));
+    } else if (event.type === "subagent-update" && event.agent?.background) {
+      const ids = this.background.get(chatId) ?? new Set();
+      if (subagentActive(event.agent)) ids.add(event.agent.id);
+      else ids.delete(event.agent.id);
+      if (ids.size) this.background.set(chatId, ids);
+      else {
+        this.background.delete(chatId);
+        if (!this.running.has(chatId)) this.release(chatId);
+      }
     }
     if (isTerminal(event)) {
+      this.running.delete(chatId);
       if (event.type !== "turn-cancelled")
         this.completed.set(chatId, {
           failed: event.type === "turn-failed",
@@ -120,7 +141,25 @@ class AttentionNotifier {
     if (typeof chatId !== "string") return false;
     const result = this.completed.get(chatId);
     this.completed.delete(chatId);
-    if (!result || !this.notifyOnCompletion || (this.isAppFocused() && this.activeChatId === chatId)) return false;
+    if (!result || !this.notifyOnCompletion) return false;
+    // A turn that ends while the chat's background subagents still work isn't the end of the work.
+    if (!result.failed && this.background.get(chatId)?.size) {
+      this.held.set(chatId, { title, subtitle, result });
+      return false;
+    }
+    return this.showCompletion(chatId, title, subtitle, result);
+  }
+
+  /** Shows the completion held for a chat, now that its last background subagent ended with no turn to take the result. */
+  release(chatId) {
+    const held = this.held.get(chatId);
+    if (!held) return false;
+    this.held.delete(chatId);
+    return this.notifyOnCompletion && this.showCompletion(chatId, held.title, held.subtitle, held.result);
+  }
+
+  showCompletion(chatId, title, subtitle, result) {
+    if (this.isAppFocused() && this.activeChatId === chatId) return false;
     const notification = this.createNotification({
       title: `${capped(title, MAX_TITLE) || "Milagre"} - ${result.failed ? "Turn failed" : "Turn completed"}`,
       subtitle: capped(subtitle, MAX_TITLE),
@@ -194,7 +233,8 @@ class AttentionNotifier {
       notification.close();
       this.completionNotifications.delete(chatId);
     }
-    for (const map of [this.completed, this.previews]) for (const chatId of [...map.keys()]) if (mine(chatId)) map.delete(chatId);
+    for (const map of [this.completed, this.previews, this.background, this.held]) for (const chatId of [...map.keys()]) if (mine(chatId)) map.delete(chatId);
+    for (const chatId of [...this.running]) if (mine(chatId)) this.running.delete(chatId);
     this.updateBadge();
   }
 
@@ -206,6 +246,9 @@ class AttentionNotifier {
     this.computerWaiting = null;
     this.completed.clear();
     this.previews.clear();
+    this.background.clear();
+    this.held.clear();
+    this.running.clear();
     this.setBadge("");
   }
 }

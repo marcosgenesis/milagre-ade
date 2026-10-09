@@ -619,11 +619,12 @@ function createRuntime(options) {
   commands.handle("main-sync:default:save", (_event, value) => projectSettings().setMainSyncDefault(value === true));
 
   // A Linear issue's current copy, or a thrown error when Linear no longer has the key (nothing is created then).
-  async function readLinearIssue(key) {
+  // `workspace` is the one the picker showed it from; without it, the workspace that has the key.
+  async function readLinearIssue(key, workspace) {
     // Checked before any query, so a Chat that can't reach Linear never creates a Worktree.
     if (!linear.enabled()) throw new Error("Linear is off in Settings › Experimental.");
-    if (!linear.status().connected) throw new Error("Linear isn't connected.");
-    const issue = await linearIssues.readIssue(key);
+    if (!linear.workspaces().length) throw new Error("Linear isn't connected.");
+    const issue = await linearIssues.readIssue(key, workspace);
     if (!issue) throw new Error(`${key} no longer exists in Linear.`);
     return issue;
   }
@@ -642,13 +643,13 @@ function createRuntime(options) {
     emit("worktree:renamed", { projectPath, path: created.path, from: created.branch, name });
   }
 
-  commands.handle("worktree:create", async (event, { projectPath, baseBranch, prompt, issueKey }) => {
+  commands.handle("worktree:create", async (event, { projectPath, baseBranch, prompt, issueKey, issueWorkspace }) => {
     // Only these fields come from the renderer: the worktree folder and the files copied into it are main's call.
     const request = { projectPath, baseBranch, prompt };
     await ownProject(projectPath);
     await environmentReady;
     // A Chat started from a Linear issue reads the issue again, never the renderer's copy. A missing issue creates nothing.
-    const issue = typeof issueKey === "string" ? await readLinearIssue(issueKey) : null;
+    const issue = typeof issueKey === "string" ? await readLinearIssue(issueKey, issueWorkspace) : null;
     const suffix = newSuffix();
     const branch = issue ? await issueBranch({ projectPath, issue, suffix }) : undefined;
     const settings = await projectSettings().get(projectPath);
@@ -675,7 +676,13 @@ function createRuntime(options) {
     const state = await updateProject(request.projectPath, (latest) => {
       const worktree = latest.worktrees[listed.id];
       return worktree
-        ? { ...latest, worktrees: { ...latest.worktrees, [worktree.id]: { ...worktree, base: created.base, ...(issue ? { linearIssue: issue.key } : {}) } } }
+        ? {
+            ...latest,
+            worktrees: {
+              ...latest.worktrees,
+              [worktree.id]: { ...worktree, base: created.base, ...(issue ? { linearIssue: issue.key, linearWorkspace: issue.workspace } : {}) },
+            },
+          }
         : latest;
     });
     // A branch named after an issue keeps that name; only a chat named from its prompt gets the Haiku name.
@@ -684,11 +691,11 @@ function createRuntime(options) {
   });
   // Links a Worktree that already exists to a Linear issue. A Milagre-named branch that was never pushed and has no PR
   // takes the issue's branch name (the folder keeps its name); any other branch is left alone and only the key is stored.
-  commands.handle("worktree:link-issue", async (_event, { projectPath, worktreeId, key } = {}) => {
+  commands.handle("worktree:link-issue", async (_event, { projectPath, worktreeId, key, workspace } = {}) => {
     await ownProject(projectPath);
     await environmentReady;
     if (!isIssueKey(key)) throw new Error(`${JSON.stringify(String(key))} isn't a Linear issue key.`);
-    const issue = await readLinearIssue(key);
+    const issue = await readLinearIssue(key, workspace);
     const project = await readProject(projectPath);
     const worktree = project.state.worktrees[worktreeId];
     if (!worktree) throw new Error("That worktree is no longer in this project.");
@@ -710,14 +717,18 @@ function createRuntime(options) {
       const state = await updateProject(projectPath, (latest) => {
         const renamed = renameWorktree(latest, { path: worktree.path, from: worktree.name, name: branch });
         const item = renamed.worktrees[worktreeId];
-        return item ? { ...renamed, worktrees: { ...renamed.worktrees, [worktreeId]: { ...item, linearIssue: issue.key } } } : renamed;
+        return item
+          ? { ...renamed, worktrees: { ...renamed.worktrees, [worktreeId]: { ...item, linearIssue: issue.key, linearWorkspace: issue.workspace } } }
+          : renamed;
       });
       emit("worktree:renamed", { projectPath, path: worktree.path, from: worktree.name, name: branch });
       return { project: { ...project, state }, mode: "renamed", branch };
     }
     const state = await updateProject(projectPath, (latest) => {
       const item = latest.worktrees[worktreeId];
-      return item ? { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: { ...item, linearIssue: issue.key } } } : latest;
+      return item
+        ? { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: { ...item, linearIssue: issue.key, linearWorkspace: issue.workspace } } }
+        : latest;
     });
     return { project: { ...project, state }, mode: "stored", branch: worktree.name };
   });
@@ -730,7 +741,7 @@ function createRuntime(options) {
     const state = await updateProject(projectPath, (latest) => {
       const item = latest.worktrees[worktreeId];
       if (!item) return latest;
-      const { linearIssue: _unlinked, ...rest } = item;
+      const { linearIssue: _unlinked, linearWorkspace: _workspace, ...rest } = item;
       return { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: rest } };
     });
     return { project: { ...project, state } };
@@ -938,11 +949,18 @@ function createRuntime(options) {
       return pending;
     });
 
-  // The Mac's Linear connection. Phones read it and the Experimental switch; only the Mac connects (mobile-bridge.cjs).
-  const linear = createLinear({ dataDir, ...options.linear, changed: () => emit("linear:status-changed", linear.status()) });
+  // The Mac's Linear connections, one per workspace. Phones read them and the Experimental switch; only the Mac connects (mobile-bridge.cjs).
+  const linear = createLinear({
+    dataDir,
+    // The Mac app opens Add workspace's sign-in in a window of its own; the link reaches it as an event.
+    openWindow: (url) => emit("linear:sign-in-window", { url }),
+    ...options.linear,
+    changed: () => emit("linear:status-changed", linear.status()),
+  });
   commands.handle("linear:status", () => linear.status());
-  commands.handle("linear:connect", () => linear.connect());
-  commands.handle("linear:disconnect", () => linear.disconnect());
+  commands.handle("linear:connect", (_event, value) => linear.connect({ window: value?.window === true }));
+  commands.handle("linear:cancel", () => linear.cancel());
+  commands.handle("linear:disconnect", (_event, value) => linear.disconnect(value?.workspace));
   commands.handle("linear:enabled:read", () => ({ enabled: linear.enabled() }));
   commands.handle("linear:enabled:save", (_event, value) => {
     const enabled = linear.setEnabled(value === true);
@@ -951,7 +969,7 @@ function createRuntime(options) {
   });
   // Issues are read through the same connection; both answer without throwing (see linear/issues.cjs).
   const linearIssues = createLinearIssues({ linear });
-  commands.handle("linear:issues", (_event, value) => linearIssues.list(value?.query));
+  commands.handle("linear:issues", (_event, value) => linearIssues.list(value?.query, { fresh: value?.fresh === true, workspace: value?.workspace }));
   commands.handle("linear:worktree-issues", async (_event, projectPath) => {
     try {
       await environmentReady;

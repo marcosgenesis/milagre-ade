@@ -7,10 +7,13 @@ import { subagentFinished } from "@milagre/shared/project-edits";
 import { useSession } from "../session";
 import { SubagentItem } from "../subagent-item";
 import { Icon } from "../icons";
-import { CircleButton, ErrorNotice, IconButton, ListRow, PageScroll, colors, styles } from "../ui";
+import { CircleButton, ErrorNotice, IconButton, ListRow, PageScroll, useStyles } from "../ui";
+import { useTheme } from "../theme";
 
 /** The Chat's subagents, like desktop's subagent popover: status, latest activity and the end of each transcript. */
 export default function AgentsSheet() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { id } = useLocalSearchParams<{ id: string }>();
   const session = useSession();
   const [busy, setBusy] = useState(false);

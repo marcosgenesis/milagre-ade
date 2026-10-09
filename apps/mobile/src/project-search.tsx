@@ -4,7 +4,8 @@ import { Search01Icon } from "@hugeicons/core-free-icons";
 import { useSession } from "./session";
 import { Icon } from "./icons";
 import { ProjectIcon } from "./project-icon";
-import { Field, colors, styles } from "./ui";
+import { Field, useStyles } from "./ui";
+import { createStylesHook, useTheme, type Palette } from "./theme";
 
 type Found = { path: string; name: string };
 type Results = { query: string; items: Found[]; error?: string };
@@ -17,6 +18,9 @@ const shortPath = (value: string) => value.replace(/^\/Users\/[^/]+(?=\/|$)/, "~
  * opens directly, for a folder outside the home or a Mac whose Milagre can't search yet.
  */
 export function ProjectSearch({ onOpen }: { onOpen: (path: string) => void }) {
+  const s = useS();
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const client = session.client;
   const [query, setQuery] = useState("");
@@ -117,6 +121,8 @@ export function ProjectSearch({ onOpen }: { onOpen: (path: string) => void }) {
 }
 
 function Row({ icon, title, detail, onPress }: { icon?: React.ReactNode; title: string; detail: string; onPress: () => void }) {
+  const s = useS();
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -137,24 +143,26 @@ function Row({ icon, title, detail, onPress }: { icon?: React.ReactNode; title: 
   );
 }
 
-const s = StyleSheet.create({
-  search: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderCurve: "continuous",
-    backgroundColor: colors.field,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    minHeight: 56,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderCurve: "continuous",
-  },
-});
+const makeS = (colors: Palette) =>
+  StyleSheet.create({
+    search: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderCurve: "continuous",
+      backgroundColor: colors.field,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      minHeight: 56,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderCurve: "continuous",
+    },
+  });
+const useS = createStylesHook(makeS);

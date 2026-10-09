@@ -1,0 +1,139 @@
+---
+// Real recordings of the desktop app and the phone app on one scripted run (scripts/site-demo/record.cjs):
+// the agent stops for an approval, it is approved on the phone, and the Mac finishes. Android visitors see the
+// Android app; everyone else the iPhone app.
+---
+<p class="demo-description">
+  Video: Milagre on a Mac and a phone showing the same Chat. The agent asks to run the mobile checks, the request is approved on the phone, and the agent finishes on the Mac.
+</p>
+<div class="demo" aria-hidden="true" data-demo>
+  <div class="glow"></div>
+  <div class="mac">
+    <video class="mac-video" src="/demo/desktop.mp4" poster="/demo/desktop.jpg" muted playsinline preload="auto" data-desktop></video>
+    <div class="lights"><i></i><i></i><i></i></div>
+  </div>
+  <div class="phone">
+    <video class="phone-video" src="/demo/phone.mp4" poster="/demo/phone.jpg" muted playsinline preload="auto" data-phone></video>
+  </div>
+</div>
+
+<script>
+  const demo = document.querySelector<HTMLElement>("[data-demo]");
+  const stage = demo?.parentElement;
+  const desktop = demo?.querySelector<HTMLVideoElement>("[data-desktop]");
+  const phone = demo?.querySelector<HTMLVideoElement>("[data-phone]");
+
+  if (demo && stage && desktop && phone) {
+    if (document.documentElement.dataset.platform === "android") {
+      demo.classList.add("android");
+      phone.poster = "/demo/android.jpg";
+      phone.src = "/demo/android.mp4";
+    }
+    // The phone is a 3D model when WebGL is there; otherwise the flat frame below stays.
+    void import("../scripts/phone3d").then(({ mountPhone3D, webglAvailable }) => {
+      const host = demo.querySelector<HTMLElement>(".phone");
+      if (!host || !webglAvailable()) return;
+      mountPhone3D({
+        host,
+        video: phone,
+        kind: demo.classList.contains("android") ? "android" : "iphone",
+        // Turned toward the Mac beside it; nearly straight on when it stands alone.
+        tilt: () => (narrow.matches ? -0.14 : -0.34),
+      });
+      demo.classList.add("three");
+    });
+    const narrow = matchMedia("(max-width: 700px)");
+    // The demo is a fixed-size canvas, scaled so its top part, down to both approval cards (y 565 of the canvas), ends
+    // just above the download button at the bottom of the page; the rest runs under the button and the blurred fade.
+    const cta = document.querySelector<HTMLElement>("[data-cta]");
+    // When the width caps the size (tall windows), the leftover height is split above the title and below the button,
+    // so the title, the devices and the button stay together in the middle and the devices still meet the button.
+    const page = stage.closest<HTMLElement>(".page");
+    let spare = 0;
+    const fit = () => {
+      const drop = spare / 2;
+      const room = innerHeight - stage.getBoundingClientRect().top - (cta?.offsetHeight ?? 0) - drop - 12;
+      const scale = Math.max(Math.min(1.7, stage.clientWidth / demo.offsetWidth, room / 565), 0.1);
+      demo.style.setProperty("--scale", String(scale));
+      const next = Math.max(0, Math.round(spare + room - 565 * scale));
+      if (Math.abs(next - spare) > 1) {
+        spare = next;
+        page?.style.setProperty("--lift", `${Math.floor(spare / 2)}px`);
+        page?.style.setProperty("--drop", `${Math.ceil(spare / 2)}px`);
+      }
+    };
+    new ResizeObserver(fit).observe(stage);
+    narrow.addEventListener("change", fit);
+    fit();
+
+    const still = matchMedia("(prefers-reduced-motion: reduce)");
+    // The desktop video is the clock; on a phone-sized screen only the phone plays.
+    const clock = () => (narrow.matches ? phone : desktop);
+    const follower = () => (narrow.matches ? null : phone);
+
+    const play = () => {
+      if (still.matches) return;
+      for (const video of narrow.matches ? [phone] : [desktop, phone]) void video.play().catch(() => {});
+    };
+    const restart = () => {
+      for (const video of [desktop, phone]) video.currentTime = 0;
+      play();
+    };
+    for (const video of [desktop, phone]) {
+      video.addEventListener("timeupdate", () => {
+        if (video !== clock()) return;
+        const other = follower();
+        if (other && Math.abs(other.currentTime - video.currentTime) > 0.12) other.currentTime = video.currentTime;
+      });
+      video.addEventListener("ended", () => {
+        // Straight back to the start, with no fade or pause.
+        if (video === clock()) restart();
+      });
+    }
+    const visible = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) play();
+      else for (const video of [desktop, phone]) video.pause();
+    });
+    visible.observe(demo);
+    narrow.addEventListener("change", () => {
+      desktop.pause();
+      restart();
+    });
+  }
+</script>
+
+<style>
+  .demo-description { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* Design size: a 1000×625 Mac window with the iPhone overlapping its lower right corner. */
+  .demo { position: absolute; top: 0; left: 50%; width: 1220px; height: 700px; transform: translateX(-50%) scale(var(--scale, 1)); transform-origin: top center; }
+  .glow { position: absolute; inset: 10% 8% 0 16%; border-radius: 50%; background: radial-gradient(closest-side, oklch(0.55 0.2 262 / 0.35), transparent); filter: blur(40px); animation: breathe 9s ease-in-out infinite; }
+  .mac { position: absolute; top: 0; left: 0; width: 1000px; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 14px; background: var(--page); box-shadow: 0 0 0 1px oklch(1 0 0 / 0.14), 0 30px 80px oklch(0 0 0 / 0.55); }
+  .mac-video, .phone-video { display: block; width: 100%; height: 100%; object-fit: cover; }
+  /* macOS draws the app's traffic lights, so the frame adds them where Milagre puts them: 12px buttons from x 24 of the
+     1280px window, centred on the sidebar toggle at y 30. --k scales app pixels to this 1000px window. */
+  .lights { --k: calc(1000 / 1280); position: absolute; top: calc((30 - 6) * var(--k) * 1px); left: calc(24 * var(--k) * 1px); display: flex; gap: calc(8 * var(--k) * 1px); }
+  .lights i { width: calc(12 * var(--k) * 1px); height: calc(12 * var(--k) * 1px); border-radius: 50%; background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+  .phone { position: absolute; right: 0; bottom: 0; width: 290px; aspect-ratio: 1206 / 2622; box-sizing: content-box; padding: 11px; border-radius: 52px; background: #0b0b0c; box-shadow: inset 0 0 0 1.5px oklch(1 0 0 / 0.16), 0 0 0 1px oklch(0 0 0 / 0.6), 0 30px 70px oklch(0 0 0 / 0.6); }
+  .phone-video { border-radius: 41px; }
+  /* The 3D phone draws the frame and the screen; the video stays in place, invisible, as its texture. */
+  .phone :global(.phone-canvas) { position: absolute; top: -18%; left: -40%; width: 180%; height: 136%; pointer-events: none; }
+  .demo.three .phone { background: transparent; box-shadow: none; }
+  .demo.three .phone-video { opacity: 0; }
+  /* Android draws its status bar close to the corners, so the screen is less rounded than the iPhone's. */
+  .demo.android .phone { aspect-ratio: 1080 / 2400; border-radius: 28px; }
+  .demo.android .phone-video { border-radius: 17px; }
+
+  @keyframes breathe { 0%, 100% { opacity: 0.7; transform: scale(1); } 50% { opacity: 1; transform: scale(1.06); } }
+
+  /* On a phone-sized screen, the phone alone. */
+  @media (max-width: 700px) {
+    .demo { width: 312px; height: 678px; }
+    .mac { display: none; }
+    .glow { inset: 10% -20%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .glow { animation: none; }
+  }
+</style>

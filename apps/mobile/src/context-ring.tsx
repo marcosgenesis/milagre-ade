@@ -2,10 +2,11 @@ import { Pressable } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import type { ContextUsage } from "@milagre/shared/model";
 import { contextSummary } from "@milagre/shared/usage";
-import { colors } from "./ui";
+import { useTheme } from "./theme";
 
 /** A ring that fills as the agent's context window does; the agent compacts it when it gets close to full. A tap opens the details. */
 export function ContextRing({ onPress, ...usage }: ContextUsage & { onPress: () => void }) {
+  const { colors } = useTheme();
   const { ratio, percent, tokens } = contextSummary(usage);
   const radius = 8;
   const circumference = 2 * Math.PI * radius;

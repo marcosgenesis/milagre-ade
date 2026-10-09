@@ -168,14 +168,19 @@ async function startDesktop() {
   ipcMain.handle("notification:completed", (_event, notice) => (Notification.isSupported() ? notifier.notifyCompletion(notice) : false));
 
   // The "Translucent window" appearance setting, pushed by the renderer with the theme it resolved.
-  ipcMain.handle("settings:window-translucent", (event, { on, theme } = {}) => {
+  ipcMain.handle("settings:window-translucent", (event, { on, theme, background } = {}) => {
     const window = BrowserWindow.fromWebContents(event.sender);
-    if (window && !window.isDestroyed()) applyTranslucency({ window, nativeTheme }, { on: on === true, theme });
+    if (window && !window.isDestroyed()) applyTranslucency({ window, nativeTheme }, { on: on === true, theme, background });
   });
 
   let connectionState = { connected: true };
   ipcMain.handle("runtime:connection", () => connectionState);
   let runtime;
+  const { createLinearSignInWindow } = require("./linear-sign-in-window.cjs");
+  // Closing the sign-in window before it finished ends the waiting sign-in, so Settings stops saying it is waiting.
+  const linearSignIn = createLinearSignInWindow({ BrowserWindow, shell, cancel: () => void runtime?.invoke("linear:cancel", []).catch(() => {}) });
+  let signInRequested = false;
+  let signInAttempt = 0; // only the newest connect may close or finish the window
   try {
     runtime = await connectDesktopRuntime({
       dataDir: app.getPath("userData"),
@@ -192,6 +197,11 @@ async function startDesktop() {
           connectionState = payload;
           // A host started again after it went away can be newer, with more commands. (Not yet set during the first connect.)
           if (payload.connected && runtime) registerHostMethods();
+        }
+        // Add workspace's sign-in opens in a window of its own, and only when this window asked for one.
+        if (channel === "linear:sign-in-window") {
+          if (signInRequested) linearSignIn.open(payload?.url);
+          return;
         }
         for (const window of BrowserWindow.getAllWindows()) {
           if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, payload);
@@ -213,8 +223,39 @@ async function startDesktop() {
     for (const method of runtime.methods) {
       if (registered.has(method)) continue;
       registered.add(method);
-      ipcMain.handle(method, (_event, ...args) => runtime.invoke(method, args));
+      ipcMain.handle(method, (event, ...args) => {
+        if (method === "linear:connect") {
+          // A newer sign-in replaces a waiting one, and its window with it.
+          linearSignIn.close();
+          signInRequested = args[0]?.window === true;
+          signInAttempt++;
+        }
+        const answer = runtime.invoke(method, args);
+        if (method === "linear:connect") {
+          const attempt = signInAttempt;
+          const newest = () => attempt === signInAttempt;
+          void answer.then(
+            () => {
+              if (newest()) linearSignIn.finish();
+              bringBack(event.sender);
+            },
+            () => {
+              if (newest()) linearSignIn.close();
+            },
+          );
+        }
+        return answer;
+      });
     }
+  }
+  // A Linear sign-in in the browser ends in a tab that can't close itself, so the window that started it comes back to the front.
+  function bringBack(contents) {
+    const window = BrowserWindow.fromWebContents(contents);
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    if (process.platform === "darwin") app.focus({ steal: true });
+    window.focus();
   }
   registerHostMethods();
   ipcMain.handle("app:version", () => app.getVersion());

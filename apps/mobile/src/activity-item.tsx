@@ -4,8 +4,8 @@ import { Alert02Icon, ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-
 import { titleSpans } from "@milagre/shared/reply-parts";
 import { Icon, type IconData } from "./icons";
 import { ShimmerText } from "./running-logo";
-import { fonts } from "./theme";
-import { PageScroll, colors, styles } from "./ui";
+import { fonts, useTheme } from "./theme";
+import { PageScroll, useStyles } from "./ui";
 
 type ActivityState = "idle" | "running" | "waiting" | "failed";
 
@@ -14,13 +14,15 @@ export function ActivityTitle({
   title,
   shimmer,
   numberOfLines = 1,
-  style = { color: colors.ink2, fontSize: 14 },
+  style: styleProp,
 }: {
   title: string;
   shimmer: boolean;
   numberOfLines?: number;
   style?: TextStyle;
 }) {
+  const { colors } = useTheme();
+  const style = styleProp ?? { color: colors.ink2, fontSize: 14 };
   const spans = titleSpans(title).map((span, index) =>
     span.code ? (
       <Text
@@ -66,6 +68,8 @@ export function ActivityItem({
   onPress?: () => void;
   disclosureOnly?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [expanded, setExpanded] = useState(false);
   const expandable = !onPress && (children != null || loading);
   const failed = state === "failed";

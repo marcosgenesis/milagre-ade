@@ -1,12 +1,12 @@
 import { useEffect, useId, useState } from "react";
-import { Animated, Easing, View, useColorScheme } from "react-native";
+import { Animated, Easing, View } from "react-native";
 import Svg, { Circle, Defs, FeGaussianBlur, Filter, G, LinearGradient, Mask, Path, Stop } from "react-native-svg";
 import { ANTIGRAVITY_LOGO, CLAUDE_LOGO, CODEX_LOGO, LINEAR_LOGO } from "@milagre/shared/provider-logos";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react-native";
 import type { ModelProvider } from "@milagre/shared/model";
-import { hex } from "./theme";
+import { useTheme, type Palette } from "./theme";
 
-export type Tone = keyof ReturnType<typeof hex>;
+export type Tone = { [K in keyof Palette]: Palette[K] extends string ? K : never }[keyof Palette];
 export type IconData = IconSvgElement;
 
 /** Desktop's icon set (Hugeicons), so the same action looks the same on both apps. */
@@ -23,10 +23,10 @@ export function Icon({
   size?: number;
   strokeWidth?: number;
 }) {
-  const palette = hex(useColorScheme());
+  const { colors } = useTheme();
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <HugeiconsIcon icon={icon} size={size} color={color ?? palette[tone]} strokeWidth={strokeWidth} />
+      <HugeiconsIcon icon={icon} size={size} color={color ?? colors[tone]} strokeWidth={strokeWidth} />
     </View>
   );
 }
@@ -83,7 +83,7 @@ export function ProviderLogo({ provider, size = 15, dim = false }: { provider: M
 
 /** Desktop's SpinnerRing: a line-colored track with a short ink-3 arc turning once every 1.1s. */
 export function SpinnerRing({ size = 14, stroke = 2, tone = "ink3" }: { size?: number; stroke?: number; tone?: Tone }) {
-  const palette = hex(useColorScheme());
+  const { colors } = useTheme();
   const [spin] = useState(() => new Animated.Value(0));
   useEffect(() => {
     const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 1100, easing: Easing.linear, useNativeDriver: true }));
@@ -96,13 +96,13 @@ export function SpinnerRing({ size = 14, stroke = 2, tone = "ink3" }: { size?: n
   return (
     <Animated.View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: size, height: size, transform: [{ rotate }] }}>
       <Svg width={size} height={size}>
-        <Circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={palette.lineStrong} strokeWidth={stroke} />
+        <Circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={colors.lineStrong} strokeWidth={stroke} />
         <Circle
           cx={size / 2}
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke={palette[tone]}
+          stroke={colors[tone]}
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={`${circumference * 0.28} ${circumference * 0.72}`}
@@ -114,10 +114,10 @@ export function SpinnerRing({ size = 14, stroke = 2, tone = "ink3" }: { size?: n
 
 /** Linear's mark, on Linear issue chips and pickers (same shape as desktop's LinearLogo), in the color of the text beside it. */
 export function LinearLogo({ size = 12, tone = "ink2" }: { size?: number; tone?: Tone }) {
-  const palette = hex(useColorScheme());
+  const { colors } = useTheme();
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <Path d={LINEAR_LOGO.d} fill={palette[tone]} />
+      <Path d={LINEAR_LOGO.d} fill={colors[tone]} />
     </Svg>
   );
 }

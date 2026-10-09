@@ -5,21 +5,6 @@ import docker from "refractor/docker";
 refractor.register(tsx);
 refractor.register(docker);
 
-// Shared by the DOM and native Text renderers. Colors follow the existing GitHub code themes.
-export const syntaxColors = {
-  plain: { light: "#24292e", dark: "#e1e4e8" },
-  comment: { light: "#6a737d", dark: "#8b949e" },
-  keyword: { light: "#d73a49", dark: "#f97583" },
-  string: { light: "#032f62", dark: "#9ecbff" },
-  number: { light: "#005cc5", dark: "#79b8ff" },
-  function: { light: "#6f42c1", dark: "#b392f0" },
-  type: { light: "#005cc5", dark: "#79b8ff" },
-  tag: { light: "#22863a", dark: "#85e89d" },
-  property: { light: "#005cc5", dark: "#79b8ff" },
-  operator: { light: "#d73a49", dark: "#f97583" },
-  punctuation: { light: "#24292e", dark: "#e1e4e8" },
-};
-
 const KINDS = {
   comment: "comment",
   prolog: "comment",

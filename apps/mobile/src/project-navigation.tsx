@@ -22,7 +22,16 @@ import {
   UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { chatMarkTone, chatPullRequests, comparePins, isListedChat, pendingChatSessionId, pullRequestRefs, withPendingChat } from "@milagre/shared/chats";
+import {
+  chatMarkTone,
+  chatPullRequests,
+  chatTitle,
+  comparePins,
+  isListedChat,
+  pendingChatSessionId,
+  pullRequestRefs,
+  withPendingChat,
+} from "@milagre/shared/chats";
 import { searchMessages } from "@milagre/shared/message-search";
 import type { AgentSession, PullRequest } from "@milagre/shared/model";
 import type { LinearIssue } from "@milagre/shared/linear";
@@ -33,7 +42,7 @@ import { chatMark, type ChatMark } from "./indicators";
 import { ChatMarkIcon } from "./status-indicators";
 import { Icon } from "./icons";
 import { LoadingLogo } from "./loading-logo";
-import { ErrorNotice, Field, IconButton, PullDown, colors, styles } from "./ui";
+import { ErrorNotice, Field, IconButton, PullDown, useStyles } from "./ui";
 import { ProjectIcon, ProjectIcons } from "./project-icon";
 import { ProjectSearch } from "./project-search";
 import { chatMenu, runChatAction } from "./chat-actions";
@@ -46,6 +55,7 @@ import { useChatPullRequests } from "./use-chat-pull-requests";
 import { ChatPullRequestChips } from "./chat-pull-request-chips";
 import { useLinear } from "./use-linear";
 import { useWorktreeLinearIssues } from "./use-worktree-linear-issues";
+import { createStylesHook, useTheme, type Palette } from "./theme";
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
@@ -54,6 +64,7 @@ type Row = { key: string; path: string } & (
   | {
       kind: "chat";
       chat: AgentSession;
+      title: string;
       worktree: string;
       mark: ChatMark;
       pending?: MobilePendingChat;
@@ -92,6 +103,9 @@ export function ProjectNavigation(props: NavigationProps) {
 }
 
 function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: NavigationProps) {
+  const s = useS();
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const { pendingChats } = usePendingChats();
   const insets = useSafeAreaInsets();
@@ -194,7 +208,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
       path: string;
       // Null for a Project searched on the host (hostMatches).
       messages: NonNullable<ReturnType<typeof cachedProject>>["project"]["state"]["messages"] | null;
-      chats: Map<number, AgentSession>;
+      chats: Map<number, { chat: AgentSession; title: string }>;
     }[] = [];
     for (const project of listed) {
       const saved = project.path === currentPath && session.snapshot ? session.snapshot : cachedProject(project.path);
@@ -220,7 +234,14 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           pending && !byChat.get(chat.id)?.some((message) => message.clientMessageId !== pending.preview.message.clientMessageId)
             ? pending.preview.sortId
             : chat.id;
-        return { chat, run, pending, sortId, mark: pending && !pending.accepted ? ("running" as const) : chatMark(chat, run, byChat.get(chat.id) || []) };
+        return {
+          chat,
+          title: chatTitle(chat, byChat.get(chat.id)),
+          run,
+          pending,
+          sortId,
+          mark: pending && !pending.accepted ? ("running" as const) : chatMark(chat, run, byChat.get(chat.id) || []),
+        };
       });
       // Like desktop's sidebar, a worktree's empty starter Chat stays out until it has a message or a turn is starting.
       const shown = marked
@@ -236,13 +257,12 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         searchable.push({
           path: project.path,
           messages: copy.previewOnly || copy.project.state.messagesInChats ? null : copy.project.state.messages,
-          chats: new Map(shown.filter(({ pending }) => !pending).map(({ chat }) => [chat.id, chat])),
+          chats: new Map(shown.filter(({ pending }) => !pending).map(({ chat, title }) => [chat.id, { chat, title }])),
         });
       const chats = shown
         .filter(
-          ({ chat }) =>
-            !needle ||
-            [name, chat.title, chat.generatedTitle, copy?.project.state.worktrees[chat.worktree_id]?.name].some((text) => text?.toLowerCase().includes(needle)),
+          ({ chat, title }) =>
+            !needle || [name, title, copy?.project.state.worktrees[chat.worktree_id]?.name].some((text) => text?.toLowerCase().includes(needle)),
         )
         // Pinned Chats first in their order, then the newest Chat first, by when it was created, so rows don't jump around as agents reply.
         .sort((a, b) => comparePins(a.chat, b.chat) || b.sortId - a.sortId);
@@ -252,12 +272,13 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         result.push({ key: `section:${section}`, path: "", kind: "section", name: section });
       result.push({ key: project.path, path: project.path, kind: "project", name, expanded: open, members: project.projects });
       if (!open) continue;
-      for (const { chat, mark, pending } of chats)
+      for (const { chat, title, mark, pending } of chats)
         result.push({
           key: `${project.path}#${chat.id}`,
           path: project.path,
           kind: "chat",
           chat,
+          title,
           pending,
           worktree: pending?.newWorktree ? "New worktree" : copy?.project.state.worktrees[chat.worktree_id]?.name || "Worktree",
           prPath: !pending && !copy?.project.link ? copy?.project.state.worktrees[chat.worktree_id]?.path : undefined,
@@ -287,16 +308,17 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         const perChat = new Map<number, number>();
         const matches = messages ? searchMessages(messages, needle, 200) : hostMatches.query === needle ? (hostMatches.matches[path] ?? []) : [];
         for (const match of matches) {
-          const chat = chats.get(match.message.session_id);
+          const entry = chats.get(match.message.session_id);
           const count = perChat.get(match.message.session_id) ?? 0;
-          if (!chat || count >= 3) continue;
+          if (!entry || count >= 3) continue;
+          const { chat, title } = entry;
           perChat.set(chat.id, count + 1);
           found.push({
             key: `${path}#${chat.id}:message:${match.message.id}`,
             path,
             kind: "message",
             chat,
-            title: chat.title || chat.generatedTitle || "New Chat",
+            title,
             snippet: match.snippet,
             highlight: match.highlight,
           });
@@ -692,7 +714,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                 <Text style={[s.detail, item.failed && { color: colors.red }]}>{item.message}</Text>
               </Pressable>
             );
-          const title = item.chat.title || item.chat.generatedTitle || "New Chat";
+          const title = item.title;
           const selected = currentPath === item.path && activeChatId === item.chat.id;
           const tone = chatMarkTone(item.mark);
           const hasChips = !!item.pullRequests?.length || !!item.linearIssue;
@@ -775,43 +797,45 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   );
 }
 
-const s = StyleSheet.create({
-  host: { color: colors.ink, fontSize: 17, fontWeight: "600" },
-  secondary: { color: colors.ink2, fontSize: 15 },
-  detail: { color: colors.ink2, fontSize: 12 },
-  computerIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    borderCurve: "continuous",
-    backgroundColor: colors.field,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  search: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderCurve: "continuous",
-    backgroundColor: colors.field,
-  },
-  project: { flexDirection: "row", alignItems: "center", marginTop: 12 },
-  projectTitle: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 8 },
-  chat: { flexDirection: "row", alignItems: "center", marginVertical: 2, borderRadius: 8, borderCurve: "continuous" },
-  chatBody: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingLeft: 12, paddingVertical: 8 },
-  filter: { width: 44, height: 44, borderRadius: 10, borderCurve: "continuous", alignItems: "center", justifyContent: "center" },
-  chatTitle: { color: colors.ink, fontSize: 15, lineHeight: 20 },
-  notice: { minHeight: 44, justifyContent: "center", paddingLeft: 42, paddingRight: 12 },
-  footer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-  },
-  footerAction: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 },
-});
+const makeS = (colors: Palette) =>
+  StyleSheet.create({
+    host: { color: colors.ink, fontSize: 17, fontWeight: "600" },
+    secondary: { color: colors.ink2, fontSize: 15 },
+    detail: { color: colors.ink2, fontSize: 12 },
+    computerIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 10,
+      borderCurve: "continuous",
+      backgroundColor: colors.field,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    search: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderCurve: "continuous",
+      backgroundColor: colors.field,
+    },
+    project: { flexDirection: "row", alignItems: "center", marginTop: 12 },
+    projectTitle: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 8 },
+    chat: { flexDirection: "row", alignItems: "center", marginVertical: 2, borderRadius: 8, borderCurve: "continuous" },
+    chatBody: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingLeft: 12, paddingVertical: 8 },
+    filter: { width: 44, height: 44, borderRadius: 10, borderCurve: "continuous", alignItems: "center", justifyContent: "center" },
+    chatTitle: { color: colors.ink, fontSize: 15, lineHeight: 20 },
+    notice: { minHeight: 44, justifyContent: "center", paddingLeft: 42, paddingRight: 12 },
+    footer: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.line,
+    },
+    footerAction: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 },
+  });
+const useS = createStylesHook(makeS);

@@ -1,17 +1,31 @@
 import { useCallback, useState } from "react";
-import { LINEAR_HINT, LINEAR_TITLE, linearStatusLine, type LinearStatus } from "@milagre/shared/linear";
+import { LINEAR_HINT, LINEAR_TITLE, linearStatusLine, linearWorkspaceLine, linearWorkspaces, type LinearStatus } from "@milagre/shared/linear";
 import { Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
+import { DEFAULT_THEME_ID, seedsFrom } from "@milagre/shared/themes";
+import { CustomThemeSection } from "./custom-theme-section";
 import { useMuriloMode } from "./murilo-mode";
 import { useUltracodeFatality } from "./ultracode-fatality-setting";
 import { useSession } from "./session";
-import { ErrorNotice, Toggle, styles } from "./ui";
+import { useTheme } from "./theme";
+import { ErrorNotice, Toggle, useStyles } from "./ui";
 
 /** Settings › Experimental: this phone's and the connected Mac's experimental switches, like desktop's Experimental section. */
 export function ExperimentalSection() {
+  const styles = useStyles();
   const session = useSession();
   const [muriloMode, setMuriloMode] = useMuriloMode();
   const [fatality, setFatality] = useUltracodeFatality();
+  const { settings, set } = useTheme();
+  // On: start from the current theme's colors and select Custom. Off while Custom is selected: back to Milagre Blue, seeds kept.
+  function changeCustomTheme(enabled: boolean) {
+    if (!enabled) {
+      set({ customThemeEnabled: false, ...(settings.colorTheme === "custom" ? { colorTheme: DEFAULT_THEME_ID } : {}) });
+      return;
+    }
+    const from = settings.colorTheme === "custom" ? DEFAULT_THEME_ID : settings.colorTheme;
+    set({ customThemeEnabled: true, customTheme: settings.customTheme ?? seedsFrom(from), colorTheme: "custom" });
+  }
   // The Mac's Linear switch and connection; null until the Mac answers (an older Mac never does). Re-read on focus:
   // the phone gets no event when the Mac connects or disconnects.
   const [linear, setLinear] = useState<{ enabled: boolean; status: LinearStatus } | null>(null);
@@ -59,12 +73,26 @@ export function ExperimentalSection() {
           Turning Ultracode on darkens the screen, slams ULTRACODE across it Mortal Kombat style, and an announcer says it out loud.
         </Text>
       </View>
+      <View style={[styles.card, { gap: 4 }]}>
+        <Toggle title="Custom theme" selected={settings.customThemeEnabled} onPress={() => changeCustomTheme(!settings.customThemeEnabled)} />
+        <Text style={styles.caption}>Build a theme from a few colors. It shows up as &quot;Custom&quot; in Appearance.</Text>
+      </View>
+      {settings.customThemeEnabled && <CustomThemeSection />}
       {!session.client && <Text style={styles.caption}>Connect to a Mac to change its experimental features.</Text>}
       {session.client && linear !== null && (
         <View style={[styles.card, { gap: 4 }]}>
           <Toggle title={LINEAR_TITLE} selected={linear.enabled} onPress={() => void changeLinear(!linear.enabled)} />
           <Text style={styles.caption}>{LINEAR_HINT}</Text>
-          {linear.enabled && <Text style={styles.caption}>{linearStatusLine(linear.status, "phone")}</Text>}
+          {linear.enabled &&
+            (linearWorkspaces(linear.status).length ? (
+              linearWorkspaces(linear.status).map((workspace) => (
+                <Text key={workspace.id} style={styles.caption}>
+                  {`Connected to ${linearWorkspaceLine(workspace)}`}
+                </Text>
+              ))
+            ) : (
+              <Text style={styles.caption}>{linearStatusLine(linear.status, "phone")}</Text>
+            ))}
           {linearError ? <ErrorNotice message={linearError} /> : null}
         </View>
       )}

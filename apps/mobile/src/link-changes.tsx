@@ -12,9 +12,11 @@ import { Counts } from "./diff-ui";
 import { ChangeTree } from "./change-tree";
 import { ProjectIcon } from "./project-icon";
 import { Icon } from "./icons";
-import { ErrorNotice, PageScroll, Segmented, colors, styles } from "./ui";
+import { ErrorNotice, PageScroll, Segmented, useStyles } from "./ui";
+import { useTheme } from "./theme";
 
 export function LinkChangesView({ chatId, header, onOpen }: { chatId: number; header?: React.ReactNode; onOpen?: (target: DiffTarget) => void }) {
+  const styles = useStyles();
   const session = useSession();
   const link = session.snapshot?.project.link;
   const members = link?.state.sessions[chatId]?.worktrees ?? [];
@@ -75,6 +77,8 @@ function MemberChanges({
   mode: DiffMode;
   onOpen?: (target: DiffTarget) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const [collapsed, setCollapsed] = useState(false);
   const { data: result, error, refresh } = useRpc<DiffFilesResult>(session.client, "git:diff-files", [{ cwd: member.worktreePath, base: member.base, mode }]);

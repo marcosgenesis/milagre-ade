@@ -24,10 +24,13 @@
     "src/terminal.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
+    "src/file-link.ts",
     "src/message-search.mjs",
     "src/message-search.d.mts",
     "src/agent-activity.ts",
-    "src/advisor-result.ts"
+    "src/advisor-result.ts",
+    "src/themes/*.ts",
+    "src/themes/palettes/*.ts"
   ],
   "type": "module",
   "exports": {
@@ -144,6 +147,7 @@
     "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
     "./artifact": "./src/artifact.ts",
+    "./file-link": "./src/file-link.ts",
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
       "default": "./src/simulator-receiver.mjs"
@@ -168,7 +172,8 @@
       "default": "./src/file-syntax.mjs"
     },
     "./agent-activity": "./src/agent-activity.ts",
-    "./advisor-result": "./src/advisor-result.ts"
+    "./advisor-result": "./src/advisor-result.ts",
+    "./themes": "./src/themes/index.ts"
   },
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",

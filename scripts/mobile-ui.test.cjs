@@ -89,6 +89,15 @@ function hookHost({ effects = false } = {}) {
     },
   };
 }
+// Every palette key reads back as its own name, so a test can tell which color a component picked.
+const fakePalette = new Proxy({}, { get: (_target, key) => (typeof key === "string" ? key : undefined) });
+const fakeStyles = new Proxy({}, { get: () => ({}) });
+const themeHooks = {
+  useTheme: () => ({ colors: fakePalette, scheme: "light", settings: {}, set() {} }),
+  createStylesHook: (make) => () => make(fakePalette),
+  fonts: { mono: "mono" },
+};
+const uiHooks = { useStyles: () => fakeStyles, makeStyles: () => fakeStyles };
 function load(file, modules, extra = "") {
   const source = fs.readFileSync(path.join(__dirname, "..", "apps/mobile/src", file), "utf8") + extra;
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
@@ -98,6 +107,12 @@ function load(file, modules, extra = "") {
     require: (id) => {
       // Image assets are opaque sources; any value stands in.
       if (id.endsWith(".png") && !(id in modules)) return { uri: id };
+      const base = id.replace(/^\.\.?\//, "");
+      if (base === "theme" || base === "ui") {
+        // Themed code reads colors through hooks; a test's own fake wins over these defaults.
+        const own = modules[id] ?? {};
+        return { ...(base === "theme" ? themeHooks : uiHooks), ...own };
+      }
       assert.ok(id in modules, `Unexpected import: ${id}`);
       return modules[id];
     },
@@ -117,6 +132,7 @@ function load(file, modules, extra = "") {
   return exports;
 }
 const jsx = (type, props, key) => ({ type, props, key });
+const { resolvePalette } = require("../packages/shared/src/themes/index.ts");
 const archiveStore = require("../apps/mobile/src/archive.ts");
 const archiveProgress = load("archive-progress.tsx", {
   react: { useSyncExternalStore: (_subscribe, read) => read() },
@@ -196,7 +212,7 @@ test("mobile slash suggestions filter skills and insert at the caret while prese
     undefined,
     "choosing a skill closes suggestions",
   );
-  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accent"));
+  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accentInk"));
   for (const punctuation of [".", ",", ":"]) {
     draft = `Please /tl${punctuation} afterwards`;
     field().props.onSelectionChange({ nativeEvent: { selection: { start: 10, end: 10 } } });
@@ -265,7 +281,7 @@ test("mobile skill input preserves edits and clears its description when the car
         (node.type === "ListRow" && node.props.subtitle === "Rewrite for a skimming reader."),
     );
   assert.equal("value" in field().props, false, "native attributed children must not be combined with value");
-  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accent"));
+  assert.ok(find(field(), (node) => node.type === "Text" && node.props.children === "/tldr" && node.props.style.color === "accentInk"));
   field().props.onFocus();
   field().props.onSelectionChange({ nativeEvent: { selection: { start: 7, end: 7 } } });
   assert.ok(description());
@@ -318,6 +334,7 @@ function markdownHost({ media, basePath } = {}) {
     "./viewer-store": viewer,
     "./chat-presentation": require("../apps/mobile/src/chat-presentation.ts"),
     "./markdown-image": require("../apps/mobile/src/markdown-image.ts"),
+    "@milagre/shared/file-link": require("../packages/shared/src/file-link.ts"),
     "./ui": { PageScroll: "PageScroll", colors: {}, styles: { muted: {}, code: {} } },
   });
   function expand(node) {
@@ -353,6 +370,21 @@ test("plain URLs in mobile replies render as links and open the exact address", 
       await link.props.onPress();
       assert.deepEqual(screen.links, [url]);
     }
+  }
+});
+
+test("links to files on the computer open the file preview", () => {
+  for (const [text, path] of [
+    ["The [written design](/Users/me/repo/docs/spec.md) is committed.", "/Users/me/repo/docs/spec.md"],
+    ["See [the spec](docs/spec.md#L4).", "/worktrees/feature/docs/spec.md"],
+    ["See [main](src/main.ts:12).", "/worktrees/feature/src/main.ts"],
+  ]) {
+    const screen = markdownHost({ basePath: "/worktrees/feature" });
+    const link = find(screen.render(text), (node) => node.props?.accessibilityRole === "link");
+    assert.ok(link, `Missing link in ${text}`);
+    link.props.onPress();
+    assert.equal(JSON.stringify(screen.routes), JSON.stringify([{ pathname: "/file-preview", params: { path } }]));
+    assert.deepEqual(screen.links, [], "a file link never goes to the phone's browser");
   }
 });
 
@@ -1266,6 +1298,44 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const filter = () => find(render(), (node) => node.type === "PullDown" && node.props.label === "Filter Chats");
   return { state, session, routes, secondaryRoutes, opened, calls, external, render, rows, row, open, more, filter };
 }
+
+test("mobile chat titles use summaries before transcripts load and switch to generated or renamed titles", () => {
+  const nav = navigationHost(Promise.resolve());
+  const chat = { id: 3, agent_name: "main", summary: { count: 2, titleLine: "Fix the login redirect" } };
+  nav.state.project.state.sessions[3] = chat;
+  nav.state.project.state.messages = [];
+  const title = () => find(nav.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.children;
+  assert.equal(title(), "Fix the login redirect");
+  const search = () => find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats");
+  search().props.onChangeText("login redirect");
+  assert.equal(nav.rows().props.data.filter((item) => item.kind === "chat").length, 1, "the summary title is searchable without message bodies");
+  search().props.onChangeText("");
+  nav.state.project.state.sessions = { 3: { ...chat, generatedTitle: "Repair login navigation" } };
+  nav.session.snapshot = { ...nav.state };
+  assert.equal(title(), "Repair login navigation");
+  nav.state.project.state.sessions = { 3: { ...chat, generatedTitle: "Repair login navigation", title: "  My login fix  " } };
+  nav.session.snapshot = { ...nav.state };
+  assert.equal(title(), "My login fix");
+
+  const host = chatHost();
+  host.params.id = "3";
+  host.session.snapshot.project.state.sessions[3] = chat;
+  const screen = find(host.render(), (node) => node.type === "Screen");
+  assert.equal(screen.props.options.title, "Fix the login redirect", "the Chat header uses the summary while the transcript is loading");
+});
+
+test("mobile chat titles fall back to messages from an older host, including message search results", () => {
+  const nav = navigationHost(Promise.resolve());
+  nav.state.project.state.sessions[3] = { id: 3, agent_name: "main" };
+  nav.state.project.state.messages = [
+    { id: 6, session_id: 99, role: "user", body: "Another Chat's title" },
+    { id: 7, session_id: 3, role: "user", body: "Fix login\nCheck the callback URL" },
+    { id: 8, session_id: 3, role: "assistant", body: "Check the wrangler configuration" },
+  ];
+  assert.equal(find(nav.row("chat"), (node) => node.type === "Text" && node.props.numberOfLines === 2).props.children, "Fix login");
+  find(nav.render(), (node) => node.type === "Field" && node.props.label === "Search chats").props.onChangeText("wrangler");
+  assert.equal(nav.row("message").props.accessibilityLabel, "Check the wrangler configuration, in Fix login");
+});
 
 test("mobile chat rows keep unread emphasis during a running turn and match desktop read title contrast", () => {
   const nav = navigationHost(Promise.resolve());
@@ -4387,6 +4457,8 @@ test("mobile file preview renders text and reports unreadable, empty, and trunca
       },
     },
     "../file-code": { FileCode: "FileCode" },
+    "../markdown": { Markdown: "Markdown" },
+    "@milagre/shared/file-link": require("../packages/shared/src/file-link.ts"),
     "../ui": { colors: {}, styles: {}, ErrorNotice: "ErrorNotice", PageScroll: "PageScroll" },
   });
   const render = () => {
@@ -4405,6 +4477,44 @@ test("mobile file preview renders text and reports unreadable, empty, and trunca
   assert.ok(text("This file does not have a text preview."));
   result = { ...result, data: null, error: "File no longer exists." };
   assert.equal(find(render(), (node) => node.type === "ErrorNotice").props.message, result.error);
+});
+
+test("mobile file preview shows Markdown formatted, with the source a tap away", () => {
+  const react = hookHost();
+  const result = { data: { text: "# Spec\n\nSee [goals](goals.md).", binary: false, truncated: false }, error: "", refresh() {} };
+  const { default: FilePreview } = load("app/file-preview.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    // oxlint-disable-next-line typescript/no-extraneous-class -- empty stub standing in for expo-file-system's File constructor
+    "expo-file-system": { File: class {}, FileMode: { ReadOnly: "readOnly" } },
+    "react-native": { Platform: { OS: "ios" }, Text: "Text", View: "View" },
+    "expo-router": {
+      Stack: { Screen: "Screen", Toolbar: Object.assign(() => null, { Button: "ToolbarButton" }) },
+      useLocalSearchParams: () => ({ path: "/project/docs/spec.md" }),
+    },
+    "../session": { useSession: () => ({ client: {} }) },
+    "../use-rpc": { useRpc: () => result },
+    "../file-code": { FileCode: "FileCode" },
+    "../markdown": { Markdown: "Markdown" },
+    "@milagre/shared/file-link": require("../packages/shared/src/file-link.ts"),
+    "../ui": { colors: {}, styles: {}, ErrorNotice: "ErrorNotice", PageScroll: "PageScroll" },
+  });
+  const render = () => {
+    react.begin();
+    return FilePreview();
+  };
+  const formatted = find(render(), (node) => node.type === "Markdown");
+  assert.equal(formatted.props.text, result.data.text);
+  assert.equal(formatted.props.basePath, "/project/docs", "relative links in the file resolve against its folder");
+  const toggle = find(render(), (node) => node.type === "ToolbarButton");
+  assert.equal(toggle.props.children, "Source");
+  toggle.props.onPress();
+  assert.equal(
+    find(render(), (node) => node.type === "Markdown"),
+    undefined,
+  );
+  assert.equal(find(render(), (node) => node.type === "FileCode").props.text, result.data.text);
+  assert.equal(find(render(), (node) => node.type === "ToolbarButton").props.children, "Formatted");
 });
 
 test("mobile picked files preview locally before sending", async () => {
@@ -4445,6 +4555,8 @@ test("mobile picked files preview locally before sending", async () => {
       },
     },
     "../file-code": { FileCode: "FileCode" },
+    "../markdown": { Markdown: "Markdown" },
+    "@milagre/shared/file-link": require("../packages/shared/src/file-link.ts"),
     "../ui": { colors: {}, styles: {}, ErrorNotice: "ErrorNotice", PageScroll: "PageScroll" },
   });
   react.begin();
@@ -4463,8 +4575,7 @@ test("mobile TSX preview colors native text in both themes and preserves selecti
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": { Text: "Text", useColorScheme: () => scheme },
     "@milagre/shared/file-syntax": require("@milagre/shared/file-syntax"),
-    "./theme": { fonts: { mono: "Menlo" } },
-    "./ui": { colors: {}, styles: {} },
+    "./theme": { fonts: { mono: "Menlo" }, useTheme: () => ({ colors: resolvePalette("milagre-blue", scheme), scheme }) },
   });
   const text = 'export const Card = () => (\r\n  <section title="hello">Welcome</section>\r\n);\r\n';
   const render = () => {
@@ -5389,13 +5500,11 @@ test("mobile Experimental page shows the Mac's Linear switch and status, re-read
   const modules = (session) => ({
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
-    "@milagre/shared/linear": {
-      LINEAR_TITLE: "Linear",
-      LINEAR_HINT: "hint",
-      linearStatusLine: (value, where) => (value.connected ? "Connected as Victor to Acme" : `not connected on ${where}`),
-    },
+    "@milagre/shared/linear": require("../packages/shared/src/linear.ts"),
     "react-native": { View: "View", Text: "Text" },
     "expo-router": { useFocusEffect: (fn) => focused.push(fn) },
+    "@milagre/shared/themes": { DEFAULT_THEME_ID: "milagre-blue", seedsFrom: (id) => ({ from: id }) },
+    "./custom-theme-section": { CustomThemeSection: "CustomThemeSection" },
     "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
     "./ultracode-fatality-setting": { useUltracodeFatality: () => [false, () => {}] },
     "./session": { useSession: () => session },
@@ -5413,17 +5522,20 @@ test("mobile Experimental page shows the Mac's Linear switch and status, re-read
   await settle();
   let tree = render();
   assert.equal(find(tree, (n) => n.props?.title === "Linear").props.selected, true);
-  assert.ok(text(tree, "not connected on phone"));
-  // Connected on the Mac while the phone was elsewhere: coming back to the page shows it.
-  status = { connected: true };
+  assert.ok(text(tree, "Connect Linear from Settings on your Mac"));
+  // Connected on the Mac while the phone was elsewhere: coming back to the page shows it, one line per workspace.
+  const acme = { id: "acme", viewer: { name: "Victor", email: "v@x" }, organization: { name: "Acme", urlKey: "acme" } };
+  const beta = { id: "beta", viewer: { name: "Vic", email: "v@b" }, organization: { name: "Beta Labs", urlKey: "beta" } };
+  status = { connected: true, viewer: acme.viewer, organization: acme.organization, workspaces: [acme, beta] };
   focused.at(-1)();
   await settle();
   tree = render();
-  assert.ok(text(tree, "Connected as Victor to Acme"));
+  assert.ok(text(tree, "Connected to Acme, as Victor"));
+  assert.ok(text(tree, "Connected to Beta Labs, as Vic"));
   find(tree, (n) => n.props?.title === "Linear").props.onPress();
   await settle();
   assert.deepEqual(saves, [false]);
-  assert.equal(text(render(), "Connected as Victor to Acme"), undefined, "the status hides while the switch is off");
+  assert.equal(text(render(), "Connected to Acme, as Victor"), undefined, "the status hides while the switch is off");
 
   const offline = load("experimental-section.tsx", modules({ client: null })).ExperimentalSection;
   react.begin();
@@ -5435,6 +5547,56 @@ test("mobile Experimental page shows the Mac's Linear switch and status, re-read
   );
   assert.equal(
     find(empty, (n) => n.props?.title === "Linear"),
+    undefined,
+  );
+});
+
+test("mobile Experimental Custom theme switch selects Custom on, Milagre Blue off, and shows the editor only while on", () => {
+  const react = hookHost();
+  const saved = [];
+  let settings = { colorTheme: "nord", customThemeEnabled: false, customTheme: null };
+  const { ExperimentalSection } = load("experimental-section.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@milagre/shared/linear": { LINEAR_TITLE: "Linear", LINEAR_HINT: "hint", linearStatusLine: () => "" },
+    "@milagre/shared/themes": { DEFAULT_THEME_ID: "milagre-blue", seedsFrom: (id) => ({ from: id }) },
+    "react-native": { View: "View", Text: "Text" },
+    "expo-router": { useFocusEffect() {} },
+    "./custom-theme-section": { CustomThemeSection: "CustomThemeSection" },
+    "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
+    "./ultracode-fatality-setting": { useUltracodeFatality: () => [false, () => {}] },
+    "./session": { useSession: () => ({ client: null }) },
+    "./theme": {
+      useTheme: () => ({
+        colors: fakePalette,
+        scheme: "dark",
+        settings,
+        set(patch) {
+          saved.push(patch);
+          settings = { ...settings, ...patch };
+        },
+      }),
+    },
+    "./ui": { ErrorNotice: "ErrorNotice", Toggle: "Toggle", styles: {} },
+  });
+  const render = () => {
+    react.begin();
+    return ExperimentalSection();
+  };
+  let tree = render();
+  assert.equal(
+    find(tree, (n) => n.type === "CustomThemeSection"),
+    undefined,
+  );
+  find(tree, (n) => n.props?.title === "Custom theme").props.onPress();
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.at(-1))), { customThemeEnabled: true, customTheme: { from: "nord" }, colorTheme: "custom" });
+  tree = render();
+  assert.ok(find(tree, (n) => n.type === "CustomThemeSection"));
+  find(tree, (n) => n.props?.title === "Custom theme").props.onPress();
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.at(-1))), { customThemeEnabled: false, colorTheme: "milagre-blue" });
+  assert.deepEqual(JSON.parse(JSON.stringify(settings.customTheme)), { from: "nord" }, "the seeds are kept");
+  assert.equal(
+    find(render(), (n) => n.type === "CustomThemeSection"),
     undefined,
   );
 });
@@ -5501,6 +5663,52 @@ test("picking a Linear issue starts a Chat in its own worktree with the issue as
   const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
   assert.equal(sent.body, issueFirstMessage(linearIssue, "first message"));
   assert.equal(screen.params.id, "7");
+});
+
+test("with two Linear workspaces the issue sheet has a tab each, and the picked issue's workspace creates the Chat", async () => {
+  const workspaces = [
+    { id: "acme", name: "Acme" },
+    { id: "beta", name: "Beta Labs" },
+  ];
+  const screen = chatHost({
+    effects: true,
+    linear: { active: true },
+    call: async (method, args) => {
+      if (method === "project:branches") return ["main"];
+      if (method === "linear:issues") {
+        const workspace = args[0]?.workspace === "beta" ? "beta" : "acme";
+        const issues = workspace === "beta" ? [{ ...linearIssue, key: "OPS-7", workspace }] : [{ ...linearIssue, workspace }];
+        return { issues, workspace, workspaces };
+      }
+      if (method === "worktree:create") return { worktreeId: 9, project: { state: { sessions: { 7: { id: 7, worktree_id: 9 } } } } };
+      return { sessionId: 7 };
+    },
+  });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: "main" } };
+  find(screen.render(), (node) => node.props?.accessibilityLabel === "Start from a Linear issue").props.onPress();
+  await settle();
+  const request = screen.choices.at(-1);
+  assert.equal(
+    JSON.stringify(request.tabs),
+    JSON.stringify([
+      { id: "acme", label: "Acme" },
+      { id: "beta", label: "Beta Labs" },
+    ]),
+  );
+  assert.equal(request.tab, "acme");
+  // The sheet's tab reads the other workspace; the same key in two workspaces never collides.
+  const beta = await request.load("beta", false);
+  assert.equal(JSON.stringify(beta.map((item) => item.id)), JSON.stringify(["beta:OPS-7"]));
+  assert.equal(
+    JSON.stringify(screen.calls.filter((call) => call.method === "linear:issues").at(-1).args),
+    JSON.stringify([{ fresh: false, workspace: "beta" }]),
+  );
+  screen.render();
+  request.onSelect("beta:OPS-7");
+  await settle();
+  const created = screen.calls.find((call) => call.method === "worktree:create").args[0];
+  assert.equal(created.issueKey, "OPS-7");
+  assert.equal(created.issueWorkspace, "beta");
 });
 
 test("a Chat row shows its Worktree's Linear issue even without pull requests", () => {

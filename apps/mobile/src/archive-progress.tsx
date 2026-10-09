@@ -2,7 +2,8 @@ import { useSyncExternalStore } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { archiveActivity, subscribeArchiveActivity } from "./archive";
 import { SpinnerRing } from "./icons";
-import { colors, styles } from "./ui";
+import { useStyles } from "./ui";
+import { createStylesHook, type Palette } from "./theme";
 
 /** Which Chats are archiving and the last archive notice, kept across screens. */
 export function useArchiveActivity() {
@@ -10,6 +11,7 @@ export function useArchiveActivity() {
 }
 
 export function ArchiveProgress() {
+  const styles = useStyles();
   return (
     <View
       accessible
@@ -26,6 +28,7 @@ export function ArchiveProgress() {
 
 /** Desktop's archiving pill: a SpinnerRing and "Archiving..." over a Chat's row while it archives; the row itself fades and takes no taps until the archive ends. */
 export function ArchivingOverlay({ title }: { title: string }) {
+  const s = useS();
   return (
     <View
       accessible
@@ -42,18 +45,20 @@ export function ArchivingOverlay({ title }: { title: string }) {
   );
 }
 
-const s = StyleSheet.create({
-  overlay: { alignItems: "center", justifyContent: "center" },
-  pill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    height: 24,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-  },
-  label: { color: colors.ink, fontSize: 12, fontWeight: "500" },
-});
+const makeS = (colors: Palette) =>
+  StyleSheet.create({
+    overlay: { alignItems: "center", justifyContent: "center" },
+    pill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 24,
+      paddingHorizontal: 10,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.line,
+    },
+    label: { color: colors.ink, fontSize: 12, fontWeight: "500" },
+  });
+const useS = createStylesHook(makeS);

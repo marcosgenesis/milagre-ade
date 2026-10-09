@@ -401,3 +401,14 @@ test("Codex publishes current subagent activity when work starts", () => {
   assert.equal(start({ id: "reason", type: "reasoning" }).latestActivity, "Thinking");
   assert.equal(start({ id: "reply", type: "agentMessage" }).latestActivity, "Responding");
 });
+test("Claude marks an Agent the chat runs in the background, whose result wakes the chat; nested and foreground ones are not", () => {
+  const state = {};
+  const spawn = (id, parent, input) => ({
+    type: "assistant",
+    parent_tool_use_id: parent,
+    message: { content: [{ type: "tool_use", id, name: "Agent", input }] },
+  });
+  assert.equal(child(mapClaudeMessage(spawn("bg", null, { description: "Review", prompt: "Check", run_in_background: true }), state)).background, true);
+  assert.equal(child(mapClaudeMessage(spawn("fg", null, { description: "Review", prompt: "Check" }), state)).background, undefined);
+  assert.equal(child(mapClaudeMessage(spawn("nested", "bg", { description: "Sub", prompt: "Check", run_in_background: true }), state)).background, undefined);
+});

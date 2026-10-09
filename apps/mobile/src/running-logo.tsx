@@ -1,11 +1,11 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View, useColorScheme, type EasingFunction, type TextStyle } from "react-native";
+import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View, type EasingFunction, type TextStyle } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import MaskedView from "@react-native-masked-view/masked-view";
 import { LinearGradient } from "expo-linear-gradient";
 import { useIsFocused } from "expo-router";
 import { LEFT, RIGHT, STAR, STAR_BOX } from "./logo";
-import { colors, fonts, hex } from "./theme";
+import { fonts, useTheme } from "./theme";
 
 /** A CSS keyframe segment: move to keyframe `to` over `duration` ms with the segment's timing function. */
 type Segment = { to: number; duration: number; easing?: EasingFunction };
@@ -59,7 +59,8 @@ const TWINKLE: Segment[] = [
 
 /** Desktop's RunningLogo: the legs take turns lighting up while the sparkle swells and turns a quarter. */
 const RunningLogo = memo(function RunningLogo({ size = 16 }: { size?: number }) {
-  const ink = hex(useColorScheme()).ink;
+  const { colors } = useTheme();
+  const ink = colors.ink;
   const left = useKeyframes(GLOW);
   const right = useKeyframes(GLOW, 240);
   const star = useKeyframes(TWINKLE);
@@ -119,6 +120,7 @@ function useElapsed(startedAt?: number) {
 
 /** Desktop's ThinkingIndicator: the running mark and the elapsed time; the label is for screen readers unless shown. */
 export function ThinkingIndicator({ label, showLabel = false, startedAt }: { label: string; showLabel?: boolean; startedAt?: number }) {
+  const { colors } = useTheme();
   return (
     <View
       accessible
@@ -139,6 +141,7 @@ export function ThinkingIndicator({ label, showLabel = false, startedAt }: { lab
 
 /** Only this Text re-renders on each tick. */
 function Elapsed({ startedAt }: { startedAt?: number }) {
+  const { colors } = useTheme();
   return <Text style={{ color: colors.ink3, fontSize: 12, fontFamily: fonts.mono, fontVariant: ["tabular-nums"] }}>{useElapsed(startedAt)}</Text>;
 }
 
@@ -148,8 +151,7 @@ const TILES = 4;
 
 /** Desktop's step-shimmer: a light highlight sweeps across the text, left to right, until the step is done. */
 export function ShimmerText({ children, style, numberOfLines = 1 }: { children: ReactNode; style?: TextStyle; numberOfLines?: number }) {
-  const scheme = useColorScheme();
-  const palette = hex(scheme);
+  const { colors } = useTheme();
   const [shift] = useState(() => new Animated.Value(0));
   const [reduced, setReduced] = useState(false);
   const active = useIsFocused();
@@ -191,7 +193,7 @@ export function ShimmerText({ children, style, numberOfLines = 1 }: { children: 
             key={index}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            colors={[palette.ink3, palette.ink3, palette.ink, palette.ink3, palette.ink3]}
+            colors={[colors.ink3, colors.ink3, colors.ink, colors.ink3, colors.ink3]}
             locations={[0, 110 / TILE, 160 / TILE, 210 / TILE, 1]}
             style={{ width: TILE, height: "100%" }}
           />

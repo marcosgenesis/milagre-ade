@@ -282,3 +282,42 @@ test("a relay computer registers, survives a restart, and a malformed relay id i
     await assert.rejects(push.register(registration({ hostId })), /Invalid push computer address/, hostId);
   }
 });
+test("a turn that ends while a background subagent runs is held; the turn its result wakes, or the last subagent ending, announces it", async (t) => {
+  const { push, messages } = await fixture(t);
+  await push.register(registration());
+  const agent = (id, status, background = true) => ({
+    type: "subagent-update",
+    agent: { id, title: "Review", status, ...(background ? { background } : {}), startedAt: 1, updatedAt: 1, transcript: [] },
+  });
+  push.observe(chatId, { type: "turn-started", turnId: "t1" });
+  push.observe(chatId, agent("a", "running"));
+  push.observe(chatId, { type: "text-delta", text: "Waiting on the reviewer." });
+  push.observe(chatId, { type: "turn-completed" });
+  await push.settled();
+  assert.equal(messages.length, 0);
+  push.observe(chatId, { type: "turn-started", turnId: "t2", continues: "t1" });
+  push.observe(chatId, agent("a", "completed"));
+  push.observe(chatId, agent("b", "running"));
+  push.observe(chatId, { type: "text-delta", text: "First review in; waiting on the second." });
+  push.observe(chatId, { type: "turn-completed" });
+  await push.settled();
+  assert.equal(messages.length, 0);
+  push.observe(chatId, agent("b", "completed"));
+  await push.settled();
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].title, /Turn completed/);
+  assert.equal(messages[0].body, "First review in; waiting on the second.");
+  push.observe(chatId, { type: "turn-started", turnId: "t3" });
+  push.observe(chatId, agent("c", "running"));
+  push.observe(chatId, { type: "turn-failed", message: "Provider unavailable" });
+  await push.settled();
+  assert.equal(messages.length, 2);
+  push.observe(chatId, agent("c", "cancelled"));
+  await push.settled();
+  assert.equal(messages.length, 2);
+  push.observe(chatId, { type: "turn-started", turnId: "t4" });
+  push.observe(chatId, agent("d", "running", false));
+  push.observe(chatId, { type: "turn-completed" });
+  await push.settled();
+  assert.equal(messages.length, 3);
+});

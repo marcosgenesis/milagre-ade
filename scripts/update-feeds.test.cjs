@@ -75,6 +75,16 @@ test("a beta tag needs only the beta feed and refreshes it", (t) => {
   assert.equal(YAML.parse(fs.readFileSync(f.file, "utf8")).sha512, digest);
   assert.equal(f.run("--check").status, 0);
 });
+test("a Linux beta tag needs only the Linux beta feed", (t) => {
+  const f = fixture(t, { tag: "v1.2.3-beta.7", feeds: ["beta-mac.yml"] });
+  const linux = ["Milagre-1.2.3-beta.7-x86_64.AppImage", "Milagre-1.2.3-beta.7-amd64.deb", "Milagre-1.2.3-beta.7-x86_64.rpm"];
+  for (const name of linux) fs.writeFileSync(path.join(f.root, name), "abc");
+  const digest = createHash("sha512").update("abc").digest("base64");
+  const feed = { version: "1.2.3-beta.7", files: linux.map((url) => ({ url, sha512: digest, size: 3 })), path: linux[0], sha512: digest };
+  assert.notEqual(f.run("--platform", "linux", "--check").status, 0, "no feed yet");
+  fs.writeFileSync(path.join(f.root, "beta-linux.yml"), YAML.stringify(feed));
+  assert.equal(f.run("--platform", "linux", "--check").status, 0);
+});
 test("a macos,linux platform list needs the Linux feed and its installers", (t) => {
   const f = fixture(t);
   const linux = ["Milagre-1.2.3-x86_64.AppImage", "Milagre-1.2.3-amd64.deb", "Milagre-1.2.3-x86_64.rpm"];
@@ -83,6 +93,8 @@ test("a macos,linux platform list needs the Linux feed and its installers", (t) 
   for (const name of linux) fs.writeFileSync(path.join(f.root, name), "abc");
   const feed = { version: "1.2.3", files: linux.map((url) => ({ url, sha512: "stale", size: 1 })), path: linux[0], sha512: "stale" };
   fs.writeFileSync(path.join(f.root, "latest-linux.yml"), YAML.stringify(feed));
+  assert.notEqual(f.run(...both, "--check").status, 0, "no Linux beta feed: beta installs could not move to this release");
+  fs.writeFileSync(path.join(f.root, "beta-linux.yml"), YAML.stringify(feed));
   assert.equal(f.run(...both).status, 0);
   assert.equal(f.run(...both, "--check").status, 0);
   fs.unlinkSync(path.join(f.root, "latest-mac.yml"));

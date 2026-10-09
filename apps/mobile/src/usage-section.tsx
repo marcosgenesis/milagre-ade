@@ -5,11 +5,14 @@ import type { ProviderUsage, UsageWindow } from "@milagre/shared/model";
 import { providerName } from "@milagre/shared/providers";
 import { formatPercent, formatResetsIn, formatUpdatedAgo } from "@milagre/shared/usage";
 import { ProviderLogo, SpinnerRing } from "./icons";
-import { colors, IconButton, styles } from "./ui";
+import { IconButton, useStyles } from "./ui";
 import { useSession } from "./session";
 import { useUsage } from "./use-usage";
+import { useTheme } from "./theme";
 
 function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const percent = Math.max(0, Math.min(100, window.usedPercent));
   const reset = formatResetsIn(window.resetsAt, now);
   return (
@@ -39,6 +42,8 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
 }
 
 function ProviderRows({ provider, now }: { provider: ProviderUsage; now: number }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const failed = provider.status === "error";
   const account = provider.account?.email || provider.account?.label;
   return (
@@ -83,6 +88,8 @@ function ProviderRows({ provider, now }: { provider: ProviderUsage; now: number 
 
 /** Plan usage, sourced only from the currently connected computer. */
 export function UsageSection() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const session = useSession();
   const usage = useUsage(session.client, session.snapshot?.project.path, session.providerRevision);
   const [now, setNow] = useState(Date.now);

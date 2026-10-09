@@ -106,6 +106,7 @@ export function PickerRow({
   option = false,
   disabled = false,
   wrapLabel = false,
+  mono = false,
 }: {
   icon?: ReactNode;
   label: string;
@@ -117,6 +118,8 @@ export function PickerRow({
   option?: boolean;
   disabled?: boolean;
   wrapLabel?: boolean;
+  /** The label in the mono font, for branch names; prose like issue titles stays in the body font. */
+  mono?: boolean;
 }) {
   return (
     <button
@@ -131,7 +134,11 @@ export function PickerRow({
     >
       {icon && <span className="shrink-0">{icon}</span>}
       <span className={`flex min-w-0 flex-1 ${wrapLabel ? "flex-col gap-1" : "items-baseline gap-1.5"}`}>
-        <strong className={`${wrapLabel ? "w-full break-all whitespace-normal font-mono leading-5" : "shrink-0"} text-xs font-medium text-ink`}>{label}</strong>
+        <strong
+          className={`${wrapLabel ? `w-full whitespace-normal leading-5 ${mono ? "break-all" : "break-words"}` : "shrink-0"} ${mono ? "font-mono" : ""} text-xs font-medium text-ink`}
+        >
+          {label}
+        </strong>
         {meta && (
           <span
             data-picker-meta

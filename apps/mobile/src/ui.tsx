@@ -594,7 +594,7 @@ export function PullDown({
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
   nativeTrigger?: NativeMenuTrigger;
-  searchable?: { placeholder: string; emptyLabel: string };
+  searchable?: { placeholder: string; emptyLabel: string; mono?: boolean };
 }) {
   const { colors } = useTheme();
   if (searchable)

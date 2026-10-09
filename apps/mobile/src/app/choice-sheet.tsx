@@ -3,10 +3,14 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "rea
 import { Stack, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GitBranchIcon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { EdgeFade } from "../bottom-fade";
 import { currentChoice } from "../choice-store";
 import { Icon } from "../icons";
 import { useStyles } from "../ui";
 import { fonts, useTheme } from "../theme";
+
+/** The grabber and title bar of the sheet, which content scrolls under. */
+const SHEET_HEADER_HEIGHT = 76;
 
 function ChoiceSeparator() {
   const { colors } = useTheme();
@@ -137,7 +141,9 @@ export default function ChoiceSheet() {
           >
             {entry.leading ?? <Icon icon={entry.icon ?? GitBranchIcon} tone={item.checked ? "accent" : "ink3"} size={18} />}
             <View style={{ flex: 1, gap: 4 }}>
-              <Text style={{ color: colors.ink, fontFamily: fonts.mono, fontSize: 14, lineHeight: 21 }}>{item.title}</Text>
+              <Text style={{ color: colors.ink, fontSize: 15, lineHeight: 21, ...(entry.mono ? { fontFamily: fonts.mono, fontSize: 14 } : {}) }}>
+                {item.title}
+              </Text>
               {item.subtitle && (
                 <Text numberOfLines={1} ellipsizeMode="middle" style={styles.caption}>
                   {item.subtitle}
@@ -148,6 +154,8 @@ export default function ChoiceSheet() {
           </Pressable>
         )}
       />
+      {/* Rows blur and fade under the transparent title bar, as in the Chat: the sheet doesn't get iOS's soft scroll edge. */}
+      <EdgeFade edge="top" height={SHEET_HEADER_HEIGHT} />
       <Stack.Title>{entry.title}</Stack.Title>
       <Stack.SearchBar
         placeholder={entry.placeholder}

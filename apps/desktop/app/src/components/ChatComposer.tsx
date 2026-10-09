@@ -6,7 +6,9 @@ import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
 import { AnswerCard } from "./agents/AnswerCard";
 import { PullRequestActionCard } from "./agents/PullRequestActionCard";
+import { LinearIssueCard } from "./agents/LinearIssueCard";
 import { isPullRequestAction } from "@milagre/shared/pr-action";
+import { isLinearIssueContext } from "@milagre/shared/linear-issue";
 import { parseDesignFeedback } from "@milagre/shared/artifact";
 import { SubagentCanvas } from "./agents/SubagentCanvas";
 import { useEvent } from "../lib/stable";
@@ -156,12 +158,14 @@ const MessageSection = memo(function MessageSection({
   const advisor = typeof message.context === "object" && message.context?.kind === "advisor-result" ? message.context : null;
   // A PR-blocker pill's message shows as a card, not as the skill prompt the agent read.
   const prAction = isUser && isPullRequestAction(message.context) ? message.context : null;
+  // So does a Chat's first message when it was started from a Linear issue.
+  const issue = isUser && isLinearIssueContext(message.context) ? message.context : null;
   // A message another Chat sent sits apart from the user's own: left-aligned, with its sender over it.
   // Feedback sent from the design canvas shows as a card, not as the text the agent reads.
-  const feedback = isUser && !linked && !advisor && !prAction ? parseDesignFeedback(message.body) : null;
+  const feedback = isUser && !linked && !advisor && !prAction && !issue ? parseDesignFeedback(message.body) : null;
   // So do the answers to the agent's questions.
   const answered = isUser && !linked && !advisor && !feedback && message.answered?.length ? message.answered : null;
-  const bubble = isUser && !linked && !advisor && !feedback && !answered && !prAction;
+  const bubble = isUser && !linked && !advisor && !feedback && !answered && !prAction && !issue;
   const recommendation = !isUser && !streaming ? parseRecommendation(message.body) : null;
   const outdatedProvider = !isUser && !streaming ? extractOutdatedProvider(message.body) : null;
   const isCurrentlyOutdated = outdatedProvider ? (cliStatus ? cliStatus[outdatedProvider]?.state === "outdated" : true) : false;
@@ -174,7 +178,7 @@ const MessageSection = memo(function MessageSection({
       data-from={messageSender(message)}
       data-linked={linked?.kind}
       data-streaming={streaming || undefined}
-      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble || feedback || answered || prAction ? "items-end pl-12" : ""}`}
+      className={`flex min-w-0 w-full flex-col gap-1.5 transition-[opacity,transform] duration-300 ${bubble || feedback || answered || prAction || issue ? "items-end pl-12" : ""}`}
       style={animate ? { animation: "fade-up 400ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}
     >
       {advisor && (
@@ -184,11 +188,13 @@ const MessageSection = memo(function MessageSection({
       )}
       {linked && <LinkedMessageHeader context={linked} onOpenChat={onOpenChat} />}
       <div
-        className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : feedback || answered || prAction ? "w-full max-w-md" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
+        className={`min-w-0 max-w-full text-[13px] leading-[1.55] text-ink ${bubble ? "rounded-xl bg-field px-3 py-1.5" : feedback || answered || prAction || issue ? "w-full max-w-md" : isUser ? "rounded-xl border border-line px-3 py-2" : ""}`}
       >
         <Attachments images={isUser ? message.images : message.images?.filter((image) => !image.sourcePath)} files={message.files} />
         {prAction ? (
           <PullRequestActionCard action={prAction} />
+        ) : issue ? (
+          <LinearIssueCard issue={issue} />
         ) : feedback ? (
           <DesignFeedbackCard feedback={feedback} messageId={message.id} />
         ) : answered ? (

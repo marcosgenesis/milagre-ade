@@ -223,6 +223,34 @@ async function browserChecks() {
       require("node:fs").mkdirSync(process.env.MILAGRE_SCREENSHOT_DIR, { recursive: true });
       require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-card.png"), shot.toPNG());
     }
+    // A Chat started from a Linear issue shows the issue as a card, with the typed note under it.
+    const issueUrl = "https://linear.app/arketa/issue/BIZ-709/home-tab-and-analytics";
+    await evaluate(`window.setExtraMessages([{ id: 999998, session_id: 1, role: "user",
+      body: "Work on Linear issue BIZ-709: Home tab & analytics: formatting, comparison clarity, drill-downs, report links\\n\\n## Items\\n\\n- [ ] Long class names wrap\\n\\n${issueUrl}\\n\\nStart with the Revenue by Class row",
+      context: { kind: "linear-issue", key: "BIZ-709", title: "Home tab & analytics: formatting, comparison clarity, drill-downs, report links",
+        url: "${issueUrl}", state: { name: "In Progress", type: "started", color: "#f2c94c" }, workspace: "arketa", note: "Start with the Revenue by Class row" } }])`);
+    await waitFor('!!document.querySelector("[data-slot=linear-issue][data-key=BIZ-709]")');
+    assert.ok(await evaluate('document.querySelector("[data-slot=linear-issue]").textContent.includes("In Progress")'));
+    assert.equal(await evaluate('document.querySelector("[data-slot=linear-issue] a").getAttribute("href")'), issueUrl);
+    assert.ok(await evaluate('!!document.querySelector("[data-slot=linear-issue] a [data-linear-logo]")'), "the card shows Linear's mark");
+    assert.ok(
+      await evaluate('document.querySelector("[data-slot=linear-issue] p").textContent === "Start with the Revenue by Class row"'),
+      "the typed note sits under the card",
+    );
+    assert.equal(
+      await evaluate('[...document.querySelectorAll("[data-slot=message]")].some((el) => el.textContent.includes("## Items"))'),
+      false,
+      "the issue renders as a card, not as the prompt text",
+    );
+    assert.equal(await evaluate('document.querySelector("[data-slot=linear-issue]").closest("[data-slot=message]").dataset.linked'), undefined);
+    if (process.env.MILAGRE_SCREENSHOT_DIR) {
+      await evaluate('document.querySelector("[data-slot=linear-issue]").scrollIntoView({ block: "center" })');
+      await delay(250);
+      require("node:fs").writeFileSync(
+        path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-linear-issue-card.png"),
+        (await window.webContents.capturePage()).toPNG(),
+      );
+    }
     // The rail checks below count every message.
     await evaluate("window.setExtraMessages([])");
     const updateButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Update branch')`;

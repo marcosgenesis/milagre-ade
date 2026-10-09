@@ -28,6 +28,7 @@ import type { Client, OpenProject } from "../client";
 import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
 import { pullRequestBlockers } from "@milagre/shared/pr-blockers";
 import { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } from "@milagre/shared/pr-action";
+import { linearIssueContext, linearIssueRequest } from "@milagre/shared/linear-issue";
 import { useComposer, usePendingChats, useSession } from "../session";
 import { pickAttachments, preparePastedImage, discardPastedImage, type PastedImage } from "../attachment-picker";
 import { appendAttachments, attachmentPrompt, prepareAttachments } from "../attachments";
@@ -562,7 +563,7 @@ export default function ChatScreen() {
       files: sending.filter((item) => !item.image).map((item) => item.path || item.name),
       model: model.id,
       provider: actualProvider,
-      context: prAction ?? null,
+      context: issue ? linearIssueContext(issue, draft) : (prAction ?? null),
     });
     pendingStore.setPendingChats((current) => ({
       ...current,
@@ -633,6 +634,8 @@ export default function ChatScreen() {
               prompt: prAction ? pullRequestActionPrompt(prAction) : attachmentPrompt(sent, media.files),
               ...options,
               ...(prAction ? { prAction: { action: prAction.action, pr: prAction.pr, url: prAction.url } } : {}),
+              // A Mac that predates issue cards ignores linearIssue and sends the body as a plain message.
+              ...(issue ? { linearIssue: linearIssueRequest({ key: issue.key, workspace: issue.workspace, note: draft })! } : {}),
             },
           ]);
       accepted = true;

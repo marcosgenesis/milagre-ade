@@ -1,0 +1,61 @@
+// A Chat started from a Linear issue: the card its first message shows, and what the agent is sent.
+// The Mac reads the issue itself and writes all three (see packages/core/src/runtime.cjs, chat:send).
+
+const ISSUE_KEY = /^[a-z][a-z0-9]{0,6}-\d+$/i; // as packages/core/src/linear/links.cjs
+const STATE_TYPES = new Set(["triage", "backlog", "unstarted", "started", "completed", "canceled"]);
+
+/** First message of a Chat started from an issue; text the user had typed goes after the URL. */
+export function issueFirstMessage(issue, typed) {
+  return (
+    `Work on Linear issue ${issue.key}: ${issue.title}` +
+    (issue.description ? `\n\n${issue.description}` : "") +
+    `\n\n${issue.url}` +
+    (typed?.trim() ? `\n\n${typed.trim()}` : "")
+  );
+}
+
+/** A renderer's request to start from an issue, checked: null unless the key looks like one. */
+export function linearIssueRequest(request) {
+  if (!request || typeof request !== "object") return null;
+  const { key, workspace, note } = request;
+  if (typeof key !== "string" || !ISSUE_KEY.test(key)) return null;
+  if (workspace !== undefined && (typeof workspace !== "string" || !workspace)) return null;
+  if (note !== undefined && typeof note !== "string") return null;
+  return { key: key.toUpperCase(), ...(workspace ? { workspace } : {}), ...(note?.trim() ? { note: note.trim() } : {}) };
+}
+
+/** The card's context, from the issue the Mac just read and the text the user typed. */
+export function linearIssueContext(issue, note) {
+  return {
+    kind: "linear-issue",
+    key: issue.key,
+    title: issue.title,
+    url: issue.url,
+    state: { name: issue.state.name, type: issue.state.type, color: issue.state.color },
+    ...(issue.workspace ? { workspace: issue.workspace } : {}),
+    ...(note?.trim() ? { note: note.trim() } : {}),
+  };
+}
+
+/** What the agent reads: the issue, then where to get the rest of it. */
+export function linearIssuePrompt(issue, note) {
+  return (
+    `${issueFirstMessage(issue, note)}\n\n` +
+    `Milagre is signed in to Linear for you: read the issue's comments, attachments, images and linked issues with Milagre's ` +
+    `linear_issue tool (linear_file for uploaded images, linear_search for other issues), not a Linear MCP or connector.`
+  );
+}
+
+export function isLinearIssueContext(context) {
+  return (
+    typeof context === "object" &&
+    context !== null &&
+    context.kind === "linear-issue" &&
+    typeof context.key === "string" &&
+    typeof context.title === "string" &&
+    typeof context.url === "string" &&
+    typeof context.state === "object" &&
+    context.state !== null &&
+    STATE_TYPES.has(context.state.type)
+  );
+}

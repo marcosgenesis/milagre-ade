@@ -56,15 +56,7 @@ export type LinearIssuesResult =
   | { issues: LinearIssue[]; workspace?: string; workspaces?: { id: string; name: string }[] }
   | { error: string; notConnected?: boolean };
 
-/** First message of a Chat started from an issue; text the user had typed goes after the URL. */
-export function issueFirstMessage(issue: LinearIssue, typed?: string): string {
-  return (
-    `Work on Linear issue ${issue.key}: ${issue.title}` +
-    (issue.description ? `\n\n${issue.description}` : "") +
-    `\n\n${issue.url}` +
-    (typed?.trim() ? `\n\n${typed.trim()}` : "")
-  );
-}
+export { issueFirstMessage } from "./linear-issue.mjs";
 
 /** Shown when a linked Worktree's branch doesn't name its issue, so Linear can't see the work until the PR says so. */
 export const LINK_PR_HINT = (key: string) => `Add "Fixes ${key}" to the PR description so Linear tracks it.`;

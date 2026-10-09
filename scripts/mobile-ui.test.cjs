@@ -852,6 +852,7 @@ function chatHost({
     "@hugeicons/core-free-icons": icons,
     "@milagre/shared/pr-blockers": require("@milagre/shared/pr-blockers"),
     "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
+    "@milagre/shared/linear-issue": require("@milagre/shared/linear-issue"),
     "../indicators": require("../apps/mobile/src/indicators.ts"),
     "../icons": { Icon: "Icon" },
     "../bottom-fade": { BottomFade: "BottomFade", EdgeFade: "EdgeFade" },
@@ -5328,7 +5329,9 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
     "./answer-card": { AnswerCard: "AnswerCard" },
     "./murilo-mode": { useMuriloMode: () => [false, () => {}] },
     "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
+    "./linear-issue-card": { LinearIssueCard: "LinearIssueCard" },
     "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
+    "@milagre/shared/linear-issue": require("@milagre/shared/linear-issue"),
     "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
     "./theme": { hex: () => "#000" },
     "./viewer-store": { showImages() {} },
@@ -5358,6 +5361,26 @@ test("a reply shows the thinking it wrote nothing after, once it waits on a ques
   });
   assert.ok(findType(prTree, "PullRequestActionCard"));
   assert.ok(!findType(prTree, "Text"), "no bubble with the body text");
+  // And a Chat's first message when it was started from a Linear issue.
+  const issueTree = ChatReply({
+    message: {
+      id: 3,
+      session_id: 1,
+      body: "Work on Linear issue ENG-12: Fix login\n\nhttps://linear.app/acme/issue/ENG-12",
+      context: {
+        kind: "linear-issue",
+        key: "ENG-12",
+        title: "Fix login",
+        url: "https://linear.app/acme/issue/ENG-12",
+        state: { name: "Todo", type: "unstarted", color: "#aaa" },
+      },
+      role: "user",
+    },
+    onActivity() {},
+    media: (path) => path,
+  });
+  assert.ok(findType(issueTree, "LinearIssueCard"));
+  assert.ok(!findType(issueTree, "Text"), "no bubble with the prompt text");
   const conclusion = "T3 Code tries every route in parallel.";
   const steps = [
     { id: "t1", kind: "thinking", title: "Thought", status: "done", detail: "Looking.", offset: 9 },
@@ -5410,7 +5433,9 @@ test("mobile Murilo mode shows each tool call and the notes between them in the 
       "./answer-card": { AnswerCard: "AnswerCard" },
       "./murilo-mode": { useMuriloMode: () => [murilo, () => {}] },
       "./pr-action-card": { PullRequestActionCard: "PullRequestActionCard" },
+      "./linear-issue-card": { LinearIssueCard: "LinearIssueCard" },
       "@milagre/shared/pr-action": require("@milagre/shared/pr-action"),
+      "@milagre/shared/linear-issue": require("@milagre/shared/linear-issue"),
       "@milagre/shared/artifact": require("../packages/shared/src/artifact.ts"),
       "./theme": { hex: () => "#000" },
       "./viewer-store": { showImages() {} },
@@ -5761,6 +5786,8 @@ test("picking a Linear issue starts a Chat in its own worktree with the issue as
   assert.equal(created.baseBranch, "main");
   const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
   assert.equal(sent.body, issueFirstMessage(linearIssue, "first message"));
+  // The Mac reads the issue again and writes the card; the typed text rides along as its note.
+  assert.equal(JSON.stringify(sent.linearIssue), JSON.stringify({ key: "ENG-12", note: "first message" }));
   assert.equal(screen.params.id, "7");
 });
 

@@ -19,7 +19,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { sessionForWorktree } from "@milagre/shared/model";
 import type { ChatMessage, LinkIssueResult, PullRequestActionContext } from "@milagre/shared/model";
-import { createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
+import { chatTitle, createPendingChat, pendingChatSessionId } from "@milagre/shared/chats";
 import { messageSender } from "@milagre/shared/advisor-result";
 import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 import { LINK_PR_HINT, issueChipLabel, issueFirstMessage, type LinearIssue, type LinearIssuesResult } from "@milagre/shared/linear";
@@ -361,7 +361,7 @@ export default function ChatScreen() {
   const branchDisabled = targetDisabled || (newWorktree && !branches?.items.length);
   const branchName = newWorktree ? base || "Choose branch" : worktree?.name || "Choose branch";
   const unavailable = session.cliStatus?.[actualProvider]?.state !== undefined && session.cliStatus[actualProvider].state !== "ready";
-  const title = chat?.title || chat?.generatedTitle || pending?.preview.session.title || "New Chat";
+  const title = chat ? chatTitle(chat, messages) : pending?.preview.session.title || "New Chat";
   async function action(work: () => Promise<unknown>, allowPending = false) {
     if (actionBusy || (!allowPending && pending)) return false;
     setBusy(true);

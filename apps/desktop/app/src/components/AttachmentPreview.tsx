@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Cancel01Icon, SourceCodeIcon, TextFontIcon } from "@hugeicons/core-free-icons";
 import { isMarkdownFile } from "@milagre/shared/file-link";
 import { FileCode } from "./FileCode";
 import { FilesRoot } from "./editor-links";
@@ -82,19 +84,22 @@ export function AttachmentPreview({ path, name, file, close }: { file?: File; pa
             {name}
           </h2>
           {markdown && result?.text && (
-            <div role="group" aria-label="Markdown view" className="flex rounded-control bg-field p-0.5 text-xs">
+            <div role="group" aria-label="Markdown view" className="flex rounded-control bg-field p-0.5">
               {[
-                { label: "Formatted", value: true },
-                { label: "Source", value: false },
+                { label: "Formatted", icon: TextFontIcon, value: true },
+                { label: "Source", icon: SourceCodeIcon, value: false },
               ].map((option) => (
+                // Native titles: the shared Tooltip portals to body, under this modal dialog's top layer.
                 <button
                   key={option.label}
                   type="button"
+                  aria-label={option.label}
+                  title={option.label}
                   aria-pressed={formatted === option.value}
                   onClick={() => setFormatted(option.value)}
-                  className={`rounded-[5px] px-2 py-0.5 focus-visible:outline-accent-ink ${formatted === option.value ? "bg-surface font-medium text-ink shadow-card" : "text-ink-2 hover:text-ink"}`}
+                  className={`flex size-6 items-center justify-center rounded-[5px] transition-colors focus-visible:outline-accent-ink ${formatted === option.value ? "bg-surface text-ink shadow-card" : "text-ink-3 hover:text-ink"}`}
                 >
-                  {option.label}
+                  <HugeiconsIcon icon={option.icon} size={14} strokeWidth={1.8} />
                 </button>
               ))}
             </div>
@@ -102,10 +107,11 @@ export function AttachmentPreview({ path, name, file, close }: { file?: File; pa
           <button
             type="button"
             aria-label="Close file preview"
+            title="Close"
             onClick={close}
-            className="rounded-control px-2 py-1 text-sm hover:bg-hover focus-visible:outline-accent-ink"
+            className="flex size-7 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-hover hover:text-ink focus-visible:outline-accent-ink"
           >
-            Close
+            <HugeiconsIcon icon={Cancel01Icon} size={16} strokeWidth={1.8} />
           </button>
         </header>
         <ScrollArea className="min-h-0 flex-1 p-4">

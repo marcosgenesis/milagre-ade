@@ -238,13 +238,15 @@ async function browserChecks() {
   const url = `http://127.0.0.1:${server.address().port}/`;
   const errors = [];
   const opened = [];
-  async function open({ width, height, mobile = false, reducedMotion = false, userAgent }) {
+  // A Mac browser unless a check says otherwise: the page picks its download from the user agent, and CI runs on Linux.
+  const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+  async function open({ width, height, mobile = false, reducedMotion = false, userAgent = MAC }) {
     const window = new BrowserWindow({ width, height, useContentSize: true, show: false, webPreferences: { backgroundThrottling: false } });
     opened.push(window);
     window.webContents.on("console-message", (event) => {
       if (event.level === "error") errors.push(event.message);
     });
-    if (userAgent) window.webContents.setUserAgent(userAgent);
+    window.webContents.setUserAgent(userAgent);
     await window.loadURL(url);
     if (mobile || reducedMotion) {
       // Device emulation before the first navigation crashes Electron 44, so emulate after the first load and reload.

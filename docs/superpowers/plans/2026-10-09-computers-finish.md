@@ -39,7 +39,7 @@ Each one is pinned by a test in its task:
 - One unit file: `node --test <path>`. One workspace: `npm test -- --unit --workspace <shared|daemon|desktop|mobile>`. All unit tests: `npm test -- --unit`. One Electron check: `npm test -- --only <name>`. Typecheck: `npm run typecheck`. Lint: `npm run lint`.
 - Popover route lines, verbatim from the spec: "This Mac", "Same network", "relay.milagre.cloud", "Offline, seen 2h ago". The gear's tooltip: "<name> settings: rename, connection, remove". This Mac's gear opens Settings › Devices.
 - Sidebar, verbatim: "with two or more computers, every chat row is two lines and the second line starts with a laptop icon and the computer name, then the PR chips. An offline computer's Projects and rows are dimmed and its rows read "studio, offline"." With just this Mac the sidebar is unchanged.
-- Offline banner, verbatim from `sidebar-c-sections` v3: "studio is offline. This is the last copy it sent, 2h ago. You can read it; sending waits until studio is back." The composer is disabled, and its placeholder adds " (studio is offline)".
+- Offline banner, verbatim from `sidebar-c-sections` v3: "studio is offline. This is the last copy it sent, 2h ago. You can read it until studio is back." The composer is disabled, and its placeholder adds " (studio is offline)".
 - Errors, verbatim (already in `computer-errors.cjs`): "Removed on studio. Pair again with a new link.", "This link expired. Copy a new one on studio.", "Update Milagre on studio to connect.", "studio has too many devices connected. Remove one in its Settings › Devices." A send to an offline computer is refused with "studio is offline."
 - Denied or local-only calls answer "Not available on a remote computer". "A denied or local-only action is hidden on remote chats rather than shown disabled."
 - Local-only, from the spec: `editor:open`, `project:reveal`, `skills:open`, `skills:reveal`, the `project:open` folder dialog, image copy/save menus that read local paths, notification settings and updates.
@@ -1172,11 +1172,11 @@ test("the gear's tooltip, the banner and the composer say the spec's words", () 
   assert.equal(settingsTooltip("arketa"), "arketa settings: rename, connection, remove");
   assert.equal(
     offlineBanner(view({ state: "offline" }), NOW),
-    "studio is offline. This is the last copy it sent, 2h ago. You can read it; sending waits until studio is back.",
+    "studio is offline. This is the last copy it sent, 2h ago. You can read it until studio is back.",
   );
   assert.equal(
     offlineBanner(view({ state: "offline", lastSeen: null }), NOW),
-    "studio is offline. This is the last copy it sent. You can read it; sending waits until studio is back.",
+    "studio is offline. This is the last copy it sent. You can read it until studio is back.",
   );
   assert.equal(offlinePlaceholder("studio"), " (studio is offline)");
 });
@@ -1250,7 +1250,7 @@ export const isReadOnly = (view: ComputerView | undefined) => view?.state !== "o
 /** The banner over an offline computer's chat (design sidebar-c-sections v3). */
 export function offlineBanner(view: ComputerView, now: number): string {
   const ago = seenAgo(view.lastSeen, now);
-  return `${view.name} is offline. This is the last copy it sent${ago ? `, ${ago}` : ""}. You can read it; sending waits until ${view.name} is back.`;
+  return `${view.name} is offline. This is the last copy it sent${ago ? `, ${ago}` : ""}. You can read it until ${view.name} is back.`;
 }
 /** Appended to the composer's placeholder while its computer is offline. */
 export const offlinePlaceholder = (name: string) => ` (${name} is offline)`;
@@ -4648,7 +4648,7 @@ In `scripts/test-sidebar-computers.cjs`, after the menus' PASS line, add:
     await waitFor(`!!document.querySelector('[data-offline-banner]')`);
     assert.equal(
       await evaluate(`document.querySelector('[data-offline-banner]').textContent.trim()`),
-      "studio is offline. This is the last copy it sent, 2h ago. You can read it; sending waits until studio is back.",
+      "studio is offline. This is the last copy it sent, 2h ago. You can read it until studio is back.",
     );
     assert.equal(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').disabled`), true);
     assert.match(await evaluate(`document.querySelector('textarea[aria-label="Prompt"]').placeholder`), / \(studio is offline\)$/);

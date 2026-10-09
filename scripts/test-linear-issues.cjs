@@ -19,11 +19,27 @@ const issues = [
 ];
 const linearOn = new URLSearchParams(location.search).get('linear') === 'on';
 window.__queries = [];
+window.__fresh = [];
+window.__workspaces = [];
+const twoWorkspaces = new URLSearchParams(location.search).get('workspaces') === 'two';
+// The second workspace, listed only with ?workspaces=two: its own issue, and both workspaces as tabs.
+const betaIssues = [{ key: 'OPS-7', title: 'Rotate the relay keys', url: 'https://linear.app/beta/issue/OPS-7', branchName: 'ops-7-rotate', state: { name: 'Todo', type: 'unstarted', color: '#aaa' } }];
+// While __hold is set, answers wait for window.__release(), so the loading state can be seen.
+window.__hold = new URLSearchParams(location.search).get('hold') === 'on';
 window.milagre = {
-  listLinearIssues: async (query) => {
+  listLinearIssues: async (query, options) => {
     window.__queries.push(query ?? null);
+    window.__fresh.push(options?.fresh === true);
+    window.__workspaces.push(options?.workspace ?? null);
+    if (window.__hold) await new Promise((resolve) => (window.__release = resolve));
     const search = (query ?? '').trim().toLowerCase();
-    return { issues: issues.filter((issue) => !search || (issue.key + ' ' + issue.title).toLowerCase().includes(search)) };
+    const workspace = twoWorkspaces && options?.workspace === 'beta' ? 'beta' : 'acme';
+    const listed = (workspace === 'beta' ? betaIssues : issues).map((issue) => ({ ...issue, workspace }));
+    return {
+      issues: listed.filter((issue) => !search || (issue.key + ' ' + issue.title).toLowerCase().includes(search)),
+      workspace,
+      workspaces: twoWorkspaces ? [{ id: 'acme', name: 'Acme' }, { id: 'beta', name: 'Beta Labs' }] : [{ id: 'acme', name: 'Acme' }],
+    };
   },
 };
 const worktrees = [{ id: 1, name: 'main', path: '/fixture' }];
@@ -46,7 +62,7 @@ function Fixture() {
         onWorktreeChange={() => {}}
         linearActive={linearOn}
         onStartFromIssue={(issue) => {
-          window.__started = { key: issue.key, body: issueFirstMessage(issue, 'Keep it small') };
+          window.__started = { key: issue.key, ...(issue.workspace && issue.workspace !== 'acme' ? { workspace: issue.workspace } : {}), body: issueFirstMessage(issue, 'Keep it small') };
         }}
       />
       <div style={{ marginTop: 24, width: 280 }}>
@@ -97,13 +113,24 @@ async function checks(url) {
       "no chip while Linear is off",
     );
     assert.equal(await evaluate(`!!document.querySelector('[data-linear-issue-chip]')`), false, "no row chip without an issue");
-    await window.loadURL(url + "?linear=on");
+    await window.loadURL(url + "?linear=on&hold=on");
     await waitFor(`!!document.querySelector('[data-new-chat-pickers]')`);
     await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Linear issue')`);
 
     // (a) Linear on: the chip opens the issue list, typing filters through listLinearIssues, picking starts the chat.
+    // Until the list arrives the panel shows skeleton rows at full height, not a "Loading" line it then grows out of.
     await click("Linear issue");
+    await waitFor(`!!document.querySelector('[data-linear-issue-skeleton]') && typeof window.__release === 'function'`);
+    assert.equal(await evaluate(`document.body.textContent.includes('No issues found.')`), false, "no empty label while loading");
+    await screenshot("linear-issue-loading");
+    await evaluate(`window.__hold = false; window.__release()`);
     await waitFor(`document.querySelectorAll('[data-linear-issue-row]').length === 2`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-linear-issue-skeleton]')`), false, "the skeleton goes once issues arrive");
+    assert.equal(await evaluate(`window.__fresh[0]`), false, "opening reads the list the Mac kept");
+    await evaluate(`document.querySelector('[data-linear-issues-refresh]').click()`);
+    await waitFor(`window.__fresh.length === 2`);
+    assert.equal(await evaluate(`window.__fresh[1]`), true, "refresh asks Linear again");
+    await waitFor(`!document.querySelector('[data-linear-issues-refresh]').disabled`);
     assert.equal(await evaluate(`!!document.querySelector('[data-linear-issue-row] [data-linear-logo]')`), true, "picker rows show Linear's mark");
     assert.equal(await evaluate(`document.body.textContent.includes('Start from a Linear issue')`), true, "the picker is titled");
     await screenshot("linear-issue-menu");
@@ -118,6 +145,32 @@ async function checks(url) {
       body: "Work on Linear issue ENG-2: Dark mode tokens\n\nShare the palette.\n\nhttps://linear.app/acme/issue/ENG-2\n\nKeep it small",
     });
     await waitFor(`!document.querySelector('input[placeholder="Search issues"]')`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-linear-workspace-tabs]')`), false, "no tabs with one workspace");
+
+    // (b2) With two workspaces the picker has a tab for each; a tab lists and starts from its own workspace's issues,
+    // and the picker opens on it next time.
+    await window.loadURL(url + "?linear=on&workspaces=two");
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Linear issue')`);
+    await click("Linear issue");
+    await waitFor(`document.querySelectorAll('[data-linear-workspace-tab]').length === 2`);
+    await waitFor(`document.querySelectorAll('[data-linear-issue-row]').length === 2`);
+    await evaluate(`document.querySelector('[data-linear-workspace-tab="beta"]').click()`);
+    await waitFor(
+      `document.querySelectorAll('[data-linear-issue-row]').length === 1 && document.querySelector('[data-linear-issue-row]').textContent.includes('OPS-7')`,
+    );
+    assert.equal(await evaluate(`document.querySelector('[data-linear-workspace-tab="beta"]').getAttribute('aria-selected')`), "true");
+    assert.equal(await evaluate(`window.__workspaces.at(-1)`), "beta");
+    await screenshot("linear-issue-workspaces");
+    await evaluate(`document.querySelector('[data-linear-issue-row] button').click()`);
+    await waitFor(`window.__started?.key === 'OPS-7'`);
+    assert.equal(await evaluate(`window.__started.workspace`), "beta", "the picked issue says which workspace it came from");
+    await waitFor(`!document.querySelector('input[placeholder="Search issues"]')`);
+    await click("Linear issue");
+    await waitFor(`document.querySelector('[data-linear-workspace-tab="beta"]')?.getAttribute('aria-selected') === 'true'`);
+    assert.equal(await evaluate(`window.__workspaces.at(-1)`), "beta", "the picker reopens on the last workspace");
+    await evaluate(`localStorage.removeItem('milagre.linear.workspace')`);
+    await window.loadURL(url + "?linear=on");
+    await waitFor(`!!document.querySelector('[data-new-chat-pickers]')`);
 
     // (c) A sidebar row with a linked issue shows its chip, and the row without one shows none.
     await waitFor(`document.querySelector('[data-linear-issue-chip]')?.textContent === 'ENG-1 · In Progress'`);

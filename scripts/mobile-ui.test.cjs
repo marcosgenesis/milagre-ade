@@ -5148,11 +5148,7 @@ test("mobile Experimental page shows the Mac's Linear switch and status, re-read
   const modules = (session) => ({
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
-    "@milagre/shared/linear": {
-      LINEAR_TITLE: "Linear",
-      LINEAR_HINT: "hint",
-      linearStatusLine: (value, where) => (value.connected ? "Connected as Victor to Acme" : `not connected on ${where}`),
-    },
+    "@milagre/shared/linear": require("../packages/shared/src/linear.ts"),
     "react-native": { View: "View", Text: "Text" },
     "expo-router": { useFocusEffect: (fn) => focused.push(fn) },
     "@milagre/shared/themes": { DEFAULT_THEME_ID: "milagre-blue", seedsFrom: (id) => ({ from: id }) },
@@ -5174,17 +5170,20 @@ test("mobile Experimental page shows the Mac's Linear switch and status, re-read
   await settle();
   let tree = render();
   assert.equal(find(tree, (n) => n.props?.title === "Linear").props.selected, true);
-  assert.ok(text(tree, "not connected on phone"));
-  // Connected on the Mac while the phone was elsewhere: coming back to the page shows it.
-  status = { connected: true };
+  assert.ok(text(tree, "Connect Linear from Settings on your Mac"));
+  // Connected on the Mac while the phone was elsewhere: coming back to the page shows it, one line per workspace.
+  const acme = { id: "acme", viewer: { name: "Victor", email: "v@x" }, organization: { name: "Acme", urlKey: "acme" } };
+  const beta = { id: "beta", viewer: { name: "Vic", email: "v@b" }, organization: { name: "Beta Labs", urlKey: "beta" } };
+  status = { connected: true, viewer: acme.viewer, organization: acme.organization, workspaces: [acme, beta] };
   focused.at(-1)();
   await settle();
   tree = render();
-  assert.ok(text(tree, "Connected as Victor to Acme"));
+  assert.ok(text(tree, "Connected to Acme, as Victor"));
+  assert.ok(text(tree, "Connected to Beta Labs, as Vic"));
   find(tree, (n) => n.props?.title === "Linear").props.onPress();
   await settle();
   assert.deepEqual(saves, [false]);
-  assert.equal(text(render(), "Connected as Victor to Acme"), undefined, "the status hides while the switch is off");
+  assert.equal(text(render(), "Connected to Acme, as Victor"), undefined, "the status hides while the switch is off");
 
   const offline = load("experimental-section.tsx", modules({ client: null })).ExperimentalSection;
   react.begin();
@@ -5312,6 +5311,52 @@ test("picking a Linear issue starts a Chat in its own worktree with the issue as
   const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
   assert.equal(sent.body, issueFirstMessage(linearIssue, "first message"));
   assert.equal(screen.params.id, "7");
+});
+
+test("with two Linear workspaces the issue sheet has a tab each, and the picked issue's workspace creates the Chat", async () => {
+  const workspaces = [
+    { id: "acme", name: "Acme" },
+    { id: "beta", name: "Beta Labs" },
+  ];
+  const screen = chatHost({
+    effects: true,
+    linear: { active: true },
+    call: async (method, args) => {
+      if (method === "project:branches") return ["main"];
+      if (method === "linear:issues") {
+        const workspace = args[0]?.workspace === "beta" ? "beta" : "acme";
+        const issues = workspace === "beta" ? [{ ...linearIssue, key: "OPS-7", workspace }] : [{ ...linearIssue, workspace }];
+        return { issues, workspace, workspaces };
+      }
+      if (method === "worktree:create") return { worktreeId: 9, project: { state: { sessions: { 7: { id: 7, worktree_id: 9 } } } } };
+      return { sessionId: 7 };
+    },
+  });
+  screen.session.snapshot.project.state.worktrees = { 1: { id: 1, name: "main" } };
+  find(screen.render(), (node) => node.props?.accessibilityLabel === "Start from a Linear issue").props.onPress();
+  await settle();
+  const request = screen.choices.at(-1);
+  assert.equal(
+    JSON.stringify(request.tabs),
+    JSON.stringify([
+      { id: "acme", label: "Acme" },
+      { id: "beta", label: "Beta Labs" },
+    ]),
+  );
+  assert.equal(request.tab, "acme");
+  // The sheet's tab reads the other workspace; the same key in two workspaces never collides.
+  const beta = await request.load("beta", false);
+  assert.equal(JSON.stringify(beta.map((item) => item.id)), JSON.stringify(["beta:OPS-7"]));
+  assert.equal(
+    JSON.stringify(screen.calls.filter((call) => call.method === "linear:issues").at(-1).args),
+    JSON.stringify([{ fresh: false, workspace: "beta" }]),
+  );
+  screen.render();
+  request.onSelect("beta:OPS-7");
+  await settle();
+  const created = screen.calls.find((call) => call.method === "worktree:create").args[0];
+  assert.equal(created.issueKey, "OPS-7");
+  assert.equal(created.issueWorkspace, "beta");
 });
 
 test("a Chat row shows its Worktree's Linear issue even without pull requests", () => {

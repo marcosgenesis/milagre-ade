@@ -82,6 +82,8 @@ export interface Worktree {
   base?: string;
   /** The Linear issue this Worktree was started from (its key); the branch may also name one. */
   linearIssue?: string;
+  /** The Linear workspace (its URL key) `linearIssue` belongs to; links saved before workspaces have none. */
+  linearWorkspace?: string;
   /** Lines changed against the base, refreshed in the background so the hover card shows it at once. */
   diff?: DiffStat;
   sharedChat?: { linkId: string; sessionId: number };
@@ -537,6 +539,8 @@ export interface WorktreeRequest {
   baseBranch: string;
   prompt: string;
   issueKey?: string;
+  /** The Linear workspace the issue was picked from. */
+  issueWorkspace?: string;
 }
 
 export interface CoordinatorState {

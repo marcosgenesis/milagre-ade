@@ -13,19 +13,26 @@ const node = (key, extra = {}) => ({
   ...extra,
 });
 
-// A fake of the Mac's Linear connection: `answer` gets each document and returns its data or throws.
-function fakeLinear({ enabled = true, connected = true, answer = () => ({}) } = {}) {
+const acme = { id: "acme", viewer: { name: "V", email: "v@x" }, organization: { name: "Acme", urlKey: "acme" } };
+const beta = { id: "beta", viewer: { name: "V", email: "v@x" }, organization: { name: "Beta", urlKey: "beta" } };
+
+// A fake of the Mac's Linear connections: `answer` gets each document (and its workspace) and returns its data or throws.
+function fakeLinear({ enabled = true, connected = true, workspaces = [acme], answer = () => ({}) } = {}) {
   const calls = [];
   return {
     calls,
     enabled: () => enabled,
-    status: () => (connected ? { connected: true, viewer: { name: "V", email: "v@x" }, organization: { name: "A", urlKey: "a" } } : { connected: false }),
-    query: async (document, variables = {}) => {
-      calls.push({ document, variables });
-      return answer(document, variables);
+    workspaces: () => (connected ? workspaces : []),
+    query: async (workspace, document, variables = {}) => {
+      calls.push({ workspace, document, variables });
+      return answer(document, variables, workspace);
     },
   };
 }
+
+// The answer to a batched read: `has(key)` says whether the workspace owns the key.
+const batch = (document, has) =>
+  Object.fromEntries([...document.matchAll(/(i\d+): issue\(id: "([^"]+)"/g)].map(([, alias, key]) => [alias, has(key) ? node(key) : null]));
 
 test("issues say why they can't load when the switch is off or Linear isn't connected", async () => {
   const off = fakeLinear({ enabled: false });
@@ -41,8 +48,11 @@ test("issues say why they can't load when the switch is off or Linear isn't conn
 test("with no query the list is the issues assigned to me, started or unstarted, newest first", async () => {
   const linear = fakeLinear({ answer: () => ({ viewer: { assignedIssues: { nodes: [node("ENG-1"), node("ENG-2", { description: "Details" })] } } }) });
   const result = await createLinearIssues({ linear }).list();
+  assert.deepEqual(result.workspace, "acme");
+  assert.deepEqual(result.workspaces, [{ id: "acme", name: "Acme" }]);
   assert.deepEqual(result.issues[0], {
     key: "ENG-1",
+    workspace: "acme",
     title: "Title ENG-1",
     url: "https://linear.app/acme/issue/ENG-1",
     branchName: "eng-1-title",
@@ -51,6 +61,24 @@ test("with no query the list is the issues assigned to me, started or unstarted,
   assert.equal(result.issues[1].description, "Details");
   assert.match(linear.calls[0].document, /assignedIssues\(first: ?50, orderBy: ?updatedAt/);
   assert.match(linear.calls[0].document, /type: \{ in: \["started", "unstarted"\] \}/);
+});
+
+test("the assigned list is kept for a minute, and fresh reads it again", async () => {
+  let clock = 0;
+  const linear = fakeLinear({ answer: () => ({ viewer: { assignedIssues: { nodes: [node("ENG-1")] } } }) });
+  const issues = createLinearIssues({ linear, now: () => clock });
+  await issues.list();
+  clock = 59_000;
+  assert.deepEqual(
+    (await issues.list()).issues.map((issue) => issue.key),
+    ["ENG-1"],
+  );
+  assert.equal(linear.calls.length, 1, "A reopen within the minute asks Linear nothing");
+  await issues.list(undefined, { fresh: true });
+  assert.equal(linear.calls.length, 2, "Refresh asks Linear again");
+  clock = 120_000;
+  await issues.list();
+  assert.equal(linear.calls.length, 3, "An old list is read again");
 });
 
 test("a search asks the workspace for 25 matches, and a key lookup comes first without duplicates", async () => {
@@ -94,30 +122,33 @@ test("a key that doesn't exist is not an error for a search, but a failed search
   assert.deepEqual(await createLinearIssues({ linear: revoked }).list(), { error: "Linear isn't connected.", notConnected: true });
 });
 
-test("readIssue fetches several keys in one query and treats a missing one as null", async () => {
+test("worktrees fetch several stored keys in one query and treat a missing one as no chip", async () => {
   const linear = fakeLinear({
     answer: (document, variables) => {
-      if (document.includes("i0:")) {
-        // One missing key fails the batch as a whole, so each key is then asked alone.
-        throw new LinearError("Entity not found", "failed");
-      }
+      // One missing key fails the batch as a whole, so each key is then asked alone.
+      if (document.includes("i0:")) throw new LinearError("Entity not found", "failed");
       if (variables.id === "ENG-2") return { issue: node("ENG-2") };
       throw new LinearError("Entity not found", "failed");
     },
   });
-  const issues = createLinearIssues({ linear });
-  const batch = await issues.readIssues(["ENG-1", "ENG-2"], { fresh: true });
-  assert.equal(batch.get("ENG-2").key, "ENG-2");
-  assert.equal(batch.get("ENG-1"), null);
+  const found = await createLinearIssues({ linear }).worktreeIssues([
+    { name: "a", path: "/wt/a", linearIssue: "ENG-1" },
+    { name: "b", path: "/wt/b", linearIssue: "ENG-2" },
+  ]);
+  assert.deepEqual(Object.keys(found), ["/wt/b"]);
+  assert.equal(found["/wt/b"].workspace, "acme");
   assert.match(linear.calls[0].document, /i0: issue\(id: "ENG-1"\)/);
   assert.match(linear.calls[0].document, /i1: issue\(id: "ENG-2"\)/);
 });
 
-test("readIssues never sends a key that isn't key-shaped to Linear", async () => {
-  const linear = fakeLinear({ answer: () => ({ issue: null }) });
-  const found = await createLinearIssues({ linear }).readIssues(['ENG-1") { x } #', "ENG-3"], { fresh: true });
-  assert.deepEqual([...found.keys()], ["ENG-3"]);
-  assert.doesNotMatch(linear.calls[0].document, /#/);
+test("readIssue never sends a key that isn't key-shaped to Linear", async () => {
+  const linear = fakeLinear({ answer: (document) => batch(document, () => true) });
+  const issues = createLinearIssues({ linear });
+  assert.equal(await issues.readIssue('ENG-1") { x } #'), null);
+  assert.equal(linear.calls.length, 0);
+  assert.equal((await issues.readIssue("eng-3")).key, "ENG-3");
+  assert.equal(linear.calls.length, 1);
+  assert.match(linear.calls[0].document, /issue\(id: "ENG-3"\)/);
 });
 
 test("worktrees name their issue by the stored key or by the team key in their branch", async () => {
@@ -136,6 +167,7 @@ test("worktrees name their issue by the stored key or by the team key in their b
   assert.deepEqual(Object.keys(found).sort(), ["/wt/a", "/wt/b"]);
   assert.equal(found["/wt/a"].key, "ENG-12");
   assert.equal(found["/wt/b"].key, "WEB-3");
+  assert.equal(found["/wt/a"].workspace, "acme");
 });
 
 test("worktree issues are cached for a minute, team keys for ten, and empty when they can't be read", async () => {
@@ -178,7 +210,6 @@ test("only Linear's not-found reads as a missing issue; any other failure is thr
     },
   });
   await assert.rejects(createLinearIssues({ linear: broken }).readIssue("ENG-5"), { code: "failed", message: "Field 'x' doesn't exist" });
-  await assert.rejects(createLinearIssues({ linear: broken }).readIssues(["ENG-5", "ENG-6"], { fresh: true }), { code: "failed" });
 });
 
 test("a failed team-key lookup still resolves the worktrees that store their issue", async () => {
@@ -194,4 +225,86 @@ test("a failed team-key lookup still resolves the worktrees that store their iss
   ]);
   assert.deepEqual(Object.keys(found), ["/wt/a"]);
   assert.equal(found["/wt/a"].key, "ENG-12");
+});
+
+test("a named workspace is queried and cached apart from the first", async () => {
+  const linear = fakeLinear({
+    workspaces: [acme, beta],
+    answer: (document, variables, workspace) => ({ viewer: { assignedIssues: { nodes: [node(workspace === "beta" ? "WEB-1" : "ENG-1")] } } }),
+  });
+  const issues = createLinearIssues({ linear, now: () => 0 });
+  const first = await issues.list();
+  assert.equal(first.workspace, "acme");
+  assert.deepEqual(first.workspaces, [
+    { id: "acme", name: "Acme" },
+    { id: "beta", name: "Beta" },
+  ]);
+  const second = await issues.list(undefined, { workspace: "beta" });
+  assert.equal(second.workspace, "beta");
+  assert.deepEqual(
+    second.issues.map((issue) => [issue.key, issue.workspace]),
+    [["WEB-1", "beta"]],
+  );
+  await issues.list();
+  await issues.list(undefined, { workspace: "beta" });
+  assert.deepEqual(
+    linear.calls.map((call) => call.workspace),
+    ["acme", "beta"],
+    "each workspace is read once and then kept",
+  );
+  assert.equal((await issues.list(undefined, { workspace: "nope" })).workspace, "acme", "an unknown workspace falls back to the first");
+});
+
+test("readIssue finds a key in the workspace whose team keys own its prefix", async () => {
+  const linear = fakeLinear({
+    workspaces: [acme, beta],
+    answer: (document, variables, workspace) => {
+      if (document.includes("teams(")) return { teams: { nodes: [{ key: workspace === "beta" ? "WEB" : "ENG" }] } };
+      return batch(document, () => workspace === "beta");
+    },
+  });
+  const issue = await createLinearIssues({ linear }).readIssue("web-3");
+  assert.equal(issue.key, "WEB-3");
+  assert.equal(issue.workspace, "beta");
+  const reads = linear.calls.filter((call) => !call.document.includes("teams("));
+  assert.deepEqual(
+    reads.map((call) => call.workspace),
+    ["beta"],
+    "the other workspace isn't asked",
+  );
+  const named = await createLinearIssues({ linear }).readIssue("WEB-3", "beta");
+  assert.equal(named.workspace, "beta");
+});
+
+test("readIssue tries every workspace in order when none owns the prefix", async () => {
+  const linear = fakeLinear({
+    workspaces: [acme, beta],
+    answer: (document, variables, workspace) => {
+      if (document.includes("teams(")) return { teams: { nodes: [{ key: "ZZZ" }] } };
+      return batch(document, () => workspace === "beta");
+    },
+  });
+  assert.equal((await createLinearIssues({ linear }).readIssue("ENG-9")).workspace, "beta");
+  assert.equal(await createLinearIssues({ linear: fakeLinear({ workspaces: [acme, beta] }) }).readIssue("ENG-1"), null);
+});
+
+test("worktrees read their stored workspace, and match a branch against each workspace's teams", async () => {
+  const linear = fakeLinear({
+    workspaces: [acme, beta],
+    answer: (document, variables, workspace) => {
+      if (document.includes("teams(")) return { teams: { nodes: [{ key: workspace === "beta" ? "WEB" : "ENG" }] } };
+      return batch(document, (key) => (workspace === "beta" ? key !== "ENG-12" : key === "ENG-12"));
+    },
+  });
+  const found = await createLinearIssues({ linear, now: () => 0 }).worktreeIssues([
+    { name: "milagre/x-ab12", path: "/wt/a", linearIssue: "ENG-5", linearWorkspace: "beta" },
+    { name: "web-3-fix", path: "/wt/b" },
+    { name: "eng-12-fix", path: "/wt/c" },
+  ]);
+  assert.deepEqual(Object.keys(found).sort(), ["/wt/a", "/wt/b", "/wt/c"]);
+  assert.equal(found["/wt/a"].workspace, "beta");
+  assert.equal(found["/wt/b"].workspace, "beta");
+  assert.equal(found["/wt/c"].workspace, "acme");
+  const reads = linear.calls.filter((call) => call.document.includes("i0:"));
+  assert.deepEqual(reads.map((call) => call.workspace).sort(), ["acme", "beta"]);
 });

@@ -694,7 +694,7 @@ test("linear commands connect, report and disconnect, and emit the status", asyn
       },
     },
   });
-  assert.deepEqual(await runtime.invoke("linear:status"), { connected: false });
+  assert.deepEqual(await runtime.invoke("linear:status"), { connected: false, workspaces: [] });
   assert.deepEqual(await runtime.invoke("linear:enabled:read"), { enabled: false });
   assert.deepEqual(await runtime.invoke("linear:enabled:save", [true]), { enabled: true });
   const connected = await runtime.invoke("linear:connect");
@@ -703,8 +703,12 @@ test("linear commands connect, report and disconnect, and emit the status", asyn
     events.filter((event) => event.channel === "linear:status-changed").map((event) => event.payload),
     [connected],
   );
-  assert.deepEqual(await runtime.invoke("linear:disconnect"), { connected: false });
-  assert.deepEqual(events.filter((event) => event.channel === "linear:status-changed").at(-1).payload, { connected: false });
+  assert.deepEqual(
+    connected.workspaces.map((item) => item.id),
+    ["acme"],
+  );
+  assert.deepEqual(await runtime.invoke("linear:disconnect", [{ workspace: "acme" }]), { connected: false, workspaces: [] });
+  assert.deepEqual(events.filter((event) => event.channel === "linear:status-changed").at(-1).payload, { connected: false, workspaces: [] });
 });
 
 test("flush ends a waiting Linear sign-in instead of waiting out its timeout", async (t) => {
@@ -729,10 +733,11 @@ test("flush ends a waiting Linear sign-in instead of waiting out its timeout", a
 
 async function connectLinearFixture(dataDir) {
   // A signed-in Mac with the Experimental switch on, without running the OAuth flow.
-  await fs.mkdir(path.join(dataDir, "linear"), { recursive: true });
+  await fs.mkdir(path.join(dataDir, "linear", "workspaces"), { recursive: true });
   await fs.writeFile(
-    path.join(dataDir, "linear", "token.json"),
+    path.join(dataDir, "linear", "workspaces", "acme.json"),
     JSON.stringify({
+      connectedAt: 1,
       accessToken: "access",
       refreshToken: "refresh",
       expiresAt: Date.now() + 86_400_000,
@@ -781,6 +786,7 @@ test("worktree:create from a Linear issue names the branch after it, skips the H
   const worktree = created.project.state.worktrees[created.worktreeId];
   assert.equal(worktree.name, "eng-12-fix-login");
   assert.equal(worktree.linearIssue, "ENG-12");
+  assert.equal(worktree.linearWorkspace, "acme");
   assert.match(path.basename(worktree.path), /^eng-12-fix-login-[a-z0-9]{4}$/);
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(
@@ -912,6 +918,7 @@ test("worktree:link-issue renames a Milagre-named branch with no open PR to the 
   const stored = linked.project.state.worktrees[worktreeId];
   assert.equal(stored.name, "eng-12-fix-login");
   assert.equal(stored.linearIssue, "ENG-12");
+  assert.equal(stored.linearWorkspace, "acme");
   assert.equal(branchOf(worktree.path), "eng-12-fix-login");
   assert.deepEqual(events.filter((event) => event.channel === "worktree:renamed").at(-1).payload, {
     projectPath: linked.project.path,
@@ -1027,7 +1034,7 @@ test("worktree:link-issue refuses while Linear is off, disconnected, malformed o
   await fs.writeFile(path.join(dataDir, "linear", "settings.json"), JSON.stringify({ enabled: false }));
   await assert.rejects(attempt(), { message: "Linear is off in Settings › Experimental." });
   await fs.writeFile(path.join(dataDir, "linear", "settings.json"), JSON.stringify({ enabled: true }));
-  await fs.rm(path.join(dataDir, "linear", "token.json"));
+  await fs.rm(path.join(dataDir, "linear", "workspaces", "acme.json"));
   await assert.rejects(attempt(), { message: "Linear isn't connected." });
   await connectLinearFixture(dataDir);
   await assert.rejects(attempt("not a key"), /isn't a Linear issue key/);

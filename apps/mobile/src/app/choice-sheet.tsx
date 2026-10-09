@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Stack, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GitBranchIcon, Tick02Icon } from "@hugeicons/core-free-icons";
@@ -19,6 +19,11 @@ export default function ChoiceSheet() {
   const styles = useStyles();
   const [entry] = useState(currentChoice);
   const [query, setQuery] = useState("");
+  const [allItems, setAllItems] = useState(() => entry?.items ?? []);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
+  const [tab, setTab] = useState(() => entry?.tab);
+  const [switching, setSwitching] = useState(false);
   const chosen = useRef<string | null>(null);
   const closing = useRef(false);
   const insets = useSafeAreaInsets();
@@ -32,7 +37,31 @@ export default function ChoiceSheet() {
   }, [entry]);
   if (!entry) return null;
   const search = query.trim().toLowerCase();
-  const items = entry.items.filter((item) => item.title.toLowerCase().includes(search));
+  const load = entry.load;
+  const items = switching ? [] : allItems.filter((item) => item.title.toLowerCase().includes(search));
+  const tabs = entry.tabs && entry.tabs.length > 1 ? entry.tabs : null;
+  // A pull reads the shown tab from Linear again; a tab reads what the Mac kept, with no rows meanwhile.
+  async function reload(next: string | undefined, fresh: boolean) {
+    if (!load) return;
+    if (fresh) setRefreshing(true);
+    else setSwitching(true);
+    try {
+      const loaded = await load(next, fresh);
+      setAllItems(loaded);
+      setRefreshError("");
+    } catch (error) {
+      setRefreshError(error instanceof Error ? error.message : String(error));
+      if (!fresh) setAllItems([]);
+    } finally {
+      setRefreshing(false);
+      setSwitching(false);
+    }
+  }
+  function chooseTab(next: string) {
+    if (next === tab) return;
+    setTab(next);
+    void reload(next, false);
+  }
   const close = (id: string | null) => {
     if (closing.current) return;
     closing.current = true;
@@ -48,16 +77,44 @@ export default function ChoiceSheet() {
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
+        refreshControl={load ? <RefreshControl refreshing={refreshing} onRefresh={() => void reload(tab, true)} tintColor={colors.ink3} /> : undefined}
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom, 16) }}
         ListHeaderComponent={
-          <View style={{ paddingTop: 16, paddingBottom: 12 }}>
+          <View style={{ paddingTop: 16, paddingBottom: 12, gap: 12 }}>
+            {tabs && (
+              <View accessibilityRole="tablist" style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {tabs.map((item) => {
+                  const selected = item.id === tab;
+                  return (
+                    <Pressable
+                      key={item.id}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected }}
+                      onPress={() => chooseTab(item.id)}
+                      style={({ pressed }) => ({
+                        paddingHorizontal: 12,
+                        paddingVertical: 7,
+                        borderRadius: 999,
+                        borderWidth: StyleSheet.hairlineWidth,
+                        borderColor: selected ? colors.ink3 : colors.line,
+                        backgroundColor: selected ? colors.hover : pressed ? colors.hover : "transparent",
+                      })}
+                    >
+                      <Text style={{ color: selected ? colors.ink : colors.ink2, fontSize: 13, fontWeight: "500" }}>{item.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
             <Text style={styles.caption}>
-              {items.length} {items.length === 1 ? "result" : "results"}
+              {switching ? "Loading…" : `${items.length} ${items.length === 1 ? "result" : "results"}`}
+              {load ? " · Pull to refresh" : ""}
             </Text>
+            {refreshError ? <Text style={[styles.caption, { color: colors.error, marginTop: 4 }]}>{refreshError}</Text> : null}
           </View>
         }
         ItemSeparatorComponent={ChoiceSeparator}
-        ListEmptyComponent={<Text style={[styles.muted, { paddingVertical: 24, textAlign: "center" }]}>{entry.emptyLabel}</Text>}
+        ListEmptyComponent={switching ? null : <Text style={[styles.muted, { paddingVertical: 24, textAlign: "center" }]}>{entry.emptyLabel}</Text>}
         renderItem={({ item }) => (
           <Pressable
             accessibilityRole="radio"

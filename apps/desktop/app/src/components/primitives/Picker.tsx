@@ -3,10 +3,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { ScrollArea } from "./ScrollArea";
 
-/* Popover picker shared by the model, permission, and branch selectors and by Select: optional title,
- * optional header slot (e.g. provider tabs), optional search, and a scrolling list. */
+/* Popover picker shared by the model, permission, and branch selectors and by Select: optional title with an
+ * optional action beside it (a refresh button), optional header slot (e.g. provider tabs), optional search, and a scrolling list. */
 export function PickerPanel({
   title,
+  titleAction,
   query,
   onQueryChange,
   placeholder,
@@ -20,6 +21,7 @@ export function PickerPanel({
   children,
 }: {
   title?: string;
+  titleAction?: ReactNode;
   query?: string;
   onQueryChange?: (query: string) => void;
   placeholder?: string;
@@ -78,8 +80,9 @@ export function PickerPanel({
       style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", ...style }}
     >
       {title && (
-        <div className="shrink-0 px-2 pb-2 pt-1">
+        <div className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2 pt-1">
           <strong className="text-sm text-ink">{title}</strong>
+          {titleAction}
         </div>
       )}
       {header}

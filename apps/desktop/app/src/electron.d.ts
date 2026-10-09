@@ -211,7 +211,7 @@ export type MilagreBridge = {
   /** `setupNote`: why the repo's setup file was ignored. */
   createWorktree: (request: WorktreeRequest) => Promise<{ project: OpenProject & { state: CoordinatorState }; worktreeId: number; setupNote?: string }>;
   /** Links an existing worktree to a Linear issue: a Milagre-named branch with no open PR takes the issue's branch name. */
-  linkWorktreeIssue: (request: { projectPath: string; worktreeId: number; key: string }) => Promise<LinkIssueResult>;
+  linkWorktreeIssue: (request: { projectPath: string; worktreeId: number; key: string; workspace?: string }) => Promise<LinkIssueResult>;
   /** Removes the stored issue link; the branch keeps its name. */
   unlinkWorktreeIssue: (request: { projectPath: string; worktreeId: number }) => Promise<{ project: OpenProject & { state: CoordinatorState } }>;
   /** The folders Milagre keeps its worktrees in (the configured one and its real path). */
@@ -245,15 +245,17 @@ export type MilagreBridge = {
   onMainSyncStatus: (callback: (status: MainSyncStatus) => void) => () => void;
   readLinearStatus: () => Promise<LinearStatus>;
   /** Opens Linear in the browser and resolves once the Mac is connected. A second call replaces a waiting one. */
-  connectLinear: () => Promise<LinearStatus>;
-  disconnectLinear: () => Promise<LinearStatus>;
+  /** `window`: sign in from a window of its own with an empty session (Add workspace), not the browser. */
+  connectLinear: (options?: { window?: boolean }) => Promise<LinearStatus>;
+  cancelLinearSignIn: () => Promise<void>;
+  disconnectLinear: (workspace: string) => Promise<LinearStatus>;
   readLinearEnabled: () => Promise<{ enabled: boolean }>;
   saveLinearEnabled: (value: boolean) => Promise<{ enabled: boolean }>;
   onLinearStatusChanged: (callback: (status: LinearStatus) => void) => () => void;
   /** The Experimental Linear switch changed, on this Mac or from a phone. */
   onLinearEnabledChanged: (callback: (value: { enabled: boolean }) => void) => () => void;
   /** Assigned issues when query is empty, otherwise workspace matches (a key also finds that issue first). Never rejects. */
-  listLinearIssues: (query?: string) => Promise<LinearIssuesResult>;
+  listLinearIssues: (query?: string, options?: { fresh?: boolean; workspace?: string }) => Promise<LinearIssuesResult>;
   /** Each Worktree's Linear issue by worktree path, for the chips. {} when off, disconnected or on error. */
   readWorktreeLinearIssues: (projectPath: string) => Promise<Record<string, LinearIssue>>;
   /** A new worktree's branch got the name picked for its chat, a few seconds after it was created. */

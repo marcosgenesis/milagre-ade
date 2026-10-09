@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { LINEAR_HINT, LINEAR_TITLE, linearStatusLine, type LinearStatus } from "@milagre/shared/linear";
+import { LINEAR_HINT, LINEAR_TITLE, linearStatusLine, linearWorkspaceLine, linearWorkspaces, type LinearStatus } from "@milagre/shared/linear";
 import { Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { DEFAULT_THEME_ID, seedsFrom } from "@milagre/shared/themes";
@@ -83,7 +83,16 @@ export function ExperimentalSection() {
         <View style={[styles.card, { gap: 4 }]}>
           <Toggle title={LINEAR_TITLE} selected={linear.enabled} onPress={() => void changeLinear(!linear.enabled)} />
           <Text style={styles.caption}>{LINEAR_HINT}</Text>
-          {linear.enabled && <Text style={styles.caption}>{linearStatusLine(linear.status, "phone")}</Text>}
+          {linear.enabled &&
+            (linearWorkspaces(linear.status).length ? (
+              linearWorkspaces(linear.status).map((workspace) => (
+                <Text key={workspace.id} style={styles.caption}>
+                  {`Connected to ${linearWorkspaceLine(workspace)}`}
+                </Text>
+              ))
+            ) : (
+              <Text style={styles.caption}>{linearStatusLine(linear.status, "phone")}</Text>
+            ))}
           {linearError ? <ErrorNotice message={linearError} /> : null}
         </View>
       )}

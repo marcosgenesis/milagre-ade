@@ -2,8 +2,8 @@
 
 export type LinearViewer = { name: string; email: string };
 export type LinearOrganization = { name: string; urlKey: string };
-/** One connected workspace; `id` is its URL key in lower case. */
-export type LinearWorkspace = { id: string; viewer: LinearViewer; organization: LinearOrganization };
+/** One connected workspace; `id` is its URL key in lower case. `canWrite` is false for a sign-in that can only read issues. */
+export type LinearWorkspace = { id: string; viewer: LinearViewer; organization: LinearOrganization; canWrite?: boolean };
 /** `viewer` and `organization` repeat the first workspace; a Mac that predates workspaces sends no `workspaces`. */
 export type LinearStatus =
   | { connected: false; workspaces?: LinearWorkspace[] }
@@ -12,6 +12,13 @@ export type LinearStatus =
 export const LINEAR_TITLE = "Linear";
 export const LINEAR_HINT = "Start chats from Linear issues and see each Worktree's issue.";
 export const LINEAR_CONNECTING = "Finish signing in to Linear in your browser.";
+
+export const LINEAR_MOVE_TO_STARTED_TITLE = "Move issues to In Progress";
+export const LINEAR_MOVE_TO_STARTED_HINT = "When a chat starts from an issue that hasn't started yet, move it to its team's first started status.";
+/** A sign-in made before Milagre asked to change issues; signing in to it again (on the Mac) grants that. */
+export function linearReadOnlyHint(where: "mac" | "phone"): string {
+  return `Can't move issues yet. Sign in to this workspace again ${where === "mac" ? "with Add workspace" : "from Settings on your Mac"} to allow it.`;
+}
 
 export const LINEAR_ADD_WORKSPACE = "Add workspace";
 export const LINEAR_ADD_WORKSPACE_HINT =

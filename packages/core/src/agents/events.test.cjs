@@ -626,3 +626,7 @@ test("the design instructions point the agent at the bundled design skill, which
   assert.ok(file, "the instructions name the skill's file");
   assert.match(require("node:fs").readFileSync(file, "utf8"), /^name: design$/m);
 });
+
+test("the design instructions defer to a design tool the user names", () => {
+  assert.match(MILAGRE_INSTRUCTIONS, /When the user names another design tool .*do not call artifact_show/);
+});

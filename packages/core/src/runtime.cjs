@@ -687,6 +687,10 @@ function createRuntime(options) {
           }
         : latest;
     });
+    // The issue moves to In Progress once its Worktree exists, unless that's switched off or the sign-in can only read.
+    // Best effort and in the background: the Chat never waits on Linear.
+    if (issue && linear.moveToStarted() && linear.workspaces().find((item) => item.id === issue.workspace)?.canWrite)
+      void track(() => linearIssues.markStarted(issue.key, issue.workspace), background).catch(() => {});
     // A branch named after an issue keeps that name; only a chat named from its prompt gets the Haiku name.
     if (!issue) void track(() => nameWorktree(request.projectPath, created, request.prompt ?? ""), background).catch(() => {});
     return { project: { ...project, state }, worktreeId: listed.id, ...(resolved.note ? { setupNote: resolved.note } : {}) };
@@ -963,7 +967,8 @@ function createRuntime(options) {
   commands.handle("linear:connect", (_event, value) => linear.connect({ window: value?.window === true }));
   commands.handle("linear:cancel", () => linear.cancel());
   commands.handle("linear:disconnect", (_event, value) => linear.disconnect(value?.workspace));
-  commands.handle("linear:enabled:read", () => ({ enabled: linear.enabled() }));
+  commands.handle("linear:enabled:read", () => ({ enabled: linear.enabled(), moveToStarted: linear.moveToStarted() }));
+  commands.handle("linear:move-to-started:save", (_event, value) => ({ moveToStarted: linear.setMoveToStarted(value === true) }));
   commands.handle("linear:enabled:save", (_event, value) => {
     const enabled = linear.setEnabled(value === true);
     emit("linear:enabled-changed", { enabled });

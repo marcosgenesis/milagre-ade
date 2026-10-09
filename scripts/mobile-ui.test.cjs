@@ -1578,6 +1578,13 @@ test("the sidebar filter shows archived, running or waiting Chats across Project
   assert.equal(ids(), "[]", "chatMark is idle in this host, so nothing is running");
 });
 
+test("Choose projects opens as a sheet over the sidebar instead of closing it", () => {
+  const nav = navigationHost(deferred().promise);
+  nav.filter().props.onSelect("choose-projects");
+  assert.deepEqual(nav.routes, ["/choose-projects"]);
+  assert.deepEqual(nav.secondaryRoutes, ["sheet"]);
+});
+
 test("a chat search with no matching title lists matching messages, and a tap opens their Chat", () => {
   const nav = navigationHost(deferred().promise);
   nav.state.project.state.sessions[3] = { id: 3, title: "Relay work" };
@@ -1899,6 +1906,7 @@ test("searching the choice sheet filters full names and selection applies only a
     },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 20 }) },
     "@hugeicons/core-free-icons": {},
+    "../bottom-fade": { EdgeFade: "EdgeFade" },
     "../choice-store": choices,
     "../icons": { Icon: "Icon" },
     "../ui": { CircleButton: "CircleButton", Field: "Field", colors: {}, styles: {} },
@@ -1922,6 +1930,8 @@ test("searching the choice sheet filters full names and selection applies only a
   const row = list().props.renderItem({ item: list().props.data[0] });
   assert.equal(row.props.accessibilityLabel, longName);
   assert.equal(find(row, (node) => node.type === "Text").props.numberOfLines, undefined, "the full name can wrap");
+  assert.equal(find(row, (node) => node.type === "Text").props.style.fontFamily, undefined, "names use the body font");
+  assert.equal(find(render(), (node) => node.type === "EdgeFade").props.edge, "top", "rows blur under the title bar");
   field().props.onChangeText({ nativeEvent: { text: "missing" } });
   assert.equal(list().props.data.length, 0);
   assert.equal(list().props.ListEmptyComponent.props.children, "No branches found.");
@@ -2302,6 +2312,63 @@ test("a long Chat opens hidden and jumps to its newest message without animating
   screen.params.id = "42";
   screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex" };
   assert.equal(page().props.style.opacity, 0, "switching Chats hides the next transcript until it is placed");
+});
+
+test("first send keeps the placed transcript mounted when the draft adopts its saved Chat", async () => {
+  const sending = deferred();
+  const screen = chatHost({ effects: true, call: (method) => (method === "project:branches" ? Promise.resolve(["main"]) : sending.promise) });
+  const page = () => find(screen.render(), (node) => node.type === "KeyboardChatScrollView");
+  const initial = page();
+  initial.props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  initial.props.onContentSizeChange(0, 300);
+  assert.equal(page().props.style.opacity, 1);
+  screen.send();
+  await settle();
+  const preview = page();
+  const request = screen.calls.find((call) => call.method === "chat:send").args[0];
+  const state = screen.session.snapshot.project.state;
+  state.sessions[7] = { id: 7, worktree_id: 1, provider: "codex", status: "Created" };
+  state.messages = [{ id: 8, session_id: 7, role: "user", body: "first message", clientMessageId: request.clientMessageId }];
+  sending.resolve({ sessionId: 7 });
+  await settle();
+  assert.equal(screen.params.id, "7");
+  assert.equal(page().key, preview.key, "saving the same Chat must not recreate its native scroll view");
+  assert.equal(page().props.style.opacity, 1, "acknowledgement must not hide an already placed transcript");
+  screen.session.pendingChats = {};
+  assert.equal(page().key, preview.key, "retiring the preview keeps its scroll position");
+  delete screen.params.id;
+  assert.notEqual(page().key, preview.key, "a new draft in the same Worktree must not reuse the saved Chat's scroll state");
+  assert.equal(page().props.style.opacity, 0);
+  screen.params.id = "42";
+  state.sessions[42] = { id: 42, worktree_id: 1, provider: "codex", status: "Created" };
+  assert.notEqual(page().key, preview.key, "opening another Chat still resets placement");
+  assert.equal(page().props.style.opacity, 0);
+});
+
+test("first send stays visible while the saved Chat's first page is still loading", async (t) => {
+  const screen = chatHost({ effects: true });
+  const state = screen.session.snapshot.project.state;
+  state.messagesInChats = true;
+  let saved = [];
+  let loading = true;
+  globalThis.chatPage = (client, _path, id) =>
+    client && id === 7 ? { messages: saved, hasMore: false, total: saved.length, loading, loadEarlier: async () => {} } : undefined;
+  t.after(() => delete globalThis.chatPage);
+  screen.send();
+  await settle();
+  const input = () => transcriptMessages(screen).find((message) => message.role === "user");
+  assert.equal(input()?.body, "first message");
+  const request = screen.calls.find((call) => call.method === "chat:send").args[0];
+  state.sessions[7] = { id: 7, worktree_id: 1, provider: "codex", status: "Created", summary: { count: 1, clientMessageIds: [request.clientMessageId] } };
+  assert.equal(input()?.body, "first message", "the summary must not remove the preview before the page arrives");
+  screen.sending.resolve({ sessionId: 7 });
+  await settle();
+  screen.session.pendingChats = {};
+  assert.equal(input()?.body, "first message", "the input survives acknowledgement while the page loads");
+  saved = [{ id: 8, session_id: 7, role: "user", body: "first message", clientMessageId: request.clientMessageId }];
+  loading = false;
+  assert.equal(input()?.id, 8);
+  assert.equal(transcriptMessages(screen).length, 1);
 });
 
 test("mobile navigation spans a long Chat with at most 15 lines and loads older targets before scrolling", () => {

@@ -58,7 +58,8 @@ import { createStylesHook, useTheme, type Palette } from "./theme";
 import { activityAgo, CHAT_ROW_FIELDS } from "@milagre/shared/chat-row";
 import { saveChatRowShow, useActivityClock, useChatRowShow } from "./chat-row-store";
 
-type Destination = (href: Href, secondary?: boolean) => void;
+/** Secondary screens push over the current one; a sheet also leaves the sidebar open under it, as confirmations do. */
+type Destination = (href: Href, secondary?: boolean | "sheet") => void;
 type Row = { key: string; path: string } & (
   | { kind: "project"; name: string; expanded: boolean; members?: RegisteredProject[] }
   | { kind: "section"; name: string }
@@ -612,7 +613,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
             onSelect={(id) => {
               const field = ROW_FIELDS.find((item) => id === `field:${item.id}`);
               if (field) saveChatRowShow({ ...rowShow, [field.id]: !rowShow[field.id] });
-              else if (id === "choose-projects") onNavigate("/choose-projects", true);
+              else if (id === "choose-projects") onNavigate("/choose-projects", "sheet");
               else setShow(id as Show);
             }}
           >

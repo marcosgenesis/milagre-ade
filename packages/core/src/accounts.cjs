@@ -6,6 +6,7 @@ const { spawnCommand, execCommand } = require("./agents/command.cjs");
 const { CodexRpc } = require("./agents/codex-rpc.cjs");
 const { killTree } = require("./agents/process-tree.cjs");
 const { preparePrivateDirectory } = require("./private-files.cjs");
+const { inheritMcp } = require("./account-mcp.cjs");
 const { AMBIENT_ENV } = require("./agents/antigravity-install.cjs");
 const { SUBSCRIPTION_MESSAGE, inspectAntigravityAccount, prepareAntigravityProfile, signInAntigravity } = require("./antigravity-account.cjs");
 const { PROVIDERS } = require("@milagre/shared/providers");
@@ -161,6 +162,16 @@ function createAccounts({
     // saved login, so clear it even when inherited from the launching process.
     if (provider === "claude") next.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = "";
     next[provider === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"] = directory(provider, id);
+    // The Account gets the MCP servers set up in the connected CLI account. A config that can't be read
+    // or written leaves the Account's servers as they were; it never stops the Chat.
+    try {
+      inheritMcp(provider, {
+        sourceDir: directory(provider, "default"),
+        targetDir: directory(provider, id),
+        home,
+        configDirSet: Boolean(env.CLAUDE_CONFIG_DIR),
+      });
+    } catch {}
     return next;
   }
   function persist(next) {

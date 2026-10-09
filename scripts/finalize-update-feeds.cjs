@@ -27,7 +27,7 @@ async function main() {
       beta ? ["beta-mac.yml"] : ["latest-mac.yml", "beta-mac.yml"],
       [`Milagre-${v}-arm64.zip`, `Milagre-${v}-x64.zip`, `Milagre-${v}-arm64.dmg`, `Milagre-${v}-x64.dmg`],
     ],
-    windows: [["latest.yml"], [`Milagre-Setup-${v}-x64.exe`]],
+    windows: [beta ? ["beta.yml"] : ["latest.yml", "beta.yml"], [`Milagre-Setup-${v}-x64.exe`]],
     linux: [
       beta ? ["beta-linux.yml"] : ["latest-linux.yml", "beta-linux.yml"],
       [`Milagre-${v}-x86_64.AppImage`, `Milagre-${v}-amd64.deb`, `Milagre-${v}-x86_64.rpm`],

@@ -438,6 +438,8 @@ interface ChatComposerProps {
   earlier?: { count: number; load: () => Promise<void>; loadAll: () => Promise<void> };
   /** The Project or Link (scope key) the messages belong to, for step output the host keeps out of the state. */
   messageScope?: string;
+  /** The open conversation keeps its scroll view when a draft gets its saved Chat id. */
+  scrollKey?: number | string;
   messages: AppChatMessage[];
   /** Unsaved input appears below the reply still streaming while the backend prepares the send. */
   pendingMessageId?: number;
@@ -731,6 +733,7 @@ export function ChatComposer({
   imageDraft,
   projectPath,
   messageScope,
+  scrollKey,
   earlier,
   messages,
   pendingMessageId,
@@ -872,7 +875,7 @@ export function ChatComposer({
           {!isNewChat && (
             <div className="relative flex min-h-0 flex-1 flex-col">
               <MessageScroller
-                key={messages[0]?.session_id ?? "new"}
+                key={scrollKey ?? messages[0]?.session_id ?? "new"}
                 navigation="rail"
                 followOutput
                 smooth

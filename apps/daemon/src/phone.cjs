@@ -34,9 +34,10 @@ const message = (error) => (error instanceof Error ? error.message : String(erro
  * `<dataDir>/mobile.json` ({ enabled, token, lan }, 0600). Transitions run one at a time. `setEnabled`, `reset` and `start`
  * return once the new state is saved and the change has begun (`status().state` is then 'starting' or 'off'); `settled()`
  * resolves when it has finished, and every change goes to `onChange`. A start that fails is an 'error' state, not a throw.
- * Without a Cloudflare tunnel the Mac reaches the phone through the public relay (`remote: 'relay'`); `status()` then also
- * carries the relay's `relay` state, `pairingUntil` (ms epoch), the end of the window in which new phones may pair, and
- * `pairedPhones`, how many phones have paired since the last Reset. `onPaired({ pairedPhones })` runs when a phone pairs
+ * Without a Cloudflare tunnel the Mac reaches the phone through the public relay (`remote: 'relay'`). With one, phones
+ * use the tunnel and the relay runs as well, since computers pair only through it: `pairingLink` is the tunnel's and
+ * `computerLink` always the relay's. `status()` also carries the relay's `relay` state, `pairingUntil` (ms epoch), the
+ * end of the window in which new devices may pair, and `pairedPhones`, how many phones have paired since the last Reset. `onPaired({ pairedPhones })` runs when a phone pairs
  * for the first time. `devices()` lists every paired device with the route it uses now, and `removeDevice(key)` forgets
  * one and closes its channels. While the phone is on, identities a Reset replaced keep their old relay rooms for RETIRED_MS, only
  * to tell the phones that dial them that this Mac was reset.
@@ -76,7 +77,7 @@ function createPhone({
   let config; // { enabled, token | null, lan }, read once
   let state = "off";
   let error;
-  let live; // { bridge, tunnel, relay, retired, lan, identity, phones, localUrl, publicUrl, remote, link, qrSvg } while on
+  let live; // { bridge, tunnel, relay, retired, lan, identity, phones, localUrl, publicUrl, remote, link, computerLink, qrSvg } while on
   let remote = "none";
   let relayStatus = "offline";
   let pairingUntil = 0;
@@ -161,9 +162,17 @@ function createPhone({
       state,
       ...(state === "error" ? { error } : {}),
       remote: current,
-      ...(current === "relay" ? { relay: relayStatus, pairingUntil, pairedPhones: relayPhones?.count() ?? 0 } : {}),
+      ...(current !== "none" ? { relay: relayStatus, pairingUntil, pairedPhones: relayPhones?.count() ?? 0 } : {}),
       ...(config ? { lan: lanStatus(on) } : {}),
-      ...(on ? { localUrl: live.localUrl, ...(live.publicUrl ? { publicUrl: live.publicUrl } : {}), pairingLink: live.link, qrSvg: live.qrSvg } : {}),
+      ...(on
+        ? {
+            localUrl: live.localUrl,
+            ...(live.publicUrl ? { publicUrl: live.publicUrl } : {}),
+            pairingLink: live.link,
+            computerLink: live.computerLink,
+            qrSvg: live.qrSvg,
+          }
+        : {}),
     };
   }
   const changed = () => {
@@ -352,31 +361,35 @@ function createPhone({
           }
         },
       };
-      let link;
-      if (cloudflare) {
-        tunnel = await tunnels.startNamedTunnel({ hostname: cloudflare.hostname, connectorToken: cloudflare.connectorToken });
-        link = pairingLink({ address: tunnel.url || bridge.url, token: config.token, name: name(), access: cloudflare.access });
-      } else {
-        relay = startRelay({
-          relayUrl,
-          identity,
-          phones,
-          token: config.token,
-          bridgeUrl: bridge.url,
-          canPair: (key) => mayPair(key),
-          ...peer,
-          onStatus: (next) => {
-            if (mine !== generation) return;
-            relayStatus = next;
-            changed();
-          },
-        });
-        retired = await holdRetired(identity);
-        link = relayPairingLink({ relay: relayUrl, hostId: identity.hostId, key: b64url(identity.box.publicKey), token: config.token, name: name() });
-      }
+      if (cloudflare) tunnel = await tunnels.startNamedTunnel({ hostname: cloudflare.hostname, connectorToken: cloudflare.connectorToken });
+      // The relay runs behind a tunnel too: computers pair and connect only through it.
+      relay = startRelay({
+        relayUrl,
+        identity,
+        phones,
+        token: config.token,
+        bridgeUrl: bridge.url,
+        canPair: (key) => mayPair(key),
+        ...peer,
+        onStatus: (next) => {
+          if (mine !== generation) return;
+          relayStatus = next;
+          changed();
+        },
+      });
+      retired = await holdRetired(identity);
+      const computerLink = relayPairingLink({
+        relay: relayUrl,
+        hostId: identity.hostId,
+        key: b64url(identity.box.publicKey),
+        token: config.token,
+        name: name(),
+      });
+      // A phone scans the tunnel's link when there is one; a computer always gets the relay's.
+      const link = cloudflare ? pairingLink({ address: tunnel.url || bridge.url, token: config.token, name: name(), access: cloudflare.access }) : computerLink;
       const publicUrl = tunnel?.url;
       const qrSvg = await QRCode.toString(link, { type: "svg", margin: 2, errorCorrectionLevel: "M" });
-      live = { bridge, tunnel, relay, retired, identity, phones, localUrl: bridge.url, publicUrl, remote, link, qrSvg };
+      live = { bridge, tunnel, relay, retired, identity, phones, localUrl: bridge.url, publicUrl, remote, link, computerLink, qrSvg };
       // Last, so a failure before it leaves no listener behind.
       await startLanFor(live);
       attempts = 0;

@@ -5,6 +5,8 @@ description: Design screens with the user in a Milagre Chat - show HTML designs,
 
 # Designing in a Chat
 
+If the user named another design tool (Pencil, Figma, Paper or any other MCP or app), stop here and use that tool. Their choice wins over Milagre designs.
+
 1. **Ground it.** In a project with an app, read its screens, colors, type and components first, and design in that style. Ask one question only if the platform or the screen is unclear.
 2. **Show it.** `artifact_show` one self-contained HTML document per screen, at that screen's size (390 by 844 for a phone). Use real content, never lorem ipsum.
 3. **Offer variants when the direction is open.** Two or three, each with its own id and a title that names the idea ("Alt B, dark timeline"). When the user was specific, show one.

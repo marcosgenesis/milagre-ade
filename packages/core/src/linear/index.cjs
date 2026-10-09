@@ -43,8 +43,11 @@ function createLinear({
     if (pending === current) pending = null;
   }
 
+  // `canWrite`: the sign-in may change issues. One saved before Milagre asked for write access can only read them.
   function workspaces() {
-    return store.listWorkspaces().map(({ id, viewer, organization }) => ({ id, viewer, organization }));
+    return store
+      .listWorkspaces()
+      .map(({ id, viewer, organization, scope }) => ({ id, viewer, organization, canWrite: Array.isArray(scope) && scope.includes("write") }));
   }
   // `viewer` and `organization` repeat the first workspace for a phone that predates workspaces.
   function status() {
@@ -81,6 +84,8 @@ function createLinear({
         const scoped = store.workspace(id);
         previous = scoped.readToken();
         scoped.saveToken({
+          // Linear may not echo the scopes: then the grant is what was asked for.
+          scope: ["read", "write"],
           ...tokens,
           connectedAt: previous?.connectedAt ?? now(),
           viewer: { name: viewer.name, email: viewer.email },
@@ -157,6 +162,8 @@ function createLinear({
     },
     enabled: () => store.readEnabled(),
     setEnabled: (value) => store.saveEnabled(value),
+    moveToStarted: () => store.readMoveToStarted(),
+    setMoveToStarted: (value) => store.saveMoveToStarted(value),
   };
 }
 

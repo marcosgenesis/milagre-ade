@@ -39,9 +39,9 @@ export function cloudflarePhonesNote(status: PhoneStatus | null): string | null 
   return status?.remote === "cloudflare" ? "Phones on your Cloudflare tunnel keep access until Reset access." : null;
 }
 
-/** Whether new phones may still pair, and for how many whole minutes (rounded up). Only a relay phone has a window. */
+/** Whether new devices may still pair through the relay, and for how many whole minutes (rounded up). */
 export function pairingWindow(status: PhoneStatus | null, now: number): { open: boolean; minutes: number } | null {
-  if (!status || status.remote !== "relay" || status.pairingUntil === undefined) return null;
+  if (!status || status.pairingUntil === undefined) return null;
   const left = status.pairingUntil - now;
   return left > 0 ? { open: true, minutes: Math.ceil(left / 60_000) } : { open: false, minutes: 0 };
 }

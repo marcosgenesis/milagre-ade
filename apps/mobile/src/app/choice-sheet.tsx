@@ -3,10 +3,14 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "rea
 import { Stack, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GitBranchIcon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { EdgeFade } from "../bottom-fade";
 import { currentChoice } from "../choice-store";
 import { Icon } from "../icons";
 import { useStyles } from "../ui";
-import { fonts, useTheme } from "../theme";
+import { useTheme } from "../theme";
+
+/** The grabber and title bar of the sheet, which content scrolls under. */
+const SHEET_HEADER_HEIGHT = 76;
 
 function ChoiceSeparator() {
   const { colors } = useTheme();
@@ -131,13 +135,14 @@ export default function ChoiceSheet() {
               paddingVertical: 14,
               borderRadius: 10,
               borderCurve: "continuous",
-              backgroundColor: pressed ? colors.hover : item.checked ? colors.accentTint : "transparent",
+              // The chosen row shows only its tick, like the Linear issue rows; no fill.
+              backgroundColor: pressed ? colors.hover : "transparent",
               opacity: item.disabled ? 0.4 : 1,
             })}
           >
             {entry.leading ?? <Icon icon={entry.icon ?? GitBranchIcon} tone={item.checked ? "accent" : "ink3"} size={18} />}
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={{ color: colors.ink, fontFamily: fonts.mono, fontSize: 14, lineHeight: 21 }}>{item.title}</Text>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ color: colors.ink, fontSize: 15, lineHeight: 20 }}>{item.title}</Text>
               {item.subtitle && (
                 <Text numberOfLines={1} ellipsizeMode="middle" style={styles.caption}>
                   {item.subtitle}
@@ -148,6 +153,8 @@ export default function ChoiceSheet() {
           </Pressable>
         )}
       />
+      {/* Rows blur and fade under the transparent title bar, as in the Chat: the sheet doesn't get iOS's soft scroll edge. */}
+      <EdgeFade edge="top" height={SHEET_HEADER_HEIGHT} />
       <Stack.Title>{entry.title}</Stack.Title>
       <Stack.SearchBar
         placeholder={entry.placeholder}
@@ -160,7 +167,8 @@ export default function ChoiceSheet() {
         onChangeText={(event) => setQuery(event.nativeEvent.text)}
         onCancelButtonPress={() => setQuery("")}
       />
-      <Stack.Toolbar placement="right">
+      {/* HIG: a sheet's close button sits on the leading edge. */}
+      <Stack.Toolbar placement="left">
         <Stack.Toolbar.Button icon="xmark" onPress={() => close(null)}>
           Close
         </Stack.Toolbar.Button>

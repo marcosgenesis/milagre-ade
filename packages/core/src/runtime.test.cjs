@@ -695,8 +695,10 @@ test("linear commands connect, report and disconnect, and emit the status", asyn
     },
   });
   assert.deepEqual(await runtime.invoke("linear:status"), { connected: false, workspaces: [] });
-  assert.deepEqual(await runtime.invoke("linear:enabled:read"), { enabled: false });
+  assert.deepEqual(await runtime.invoke("linear:enabled:read"), { enabled: false, moveToStarted: true });
   assert.deepEqual(await runtime.invoke("linear:enabled:save", [true]), { enabled: true });
+  assert.deepEqual(await runtime.invoke("linear:move-to-started:save", [false]), { moveToStarted: false });
+  assert.deepEqual(await runtime.invoke("linear:enabled:read"), { enabled: true, moveToStarted: false });
   const connected = await runtime.invoke("linear:connect");
   assert.equal(connected.connected, true);
   assert.deepEqual(
@@ -731,8 +733,9 @@ test("flush ends a waiting Linear sign-in instead of waiting out its timeout", a
   await rejected;
 });
 
-async function connectLinearFixture(dataDir) {
-  // A signed-in Mac with the Experimental switch on, without running the OAuth flow.
+async function connectLinearFixture(dataDir, { scope, settings = {} } = {}) {
+  // A signed-in Mac with the Experimental switch on, without running the OAuth flow. With no `scope` the sign-in
+  // predates write access, so it can only read issues.
   await fs.mkdir(path.join(dataDir, "linear", "workspaces"), { recursive: true });
   await fs.writeFile(
     path.join(dataDir, "linear", "workspaces", "acme.json"),
@@ -743,9 +746,10 @@ async function connectLinearFixture(dataDir) {
       expiresAt: Date.now() + 86_400_000,
       viewer: { name: "Victor", email: "v@example.test" },
       organization: { name: "Acme", urlKey: "acme" },
+      ...(scope ? { scope } : {}),
     }),
   );
-  await fs.writeFile(path.join(dataDir, "linear", "settings.json"), JSON.stringify({ enabled: true }));
+  await fs.writeFile(path.join(dataDir, "linear", "settings.json"), JSON.stringify({ enabled: true, ...settings }));
 }
 
 const linearIssueNode = (key, branchName) => ({
@@ -801,6 +805,45 @@ test("worktree:create from a Linear issue names the branch after it, skips the H
     message: "ENG-99 no longer exists in Linear.",
   });
   assert.equal(execFileSync("git", ["-C", project, "worktree", "list", "--porcelain"], { encoding: "utf8" }), before);
+});
+
+test("worktree:create from a Linear issue moves it to In Progress unless switched off or the sign-in can only read", async (t) => {
+  const json = (body) => ({ ok: true, status: 200, json: async () => body });
+  async function start(options) {
+    const { project, dataDir, make } = await fixture(t);
+    execFileSync("git", ["-C", project, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "Initial"], {
+      stdio: "ignore",
+    });
+    await connectLinearFixture(dataDir, options);
+    const moves = [];
+    const runtime = make({
+      worktreeRoot: path.join(path.dirname(project), "worktrees"),
+      linear: {
+        clientId: "cid",
+        apiBase: "https://api.test",
+        port: 0,
+        fetchImpl: async (url, init) => {
+          const body = JSON.parse(init.body);
+          if (body.query.includes("teams(")) return json({ data: { teams: { nodes: [{ key: "ENG" }] } } });
+          if (body.query.includes("query Started"))
+            return json({ data: { issue: { id: "uuid-12", state: { type: "unstarted" }, team: { states: { nodes: [{ id: "started-1", position: 1 }] } } } } });
+          if (body.query.includes("mutation Move")) {
+            moves.push(body.variables);
+            return json({ data: { issueUpdate: { success: true } } });
+          }
+          return json({ data: { i0: linearIssueNode("ENG-12", "eng-12-fix-login") } });
+        },
+        openBrowser: () => {},
+      },
+    });
+    await runtime.openProject(project);
+    await runtime.invoke("worktree:create", [{ projectPath: project, baseBranch: "main", prompt: "x", issueKey: "ENG-12" }]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return moves;
+  }
+  assert.deepEqual(await start({ scope: ["read", "write"] }), [{ id: "uuid-12", stateId: "started-1" }]);
+  assert.deepEqual(await start({ scope: ["read", "write"], settings: { moveToStarted: false } }), [], "Switched off");
+  assert.deepEqual(await start({}), [], "A read-only sign-in never tries");
 });
 
 test("linear:worktree-issues names a worktree's issue and linear:issues reports the switch", async (t) => {

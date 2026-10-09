@@ -122,7 +122,19 @@ export default function ChatScreen() {
   const historyRead = useRef<object | null>(null);
   const pickingNow = useRef(false);
   const historyAnchor = useRef<{ id: number; y: number; key: string } | null>(null);
-  const scrollKey = `${params.hostId || session.client?.url}|${params.projectPath || session.snapshot?.project.path}|${params.id ?? `new:${params.worktreeId}`}`;
+  const scrollScope = `${params.hostId || session.client?.url}|${params.projectPath || session.snapshot?.project.path}`;
+  const routeKey = `${scrollScope}|${params.id ?? `new:${params.worktreeId}`}`;
+  const [scrollIdentity, setScrollIdentity] = useState({ route: routeKey, key: routeKey, revision: 0 });
+  const scrollKey = scrollIdentity.route === routeKey ? scrollIdentity.key : `${routeKey}|${scrollIdentity.revision + 1}`;
+  if (scrollIdentity.route !== routeKey) setScrollIdentity({ route: routeKey, key: scrollKey, revision: scrollIdentity.revision + 1 });
+  // Saving a draft changes its address, not its transcript or native keyboard/scroll state.
+  const adoptChat = useCallback(
+    (id: number) => {
+      setScrollIdentity((current) => ({ ...current, route: `${scrollScope}|${id}`, key: scrollKey }));
+      router.setParams({ id: String(id) });
+    },
+    [scrollScope, scrollKey],
+  );
   const currentScrollKey = useRef(scrollKey);
   const [historyState, setHistoryState] = useState({ key: scrollKey, loading: false, error: "" });
   const [jumpState, setJumpState] = useState({ key: scrollKey, visible: false });
@@ -211,9 +223,9 @@ export default function ChatScreen() {
   useFocusEffect(
     useCallback(() => {
       if (acceptedSessionId === null || pending?.promoted || !pendingKey) return;
-      router.setParams({ id: String(acceptedSessionId) });
+      adoptChat(acceptedSessionId);
       setPendingChats((current) => (current[pendingKey] ? { ...current, [pendingKey]: { ...current[pendingKey], promoted: true } } : current));
-    }, [acceptedSessionId, pending?.promoted, pendingKey, setPendingChats]),
+    }, [acceptedSessionId, pending?.promoted, pendingKey, setPendingChats, adoptChat]),
   );
   const allMessages = session.snapshot?.project.state.messages;
   // A host that keeps messages by Chat sends the snapshot without them: the Chat on screen reads its own as pages.
@@ -225,7 +237,7 @@ export default function ChatScreen() {
     () => (lean ? page.messages : params.id && allMessages ? allMessages.filter((m) => m.session_id === Number(params.id)) : []),
     [lean, page.messages, allMessages, params.id],
   );
-  const messages = useMemo(
+  const loadedMessages = useMemo(
     () =>
       pending
         ? pendingCanonicalId !== null
@@ -238,6 +250,10 @@ export default function ChatScreen() {
   );
   // Messages the host still holds before the ones here.
   const historyPage = pendingCanonicalId !== null ? canonicalPage : page;
+  // A summary can acknowledge a send before its message page arrives. Keep what is already on screen during that read.
+  const [transcript, setTranscript] = useState({ key: scrollKey, messages: loadedMessages });
+  const messages = lean && historyPage.loading && !loadedMessages.length && transcript.key === scrollKey ? transcript.messages : loadedMessages;
+  if (transcript.key !== scrollKey || transcript.messages !== messages) setTranscript({ key: scrollKey, messages });
   const remote = lean && (!pending || pendingCanonicalId !== null) ? Math.max(0, historyPage.total - historyPage.messages.length) : 0;
   // The design the user last chose on the design sheet, which its cards mark.
   const chosen = useMemo(() => chosenDesign(messages.filter((message) => message.role === "user").map((message) => message.body)), [messages]);
@@ -664,7 +680,7 @@ export default function ChatScreen() {
       if (current()) {
         following.current = true;
         Keyboard.dismiss();
-        if (!params.id) router.setParams({ id: String(result.sessionId) });
+        if (!params.id) adoptChat(result.sessionId);
       }
       await session.refresh();
       return true;

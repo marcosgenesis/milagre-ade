@@ -550,7 +550,7 @@ function App() {
     return pendingSend?.projectPath === project?.path ? withPendingChat(recovered, pendingSend) : recovered;
   }, [state, pendingSend, failedSends, project?.path]);
   // The renderer's preview never enters project state. The main process still owns the persisted transcript.
-  const displayedMessages = useMemo(
+  const loadedMessages = useMemo(
     () =>
       pendingHere && pendingSend
         ? pendingCanonicalId !== null
@@ -562,6 +562,12 @@ function App() {
     // oxlint-disable-next-line react/preserve-manual-memoization -- the callback reads state!.messages (non-null assertion) and the list names state?.messages, the same value; the compiler infers state itself from the assertion
     [pendingHere, pendingSend, pendingCanonicalId, state?.messages, messages, lean, canonicalWindow.messages],
   );
+  // The saved Chat's summary may reach us before its page. Preserve the visible input through that read.
+  const transcriptKey = `${project?.path}|${chatView.current}`;
+  const [transcript, setTranscript] = useState({ key: transcriptKey, messages: loadedMessages });
+  const transcriptLoading = pendingHere && pendingCanonicalId !== null ? canonicalWindow.loading : chatWindow.loading;
+  const displayedMessages = lean && transcriptLoading && !loadedMessages.length && transcript.key === transcriptKey ? transcript.messages : loadedMessages;
+  if (transcript.key !== transcriptKey || transcript.messages !== displayedMessages) setTranscript({ key: transcriptKey, messages: displayedMessages });
   // How many messages the open Chat has: its summary's count while its window is still loading from the host.
   const chatCount = lean ? (selectedSession?.summary?.count ?? messages.length) : messages.length;
   preferredProviderRef.current = chatCount > 0 ? selectedSession?.provider : undefined;
@@ -2260,6 +2266,7 @@ function App() {
                     key={project.path}
                     store={draftStore}
                     messages={displayedMessages}
+                    scrollKey={chatView.current}
                     pendingMessageId={pendingHere && pendingCanonicalId === null ? pendingSend?.message.id : undefined}
                     imageDraft={imageDraft}
                     projectPath={selectedWorktree?.path ?? project.path}

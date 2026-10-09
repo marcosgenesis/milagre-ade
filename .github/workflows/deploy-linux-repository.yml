@@ -1,6 +1,20 @@
 # Deployment uses public, signed release metadata. It never imports the signing private key.
+# Publish calls it after every stable release; dispatch it by hand only to redeploy a tag.
 name: Deploy Linux package repository
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Public stable release containing milagre-linux-repository.tar.gz
+        type: string
+        required: true
+    secrets:
+      LINUX_REPOSITORY_KEY_FINGERPRINT:
+        required: true
+      CLOUDFLARE_PACKAGES_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
   workflow_dispatch:
     inputs:
       tag:

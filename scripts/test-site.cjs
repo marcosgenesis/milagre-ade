@@ -289,7 +289,6 @@ const checks = [
         card: document.querySelector('meta[name="twitter:card"]')?.content,
       })`,
       );
-      // The canonical URL and og:image follow astro.config.mjs `site` (milagre.dev since #365); milagre.cloud serves the same pages.
       assert.equal(meta.canonical, "https://milagre.dev/");
       assert.ok(meta.description.length >= 120 && meta.description.length <= 160, `description is ${meta.description.length} characters`);
       assert.ok(meta.description.includes("Claude Code"));

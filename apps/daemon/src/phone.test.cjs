@@ -8,6 +8,7 @@ const { createPhone, LOCAL_PORT, RETIRED_MS } = require("./phone.cjs");
 const { createDevices } = require("./devices.cjs");
 const { b64url } = require("@milagre/shared/relay-crypto");
 const { readIdentity } = require("./relay-identity.cjs");
+const { parsePairing } = require("@milagre/shared/pairing-link");
 
 const PAIRING_WINDOW_MS = 10 * 60 * 1000;
 
@@ -447,18 +448,30 @@ test("with cloudflare.json the bridge uses its port, a named tunnel runs and the
   const status = phone.status();
   assert.equal(status.state, "on");
   assert.equal(status.remote, "cloudflare");
-  assert.equal(relays.length, 0, "the relay is not started");
-  assert.equal(status.relay, undefined);
-  assert.equal(status.pairingUntil, undefined);
   assert.equal(status.publicUrl, "https://mac.example.com");
   assert.equal(status.localUrl, "http://127.0.0.1:8801");
-  assert.deepEqual(log, ["bridge:start:8801", "tunnel:start", "lan:start:8798"]);
+  assert.deepEqual(log, ["bridge:start:8801", "tunnel:start", "relay:start", "lan:start:8798"]);
+  assert.equal(relays.length, 1);
   assert.deepEqual(tunnelsStarted[0].options, { hostname: "mac.example.com", connectorToken: "connector" });
   const link = new URL(status.pairingLink);
   assert.equal(link.searchParams.get("address"), "https://mac.example.com");
   assert.equal(link.searchParams.get("token"), bridges[0].token);
   assert.equal(link.searchParams.get("cfId"), ACCESS.id);
   assert.equal(link.searchParams.get("cfSecret"), ACCESS.secret);
+});
+
+test("behind a Cloudflare tunnel the relay runs too, so another Mac can pair with the computer link", async (t) => {
+  const { phone, relays } = await fixture(t, { cloudflare: true });
+  await phone.setEnabled(true);
+  await phone.settled();
+  const status = phone.status();
+  assert.equal(status.relay, "connecting");
+  assert.equal(typeof status.pairingUntil, "number");
+  assert.equal(relays[0].options.canPair("computerA"), true);
+  const pairing = parsePairing(status.computerLink);
+  assert.equal(pairing.relay.hostId, relays[0].options.identity.hostId);
+  assert.equal(pairing.token, relays[0].options.token);
+  assert.equal(new URL(status.pairingLink).searchParams.get("relay"), null, "the QR stays the tunnel's");
 });
 
 test("disabling stops the tunnel before the bridge and keeps the setting off", async (t) => {
@@ -468,9 +481,17 @@ test("disabling stops the tunnel before the bridge and keeps the setting off", a
   const disabled = await phone.setEnabled(false);
   assert.equal(disabled.state, "off");
   await phone.settled();
-  assert.deepEqual(log.slice(3), ["lan:close", "tunnel:close", "bridge:close:0"]);
+  assert.deepEqual(log.slice(4), ["lan:close", "tunnel:close", "relay:close", "bridge:close:0"]);
   assert.equal(tunnelsStarted[0].closed && bridges[0].closed, true);
-  assert.deepEqual(phone.status(), { enabled: false, state: "off", remote: "cloudflare", lan: { enabled: true, addresses: [] } });
+  assert.deepEqual(phone.status(), {
+    enabled: false,
+    state: "off",
+    remote: "cloudflare",
+    relay: "offline",
+    pairingUntil: PAIRING_WINDOW_MS,
+    pairedPhones: 0,
+    lan: { enabled: true, addresses: [] },
+  });
   assert.equal(JSON.parse(await fs.readFile(file, "utf8")).enabled, false);
   assert.deepEqual(changes, ["starting", "on", "off"]);
 });

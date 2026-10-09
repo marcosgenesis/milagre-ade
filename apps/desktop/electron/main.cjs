@@ -168,9 +168,9 @@ async function startDesktop() {
   ipcMain.handle("notification:completed", (_event, notice) => (Notification.isSupported() ? notifier.notifyCompletion(notice) : false));
 
   // The "Translucent window" appearance setting, pushed by the renderer with the theme it resolved.
-  ipcMain.handle("settings:window-translucent", (event, { on, theme } = {}) => {
+  ipcMain.handle("settings:window-translucent", (event, { on, theme, background } = {}) => {
     const window = BrowserWindow.fromWebContents(event.sender);
-    if (window && !window.isDestroyed()) applyTranslucency({ window, nativeTheme }, { on: on === true, theme });
+    if (window && !window.isDestroyed()) applyTranslucency({ window, nativeTheme }, { on: on === true, theme, background });
   });
 
   let connectionState = { connected: true };

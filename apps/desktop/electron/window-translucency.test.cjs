@@ -43,3 +43,17 @@ test("off macOS the window is left alone", () => {
   assert.deepEqual(window.calls, []);
   assert.equal(nativeTheme.themeSource, "system");
 });
+
+test("turning translucency off paints the theme's page color", () => {
+  const window = fakeWindow();
+  applyTranslucency({ window, nativeTheme: {}, platform: "darwin" }, { on: false, theme: "dark", background: "#1e1e2e" });
+  assert.deepEqual(window.calls.at(-1), ["background", "#1e1e2e"]);
+});
+
+test("a missing or bad background keeps the default", () => {
+  for (const background of [undefined, "red; drop", "#fff"]) {
+    const window = fakeWindow();
+    applyTranslucency({ window, nativeTheme: {}, platform: "darwin" }, { on: false, theme: "dark", background });
+    assert.deepEqual(window.calls.at(-1), ["background", OPAQUE_BACKGROUND]);
+  }
+});

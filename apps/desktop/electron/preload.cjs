@@ -234,7 +234,7 @@ function makeBridge(invoke, listen, send) {
     setKeepAwake: (enabled) => invoke("app:set-keep-awake", enabled),
     getCachedUsage: (scopeKey) => invoke("usage:cached", scopeKey),
     setNotifyWhenWaiting: (on) => invoke("settings:notify-when-waiting", on),
-    setWindowTranslucent: (on, theme) => invoke("settings:window-translucent", { on, theme }),
+    setWindowTranslucent: (on, theme, background) => invoke("settings:window-translucent", { on, theme, background }),
     syncNotifications: (state) => invoke("notification:state", state),
     notifyCompletion: (notice) => invoke("notification:completed", notice),
     onOpenChat: (callback) => listen("notification:open-chat", callback),

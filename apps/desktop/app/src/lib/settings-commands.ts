@@ -1,3 +1,4 @@
+import { themes } from "@milagre/shared/themes";
 import type { Command } from "./commands";
 import type { AppSettings } from "./settings";
 
@@ -16,9 +17,12 @@ export function settingsCommands(settings: AppSettings, update: (patch: Partial<
   }
 
   return [
-    choice("theme", "dark", "Theme: Dark", "appearance color mode"),
-    choice("theme", "light", "Theme: Light", "appearance color mode"),
-    choice("theme", "system", "Theme: System", "appearance color mode automatic"),
+    choice("theme", "dark", "Mode: Dark", "appearance color mode"),
+    choice("theme", "light", "Mode: Light", "appearance color mode"),
+    choice("theme", "system", "Mode: System", "appearance color mode automatic"),
+    ...themes.map((theme) =>
+      choice("colorTheme", theme.id, `Theme: ${theme.group === "Catppuccin" ? `Catppuccin ${theme.name}` : theme.name}`, "appearance color theme"),
+    ),
     choice("usageDisplay", "used", "Usage: Used", "plan limits"),
     choice("usageDisplay", "remaining", "Usage: Remaining", "plan limits left"),
     choice("showUsageInSidebar", true, "Sidebar usage: Show", "on enable plan limits"),

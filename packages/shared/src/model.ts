@@ -95,6 +95,8 @@ export interface ChatSummary {
   /** The first and last message in the Project's order: when the Chat started, and its latest activity. */
   firstId?: number;
   lastId?: number;
+  /** When the Chat last got a message or a reply ended (ms since epoch); absent until that happens on a host that keeps it. */
+  lastAt?: number;
   /** The first line of the first thing the user wrote, which names a Chat that has no title. */
   titleLine?: string;
   /** How the last reply ended (the commit dialog's notes aren't replies). */

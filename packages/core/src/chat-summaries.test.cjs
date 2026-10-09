@@ -20,10 +20,10 @@ test("a state read without summaries gets one for every Chat, an empty one inclu
 
 test("a reply updates its own Chat's summary only, and a rename keeps every summary", () => {
   const before = withChatSummaries(state(), null);
-  const after = withChatSummaries({ ...before, next_id: 6, messages: [...before.messages, reply(5, 2, { outcome: "completed" })] }, before);
+  const after = withChatSummaries({ ...before, next_id: 6, messages: [...before.messages, reply(5, 2, { outcome: "completed" })] }, before, () => 9);
   assert.equal(after.sessions[1], before.sessions[1]);
   assert.equal(after.sessions[3], before.sessions[3]);
-  assert.deepEqual(after.sessions[2].summary, { count: 3, firstId: 2, lastId: 5, titleLine: "Second chat", lastOutcome: "completed" });
+  assert.deepEqual(after.sessions[2].summary, { count: 3, firstId: 2, lastId: 5, lastAt: 9, titleLine: "Second chat", lastOutcome: "completed" });
   const renamed = { ...after, sessions: { ...after.sessions, 1: { ...after.sessions[1], title: "Named" } } };
   const kept = withChatSummaries(renamed, after);
   assert.equal(kept, renamed);
@@ -32,8 +32,27 @@ test("a reply updates its own Chat's summary only, and a rename keeps every summ
 
 test("a Chat whose messages are gone, or a session rebuilt without its summary, is summarized again", () => {
   const before = withChatSummaries(state(), null);
-  const without = withChatSummaries({ ...before, messages: before.messages.filter((message) => message.session_id !== 1) }, before);
-  assert.deepEqual(without.sessions[1].summary, { count: 0 });
+  const without = withChatSummaries({ ...before, messages: before.messages.filter((message) => message.session_id !== 1) }, before, () => 9);
+  assert.deepEqual(without.sessions[1].summary, { count: 0, lastAt: 9 });
   const rebuilt = { ...without, sessions: { ...without.sessions, 2: { id: 2, agent_name: "b" } } };
   assert.equal(withChatSummaries(rebuilt, without).sessions[2].summary.count, 2);
+});
+
+test("a new message or an ended reply stamps lastAt; a rename, a reread or a rebuilt session keeps it", () => {
+  const read = withChatSummaries(state(), null, () => 100);
+  assert.equal(read.sessions[1].summary.lastAt, undefined, "a state read from disk has no time to give");
+  const replied = withChatSummaries({ ...read, messages: [...read.messages, reply(5, 2, { outcome: "completed" })] }, read, () => 200);
+  assert.equal(replied.sessions[2].summary.lastAt, 200);
+  assert.equal(replied.sessions[1], read.sessions[1]);
+  const streamed = replied.messages.map((message) => (message.id === 5 ? { ...message, body: "Done, and more" } : message));
+  const kept = withChatSummaries({ ...replied, messages: streamed }, replied, () => 300);
+  assert.equal(kept.sessions[2].summary.lastAt, 200, "a reply growing in place is not new activity");
+  const rebuilt = withChatSummaries({ ...kept, sessions: { ...kept.sessions, 2: { id: 2, agent_name: "b" } } }, kept, () => 400);
+  assert.equal(rebuilt.sessions[2].summary.lastAt, 200);
+  const created = withChatSummaries(
+    { ...rebuilt, sessions: { ...rebuilt.sessions, 4: { id: 4, agent_name: "c" } }, messages: [...rebuilt.messages, ask(6, 4, "New")] },
+    rebuilt,
+    () => 500,
+  );
+  assert.equal(created.sessions[4].summary.lastAt, 500);
 });

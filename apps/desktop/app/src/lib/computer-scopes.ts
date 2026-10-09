@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { NamedProjectLink } from "@milagre/shared/model";
 import { LOCAL_COMPUTER } from "@milagre/shared/chat-scopes";
 import type { ComputerView } from "../electron";
@@ -38,12 +38,20 @@ export function withoutLocal<T extends { key: string }>(remote: T[], local: { ke
   return remote.filter((scope) => !local.some((item) => item.key === scope.key));
 }
 
+/** Another computer's Project as the project chooser lists it, hidden ones included. */
+export type ComputerProject = RecentProject & { computerId: string };
+
 /**
  * Each paired computer's Projects and Links, read from it (from its cache in main while it is away), again when its
- * state changes, and when a Project is hidden or shown. A failed read keeps the last list.
+ * state changes, and when a Project is hidden or shown. A failed read keeps the last list. `scopes` are what the sidebar
+ * lists; `projects` every Project, hidden too, for the chooser. `setHidden` shows a choice before the computer answers.
  */
-export function useComputerScopes(computers: ComputerView[]): ComputerScope[] {
-  const [byComputer, setByComputer] = useState<Record<string, ComputerScope[]>>({});
+export function useComputerScopes(computers: ComputerView[]): {
+  scopes: ComputerScope[];
+  projects: ComputerProject[];
+  setHidden: (key: string, hidden: boolean) => void;
+} {
+  const [byComputer, setByComputer] = useState<Record<string, { recent: RecentProject[]; links: NamedProjectLink[] }>>({});
   const [changed, setChanged] = useState(0);
   const states = computers.map((computer) => `${computer.id}:${computer.state}`).join("\n");
   useEffect(() => {
@@ -64,15 +72,33 @@ export function useComputerScopes(computers: ComputerView[]): ComputerScope[] {
       const bridge = bridgeFor(computer.id);
       void Promise.all([bridge.listRecentProjects().catch(() => null), bridge.listNamedLinks().catch(() => null)]).then(([recent, links]) => {
         if (!live || !Array.isArray(recent)) return;
-        setByComputer((previous) => ({ ...previous, [computer.id]: computerScopes(computer.id, recent, Array.isArray(links) ? links : []) }));
+        setByComputer((previous) => ({ ...previous, [computer.id]: { recent, links: Array.isArray(links) ? links : [] } }));
       });
     }
     return () => {
       live = false;
     };
   }, [states, changed]);
-  const ids = new Set(computers.map((computer) => computer.id));
-  return Object.entries(byComputer)
-    .filter(([id]) => ids.has(id))
-    .flatMap(([, scopes]) => scopes);
+  const setHidden = useCallback(
+    (key: string, hidden: boolean) =>
+      setByComputer((previous) =>
+        Object.fromEntries(
+          Object.entries(previous).map(([id, lists]) => [
+            id,
+            lists.recent.some((project) => project.path === key)
+              ? { ...lists, recent: lists.recent.map((project) => (project.path === key ? { ...project, hidden } : project)) }
+              : lists,
+          ]),
+        ),
+      ),
+    [],
+  );
+  return useMemo(() => {
+    const listed = computers.filter((computer) => byComputer[computer.id]).map((computer) => [computer.id, byComputer[computer.id]!] as const);
+    return {
+      scopes: listed.flatMap(([id, lists]) => computerScopes(id, lists.recent, lists.links)),
+      projects: listed.flatMap(([id, lists]) => lists.recent.map((project) => ({ ...project, computerId: id }))),
+      setHidden,
+    };
+  }, [byComputer, computers, setHidden]);
 }

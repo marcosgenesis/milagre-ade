@@ -23,7 +23,9 @@ function byChat(messages) {
 const sameList = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
 
 /** `next` with the summary of every Chat whose messages changed since `previous` (all of them without one) brought up to date. */
-function withChatSummaries(next, previous) {
+// `lastAt` is when a Chat last got a message or a reply ended: messages carry no time, so it is stamped here as the
+// change is saved. A state read from disk (no `previous`) keeps what it had.
+function withChatSummaries(next, previous, clock = Date.now) {
   if (!next?.sessions || !Array.isArray(next.messages)) return next;
   if (previous && next.messages === previous.messages && next.sessions === previous.sessions) return next;
   const now = byChat(next.messages);
@@ -34,6 +36,11 @@ function withChatSummaries(next, previous) {
     const list = now.get(String(id)) ?? EMPTY;
     if (session.summary && (messagesKept || (before && sameList(list, before.get(String(id)) ?? EMPTY)))) continue;
     const summary = summarizeChat(list);
+    const old = session.summary ?? previous?.sessions?.[id]?.summary;
+    const active =
+      previous && (old ? old.count !== summary.count || old.lastId !== summary.lastId || old.lastOutcome !== summary.lastOutcome : summary.count > 0);
+    const lastAt = active ? clock() : old?.lastAt;
+    if (lastAt !== undefined) summary.lastAt = lastAt;
     if (sameSummary(session.summary, summary)) continue;
     (sessions ??= { ...next.sessions })[id] = { ...session, summary };
   }

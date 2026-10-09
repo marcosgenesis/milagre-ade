@@ -1,4 +1,4 @@
-// Browser check: with the Experimental "Every project in the sidebar" on, the sidebar lists each recent Project and
+// Browser check: by default (Experimental "Use legacy sidebar" off), the sidebar lists each recent Project and
 // Link with its chats, leaves out a hidden Project, shows and hides Projects from the chooser's checkboxes, marks exactly one open scope, shows each scope's ⋯ menu and New chat
 // label, pins and folds groups, opens another Project's chat and follows its live updates. Off, the project menu is
 // back on top. No agent calls.
@@ -12,10 +12,11 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import SidebarNav from "/src/components/SidebarNav";
 import { updateSettings } from "/src/lib/settings";
+import { DESKTOP_CHAT_ROW_SHOW } from "@milagre/shared/chat-row";
 import "/src/styles.css";
 const chat = (id, body) => ({
-  sessions: { [id]: { id, worktree_id: 1, agent_name: "Claude", status: "Idle" } },
-  worktrees: { 1: { id: 1, name: "main", path: "/work/x" } },
+  sessions: { [id]: { id, worktree_id: 1, agent_name: "Claude", status: "Idle", summary: { count: 1, firstId: id, lastId: id, titleLine: body, lastAt: Date.now() - 5 * 60000 } } },
+  worktrees: { 1: { id: 1, name: "main", path: "/work/x", diff: { added: 12, removed: 3, files: 2 } } },
   messages: [{ id, session_id: id, role: "user", body }],
 });
 const listeners = [];
@@ -53,9 +54,9 @@ window.milagre = {
   },
 };
 window.pushShop = (state) => listeners.forEach((callback) => callback({ path: "/work/shop", state }));
-window.showAll = (sidebarAllProjects) => updateSettings({ sidebarAllProjects });
+window.showAll = (all) => updateSettings({ legacySidebar: !all });
 localStorage.removeItem("milagre.sidebarClosedScopes");
-updateSettings({ sidebarAllProjects: true });
+updateSettings({ legacySidebar: false, chatRowShow: DESKTOP_CHAT_ROW_SHOW });
 createRoot(document.getElementById("root")).render(
   <div style={{ display: "flex", height: "100vh", padding: "60px 12px 12px" }}>
     <SidebarNav fill workspaceName="arketa" projectPath="/work/arketa" recents={[{ id: "1", label: "Fix the login flow" }]} activeId="1"
@@ -196,8 +197,10 @@ async function browserChecks() {
     await waitFor(`!document.querySelector("[data-scope-menu-panel]")`);
 
     // The project chooser lists every Project, the hidden one unchecked; checking it brings its group back, unchecking hides it again.
-    await evaluate(`document.querySelector("[data-project-picker]").click()`);
-    await waitFor(`!!document.querySelector("[data-project-picker-panel]")`);
+    await evaluate(`document.querySelector("[data-filters]").click()`);
+    await waitFor(`!!document.querySelector('[data-filters-panel] [data-sub="projects"]')`);
+    await evaluate(`document.querySelector('[data-filters-panel] [data-sub="projects"]').click()`);
+    await waitFor(`!!document.querySelector('[data-filters-sub="projects"]')`);
     assert.deepEqual(
       await evaluate(`[...document.querySelectorAll("[data-project-choice]")].map((row) => [row.dataset.projectChoice, row.getAttribute("aria-checked")])`),
       [
@@ -222,8 +225,11 @@ async function browserChecks() {
     await waitFor(`!!document.querySelector('[data-sidebar-scope="/work/shop"]')`);
     await evaluate(`document.querySelector('[data-project-choice="/work/api"]').click()`);
     await waitFor(`!document.querySelector('[data-sidebar-scope="/work/api"]')`);
+    // Escape leaves Projects for the menu, and again closes it.
     await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
-    await waitFor(`!document.querySelector("[data-project-picker-panel]")`);
+    await waitFor(`!document.querySelector("[data-filters-sub]") && document.activeElement?.dataset.sub === "projects"`);
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await waitFor(`!document.querySelector("[data-filters-panel]")`);
 
     await click('[data-sidebar-scope="/work/shop"] [data-chat-id] [data-row]');
     assert.equal(await evaluate("window.opened"), "/work/shop#7", "Another Project's chat opens through onOpenScopeChat");
@@ -245,7 +251,7 @@ async function browserChecks() {
     await screenshot("pinned-other-project");
 
     await evaluate(
-      `window.pushShop({ sessions: { 7: { id: 7, worktree_id: 1, agent_name: "Claude", status: "Idle", pinned: true, pin_order: 0 }, 8: { id: 8, worktree_id: 1, agent_name: "Claude", status: "Idle" } }, worktrees: {}, messages: [{ id: 7, session_id: 7, role: "user", body: "Shop chat" }, { id: 8, session_id: 8, role: "user", body: "New from the phone" }] })`,
+      `window.pushShop({ sessions: { 7: { id: 7, worktree_id: 1, agent_name: "Claude", status: "Idle", pinned: true, pin_order: 0 }, 8: { id: 8, worktree_id: 1, agent_name: "Claude", status: "Idle", summary: { count: 1, firstId: 8, lastId: 8, titleLine: "New from the phone", lastAt: Date.now() - 5 * 60000 } } }, worktrees: { 1: { id: 1, name: "main", path: "/work/x", diff: { added: 12, removed: 3, files: 2 } } }, messages: [{ id: 7, session_id: 7, role: "user", body: "Shop chat" }, { id: 8, session_id: 8, role: "user", body: "New from the phone" }] })`,
     );
     await waitFor(`document.querySelectorAll('[data-sidebar-scope="/work/shop"] [data-chat-id]').length === 1`);
 
@@ -255,13 +261,76 @@ async function browserChecks() {
     assert.deepEqual(JSON.parse(await evaluate(`localStorage.getItem("milagre.sidebarClosedScopes")`)), ["/work/shop"]);
     await screenshot("folded");
 
+    // Filters › Show adds the branch, the diff and the last activity to each row's second line, and takes them off again.
+    const line = () => evaluate(`document.querySelector('[data-sidebar-scope="/work/shop"] [data-chat-id] [data-chat-prs]')?.textContent.trim() ?? ""`);
+    assert.equal(await line(), "", "By default a row without chips has one line");
+    await evaluate(`document.querySelector("[data-filters]").click()`);
+    await waitFor(`!!document.querySelector('[data-filters-panel] [data-sub="show"]')`);
+    await evaluate(`document.querySelector('[data-filters-panel] [data-sub="show"]').click()`);
+    await waitFor(`!!document.querySelector('[data-filters-sub="show"]')`);
+    assert.deepEqual(
+      await evaluate(`[...document.querySelectorAll("[data-show-field]")].map((row) => [row.dataset.showField, row.getAttribute("aria-checked")])`),
+      [
+        ["pullRequests", "true"],
+        ["linearIssue", "true"],
+        ["branch", "false"],
+        ["diff", "false"],
+        ["lastActivity", "false"],
+      ],
+      "This Mac alone: no Computer choice",
+    );
+    for (const field of ["branch", "diff", "lastActivity"]) await evaluate(`document.querySelector('[data-show-field="${field}"]').click()`);
+    await waitFor(`!!document.querySelector('[data-sidebar-scope="/work/shop"] [data-chat-id] [data-chat-ago]')`);
+    assert.match(await line(), /^main\s*·\s*\+12 −3\s*·\s*[45]m$/);
+    await screenshot("filters-show");
+    await evaluate(`document.querySelector('[data-show-field="diff"]').click()`);
+    await waitFor(`!document.querySelector('[data-sidebar-scope="/work/shop"] [data-chat-diff]')`);
+    for (const field of ["branch", "lastActivity"]) await evaluate(`document.querySelector('[data-show-field="${field}"]').click()`);
+    await waitFor(`!document.querySelector('[data-sidebar-scope="/work/shop"] [data-chat-id] [data-chat-prs]')`);
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await waitFor(`!document.querySelector("[data-filters-panel]")`);
+
+    // Dragging another Project's chat from its group into Pinned pins it there: the group and its pinned rows are one list.
+    await click('[data-sidebar-scope="/work/shop"] [data-scope-toggle]');
+    await waitFor(`document.querySelector('[data-sidebar-scope="/work/shop"] [data-chat-id="8"]')?.getBoundingClientRect().height > 0`);
+    await delay(250);
+    const centre = (selector) =>
+      evaluate(
+        `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.left + 60), y: Math.round(r.top + r.height / 2), bottom: r.bottom }; })()`,
+      );
+    const mouse = (type, x, y) => window.webContents.sendInputEvent({ type, x, y, button: "left", clickCount: 1 });
+    const from = await centre('[data-sidebar-scope="/work/shop"] [data-chat-id="8"]');
+    const to = await centre('[data-all-pinned] [data-pinned-scope="/work/shop"] [data-chat-id="7"]');
+    mouse("mouseMove", from.x, from.y);
+    mouse("mouseDown", from.x, from.y);
+    for (let step = 1; step <= 10; step++) {
+      mouse("mouseMove", from.x, Math.round(from.y + ((to.bottom - 4 - from.y) * step) / 10));
+      await delay(16);
+    }
+    await waitFor(`!!document.querySelector("[data-drop-line]")`);
+    await screenshot("drag-into-pinned");
+    mouse("mouseUp", to.x, to.bottom - 4);
+    await waitFor(`window.patched?.[1] === 8`);
+    const [scope, id, patch] = await evaluate("window.patched");
+    assert.deepEqual([scope, id, patch.pinned], ["/work/shop", 8, true], "dropped below the pinned chat, another Project's chat is pinned");
+    assert.ok(patch.pin_order > 0, "after the pinned one");
+
     await evaluate("window.showAll(false)");
     await waitFor(`!document.querySelector("[data-sidebar-scope]")`);
     await screenshot("off");
     assert.match(await evaluate(`document.querySelector("[data-chat-id]").textContent`), /Fix the login flow/, "Off, only the open Project's chats");
     assert.equal(await evaluate(`!!document.querySelector("[data-workspace-trigger]")`), true, "Off, the project menu is back on top");
     assert.equal(await evaluate(`!!document.querySelector("[data-link-projects]")`), false, "Off, Link projects stays in that menu");
-    assert.equal(await evaluate(`!!document.querySelector("[data-project-picker]")`), false, "Off, no project chooser");
+    await evaluate(`document.querySelector("[data-filters]").click()`);
+    await waitFor(`!!document.querySelector("[data-filters-panel]")`);
+    assert.deepEqual(
+      await evaluate(`[...document.querySelectorAll("[data-filters-panel] [data-sub]")].map((row) => row.dataset.sub)`),
+      ["show"],
+      "Off, Filters has no Projects",
+    );
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await waitFor(`!document.querySelector("[data-filters-panel]")`);
     assert.deepEqual(errors, []);
     await reset();
     console.log(

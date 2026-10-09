@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client";
 import SidebarNav from "/src/components/SidebarNav";
 import { SettingsPanel } from "/src/components/Settings";
 import { orderChats } from "/src/lib/chat-list";
-import { useSettings } from "/src/lib/settings";
+import { updateSettings, useSettings } from "/src/lib/settings";
 import { MODEL_CATALOG } from "/src/model";
 import "/src/styles.css";
 // Message ids: the first dates the chat's start, the last its latest reply.
@@ -31,6 +31,8 @@ function Fixture() {
   );
 }
 document.documentElement.classList.add("dark");
+// No open Project: only the legacy sidebar lists the recents without one.
+updateSettings({ legacySidebar: true });
 createRoot(document.getElementById("root")).render(<Fixture />);
 `;
 

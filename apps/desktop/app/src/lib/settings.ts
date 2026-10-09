@@ -4,6 +4,7 @@ import type { PermissionMode } from "../model";
 import { DEFAULT_THEME_ID, parseCustomTheme, resolvePalette, resolveThemeSettings } from "@milagre/shared/themes";
 import type { CustomTheme, ThemeChoice } from "@milagre/shared/themes";
 import type { ChatOrder } from "./chat-list";
+import { DESKTOP_CHAT_ROW_SHOW, parseChatRowShow, type ChatRowShow } from "@milagre/shared/chat-row";
 import { THEME_EVENT, applyPalette } from "./theme-sheet.ts";
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -40,8 +41,11 @@ export interface AppSettings {
   tldrEnabled: boolean;
   /** Sidebar chats by start date, or with the latest message first. */
   chatOrder: ChatOrder;
-  /** Experimental: the sidebar lists every recent Project and Link with its chats, not only the open one's. */
-  sidebarAllProjects: boolean;
+  /** What a sidebar chat row's second line shows (the Filters menu's Show). */
+  chatRowShow: ChatRowShow;
+  /** Experimental: the old sidebar, with the project menu on top and only the open Project's chats, instead of every
+   * Project and Link with its chats. A new key, so the old opt-in (sidebarAllProjects, saved false for everyone) is dropped. */
+  legacySidebar: boolean;
   /** Experimental: a reply's tool calls and the text between them show in the chat, one row each, instead of folding into one line. */
   muriloMode: boolean;
   /** Experimental: drive the chats of other Macs running Milagre from this window (Add computer, the computers popover). */
@@ -86,7 +90,8 @@ const DEFAULTS: AppSettings = {
   claudeReplies: "concise",
   tldrEnabled: true,
   chatOrder: "created",
-  sidebarAllProjects: false,
+  chatRowShow: DESKTOP_CHAT_ROW_SHOW,
+  legacySidebar: false,
   muriloMode: false,
   otherComputers: false,
   ultracodeFatality: false,
@@ -124,7 +129,8 @@ function load(): AppSettings {
       tldrEnabled: typeof saved.tldrEnabled === "boolean" ? saved.tldrEnabled : DEFAULTS.tldrEnabled,
       claudeReplies: CLAUDE_REPLIES.includes(saved.claudeReplies as ClaudeReplies) ? saved.claudeReplies! : DEFAULTS.claudeReplies,
       chatOrder: CHAT_ORDERS.includes(saved.chatOrder as ChatOrder) ? saved.chatOrder! : DEFAULTS.chatOrder,
-      sidebarAllProjects: typeof saved.sidebarAllProjects === "boolean" ? saved.sidebarAllProjects : DEFAULTS.sidebarAllProjects,
+      chatRowShow: parseChatRowShow(saved.chatRowShow, DEFAULTS.chatRowShow),
+      legacySidebar: typeof saved.legacySidebar === "boolean" ? saved.legacySidebar : DEFAULTS.legacySidebar,
       muriloMode: typeof saved.muriloMode === "boolean" ? saved.muriloMode : DEFAULTS.muriloMode,
       otherComputers: typeof saved.otherComputers === "boolean" ? saved.otherComputers : DEFAULTS.otherComputers,
       ultracodeFatality: typeof saved.ultracodeFatality === "boolean" ? saved.ultracodeFatality : DEFAULTS.ultracodeFatality,

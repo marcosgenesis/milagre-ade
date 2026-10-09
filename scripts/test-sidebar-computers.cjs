@@ -25,6 +25,10 @@ const remoteState = (title, body) => ({ next_id: 9, projects: { 1: { id: 1, name
 const remoteProjects = {
   "c-arketa": { path: "c-arketa|/Users/a/arketa-web", name: "arketa-web", state: remoteState("Fix flaky deploy check", "The deploy check fails about one run in five.") },
   "c-studio": { path: "c-studio|/Users/s/homelab", name: "homelab", state: remoteState("Backup rotation", "Rotate the nightly backups.") },
+  // Hidden on its computer: not in the sidebar, but in the project chooser, unchecked.
+  "c-arketa-hidden": { path: "c-arketa|/Users/a/old-site", name: "old-site", hidden: true, state: remoteState("Old site", "Retire it.") },
+  // Only on a computer added during the test.
+  "c-new": { path: "c-new|/Users/n/garden", name: "garden", state: remoteState("Water plan", "Plan the watering.") },
   "c-studio-lean": {
     path: "c-studio|/Users/s/notes",
     name: "notes",
@@ -32,12 +36,17 @@ const remoteProjects = {
     state: { ...remoteState("Never opened here", ""), messages: [], messagesInChats: true, sessions: { 4: { id: 4, worktree_id: 1, agent_name: "Claude", provider: "claude", status: "Idle", title: "Never opened here", summary: { count: 3, firstId: 1, lastId: 3 } } } },
   },
 };
+window.remoteProjects = remoteProjects;
 window.sent = [];
 // Each computer's bridge, as main would answer it: keys already name the computer.
 const projectsOf = (id) => Object.values(remoteProjects).filter((project) => project.path.startsWith(id + "|"));
 const projectAt = async (key) => Object.values(remoteProjects).find((project) => project.path === key);
 const remote = (id) => new Proxy({
-  listRecentProjects: async () => projectsOf(id).map(({ path, name }) => ({ path, name })),
+  listRecentProjects: async () => projectsOf(id).map(({ path, name, hidden }) => ({ path, name, ...(hidden ? { hidden } : {}) })),
+  setProjectHidden: async (key, hidden) => {
+    Object.values(remoteProjects).find((project) => project.path === key).hidden = hidden;
+    return projectsOf(id).map(({ path, name, hidden }) => ({ path, name, ...(hidden ? { hidden } : {}) }));
+  },
   listNamedLinks: async () => [],
   readProject: projectAt,
   switchProject: projectAt,
@@ -49,7 +58,7 @@ const remote = (id) => new Proxy({
   forgetProject: async (key) => ((window.forgotten ??= []).push(key), projectsOf(id).filter((project) => project.path !== key).map(({ path, name }) => ({ path, name }))),
   sendMessage: async (request) => (window.sent.push(request), { sessionId: 4 }),
 }, { get(target, key) { return target[key] ?? (String(key).startsWith("on") ? () => () => {} : async () => null); } });
-const remotes = { "c-arketa": remote("c-arketa"), "c-studio": remote("c-studio") };
+const remotes = { "c-arketa": remote("c-arketa"), "c-studio": remote("c-studio"), "c-new": remote("c-new") };
 window.milagre = new Proxy({
   getRuntimeConnection: async () => ({ connected: true }),
   getAgentPorts: async () => ({}),
@@ -181,6 +190,51 @@ async function browserChecks() {
     );
     await screenshot("merged-list");
     console.log("PASS: every computer's Projects in one list by name, each row naming its computer, the offline one dimmed");
+
+    // Filters › Projects lists every computer's Projects, hidden ones unchecked, each naming its computer.
+    const choices = () =>
+      evaluate(
+        `[...document.querySelectorAll('[data-filters-sub="projects"] [data-project-choice]')].map((row) => [row.dataset.projectChoice, row.getAttribute('aria-checked'), row.lastElementChild.textContent])`,
+      );
+    await evaluate(`document.querySelector('[data-filters]').click()`);
+    await waitFor(`!!document.querySelector('[data-filters-panel] [data-sub="projects"]')`);
+    await evaluate(`document.querySelector('[data-filters-panel] [data-sub="projects"]').click()`);
+    await waitFor(`!!document.querySelector('[data-filters-sub="projects"]')`);
+    assert.deepEqual(
+      await choices(),
+      [
+        ["c-arketa|/Users/a/arketa-web", "true", "arketa"],
+        ["c-studio|/Users/s/homelab", "true", "studio"],
+        ["/work/milagre-ade", "true", "Open"],
+        ["c-studio|/Users/s/notes", "true", "studio"],
+        ["c-arketa|/Users/a/old-site", "false", "arketa"],
+      ],
+      "every computer's Projects by name, the hidden one unchecked",
+    );
+    await screenshot("filters-projects");
+    await evaluate(`document.querySelector('[data-project-choice="c-arketa|/Users/a/old-site"]').click()`);
+    await waitFor(`!!document.querySelector('[data-sidebar-scope="c-arketa|/Users/a/old-site"]')`);
+    assert.equal(await evaluate(`document.querySelector('[data-project-choice="c-arketa|/Users/a/old-site"]').getAttribute('aria-checked')`), "true");
+    await evaluate(`document.querySelector('[data-project-choice="c-arketa|/Users/a/old-site"]').click()`);
+    await waitFor(`!document.querySelector('[data-sidebar-scope="c-arketa|/Users/a/old-site"]')`);
+    assert.equal(await evaluate(`window.remoteProjects["c-arketa-hidden"].hidden`), true, "the choice is saved on that computer");
+
+    // A computer added while the menu is open brings its Projects in.
+    await evaluate(
+      `window.setComputers([...window.computerList, { id: "c-new", name: "garden-mini", hostId: "n".repeat(22), relayHost: "relay.milagre.cloud", state: "online", route: "lan", lastSeen: Date.now(), addedAt: 3, message: null, lan: true, lanRoutes: [] }])`,
+    );
+    await waitFor(`!!document.querySelector('[data-project-choice="c-new|/Users/n/garden"]')`);
+    assert.equal(await evaluate(`document.querySelector('[data-project-choice="c-new|/Users/n/garden"]').lastElementChild.textContent`), "garden-mini");
+    await waitFor(`!!document.querySelector('[data-sidebar-scope="c-new|/Users/n/garden"]')`);
+    await screenshot("filters-new-computer");
+    await evaluate(`window.setComputers(window.computerList.filter((computer) => computer.id !== "c-new"))`);
+    await waitFor(`!document.querySelector('[data-project-choice="c-new|/Users/n/garden"]')`);
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    await waitFor(`!document.querySelector('[data-filters-panel]')`);
+    console.log(
+      "PASS: Filters › Projects lists every computer's Projects, hidden ones too, saves a choice on its computer, and follows a computer being added",
+    );
 
     // Removing a computer's Project from the list asks that computer, and leaves this Mac's list as it was.
     await evaluate(`document.querySelector('[data-sidebar-scope="c-arketa|/Users/a/arketa-web"] [data-scope-menu]').click()`);

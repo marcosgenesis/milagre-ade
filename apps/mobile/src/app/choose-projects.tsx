@@ -55,7 +55,7 @@ export default function ChooseProjects() {
           <Text style={[styles.text, { fontWeight: "600" }]}>Done</Text>
         </Pressable>
       </View>
-      <Text style={styles.muted}>Checked Projects show in your Projects list, and in the sidebar on your Mac when it shows every Project.</Text>
+      <Text style={styles.muted}>Checked Projects show in your Projects list, and in the sidebar on your Mac.</Text>
       <View style={{ borderRadius: 12, backgroundColor: colors.surface, padding: 4 }}>
         {projects.map((project) => {
           const checked = shown(project.path, project.hidden);

@@ -9,7 +9,6 @@ import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
   Cancel01Icon,
-  CheckListIcon,
   FilterHorizontalIcon,
   FolderAddIcon,
   GitBranchIcon,
@@ -56,6 +55,8 @@ import { ChatPullRequestChips } from "./chat-pull-request-chips";
 import { useLinear } from "./use-linear";
 import { useWorktreeLinearIssues } from "./use-worktree-linear-issues";
 import { createStylesHook, useTheme, type Palette } from "./theme";
+import { activityAgo, CHAT_ROW_FIELDS } from "@milagre/shared/chat-row";
+import { saveChatRowShow, useActivityClock, useChatRowShow } from "./chat-row-store";
 
 type Destination = (href: Href, secondary?: boolean) => void;
 type Row = { key: string; path: string } & (
@@ -83,6 +84,15 @@ const SHOW: [Show, string, string][] = [
   ["running", "Running", "play.circle"],
   ["archived", "Archived", "archivebox"],
 ];
+// What a Chat row can show under its title (the Filters menu's "On chats"); the computer is a desktop choice.
+const ROW_FIELDS = CHAT_ROW_FIELDS.filter((field) => field.id !== "computer");
+const FIELD_SYMBOLS: Record<string, string> = {
+  pullRequests: "arrow.triangle.pull",
+  linearIssue: "ticket",
+  branch: "arrow.triangle.branch",
+  diff: "plusminus",
+  lastActivity: "clock",
+};
 const NEEDS: ChatMark[] = ["question", "waiting", "interrupted", "failed", "unread"];
 const labels: Record<ChatMark, string> = {
   idle: "",
@@ -118,6 +128,9 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const [failures, setFailures] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
   const [show, setShow] = useState<Show>("all");
+  const rowShow = useChatRowShow();
+  // Last activity reads "5m"; the clock ticks only while the rows show it.
+  const now = useActivityClock(rowShow.lastActivity);
   const [page, setPage] = useState<"add" | null>(null);
   const [busy, setBusy] = useState(false);
   const archives = useArchiveActivity();
@@ -501,7 +514,6 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         <Text style={s.secondary}>Add project</Text>
       </Pressable>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <IconButton label="Choose projects" icon={CheckListIcon} size={44} disabled={busy} onPress={() => onNavigate("/choose-projects", true)} />
         <IconButton label="Link projects" icon={Link04Icon} size={44} disabled={busy} onPress={() => onNavigate("/link-projects", true)} />
         <IconButton label="Settings" icon={Settings01Icon} size={44} onPress={() => onNavigate("/settings", true)} />
       </View>
@@ -583,8 +595,26 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           <PullDown
             label="Filter Chats"
             nativeTrigger={{ systemImage: show === "all" ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill" }}
-            sections={[{ title: "Show", items: SHOW.map(([id, title, systemImage]) => ({ id, title, systemImage, checked: show === id })) }]}
-            onSelect={(id) => setShow(id as Show)}
+            sections={[
+              // Which Projects the list shows, as desktop's Filters › Projects.
+              { items: [{ id: "choose-projects", title: "Choose projects…", systemImage: "checklist" }] },
+              { title: "Show", items: SHOW.map(([id, title, systemImage]) => ({ id, title, systemImage, checked: show === id })) },
+              {
+                title: "On chats",
+                items: ROW_FIELDS.map((field) => ({
+                  id: `field:${field.id}`,
+                  title: field.label,
+                  systemImage: FIELD_SYMBOLS[field.id],
+                  checked: rowShow[field.id],
+                })),
+              },
+            ]}
+            onSelect={(id) => {
+              const field = ROW_FIELDS.find((item) => id === `field:${item.id}`);
+              if (field) saveChatRowShow({ ...rowShow, [field.id]: !rowShow[field.id] });
+              else if (id === "choose-projects") onNavigate("/choose-projects", true);
+              else setShow(id as Show);
+            }}
           >
             <View style={[s.filter, show !== "all" && { backgroundColor: colors.field }]}>
               <Icon icon={FilterHorizontalIcon} tone={show === "all" ? "ink2" : "ink"} size={19} />
@@ -717,8 +747,26 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
           const title = item.title;
           const selected = currentPath === item.path && activeChatId === item.chat.id;
           const tone = chatMarkTone(item.mark);
-          const hasChips = !!item.pullRequests?.length || !!item.linearIssue;
+          const pullRequests = rowShow.pullRequests ? item.pullRequests || [] : [];
+          const linearIssue = rowShow.linearIssue ? item.linearIssue : undefined;
+          const hasChips = pullRequests.length > 0 || !!linearIssue;
           const copy = item.path === currentPath && session.snapshot ? session.snapshot : cachedProject(item.path);
+          const worktreeDiff = rowShow.diff && !copy?.project.link ? copy?.project.state.worktrees[item.chat.worktree_id]?.diff : undefined;
+          const diff = worktreeDiff && (worktreeDiff.added > 0 || worktreeDiff.removed > 0) ? worktreeDiff : undefined;
+          const lastAt = rowShow.lastActivity ? item.chat.summary?.lastAt : undefined;
+          // The diff and the last activity sit after the branch, or after the chips.
+          const facts = (
+            <>
+              {diff && (
+                <Text style={[s.detail, { fontVariant: ["tabular-nums"] }]}>
+                  <Text style={{ color: colors.green }}>+{diff.added}</Text> <Text style={{ color: colors.red }}>−{diff.removed}</Text>
+                </Text>
+              )}
+              {lastAt !== undefined && <Text style={[s.detail, { fontVariant: ["tabular-nums"] }]}>{activityAgo(lastAt, now)}</Text>}
+            </>
+          );
+          const branchLine = copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : rowShow.branch ? item.worktree : "";
+          const secondLine = !!branchLine || !!diff || lastAt !== undefined || !!item.chat.pinned || !!labels[item.mark];
           const menu = chatMenu(
             item.chat,
             copy?.project.link ? { path: copy.project.state.worktrees[item.chat.worktree_id]?.path } : copy?.project.state.worktrees[item.chat.worktree_id],
@@ -754,13 +802,16 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                       >
                         {title}
                       </Text>
-                      {!hasChips && (
+                      {!hasChips && secondLine && (
                         <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
                           {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
-                          {!copy?.project.link && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}
-                          <Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>
-                            {copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : item.worktree}
-                          </Text>
+                          {!copy?.project.link && !!branchLine && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}
+                          {!!branchLine && (
+                            <Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>
+                              {branchLine}
+                            </Text>
+                          )}
+                          {facts}
                           {!!labels[item.mark] && (
                             <Text style={[s.detail, { color: tone === "accent" ? colors.accentInk : colors[tone] }]}>{labels[item.mark]}</Text>
                           )}
@@ -770,8 +821,9 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                   </View>
                 </PullDown>
                 {hasChips && (
-                  <ChatPullRequestChips pullRequests={item.pullRequests || []} linearIssue={item.linearIssue}>
+                  <ChatPullRequestChips pullRequests={pullRequests} linearIssue={linearIssue}>
                     {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
+                    {facts}
                     {!!labels[item.mark] && (
                       <Text numberOfLines={1} style={[s.detail, { flexShrink: 1, color: tone === "accent" ? colors.accentInk : colors[tone] }]}>
                         {labels[item.mark]}

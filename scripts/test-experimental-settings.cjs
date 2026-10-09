@@ -29,10 +29,10 @@ const entries = [
 ];
 function Fixture() {
   const [section, setSection] = useState('appearance');
-  const { sidebarAllProjects, otherComputers } = useSettings();
+  const { legacySidebar, otherComputers } = useSettings();
   useApplyOtherComputers();
   return (
-    <div data-all-projects={String(sidebarAllProjects)} data-other-computers={String(otherComputers)} style={{ display: 'flex', gap: 12, height: '100vh', padding: 12 }}>
+    <div data-legacy-sidebar={String(legacySidebar)} data-other-computers={String(otherComputers)} style={{ display: 'flex', gap: 12, height: '100vh', padding: 12 }}>
       <SettingsNav section={section} onSelect={setSection} onSelectProject={() => {}} onBack={() => {}} showProjectSettings={false} />
       <main style={{ flex: 1, minWidth: 0 }}><SettingsPanel section={section} models={[]} update={null} /></main>
       <aside data-reply style={{ width: 320 }}><ActivityBlock entries={entries} /></aside>
@@ -66,19 +66,23 @@ async function browserChecks() {
     await delay(250);
     fs.writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, name + ".png"), (await window.webContents.capturePage()).toPNG());
   };
-  const toggle = `document.querySelector('[role="switch"][aria-label="Every project in the sidebar"], button[aria-label="Every project in the sidebar"], input[aria-label="Every project in the sidebar"]')`;
+  const toggle = `document.querySelector('[role="switch"][aria-label="Use legacy sidebar"], button[aria-label="Use legacy sidebar"], input[aria-label="Use legacy sidebar"]')`;
   try {
     await window.loadURL(process.argv[2]);
     await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Experimental')`);
     await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Experimental').click()`);
     await waitFor(`!!${toggle}`);
-    assert.equal(await evaluate(`document.querySelector('[data-all-projects]').dataset.allProjects`), "false", "Off by default");
+    assert.equal(
+      await evaluate(`document.querySelector('[data-legacy-sidebar]').dataset.legacySidebar`),
+      "false",
+      "Off by default: every project in the sidebar",
+    );
     await screenshot("off");
     await evaluate(`${toggle}.click()`);
-    await waitFor(`document.querySelector('[data-all-projects]').dataset.allProjects === 'true'`);
+    await waitFor(`document.querySelector('[data-legacy-sidebar]').dataset.legacySidebar === 'true'`);
     await screenshot("on");
     await evaluate(`${toggle}.click()`);
-    await waitFor(`document.querySelector('[data-all-projects]').dataset.allProjects === 'false'`);
+    await waitFor(`document.querySelector('[data-legacy-sidebar]').dataset.legacySidebar === 'false'`);
     const murilo = `document.querySelector('[role="switch"][aria-label="Murilo mode"], button[aria-label="Murilo mode"], input[aria-label="Murilo mode"]')`;
     const reply = (selector) => `document.querySelector('[data-reply] ${selector}')`;
     assert.equal(await evaluate(`!!${reply("[data-slot=activity]")}`), true, "Murilo mode is off by default: the activity folds into one line");

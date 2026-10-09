@@ -67,7 +67,10 @@ export function scopeChats(
       unread: Boolean(session.unread),
       mark: chatMark({ asking: asking.has(chatKey), waiting: waiting.has(chatKey), running: running.has(chatKey), unread: Boolean(session.unread) }),
       ...("worktrees" in session ? { worktreeCount: session.worktrees.length } : {}),
-      ...(worktree ? { details: { branch: worktree.name, path: worktree.path, diff: worktree.diff } } : {}),
+      details: {
+        ...(worktree ? { branch: worktree.name, path: worktree.path, diff: worktree.diff } : {}),
+        lastAt: chatSummary(session, sessionMessages).lastAt,
+      },
     };
   });
 }

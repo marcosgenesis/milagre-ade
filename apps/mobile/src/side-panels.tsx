@@ -29,7 +29,7 @@ type Panels = {
   show: (side: Side | null) => void;
   pull: (side: Side) => void;
   settled: (to: number) => void;
-  navigate: (href?: Href, secondary?: boolean) => void;
+  navigate: (href?: Href, secondary?: boolean | "sheet") => void;
 };
 
 const SPRING = { damping: 32, stiffness: 320, mass: 0.9, reduceMotion: ReduceMotion.System };
@@ -110,8 +110,13 @@ export function SidePanelsProvider({ children }: { children: React.ReactNode }) 
   }, []);
   // The navigation slides away before the next screen replaces this one, and whatever was still opening is dropped.
   // The navigation goes ahead even when something else stops the slide early (a screen resetting the panels).
+  // A sheet opens over the navigation instead, which is still there when the sheet closes.
   const navigate = useCallback(
-    (href?: Href, secondary = false) => {
+    (href?: Href, secondary: boolean | "sheet" = false) => {
+      if (secondary === "sheet") {
+        if (href) router.push(href);
+        return;
+      }
       Keyboard.dismiss();
       cancelNavigation();
       setOpen(null);

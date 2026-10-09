@@ -1577,6 +1577,13 @@ test("the sidebar filter shows archived, running or waiting Chats across Project
   assert.equal(ids(), "[]", "chatMark is idle in this host, so nothing is running");
 });
 
+test("Choose projects opens as a sheet over the sidebar instead of closing it", () => {
+  const nav = navigationHost(deferred().promise);
+  nav.filter().props.onSelect("choose-projects");
+  assert.deepEqual(nav.routes, ["/choose-projects"]);
+  assert.deepEqual(nav.secondaryRoutes, ["sheet"]);
+});
+
 test("a chat search with no matching title lists matching messages, and a tap opens their Chat", () => {
   const nav = navigationHost(deferred().promise);
   nav.state.project.state.sessions[3] = { id: 3, title: "Relay work" };

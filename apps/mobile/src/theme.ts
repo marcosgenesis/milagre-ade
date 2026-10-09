@@ -1,4 +1,8 @@
-import { Appearance, DynamicColorIOS, Platform, type ColorValue } from "react-native";
+import { useMemo, useSyncExternalStore } from "react";
+import { Appearance, DynamicColorIOS, Platform, useColorScheme, type ColorValue } from "react-native";
+import { resolvePalette, withAlpha, type ThemePalette } from "@milagre/shared/themes";
+import { readThemeSettings, saveThemeSettings } from "./hosts-native";
+import { getThemeSettings, initThemeStore, setThemeSettings, subscribeTheme, type PhoneThemeSettings } from "./theme-store";
 
 // Desktop's tokens (apps/desktop/app/src/styles.css), converted from oklch so both apps share one palette.
 const light = {
@@ -79,3 +83,46 @@ export const colors = Object.fromEntries(
 /** Raw hex values, for SVG and native components that cannot take a dynamic color. */
 export const hex = (scheme: string | null | undefined) => (scheme === "dark" ? dark : light);
 export const fonts = { mono: Platform.OS === "ios" ? "Menlo" : "monospace" };
+
+/** The themed palette plus the phone's short names. Task 7 renames this to `Palette` once the old one is gone. */
+export type AppPalette = ThemePalette & {
+  bg: string;
+  panel: string;
+  text: string;
+  muted: string;
+  error: string;
+  onInk: string;
+  idleDot: string;
+  backdrop: string;
+};
+
+function applyMode(mode: PhoneThemeSettings["mode"]) {
+  Appearance.setColorScheme(mode === "system" ? "unspecified" : mode);
+}
+void initThemeStore({ read: readThemeSettings, save: saveThemeSettings }).then(() => applyMode(getThemeSettings().mode));
+
+function extend(p: ThemePalette): AppPalette {
+  return {
+    ...p,
+    bg: p.page,
+    panel: p.surface,
+    text: p.ink,
+    muted: p.ink2,
+    error: p.red,
+    onInk: p.onAccent,
+    idleDot: withAlpha(p.ink3, 0.4),
+    backdrop: "#00000033",
+  };
+}
+
+function setTheme(patch: Partial<PhoneThemeSettings>) {
+  setThemeSettings(patch);
+  if (patch.mode) applyMode(patch.mode);
+}
+
+export function useTheme() {
+  const settings = useSyncExternalStore(subscribeTheme, getThemeSettings);
+  const scheme = useColorScheme() === "dark" ? "dark" : "light";
+  const palette = useMemo(() => extend(resolvePalette(settings.colorTheme, scheme, settings.customTheme)), [settings.colorTheme, settings.customTheme, scheme]);
+  return { colors: palette, scheme, settings, set: setTheme } as const;
+}

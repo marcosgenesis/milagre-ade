@@ -72,6 +72,22 @@ export async function saveUltracodeFatality(on: boolean) {
     /* best effort */
   }
 }
+const themeKey = "milagre.theme.v1";
+/** The saved color theme settings as raw JSON, or null when nothing is saved yet. */
+export async function readThemeSettings(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(themeKey);
+  } catch {
+    return null;
+  }
+}
+export async function saveThemeSettings(raw: string) {
+  try {
+    await SecureStore.setItemAsync(themeKey, raw);
+  } catch {
+    /* best effort */
+  }
+}
 export async function savePermission(mode: string) {
   try {
     await SecureStore.setItemAsync(permissionKey, mode);

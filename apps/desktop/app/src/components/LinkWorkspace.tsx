@@ -74,6 +74,8 @@ export function LinkWorkspace({
   onSwitchProject,
   onSwitchLink,
   onLinkProject,
+  onAddComputer,
+  onOpenComputerSettings,
   onEditLink,
   onOpenProject,
   onSettings,
@@ -96,6 +98,8 @@ export function LinkWorkspace({
   onSwitchProject: (path: string) => void;
   onSwitchLink: (id: string) => void;
   onLinkProject: () => void;
+  onAddComputer?: () => void;
+  onOpenComputerSettings?: (id: string | null) => void;
   onEditLink: (id: string) => void;
   onOpenProject: () => void;
   onSettings: () => void;
@@ -410,6 +414,8 @@ export function LinkWorkspace({
             selectedLink={{ id: opened.link.id, projects: opened.projects }}
             onSwitchLink={onSwitchLink}
             onLinkProject={onLinkProject}
+            onAddComputer={onAddComputer}
+            onOpenComputerSettings={onOpenComputerSettings}
             onEditLink={onEditLink}
             onSwitchProject={onSwitchProject}
             onOpenProject={onOpenProject}

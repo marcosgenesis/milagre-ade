@@ -27,6 +27,17 @@ export function AddComputerDialog({ onClose, onAdded }: { onClose: () => void; o
     dialog.current?.showModal();
   }, []);
   useEffect(() => window.milagre.onComputerAddPending(() => setWaiting(true)), []);
+  // A parent that unmounts the dialog mid-pairing still stops it: nothing is left waiting on the other Mac's Allow.
+  const addingNow = useRef(false);
+  useEffect(() => {
+    addingNow.current = adding;
+  }, [adding]);
+  useEffect(
+    () => () => {
+      if (addingNow.current) void window.milagre.computers.cancelAdd();
+    },
+    [],
+  );
 
   // Each change to the link is read again before anything is sent; an older answer that arrives late is dropped.
   useEffect(() => {

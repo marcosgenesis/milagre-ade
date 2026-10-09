@@ -1,6 +1,7 @@
 import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { ComputerAllowPrompt } from "./components/ComputerAllowPrompt";
 import { LinkWorkspace } from "./components/LinkWorkspace";
+import { AddComputerDialog } from "./components/AddComputerDialog";
 import { LinkProjectDialog } from "./components/LinkProjectDialog";
 import { createScopeDrafts } from "./lib/link-scope";
 import type { LinkState, NamedProjectLink, OpenLink } from "@milagre/shared/model";
@@ -348,6 +349,8 @@ function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   // Which Project the Settings page shows; any recent Project can be picked there, the open one by default.
   const [settingsProject, setSettingsProject] = useState<{ path: string; name: string } | null>(null);
+  const [settingsComputer, setSettingsComputer] = useState<string | null>(null);
+  const [addComputerOpen, setAddComputerOpen] = useState(false);
   // A send may finish after the user opens another Chat. Its feedback and completion belong to the view that sent it.
   const chatView = useRef(0);
   const nextChatView = useRef(0);
@@ -1512,6 +1515,19 @@ function App() {
   const sidebarRunKeys = runKeys(agentRuns.runs);
   const openScopeChat = useEvent((scopeKey: string, id: string) => void openCanvasChat(scopeKey, Number(id)));
   const openSettings = useEvent(() => setView("settings"));
+  // The computers popover's gears: a computer's own section, or This Mac's devices.
+  const openComputerSettings = useEvent((id: string | null) => {
+    if (id === null) setSettingsSection("devices");
+    else {
+      setSettingsComputer(id);
+      setSettingsSection("computer");
+    }
+    setView("settings");
+  });
+  const selectSettingsComputer = (id: string) => {
+    setSettingsComputer(id);
+    setSettingsSection("computer");
+  };
   const openCanvas = useEvent(() => {
     changes.closeDiff();
     setView("canvas");
@@ -1609,6 +1625,7 @@ function App() {
       }}
     />
   ) : null;
+  const addComputerDialog = addComputerOpen ? <AddComputerDialog onClose={() => setAddComputerOpen(false)} onAdded={() => setAddComputerOpen(false)} /> : null;
   if (selectedLink && view === "settings")
     return (
       <DotBackground>
@@ -1618,10 +1635,19 @@ function App() {
             section={settingsSection}
             onSelectProject={() => {}}
             onSelect={setSettingsSection}
+            computerId={settingsComputer ?? undefined}
+            onSelectComputer={selectSettingsComputer}
             onBack={() => setView("chat")}
           />
           <main className="min-w-0 flex-1">
-            <SettingsPanel section={settingsSection} accountScope={accountScope} models={models} update={update} onSectionChange={setSettingsSection} />
+            <SettingsPanel
+              section={settingsSection}
+              computerId={settingsComputer ?? undefined}
+              accountScope={accountScope}
+              models={models}
+              update={update}
+              onSectionChange={setSettingsSection}
+            />
           </main>
         </div>
       </DotBackground>
@@ -1659,6 +1685,8 @@ function App() {
           onSwitchProject={(path) => void switchProject(path)}
           onSwitchLink={(id) => void selectLink(id)}
           onLinkProject={() => setLinkDialogOpen(true)}
+          onAddComputer={() => setAddComputerOpen(true)}
+          onOpenComputerSettings={openComputerSettings}
           onEditLink={(id) => void editLink(id)}
           onOpenProject={() => void openProject()}
           onSettings={() => {
@@ -1671,6 +1699,7 @@ function App() {
           onNewChatInScope={newChatInScope}
         />
         {linkDialog}
+        {addComputerDialog}
       </>
     );
 
@@ -1912,6 +1941,8 @@ function App() {
               workspaceImage={projectImage(project.path)}
               onSwitchLink={(id) => void selectLink(id)}
               onLinkProject={() => setLinkDialogOpen(true)}
+              onAddComputer={() => setAddComputerOpen(true)}
+              onOpenComputerSettings={openComputerSettings}
               onEditLink={(id) => void editLink(id)}
               onOpenProject={openProjectFromSidebar}
               recents={chats}
@@ -1951,6 +1982,8 @@ function App() {
                 project={settingsProject ?? project}
                 current={project}
                 onSelect={setSettingsSection}
+                computerId={settingsComputer ?? undefined}
+                onSelectComputer={selectSettingsComputer}
                 onSelectProject={(picked) => {
                   setSettingsProject(picked);
                   setSettingsSection("project");
@@ -1980,6 +2013,7 @@ function App() {
                 <SettingsPanel
                   section={settingsSection}
                   project={settingsProject ?? project}
+                  computerId={settingsComputer ?? undefined}
                   models={models}
                   update={update}
                   onSectionChange={setSettingsSection}
@@ -2139,6 +2173,7 @@ function App() {
           </ChangesPanelSlot>
         </div>
         {linkDialog}
+        {addComputerDialog}
         {commandPaletteOpen && (
           <CommandPalette
             commands={buildCommands(project)}

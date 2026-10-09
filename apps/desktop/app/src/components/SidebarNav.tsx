@@ -44,6 +44,7 @@ import { shortcutModifier, useShortcutHints } from "../lib/shortcut-hints";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { projectMenuActions, type ProjectMenuKey } from "@/lib/reveal";
 import { projectRows, stableOrder, type ProjectRow, type RecentProject } from "@/lib/project-list";
+import { ComputersButton } from "./sidebar/ComputersButton";
 import { ChatRow, type ChatRowActions, type SidebarRecent } from "./sidebar/ChatRow";
 import { useDismiss } from "../lib/use-dismiss";
 import { dropIntent, pinOrderAt, type DropIntent, type DropZone } from "@/lib/chat-list";
@@ -104,6 +105,10 @@ type SidebarNavProps = {
   selectedLink?: { id: string; projects: Array<{ path: string; name: string }> };
   onSwitchLink?: (id: string) => void;
   onLinkProject?: () => void;
+  /** Opens Add computer. */
+  onAddComputer?: () => void;
+  /** Opens a computer's settings; null for This Mac (Settings › Devices). */
+  onOpenComputerSettings?: (id: string | null) => void;
   /** Opens the dialog that renames a Link or changes its member Projects. */
   onEditLink?: (id: string) => void;
   workspaceName?: string;
@@ -808,6 +813,8 @@ export default memo(function SidebarNav({
   workspaceImage,
   selectedLink,
   onLinkProject,
+  onAddComputer,
+  onOpenComputerSettings,
   onEditLink,
   onOpenProject,
   onSwitchLink,
@@ -1381,6 +1388,14 @@ export default memo(function SidebarNav({
                     <HugeIcon icon={Link04Icon} size={17} />
                   </button>
                 </Tooltip>
+              )}
+              {onAddComputer && onOpenComputerSettings && (
+                <ComputersButton
+                  collapsed={collapsed}
+                  buttonClassName={BOTTOM_BAR_BUTTON}
+                  onAddComputer={onAddComputer}
+                  onOpenSettings={onOpenComputerSettings}
+                />
               )}
             </div>
             <Tooltip label="Settings" shortcut="⌘," align={collapsed ? "start" : "end"}>

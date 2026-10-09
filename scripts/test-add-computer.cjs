@@ -50,6 +50,7 @@ function Fixture() {
   return (
     <div style={{ padding: 24 }}>
       <button data-open onClick={() => setOpen(true)}>Open</button>
+      <button data-unmount onClick={() => setOpen(false)}>Unmount</button>
       <output data-added>{added}</output>
       {open && (
         <AddComputerDialog
@@ -164,8 +165,19 @@ async function browserChecks() {
     await waitFor(`document.querySelector('dialog[data-add-computer]')?.open`);
     await evaluate(`document.querySelector('dialog[data-add-computer]').dispatchEvent(new Event('cancel', { cancelable: true }))`);
     await waitFor(`!document.querySelector('dialog')`);
+    // A parent that unmounts the dialog mid-pairing still stops the pairing.
+    await evaluate(`document.querySelector('[data-open]').click()`);
+    await waitFor(`document.querySelector('dialog[data-add-computer]')?.open`);
+    await type("Pairing link", LINK);
+    await waitFor(`!!document.querySelector('[data-add-computer-found]')`);
+    const calls = await evaluate(`window.addCalls.length`);
+    const cancels = await evaluate(`window.cancels`);
+    await press("Add computer");
+    await waitFor(`window.addCalls.length === ${calls + 1}`);
+    await evaluate(`document.querySelector('[data-unmount]').click()`);
+    await waitFor(`!document.querySelector('dialog') && window.cancels === ${cancels + 1}`);
     assert.deepEqual(errors, []);
-    console.log("PASS: an added computer closes the dialog, and Escape closes it with nothing mounted after");
+    console.log("PASS: an added computer closes the dialog, and Escape closes it with nothing mounted after; unmounting mid-pairing cancels it");
     app.exit(0);
   } catch (error) {
     console.error(error);

@@ -13,6 +13,7 @@ const { socketPath: pathFor, prepareSocketDirectory } = require("./paths.cjs");
 const { VERSION, MAX_FRAME_BYTES, MAX_PENDING, pageSize, wire } = require("./protocol.cjs");
 const { createPhone } = require("./phone.cjs");
 const { createMobilePush } = require("./mobile-push.cjs");
+const { createLiveActivity } = require("./live-activity.cjs");
 const { createExpoPush } = require("./expo-push.cjs");
 const { peerPolicy } = require("./peer-policy.cjs");
 const { listDirs } = require("./remote-files.cjs");
@@ -22,6 +23,7 @@ const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs")
 
 // Handled here, never by core, and not in the mobile bridge's allow-list: a paired phone must not manage its own access.
 const PUSH_METHODS = Object.freeze(["push:register", "push:unregister", "push:focus"]);
+const LIVE_ACTIVITY_METHODS = Object.freeze(["live-activity:state", "live-activity:open", "live-activity:answer", "live-activity:forget"]);
 const PHONE_METHODS = Object.freeze(["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing", "phone:set-lan"]);
 // Paired phones and computers, listed and removed from this Mac's own window only (Settings > Devices), and the
 // computers waiting for its Allow.
@@ -303,6 +305,7 @@ async function startDaemon({
       runtimeOptions.emit?.(channel, payload);
     },
   });
+  const liveActivity = createLiveActivity({ snapshot: () => runtime.snapshot(), answer: (value) => runtime.invoke("agent:answer-question", [value]) });
   function broadcast(channel, payload) {
     if (channel === "agent:event") push.observe(payload.chatId, payload.event);
     const seq = ++eventSeq;
@@ -535,9 +538,16 @@ async function startDaemon({
               DESKTOP_PEER,
               REMOTE_FILES,
             ],
-            methods: [...runtime.methods, ...PHONE_METHODS, ...DEVICE_METHODS, ...PUSH_METHODS, ...STATE_METHODS, ...PEER_METHODS, ...FILE_METHODS].filter(
-              (method) => !policy?.denies(method),
-            ),
+            methods: [
+              ...runtime.methods,
+              ...PHONE_METHODS,
+              ...DEVICE_METHODS,
+              ...PUSH_METHODS,
+              ...LIVE_ACTIVITY_METHODS,
+              ...STATE_METHODS,
+              ...PEER_METHODS,
+              ...FILE_METHODS,
+            ].filter((method) => !policy?.denies(method)),
           };
         else if (request.method === "phone:status") result = phone.status();
         // Settings shows the reply, which arrives after the status events: answer with the settled status, not the
@@ -547,12 +557,14 @@ async function startDaemon({
           if (request.args[0] === false) {
             await phone.settled();
             await push.clear();
+            liveActivity.clear();
             result = phone.status();
           }
         } else if (request.method === "phone:reset") {
           await phone.reset();
           await phone.settled();
           await push.clear();
+          liveActivity.clear();
           result = phone.status();
         } else if (request.method === "phone:open-pairing") result = await phone.openPairing();
         else if (request.method === "phone:set-lan") result = await phone.setLan(request.args[0]);
@@ -562,7 +574,13 @@ async function startDaemon({
         else if (request.method === "devices:allow") result = phone.allowDevice(request.args[0]);
         else if (request.method === "devices:deny") result = phone.denyDevice(request.args[0]);
         else if (request.method === "peer:routes") result = phone.peerRoutes();
-        else if (request.method === "push:register") result = await push.register(request.args[0]);
+        else if (request.method === "live-activity:state") result = liveActivity.state(request.args[0]);
+        else if (request.method === "live-activity:open") result = liveActivity.open(request.args[0]);
+        else if (request.method === "live-activity:answer") result = await liveActivity.choose(request.args[0]);
+        else if (request.method === "live-activity:forget") {
+          liveActivity.forget(request.args[0]?.deviceId);
+          result = null;
+        } else if (request.method === "push:register") result = await push.register(request.args[0]);
         else if (request.method === "push:unregister") result = await push.unregister(request.args[0]);
         else if (request.method === "push:focus") result = push.focus(request.args[0]);
         else if (request.method === "fs:list-dirs")

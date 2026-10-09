@@ -12,6 +12,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import * as Font from "expo-font";
+import { useUltracodeAudio } from "./ultracode-audio";
 
 const DURATION = 2600;
 // Sparks that burst out of the word in jittery hops and flicker as they fade: a fixed scatter so every run looks the same.
@@ -32,9 +33,9 @@ const FALLBACK = Platform.select({ ios: "Futura-CondensedExtraBold", default: "s
 const CREEPSTER = { Creepster: require("../assets/fonts/Creepster-Regular.ttf") };
 
 /** Turning Ultracode on, Mortal Kombat style in Milagre purple: the sheet darkens and shakes, ULTRACODE slams in, dots float out of it, and the
- * the model sheet's Ultra rumble plays under it. Desktop also plays the announcer; the phone has no audio module in
- * this build. Reduced motion keeps the word, not the slam. */
+ * announcer and the model sheet's Ultra rumble play under it. Reduced motion keeps the word and voice, not the slam. */
 export function UltracodeFatality({ onDone }: { onDone: () => void }) {
+  useUltracodeAudio();
   const reduce = useReducedMotion();
   const [font, setFont] = useState(Font.isLoaded("Creepster") ? "Creepster" : FALLBACK);
   useEffect(() => {

@@ -69,6 +69,31 @@ async function fixture(t, { runtimeOptions = {}, bridgeOptions = {} } = {}) {
   return { dataDir, project, bridge, request, rpc, token };
 }
 
+test("Live Activity answers reach the real question handler and persist one answer", async (t) => {
+  const { rpc, request, project } = await fixture(t, { runtimeOptions: demoRuntimeOptions() });
+  await rpc("project:open", [project]);
+  const initial = (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result;
+  const sessionId = Object.values(initial.project.state.sessions)[0].id;
+  await rpc("chat:send", [{ projectPath: project, sessionId, body: "question", provider: "codex", model: "demo", permissionMode: "ask" }]);
+  const deviceId = "b6e2df4b-972b-4e7b-bc65-6cda0a173798";
+  let state;
+  for (let i = 0; i < 100; i++) {
+    state = (await (await rpc("live-activity:state", [{ deviceId }])).json()).result;
+    if (state?.question) break;
+    await delay(20);
+  }
+  assert.ok(state.question);
+  const action = { deviceId, target: state.question.target, position: 1, option: 0 };
+  const answered = await rpc("live-activity:answer", [action]);
+  assert.equal(answered.status, 200);
+  assert.equal((await answered.json()).result.status, "accepted");
+  assert.notEqual((await rpc("live-activity:answer", [action])).status, 200);
+  const after = (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result;
+  const answers = after.project.state.messages.filter((message) => message.body === "Next step: Read a Chat");
+  assert.equal(answers.length, 1);
+  assert.equal(after.runs.runs[`${project}#${sessionId}`], undefined);
+});
+
 test("mobile bridge forwards commands to the existing owner and reads cached snapshots", async (t) => {
   const { dataDir, project, bridge, request, rpc } = await fixture(t);
   assert.match(bridge.url, /^http:\/\/127\.0\.0\.1:\d+$/);

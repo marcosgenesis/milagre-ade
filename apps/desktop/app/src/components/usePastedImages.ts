@@ -92,6 +92,26 @@ export function usePastedImages(scope: string, remote = false) {
     await addFiles(files);
   }
 
+  async function pasteImage() {
+    const current = generation.current;
+    try {
+      const items = await navigator.clipboard.read();
+      const files: File[] = [];
+      for (const item of items) {
+        const type = item.types.find((type) => TYPES.has(type));
+        if (type) files.push(new File([await item.getType(type)], `Pasted image.${type.split("/")[1]}`, { type }));
+      }
+      if (current !== generation.current) return;
+      if (!files.length) {
+        setError("Copy an image first, then try Paste image again.");
+        return;
+      }
+      await addFiles(files);
+    } catch {
+      if (current === generation.current) setError("Could not read the clipboard. Allow clipboard access or paste with the keyboard shortcut.");
+    }
+  }
+
   async function attachFiles(selected: File[]) {
     if (remote) {
       if (selected.length) setError(REMOTE_FILES_NOTICE);
@@ -162,6 +182,7 @@ export function usePastedImages(scope: string, remote = false) {
     loading,
     error,
     onPaste,
+    pasteImage,
     addFiles,
     attachFiles,
     attachPath,

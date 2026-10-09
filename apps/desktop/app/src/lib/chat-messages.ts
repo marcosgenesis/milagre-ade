@@ -66,6 +66,7 @@ export function applyChanges(current: ChatWindow, chatId: number, changes: Messa
 }
 
 const loads = new Map<string, Promise<void>>();
+const earlierLoads = new Map<string, Promise<void>>();
 // Reads whose page may predate a change that arrived while they were on their way: each reads again when it ends.
 const stale = new Set<string>();
 function load(scope: string, chatId: number) {
@@ -90,12 +91,20 @@ function load(scope: string, chatId: number) {
 /** Reads the turns before the window; resolves once they're in. */
 async function loadEarlier(scope: string, chatId: number, turns = TURNS) {
   const key = keyOf(scope, chatId);
+  const pending = earlierLoads.get(key);
+  if (pending) return pending;
   const current = windows.get(key);
   if (!current?.hasMore || !current.messages.length) return;
-  const page = await bridgeForKey(scope).readChatMessages(scope, chatId, { before: current.messages[0].id, turns });
-  const latest = windows.get(key) ?? current;
-  const known = new Set(latest.messages.map((message) => message.id));
-  set(key, { ...latest, messages: [...page.messages.filter((message) => !known.has(message.id)), ...latest.messages], hasMore: page.hasMore });
+  const request = bridgeForKey(scope)
+    .readChatMessages(scope, chatId, { before: current.messages[0].id, turns })
+    .then((page) => {
+      const latest = windows.get(key) ?? current;
+      const known = new Set(latest.messages.map((message) => message.id));
+      set(key, { ...latest, messages: [...page.messages.filter((message) => !known.has(message.id)), ...latest.messages], hasMore: page.hasMore });
+    })
+    .finally(() => earlierLoads.delete(key));
+  earlierLoads.set(key, request);
+  return request;
 }
 
 /** Reads every message of the Chat (find in chat searches all of it). */

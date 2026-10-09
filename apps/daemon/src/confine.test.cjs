@@ -624,3 +624,13 @@ test("device management is never a phone command, confined or not", async () => 
     await assert.rejects(confine.checkCall(method, []), { status: 403, message: REFUSED });
   }
 });
+
+test("a confined phone cannot access machine-wide Live Activity targets", async () => {
+  const confine = createConfinement({ allowedRoot: os.tmpdir() });
+  for (const method of ["live-activity:state", "live-activity:open", "live-activity:answer", "live-activity:forget"]) {
+    await assert.rejects(confine.checkCall(method, [{ deviceId: "b6e2df4b-972b-4e7b-bc65-6cda0a173798", target: "arbitrary" }]), {
+      status: 403,
+      message: REFUSED,
+    });
+  }
+});

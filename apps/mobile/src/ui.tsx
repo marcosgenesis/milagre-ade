@@ -210,7 +210,7 @@ export function Toggle({ title, selected, onPress, disabled = false }: { title: 
     </Host>
   );
 }
-export function Field({ label, hideLabel = false, ...props }: TextInputProps & { label: string; hideLabel?: boolean }) {
+export function Field({ label, hideLabel = false, ...props }: TextInputProps & { label: string; hideLabel?: boolean; ref?: React.Ref<TextInput> }) {
   return (
     <View style={{ gap: 8 }}>
       {!hideLabel && <Text style={styles.label}>{label}</Text>}

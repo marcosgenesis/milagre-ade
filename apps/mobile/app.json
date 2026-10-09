@@ -56,7 +56,17 @@
         {
           "defaultChannel": "chats"
         }
-      ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false,
+          "enableBackgroundRecording": false
+        }
+      ],
+      "./plugins/with-live-activity.cjs"
     ],
     "ios": {
       "supportsTablet": false,

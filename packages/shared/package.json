@@ -31,6 +31,10 @@
   ],
   "type": "module",
   "exports": {
+    "./live-activity": {
+      "types": "./src/live-activity.d.mts",
+      "default": "./src/live-activity.mjs"
+    },
     "./pr-action": {
       "types": "./src/pr-action.d.mts",
       "default": "./src/pr-action.mjs"

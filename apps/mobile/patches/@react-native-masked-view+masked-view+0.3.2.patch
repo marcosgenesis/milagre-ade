@@ -1,0 +1,8 @@
+diff --git a/node_modules/@react-native-masked-view/masked-view/android/src/main/AndroidManifest.xml b/node_modules/@react-native-masked-view/masked-view/android/src/main/AndroidManifest.xml
+index 5d1b95e..a640811 100644
+--- a/node_modules/@react-native-masked-view/masked-view/android/src/main/AndroidManifest.xml
++++ b/node_modules/@react-native-masked-view/masked-view/android/src/main/AndroidManifest.xml
+@@ -1,2 +1,2 @@
+-<manifest package="org.reactnative.maskedview" xmlns:android="http://schemas.android.com/apk/res/android">
++<manifest  xmlns:android="http://schemas.android.com/apk/res/android">
+ </manifest>

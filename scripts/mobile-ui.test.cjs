@@ -106,6 +106,9 @@ function load(file, modules, extra = "") {
     Error,
     URL,
     TextDecoder,
+    fetch: () => {
+      throw new Error("Unexpected network request in mobile UI test");
+    },
     setTimeout,
     clearTimeout,
     setInterval,
@@ -161,6 +164,7 @@ test("mobile slash suggestions filter skills and insert at the caret while prese
         },
       }),
     },
+    "./use-image-paste": { useImagePaste: () => ({ onFocus() {} }) },
     "./ui": { Field: "Field", ListRow: "ListRow", PageScroll: "PageScroll", colors: { ink: "ink", accentInk: "accent" } },
   });
   function render() {
@@ -236,6 +240,7 @@ test("mobile skill input preserves edits and clears its description when the car
     "react-native-reanimated": reanimatedStub,
     "@milagre/shared/prompt-skills": require("../packages/shared/src/prompt-skills.mjs"),
     "./use-rpc": { useRpc: () => ({ data: catalog }) },
+    "./use-image-paste": { useImagePaste: () => ({ onFocus() {} }) },
     "./ui": { Field: "Field", ListRow: "ListRow", PageScroll: "PageScroll", colors: { ink: "ink", accentInk: "accent" } },
   });
   function render() {
@@ -670,7 +675,14 @@ function find(node, predicate) {
     if (found) return found;
   }
 }
-function chatHost({ pickAttachments = async () => [], call, effects = false, alert = () => {}, linear = { active: false } } = {}) {
+function chatHost({
+  pickAttachments = async () => [],
+  preparePastedImage = async () => {},
+  call,
+  effects = false,
+  alert = () => {},
+  linear = { active: false },
+} = {}) {
   const sending = deferred();
   const calls = [];
   const choices = [];
@@ -812,7 +824,7 @@ function chatHost({ pickAttachments = async () => [], call, effects = false, ale
     "../use-worktree-linear-issues": { useWorktreeLinearIssues: () => ({}) },
     "../choice-store": { showChoiceSheet: (request) => choices.push(request) },
     "../session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
-    "../attachment-picker": { pickAttachments },
+    "../attachment-picker": { pickAttachments, preparePastedImage, discardPastedImage() {} },
     "../attachments": require("../apps/mobile/src/attachments.ts"),
     // A test can show the Chat's open PR with globalThis.chatPullRequest.
     "../status-indicators": { PullRequestAction: "PullRequestAction", SubagentChip: "SubagentChip", usePullRequest: () => globalThis.chatPullRequest ?? null },
@@ -2522,6 +2534,7 @@ function pushHost(t, initial = "index") {
       "./hosts-native": { savedHosts: { list: async () => [host] } },
       "./session": { useSession: () => session },
       "./push-controller": require("../apps/mobile/src/push-controller.ts"),
+      "./live-activity-native": { nativeActivity: null },
       "./push-native": {
         pushStore: { read: async () => ({ enabled: false, pending: [] }) },
         pushNative: {
@@ -3201,6 +3214,7 @@ test("refreshing saved hosts during startup cannot cancel the claimed auto-open"
     "@hugeicons/core-free-icons": {},
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ bottom: 0 }) },
     "../session": { useSession: () => session },
+    "../live-activity-native": { nativeActivity: null },
     "../push": { usePush: () => ({}) },
     "../hosts-native": { savedHosts: {} },
     "../confirm-store": { confirmSheet() {} },
@@ -3935,6 +3949,341 @@ test("mobile opens a long Chat with its newest 40 messages and loads another pag
   assert.equal(transcriptMessages(screen).at(-1).id, 1000);
 });
 
+test("scrolling up loads older mobile messages once and preserves the reading position", async (t) => {
+  const screen = ongoingChatHost();
+  screen.session.snapshot.project.state.messagesInChats = true;
+  const message = (id) => ({ id, session_id: 7, role: "user", body: `Message ${id}`, context: null });
+  let held = Array.from({ length: 40 }, (_, i) => message(61 + i));
+  const request = deferred();
+  let reads = 0;
+  globalThis.chatPage = (client, path, id) =>
+    id === 7 && client
+      ? {
+          messages: held,
+          total: 100,
+          hasMore: true,
+          loading: false,
+          loadEarlier: async () => {
+            reads++;
+            await request.promise;
+            held = [...Array.from({ length: 40 }, (_, i) => message(21 + i)), ...held];
+          },
+        }
+      : undefined;
+  t.after(() => delete globalThis.chatPage);
+  const offsets = [];
+  const scroller = () => find(screen.render(), (node) => node.type === "KeyboardChatScrollView");
+  scroller().props.ref.current = { scrollTo: (value) => offsets.push(value), scrollToEnd() {} };
+  scroller().props.onLayout({ nativeEvent: { layout: { height: 600 } } });
+  scroller().props.onContentSizeChange(390, 4000);
+  const move = (y) => scroller().props.onScroll({ nativeEvent: { contentOffset: { y }, contentSize: { height: 4000 }, layoutMeasurement: { height: 600 } } });
+  move(3400);
+  assert.equal(reads, 0, "opening at the newest message must not fetch history");
+  find(screen.render(), (node) => node.props?.nativeID === "chat-message-61").props.onLayout({ nativeEvent: { layout: { y: 100 } } });
+  move(100);
+  move(50);
+  assert.equal(reads, 1, "repeated scroll events share one request");
+  request.resolve();
+  await settle();
+  assert.equal(transcriptMessages(screen)[0].id, 21);
+  find(screen.render(), (node) => node.props?.nativeID === "chat-message-61").props.onLayout({ nativeEvent: { layout: { y: 2100 } } });
+  assert.equal(offsets.at(-1).y, 2050, "the previous first message keeps its screen position, including scrolling during the read");
+});
+
+test("failed mobile history stays retryable without dropping the current messages", async (t) => {
+  const screen = ongoingChatHost();
+  screen.session.snapshot.project.state.messagesInChats = true;
+  const messages = Array.from({ length: 40 }, (_, i) => ({ id: i + 61, session_id: 7, role: "user", body: `Message ${i}`, context: null }));
+  globalThis.chatPage = (client, path, id) =>
+    id === 7 && client
+      ? {
+          messages,
+          total: 100,
+          hasMore: true,
+          loading: false,
+          loadEarlier: async () => {
+            throw new Error("Computer offline");
+          },
+        }
+      : undefined;
+  t.after(() => delete globalThis.chatPage);
+  await find(screen.render(), (node) => node.props?.title?.startsWith("Show earlier messages")).props.onPress();
+  const notice = find(screen.render(), (node) => node.type === "ErrorNotice" && node.props.message.includes("Computer offline"));
+  assert.ok(notice?.props.retry, "history failure needs a visible retry");
+  assert.equal(transcriptMessages(screen).length, 40);
+});
+
+test("the mobile paste action adds a clipboard screenshot to the draft", async () => {
+  const image = {
+    id: "clipboard",
+    name: "Pasted image.jpg",
+    uri: "file:///paste.jpg",
+    image: { id: "clipboard", name: "Pasted image.jpg", dataUrl: "data:image/jpeg;base64,YQ==" },
+  };
+  const screen = chatHost({
+    pickAttachments: async (kind) => {
+      assert.equal(kind, "paste");
+      return [image];
+    },
+  });
+  const menu = find(screen.render(), (node) => node.type === "PullDown" && node.props.label === "Add photos or files");
+  assert.ok(menu.props.sections[0].items.some((item) => item.id === "paste"));
+  menu.props.onSelect("paste");
+  await settle();
+  assert.equal(screen.session.attachments["/p#new:1"][0].image.dataUrl, "data:image/jpeg;base64,YQ==");
+  assert.equal(screen.field().value, "first message");
+});
+
+test("native image paste adds a screenshot without changing the message text", async () => {
+  const source = { uri: "file:///native.png", width: 1170, height: 2532 };
+  const image = {
+    id: "paste",
+    name: "Pasted image.jpg",
+    uri: "file:///compressed.jpg",
+    image: { id: "paste", name: "Pasted image.jpg", dataUrl: "data:image/jpeg;base64,YQ==" },
+  };
+  const loading = deferred();
+  const screen = chatHost({
+    preparePastedImage: async (value) => {
+      assert.equal(value, source);
+      return loading.promise;
+    },
+  });
+  assert.equal(typeof screen.field().onImagePaste, "function");
+  screen.field().onImagePaste(source);
+  screen.field().onImagePaste(source);
+  loading.resolve(image);
+  await settle();
+  assert.equal(screen.session.attachments["/p#new:1"].length, 1);
+  assert.equal(screen.session.attachments["/p#new:1"][0].image.dataUrl, "data:image/jpeg;base64,YQ==");
+  assert.equal(screen.field().value, "first message");
+});
+
+test("the Ultracode announcer plays once and pauses when its overlay closes", async () => {
+  const react = hookHost({ effects: true });
+  const events = [];
+  const player = { volume: 1, play: () => events.push("play"), pause: () => events.push("pause") };
+  const { useUltracodeAudio } = load("ultracode-audio.ts", {
+    react,
+    "expo-audio": {
+      useAudioPlayer: () => player,
+      useAudioPlayerStatus: () => ({ isLoaded: true }),
+      setAudioModeAsync: async (mode) => {
+        assert.equal(mode.playsInSilentMode, false);
+        assert.equal(mode.shouldPlayInBackground, false);
+      },
+    },
+    "../assets/ultracode.mp3": 1,
+  });
+  react.begin();
+  useUltracodeAudio();
+  await settle();
+  react.begin();
+  useUltracodeAudio();
+  await settle();
+  assert.equal(player.volume, 0.8);
+  assert.deepEqual(events, ["play"]);
+  react.unmount();
+  assert.deepEqual(events, ["play", "pause"]);
+});
+
+test("native paste targets only the registered field and detaches when it closes", async () => {
+  const react = hookHost({ effects: true });
+  let receive;
+  const registrations = [];
+  const pasted = [];
+  const { useImagePaste } = load("use-image-paste.ts", {
+    react,
+    "react-native": { findNodeHandle: (view) => view.tag },
+    "expo-modules-core": {
+      requireOptionalNativeModule: () => ({
+        addListener: (_event, listener) => {
+          receive = listener;
+          return { remove: () => registrations.push("removed") };
+        },
+        attachAsync: async (tag) => {
+          registrations.push(["attach", tag]);
+          return true;
+        },
+        detachAsync: async (tag) => {
+          registrations.push(["detach", tag]);
+        },
+      }),
+    },
+  });
+  react.begin();
+  const field = useImagePaste((image) => pasted.push(image));
+  field.ref.current = { tag: 77 };
+  field.onLayout();
+  receive({ target: 88, uri: "file:///other.png", width: 1, height: 1 });
+  receive({ target: 77, uri: "file:///ours.png", width: 1, height: 1 });
+  assert.equal(pasted.length, 1);
+  assert.equal(pasted[0].uri, "file:///ours.png");
+  react.unmount();
+  assert.deepEqual(registrations, [["attach", 77], "removed", ["detach", 77]]);
+});
+
+test("a native paste finishing after switching Chats does not attach to the next Chat", async () => {
+  const loading = deferred();
+  const screen = chatHost({ effects: true, preparePastedImage: () => loading.promise });
+  screen.field().onImagePaste({ uri: "file:///native.png", width: 10, height: 10 });
+  screen.params.id = "7";
+  screen.render();
+  loading.resolve({ id: "paste", uri: "file:///compressed.jpg", name: "paste.jpg" });
+  await settle();
+  assert.equal(screen.session.attachments["/p#7"], undefined);
+  assert.equal(screen.session.attachments["/p#new:1"], undefined);
+});
+
+test("native pasted temporary images are deleted after compression fails", async () => {
+  const deleted = [];
+  const { preparePastedImage } = load("attachment-picker.ts", {
+    "expo-document-picker": {},
+    "expo-image-picker": {},
+    "expo-clipboard": {},
+    "expo-file-system": {
+      File: class {
+        constructor(uri) {
+          this.uri = uri;
+        }
+        delete() {
+          deleted.push(this.uri);
+        }
+      },
+    },
+    "expo-image-manipulator": {
+      SaveFormat: { JPEG: "jpeg" },
+      ImageManipulator: {
+        manipulate: () => ({
+          resize() {},
+          release() {},
+          renderAsync: async () => {
+            throw new Error("Decode failed");
+          },
+        }),
+      },
+    },
+    "./attachments": require("../apps/mobile/src/attachments.ts"),
+  });
+  await assert.rejects(preparePastedImage({ uri: "file:///native.png", width: 10, height: 10 }), /Decode failed/);
+  assert.deepEqual(deleted, ["file:///native.png"]);
+});
+
+test("clipboard screenshots use the same compressed image payload as picked photos", async () => {
+  const { pickAttachments } = load("attachment-picker.ts", {
+    "expo-document-picker": { getDocumentAsync: async () => ({ canceled: true }) },
+    "expo-image-picker": {},
+    "expo-file-system": {},
+    "expo-clipboard": { getImageAsync: async () => ({ data: "data:image/png;base64,c2NyZWVu", size: { width: 1170, height: 2532 } }) },
+    "expo-image-manipulator": {
+      SaveFormat: { JPEG: "jpeg" },
+      ImageManipulator: {
+        manipulate: (uri) => {
+          assert.equal(uri, "data:image/png;base64,c2NyZWVu");
+          return {
+            resize: (size) => assert.equal(size.height, 1024),
+            release() {},
+            renderAsync: async () => ({ release() {}, saveAsync: async () => ({ uri: "file:///compressed.jpg", base64: "YQ==" }) }),
+          };
+        },
+      },
+    },
+    "./attachments": require("../apps/mobile/src/attachments.ts"),
+  });
+  const [photo] = await pickAttachments("paste");
+  assert.equal(photo.image.dataUrl, "data:image/jpeg;base64,YQ==");
+  assert.equal(photo.uri, "file:///compressed.jpg");
+});
+
+test("an empty or denied clipboard gives a useful error without adding an attachment", async () => {
+  const { pickAttachments } = load("attachment-picker.ts", {
+    "expo-document-picker": { getDocumentAsync: async () => ({ canceled: true }) },
+    "expo-image-picker": {},
+    "expo-file-system": {},
+    "expo-clipboard": { getImageAsync: async () => null },
+    "expo-image-manipulator": {},
+    "./attachments": require("../apps/mobile/src/attachments.ts"),
+  });
+  await assert.rejects(pickAttachments("paste"), /Copy an image.*paste access/);
+});
+
+test("a mobile tail refresh retains history loaded while it was in flight", async () => {
+  const react = hookHost();
+  const { useChatPage } = load("chat-pages.ts", {
+    react: { ...react, useEffect: react.effect, useSyncExternalStore: (_subscribe, read) => read() },
+  });
+  const message = (id) => ({ id, session_id: 7, role: "user", body: `Message ${id}`, context: null });
+  const tail = deferred();
+  const client = {
+    url: "refresh-race",
+    chatMessages: async (path, id, options) => {
+      if (options.before) return { messages: [message(1), message(2)], hasMore: false, total: 4 };
+      if (options.turns === 2) return tail.promise;
+      return { messages: [message(3), message(4)], hasMore: true, total: 4 };
+    },
+  };
+  let revision = 1;
+  function render() {
+    react.begin();
+    const result = useChatPage(client, "/p", 7, revision);
+    react.flush();
+    return result;
+  }
+  render();
+  await settle();
+  revision++;
+  render();
+  await render().loadEarlier();
+  assert.equal(render().messages.length, 4);
+  tail.resolve({ messages: [message(3), message(4), message(5)], hasMore: true, total: 5 });
+  await settle();
+  assert.deepEqual(
+    Array.from(render().messages, (item) => item.id),
+    [1, 2, 3, 4, 5],
+  );
+  assert.equal(render().hasMore, false);
+});
+
+test("concurrent mobile history readers share a page and can retry after a failure", async () => {
+  const react = hookHost();
+  const { useChatPage } = load("chat-pages.ts", { react: { ...react, useEffect: react.effect, useSyncExternalStore: (_subscribe, read) => read() } });
+  const message = (id) => ({ id, session_id: 7, role: "user", body: `Message ${id}`, context: null });
+  let request = deferred(),
+    reads = 0;
+  const client = {
+    url: "concurrent-history",
+    chatMessages: async (path, id, options) => {
+      if (options.before) {
+        reads++;
+        return request.promise;
+      }
+      return { messages: [message(3), message(4)], hasMore: true, total: 4 };
+    },
+  };
+  function render() {
+    react.begin();
+    const result = useChatPage(client, "/p", 7);
+    react.flush();
+    return result;
+  }
+  render();
+  await settle();
+  const first = render().loadEarlier(),
+    second = render().loadEarlier();
+  const results = Promise.allSettled([first, second]);
+  assert.equal(reads, 1);
+  request.reject(new Error("Offline"));
+  assert.ok((await results).every((result) => result.status === "rejected"));
+  request = deferred();
+  const retry = render().loadEarlier();
+  request.resolve({ messages: [message(1), message(2)], hasMore: false, total: 4 });
+  await retry;
+  assert.deepEqual(
+    Array.from(render().messages, (item) => item.id),
+    [1, 2, 3, 4],
+  );
+});
+
 test("with a host that keeps messages by Chat, the screen shows its Chat's page and reads the next one on request", async (t) => {
   const screen = ongoingChatHost();
   const state = screen.session.snapshot.project.state;
@@ -4318,6 +4667,7 @@ test("mobile Project Accounts opens from Settings as a native stack screen", () 
     "@hugeicons/core-free-icons": {},
     "../session": { useSession: () => ({ recent: [], client: null }) },
     "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../live-activity-native": { nativeActivity: null },
     "../push": { usePush: () => ({}) },
     "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
     "../icons": { Icon: "Icon" },
@@ -4954,6 +5304,7 @@ test("mobile main sync switch re-reads the Mac's default on focus and shows a re
     "@hugeicons/core-free-icons": {},
     "../session": { useSession: () => ({ recent: [], client }) },
     "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../live-activity-native": { nativeActivity: null },
     "../push": { usePush: () => ({}) },
     "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
     "../icons": { Icon: "Icon" },
@@ -4993,6 +5344,7 @@ test("mobile Settings opens Experimental as its own page, like desktop's section
     "@hugeicons/core-free-icons": {},
     "../session": { useSession: () => ({ recent: [], client: null }) },
     "../project-icon": { ProjectIcon: "ProjectIcon" },
+    "../live-activity-native": { nativeActivity: null },
     "../push": { usePush: () => ({}) },
     "../update-sheet": { useAppUpdates: () => ({ state: { status: "disabled" } }) },
     "../icons": { Icon: "Icon" },
@@ -5261,4 +5613,119 @@ test("no PR hint when the branch already names the stored issue", () => {
   const { LINK_PR_HINT } = require("@milagre/shared/linear");
   const screen = linkableChat({ worktree: { path: "/p/wt", name: "eng-12-fix-login", linearIssue: "ENG-12" } });
   assert.ok(!find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === LINK_PR_HINT("ENG-12")));
+});
+
+function activityProviderHost({ enabled = true, enabledRead } = {}) {
+  const react = hookHost();
+  const retained = [],
+    synced = [];
+  let hosts = [{ id: "mac", name: "Mac", token: "paired" }];
+  let reads = 0;
+  let requests = 0;
+  const nativeActivity = {
+    availableAsync: async () => true,
+    retainHostsAsync: async (ids) => retained.push([...ids]),
+    syncAsync: async (id) => synced.push(id),
+  };
+  const { ActivityProvider } = load("live-activity.tsx", {
+    react: { ...react, useEffect: react.effect, createContext: () => ({ Provider: "ActivityProvider" }) },
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) } },
+    "./session": { useSession: () => ({ hosts }) },
+    "./client": {
+      createClient: () => ({
+        call: async () => {
+          requests++;
+          return { version: 1 };
+        },
+      }),
+    },
+    "./hosts-native": { savedHosts: { list: async () => hosts } },
+    "./relay-native": { relayRuntime: {} },
+    "./push-native": { pushStore: { read: async () => ({ deviceId: "device", pending: [] }) } },
+    "./live-activity-native": { nativeActivity },
+    "./live-activity-store": {
+      activityEnabled: () => (++reads > 1 && enabledRead ? enabledRead() : Promise.resolve(enabled)),
+      activityMode: async () => "all",
+      saveActivityEnabled: async () => {},
+      saveActivityMode: async () => {},
+    },
+  });
+  const render = () => {
+    react.begin();
+    ActivityProvider({ children: null });
+    react.flush();
+  };
+  return {
+    render,
+    retained,
+    synced,
+    requests: () => requests,
+    forget: () => {
+      hosts = [];
+    },
+    cleanup: () => react.cleanup(),
+  };
+}
+
+test("disabled activity reconciles orphan native activities on startup", async () => {
+  const fixture = activityProviderHost({ enabled: false });
+  fixture.render();
+  await settle();
+  fixture.render();
+  await settle();
+  assert.deepEqual(fixture.retained, [[]]);
+  assert.deepEqual(fixture.synced, []);
+  fixture.cleanup();
+});
+
+test("a refresh stopped during settings read cannot recreate a forgotten activity", async () => {
+  const read = deferred();
+  const fixture = activityProviderHost({ enabledRead: () => read.promise });
+  fixture.render();
+  await settle();
+  fixture.render();
+  await settle();
+  assert.equal(fixture.requests(), 1);
+  fixture.forget();
+  fixture.render();
+  await settle();
+  read.resolve(true);
+  await settle();
+  assert.deepEqual(fixture.synced, []);
+  assert.deepEqual(fixture.retained.at(-1), []);
+  fixture.cleanup();
+});
+
+test("an answer completing after computer removal cannot update its activity", async () => {
+  const response = deferred(),
+    completed = [],
+    ended = [];
+  let hosts = [{ id: "mac", token: "paired" }];
+  let listener;
+  const { installActivityAnswers } = load("live-activity-native.ts", {
+    "expo-modules-core": {
+      requireOptionalNativeModule: () => ({
+        addListener: (_event, handle) => {
+          listener = handle;
+        },
+        pendingActionsAsync: async () => [],
+        completeAsync: async (...args) => completed.push(args),
+        endAsync: async (id) => ended.push(id),
+      }),
+    },
+    "./client": { createClient: () => ({ call: () => response.promise }) },
+    "./hosts-native": { savedHosts: { list: async () => hosts } },
+    "./push-native": { pushStore: { read: async () => ({ deviceId: "device", pending: [] }) } },
+    "./live-activity-store": { activityEnabled: async () => true, activityMode: async () => "all" },
+    "./relay-native": { relayRuntime: {} },
+  });
+  installActivityAnswers();
+  listener({ id: "action", hostId: "mac", target: "question", position: 1, option: 0 });
+  await settle();
+  hosts = [];
+  response.resolve({ status: "accepted", content: { version: 1 } });
+  await settle();
+  assert.deepEqual(ended, ["mac"]);
+  assert.deepEqual(completed, [["action", "mac", "unknown", null]]);
 });

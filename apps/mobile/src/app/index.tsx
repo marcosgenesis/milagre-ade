@@ -1,3 +1,4 @@
+import { nativeActivity } from "../live-activity-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Platform, RefreshControl, Text, View } from "react-native";
 import { Stack, router, useFocusEffect } from "expo-router";
@@ -114,6 +115,7 @@ export default function ComputersScreen() {
             if (session.client?.url === host.address) session.disconnect();
             void push
               .forget(host)
+              .then(() => nativeActivity?.endAsync(host.id))
               .then(() => savedHosts.forget(host.id))
               .then(() => {
                 if (host.relay) relayRuntime.forget(host.relay.hostId);

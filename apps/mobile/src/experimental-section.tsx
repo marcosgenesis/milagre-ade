@@ -56,7 +56,7 @@ export function ExperimentalSection() {
       <View style={[styles.card, { gap: 4 }]}>
         <Toggle title="Ultracode Fatality" selected={fatality} onPress={() => setFatality(!fatality)} />
         <Text style={styles.caption}>
-          Turning Ultracode on darkens the screen and slams ULTRACODE across it Mortal Kombat style. The Mac also says it out loud.
+          Turning Ultracode on darkens the screen, slams ULTRACODE across it Mortal Kombat style, and an announcer says it out loud.
         </Text>
       </View>
       {!session.client && <Text style={styles.caption}>Connect to a Mac to change its experimental features.</Text>}

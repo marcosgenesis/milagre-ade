@@ -67,6 +67,11 @@ const PATHS = Object.freeze({
   "artifact:list": ([value]) => [chatProject(value?.chatId)],
   "artifact:add-comments": ([value]) => [chatProject(value?.chatId)],
   "artifact:comments": ([value]) => [chatProject(value?.chatId)],
+  // Live Activities summarize every open Project and Link, beyond a confined demo folder.
+  "live-activity:state": denied,
+  "live-activity:open": denied,
+  "live-activity:answer": denied,
+  "live-activity:forget": denied,
   "push:register": none,
   "push:unregister": none,
   "push:focus": ([value]) => (value?.chatId === null || value?.chatId === undefined ? [] : [chatProject(value.chatId)]),

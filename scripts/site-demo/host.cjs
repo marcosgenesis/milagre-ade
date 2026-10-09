@@ -40,6 +40,11 @@ const OTHERS = [
   { title: "Link Worktrees and share context", prompt: "Link Worktrees so agents can share context.", pr: { number: 168, merged: true } },
 ];
 
+const RELAY_CHATS = [
+  { title: "Rate-limit pairing attempts", prompt: "Limit how often a phone can try to pair through the relay.", pr: { number: 64, checks: "passed" } },
+  { title: "Reconnect after the Mac sleeps", prompt: "Reconnect the relay room after the Mac wakes from sleep.", pr: { number: 61, merged: true } },
+];
+
 const PAGER_DIFF = `--- a/apps/mobile/src/chat-pager.tsx
 +++ b/apps/mobile/src/chat-pager.tsx
 @@ -41,9 +41,14 @@ export function ChatPager({ pages }: Props) {
@@ -206,15 +211,20 @@ async function startSiteDemo({ port = 8913, log = () => {} } = {}) {
   }
   const root = await fs.realpath(fixed || (await fs.mkdtemp(path.join(os.tmpdir(), "milagre-site-demo-"))));
   const dataDir = path.join(root, "profile");
-  const project = path.join(root, "milagre");
-  await fs.mkdir(project);
-  const git = (...args) =>
-    execFileSync("git", ["-C", project, "-c", "user.name=Milagre Demo", "-c", "user.email=demo@example.invalid", ...args], { stdio: "ignore" });
-  execFileSync("git", ["init", "-qb", "main", project]);
-  await fs.writeFile(path.join(project, "README.md"), "# Milagre\n");
-  await fs.writeFile(path.join(project, ".gitignore"), ".milagre/\n");
-  git("add", ".");
-  git("commit", "-qm", "Start");
+  async function makeRepo(name) {
+    const repo = path.join(root, name);
+    await fs.mkdir(repo);
+    const git = (...args) =>
+      execFileSync("git", ["-C", repo, "-c", "user.name=Milagre Demo", "-c", "user.email=demo@example.invalid", ...args], { stdio: "ignore" });
+    execFileSync("git", ["init", "-qb", "main", repo]);
+    await fs.writeFile(path.join(repo, "README.md"), `# ${name}\n`);
+    await fs.writeFile(path.join(repo, ".gitignore"), ".milagre/\n");
+    git("add", ".");
+    git("commit", "-qm", "Start");
+    return repo;
+  }
+  const project = await makeRepo("milagre");
+  const relay = await makeRepo("relay");
 
   const byPath = new Map();
   const daemon = await startDaemon({
@@ -237,14 +247,25 @@ async function startSiteDemo({ port = 8913, log = () => {} } = {}) {
   const icon = await fs.readFile(path.resolve(__dirname, "../../apps/desktop/build/icons/128x128.png"));
   await client.call("project:set-icon", [project, `data:image/png;base64,${icon.toString("base64")}`]);
 
-  async function createChat({ title, prompt }, send) {
-    const created = await client.call("worktree:create", [{ projectPath: project, baseBranch: "main", prompt: title }]);
+  async function createChat({ title, prompt }, send, projectPath = project) {
+    const created = await client.call("worktree:create", [{ projectPath, baseBranch: "main", prompt: title }]);
     const worktree = created.project.state.worktrees[created.worktreeId];
     const chat = Object.values(created.project.state.sessions).find((session) => session.worktree_id === created.worktreeId);
-    await client.call("chat:patch", [project, chat.id, { title }]);
-    if (send) await client.call("chat:send", [{ projectPath: project, sessionId: chat.id, body: prompt, provider: "claude", model: "claude-opus-5-5" }]);
+    await client.call("chat:patch", [projectPath, chat.id, { title }]);
+    if (send) await client.call("chat:send", [{ projectPath, sessionId: chat.id, body: prompt, provider: "claude", model: "claude-opus-5-5" }]);
     return { chat, worktree };
   }
+  // A second Project, so the every-Project sidebar has more than one group.
+  const relayOpened = await client.call("project:open", [relay]);
+  for (const session of Object.values(relayOpened.state.sessions)) await client.call("chat:patch", [relay, session.id, { title: "Release notes" }]);
+  const relayIcon = await fs.readFile(path.join(__dirname, "relay-icon.png"));
+  await client.call("project:set-icon", [relay, `data:image/png;base64,${relayIcon.toString("base64")}`]);
+  for (const other of RELAY_CHATS.toReversed()) {
+    const { worktree } = await createChat(other, true, relay);
+    byPath.set(worktree.path, other);
+    await wait(600);
+  }
+  await client.call("project:open", [project]);
   for (const other of OTHERS.toReversed()) {
     const { worktree } = await createChat(other, true);
     byPath.set(worktree.path, other);

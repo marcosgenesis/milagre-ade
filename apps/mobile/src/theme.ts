@@ -16,6 +16,8 @@ export type Palette = ThemePalette & {
   onInk: string;
   idleDot: string;
   backdrop: string;
+  purpleInk: string;
+  purpleTint: string;
 };
 
 function applyMode(mode: PhoneThemeSettings["mode"]) {
@@ -23,9 +25,15 @@ function applyMode(mode: PhoneThemeSettings["mode"]) {
 }
 void initThemeStore({ read: readThemeSettings, save: saveThemeSettings }).then(() => applyMode(getThemeSettings().mode));
 
+// Ultracode's purple is a brand color, the same in every theme (desktop keeps --purple out of the theme sheet too).
+const ULTRACODE = {
+  light: { purple: "#ad46ff", purpleInk: "#8e2bdc", purpleTint: "#f6edff" },
+  dark: { purple: "#ad46ff", purpleInk: "#d0a3ff", purpleTint: "#ad46ff2e" },
+};
 function extend(p: ThemePalette, scheme: "light" | "dark"): Palette {
   return {
     ...p,
+    ...ULTRACODE[scheme],
     bg: p.page,
     panel: p.surface,
     text: p.ink,

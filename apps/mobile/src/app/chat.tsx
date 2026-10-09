@@ -1032,7 +1032,7 @@ export default function ChatScreen() {
                   paddingHorizontal: 8,
                   paddingBottom: 6,
                   gap: 4,
-                  boxShadow: ultracodeOn ? `0 4px 22px ${hex(scheme).purple}47` : "0 4px 20px #0000000f",
+                  boxShadow: ultracodeOn ? `0 4px 22px ${colors.purple}47` : "0 4px 20px #0000000f",
                 }}
               >
                 <LiquidGlassView

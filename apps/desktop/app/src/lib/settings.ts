@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { MODEL_CATALOG, PERMISSION_MODES } from "../model";
+import { MODEL_CATALOG, PERMISSION_MODES } from "../model.ts";
 import type { PermissionMode } from "../model";
 import type { ChatOrder } from "./chat-list";
 

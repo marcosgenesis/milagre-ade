@@ -1,5 +1,6 @@
-import { useEffect } from "react";
-import { useSettings } from "./settings.ts";
+import { useEffect, useSyncExternalStore } from "react";
+import type { ComputersSnapshot, ComputerView } from "../electron.d.ts";
+import { getSettings, useSettings } from "./settings.ts";
 
 /**
  * Tells main whether to connect the saved computers: at launch, and each time Settings › Experimental › Other computers
@@ -11,3 +12,112 @@ export function useApplyOtherComputers() {
     void Promise.resolve(window.milagre?.computers?.setEnabled?.(otherComputers)).catch(() => {});
   }, [otherComputers]);
 }
+
+export type ComputerTone = "online" | "connecting" | "offline" | "refused";
+/** The status dot (design sidebar-c-sections v6): green online, amber while it connects, grey offline, red refused. */
+export const DOT_COLOR: Record<ComputerTone, string> = {
+  online: "var(--green)",
+  connecting: "var(--orange)",
+  offline: "var(--ink-3)",
+  refused: "var(--red)",
+};
+
+export function computerTone({ state }: Pick<ComputerView, "state">): ComputerTone {
+  if (state === "online") return "online";
+  if (state === "connecting" || state === "reconnecting") return "connecting";
+  if (state === "refused") return "refused";
+  return "offline";
+}
+
+/** "just now", "5 min ago", "2h ago", "3d ago"; null when it was never seen. */
+export function seenAgo(lastSeen: number | null, now: number): string | null {
+  if (lastSeen === null || !Number.isFinite(lastSeen)) return null;
+  const minutes = Math.max(0, Math.floor((now - lastSeen) / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** The popover's second line under a computer's name (spec "Computer status"). */
+export function routeLine(view: ComputerView, now: number): string {
+  switch (view.state) {
+    case "online":
+      return view.route === "lan" ? "Same network" : view.relayHost;
+    case "connecting":
+      return "Connecting…";
+    case "reconnecting":
+      return view.message ?? "Reconnecting…";
+    case "offline": {
+      const ago = seenAgo(view.lastSeen, now);
+      return ago ? `Offline, seen ${ago}` : "Offline";
+    }
+    case "refused":
+      return view.message ?? "Pair again with a new link.";
+    default:
+      return "Off";
+  }
+}
+
+export const settingsTooltip = (name: string) => `${name} settings: rename, connection, remove`;
+/** Its Projects and rows are dimmed (spec "Sidebar"). */
+export const isDimmed = (view: ComputerView | undefined) => view?.state === "offline" || view?.state === "refused";
+/** Nothing can be sent to it: the composer is disabled and sends are refused. */
+export const isReadOnly = (view: ComputerView | undefined) => view?.state !== "online";
+
+/** The banner over an offline computer's chat (design sidebar-c-sections v3). */
+export function offlineBanner(view: ComputerView, now: number): string {
+  const ago = seenAgo(view.lastSeen, now);
+  return `${view.name} is offline. This is the last copy it sent${ago ? `, ${ago}` : ""}. You can read it until ${view.name} is back.`;
+}
+/** Appended to the composer's placeholder while its computer is offline. */
+export const offlinePlaceholder = (name: string) => ` (${name} is offline)`;
+
+// The window's list of computers, kept current from main (computers:changed).
+let snapshot: ComputersSnapshot = { thisMac: "This Mac", computers: [] };
+let off: ComputersSnapshot = snapshot;
+const listeners = new Set<() => void>();
+let started = false;
+function store(next: ComputersSnapshot | null | undefined) {
+  if (!next || !Array.isArray(next.computers)) return;
+  snapshot = next;
+  off = { thisMac: next.thisMac, computers: [] };
+  for (const listener of listeners) listener();
+}
+function start() {
+  if (started || typeof window === "undefined" || !window.milagre?.computers?.list) return;
+  started = true;
+  let heard = false;
+  window.milagre.onComputersChanged?.((next) => {
+    heard = true;
+    store(next);
+  });
+  void loadFirst(window.milagre.computers.list(), () => heard);
+}
+async function loadFirst(request: Promise<ComputersSnapshot>, heard: () => boolean) {
+  try {
+    const next = await request;
+    if (!heard()) store(next);
+  } catch {
+    // main keeps pushing computers:changed; the list stays as it was
+  }
+}
+function subscribe(listener: () => void) {
+  start();
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+}
+
+/** This Mac's name and its computers; none while Settings › Experimental › Other computers is off. */
+export function useComputers(): ComputersSnapshot {
+  const { otherComputers } = useSettings();
+  const current = useSyncExternalStore(subscribe, () => snapshot);
+  return otherComputers ? current : current === snapshot ? off : { thisMac: current.thisMac, computers: [] };
+}
+/** The same outside React. */
+export function getComputers(): ComputersSnapshot {
+  start();
+  return getSettings().otherComputers ? snapshot : off;
+}
+export const computerById = (id: string) => getComputers().computers.find((computer) => computer.id === id);

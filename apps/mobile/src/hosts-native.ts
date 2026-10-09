@@ -56,6 +56,22 @@ export async function saveMuriloMode(on: boolean) {
     /* best effort */
   }
 }
+const ultracodeFatalityKey = "milagre.ultracode-fatality.v1";
+/** Experimental: whether turning Ultracode on plays the Fatality overlay; off unless turned on. */
+export async function readUltracodeFatality(): Promise<boolean> {
+  try {
+    return (await SecureStore.getItemAsync(ultracodeFatalityKey)) === "on";
+  } catch {
+    return false;
+  }
+}
+export async function saveUltracodeFatality(on: boolean) {
+  try {
+    await SecureStore.setItemAsync(ultracodeFatalityKey, on ? "on" : "off");
+  } catch {
+    /* best effort */
+  }
+}
 export async function savePermission(mode: string) {
   try {
     await SecureStore.setItemAsync(permissionKey, mode);

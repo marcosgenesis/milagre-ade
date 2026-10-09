@@ -112,30 +112,6 @@ export function SpinnerRing({ size = 14, stroke = 2, tone = "ink3" }: { size?: n
   );
 }
 
-/** Desktop's EffortMeter: rising bars, one per level the model offers, filled up to the chosen one. */
-export function EffortMeter({ level, total, tone = "ink2" }: { level: number; total: number; tone?: Tone }) {
-  const palette = hex(useColorScheme());
-  return (
-    <View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 12 }}
-    >
-      {Array.from({ length: total }, (_, index) => (
-        <View
-          key={index}
-          style={{
-            width: 2.5,
-            borderRadius: 2,
-            height: 4 + (index * 8) / Math.max(1, total - 1),
-            backgroundColor: index <= level ? palette[tone] : palette.lineStrong,
-          }}
-        />
-      ))}
-    </View>
-  );
-}
-
 /** Linear's mark, on Linear issue chips and pickers (same shape as desktop's LinearLogo), in the color of the text beside it. */
 export function LinearLogo({ size = 12, tone = "ink2" }: { size?: number; tone?: Tone }) {
   const palette = hex(useColorScheme());

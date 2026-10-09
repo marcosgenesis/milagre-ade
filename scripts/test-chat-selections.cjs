@@ -77,7 +77,7 @@ async function browserChecks() {
     require("node:fs").writeFileSync(path.join(dir, name + ".png"), (await window.webContents.capturePage()).toPNG());
   }
   const newChat = () => evaluate(`document.querySelector('[aria-label="New chat"]').click()`);
-  const modelIs = (name) => waitFor(`[...document.querySelectorAll('[data-promptbar] button')].some(el => el.textContent === ${JSON.stringify(name)})`);
+  const modelIs = (name) => waitFor(`document.querySelector('[data-promptbar] [data-model-name]')?.textContent === ${JSON.stringify(name)}`);
   try {
     await window.loadURL(process.argv[2]);
     // Vite builds the app on first request: 3-4s on a warm CI runner, up to 8s on a cold one. Later waits stay short.
@@ -102,15 +102,11 @@ async function browserChecks() {
     await shot("composer-antigravity-models");
     await click("Gemini 3.1 Pro");
     await modelIs("Gemini 3.1 Pro");
-    await evaluate(`document.querySelector('[data-promptbar] [aria-label^="Thinking effort"]').click()`);
-    await waitFor(`document.body.textContent.includes("Thinking effort")`);
-    const levels = JSON.parse(await evaluate(`JSON.stringify([...document.querySelectorAll('[data-picker-row]')].map(el => el.textContent))`));
-    assert.equal(levels.length, 2, levels.join(" | "));
-    assert.match(levels[0], /^Low/);
-    assert.match(levels[1], /^High/);
+    // Effort sits beside the models: a two-step slider from Low to High, and the picker stays open after a pick.
+    await waitFor(`!!document.querySelector('[data-model-settings] [role="slider"]')`);
+    assert.equal(await evaluate(`document.querySelector('[data-model-settings] [role="slider"]').getAttribute('aria-valuemax')`), "1");
+    assert.match(await evaluate(`document.querySelector('[data-model-settings]').textContent`), /Low.*High/);
     await shot("composer-antigravity-effort");
-    await evaluate(`document.querySelector('[data-promptbar] [aria-label^="Thinking effort"]').click()`);
-    await click("Gemini 3.1 Pro");
     await click("Claude");
     await click("Opus 5.5");
     await modelIs("Opus 5.5");

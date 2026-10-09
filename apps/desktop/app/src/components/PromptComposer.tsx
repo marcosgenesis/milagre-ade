@@ -5,11 +5,13 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, ArrowDown01Icon, ArrowUp01Icon, Attachment01Icon, FlashIcon, SecurityCheckIcon } from "@hugeicons/core-free-icons";
 import type { AgentCliStatus, ContextUsage, EffortLevel, ModelCapability, ModelOption, ModelProvider, PermissionMode } from "../model";
 import { effortCopy, PERMISSION_MODES } from "../model";
-import Tooltip from "./primitives/Tooltip";
-import { cliMessage, cliNotice, cliTabLabel, messageParts } from "../lib/cli-status";
+import { cliNotice, messageParts } from "../lib/cli-status";
 import type { ImageDraft } from "./usePastedImages";
 import { PickerPanel, PickerRow } from "./primitives/Picker";
+import { ModelPicker } from "./ModelPicker";
+import { UltracodeFatality } from "./UltracodeFatality";
 import { useDismiss } from "../lib/use-dismiss";
+import { useSettings } from "../lib/settings";
 import { ProviderLogo } from "./ProviderLogo";
 import { Attachments } from "./Attachments";
 import { useProjectFiles } from "./useProjectFiles";
@@ -19,9 +21,7 @@ import { ScrollArea } from "./primitives/ScrollArea";
 import { promptSkillParts } from "../lib/prompt-skills";
 import { PromptHighlights } from "./PromptHighlights";
 import { ContextRing } from "./ContextRing";
-import { contextWindowFor } from "../lib/model-options";
 import { offlinePlaceholder } from "../lib/computers";
-import { formatTokens } from "./usage/format";
 
 type IconData = ComponentProps<typeof HugeiconsIcon>["icon"];
 
@@ -89,12 +89,6 @@ const POPOVER_BOTTOM_INSET = 16;
 const POPOVER_MIN_BELOW = 220;
 
 /** Rising bars, one per level the model offers; the filled ones show how hard the agent will think. */
-/** The model's context window as the picker shows it: "1M", "272k". */
-function contextLabel(model: ModelOption) {
-  const size = contextWindowFor(model);
-  return size ? formatTokens(size) : undefined;
-}
-
 function EffortMeter({ level, total }: { level: number; total: number }) {
   return (
     <span aria-hidden className="flex h-3 items-end gap-[2px]">
@@ -142,13 +136,17 @@ export function PromptComposer({
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [permissionOpen, setPermissionOpen] = useState(false);
-  const [effortOpen, setEffortOpen] = useState(false);
+  // Bumped each time Ultracode turns on; the Fatality overlay plays once per bump (Settings › Experimental).
+  const [fatality, setFatality] = useState(0);
+  const { ultracodeFatality } = useSettings();
   const effortLevels = capability.efforts;
   const effortIndex = Math.max(0, effortLevels.indexOf(effort ?? ""));
   const effortName = effort ? effortCopy(effort).name : "";
-  // Ultracode (Claude) and Codex's ultra level both hand work to parallel agents: they share the accent.
+  // Ultracode (Claude) and Codex's ultra level both hand work to parallel agents: they share Ultracode's purple.
   const orchestrating = ultracode || effort === "ultra";
-  const effortLabel = ultracode ? "Ultracode" : effortName;
+  // With Ultracode on, the composer itself turns purple.
+  const ultracodeOn = capability.ultracode && ultracode;
+  const effortLabel = ultracode ? "Ultra" : effortName;
   const canUseFastMode = capability.fastMode;
   const [provider, setProvider] = useState<ModelProvider>(selectedModel.provider);
   // The provider tab follows the selected model, which follows the open chat.
@@ -266,12 +264,11 @@ export function PromptComposer({
 
   // Any press outside the open picker closes it, including the prompt field and the rest of the composer.
   useDismiss(
-    modelOpen || plusOpen || permissionOpen || effortOpen,
+    modelOpen || plusOpen || permissionOpen,
     () => {
       setModelOpen(false);
       setPlusOpen(false);
       setPermissionOpen(false);
-      setEffortOpen(false);
     },
     (target) => !!target.closest("[data-picker-panel], [data-promptbar] button[aria-expanded]"),
     () => {
@@ -311,17 +308,14 @@ export function PromptComposer({
   function send() {
     setModelOpen(false);
     setPermissionOpen(false);
-    setEffortOpen(false);
     setPlusOpen(false);
     onSend();
   }
 
+  // The picker stays open after a pick: effort, fast mode and Ultracode sit beside the models.
   function chooseModel(model: ModelOption) {
     onModelChange(model);
     setProvider(model.provider);
-    setModelOpen(false);
-    setQuery("");
-    inputRef.current?.focus();
   }
 
   function pick(row: MenuRow) {
@@ -348,13 +342,12 @@ export function PromptComposer({
   // Escape closes the slash/@ menu or an open picker, from the prompt or a picker's search field.
   // Only then is it consumed: with nothing open it reaches the window and stops the running turn.
   function handleEscape(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "Escape" || !(menu || modelOpen || permissionOpen || effortOpen)) return;
+    if (event.key !== "Escape" || !(menu || modelOpen || permissionOpen)) return;
     event.preventDefault();
     setDismissed(true);
     setPlusOpen(false);
     setModelOpen(false);
     setPermissionOpen(false);
-    setEffortOpen(false);
     setQuery("");
     inputRef.current?.focus();
   }
@@ -459,140 +452,72 @@ export function PromptComposer({
         )}
 
         {modelOpen && (
-          <PickerPanel
-            title="Choose a model"
+          <ModelPicker
+            style={anchorStyle}
+            providers={providerTabs}
+            provider={provider}
+            onProviderChange={setProvider}
+            models={modelRows}
+            totalModels={models.filter((model) => model.provider === provider).length}
             query={query}
             onQueryChange={setQuery}
-            placeholder="Search models…"
-            emptyLabel="No models found."
-            isEmpty={modelRows.length === 0}
-            className="absolute w-[360px]"
-            style={anchorStyle}
-            header={
-              <div
-                data-provider-tabs
-                className="grid gap-1 rounded-control bg-inset p-1"
-                style={{ gridTemplateColumns: `repeat(${providerTabs.length}, minmax(0, 1fr))` }}
-              >
-                {providerTabs.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    title={cliMessage(cliStatus?.[item]) ?? providerName(item)}
-                    aria-label={providerName(item)}
-                    className={`flex items-center justify-center gap-1.5 rounded-chip px-2 py-1.5 text-xs font-semibold ${provider === item ? "bg-surface text-ink shadow-xs" : "text-ink-3 hover:text-ink"}`}
-                    onClick={() => setProvider(item)}
-                  >
-                    <span className={provider === item ? "" : "opacity-60 grayscale-[0.4]"}>
-                      <ProviderLogo provider={item} size={14} />
-                    </span>
-                    {cliTabLabel(cliStatus?.[item]) ? (
-                      <span className="text-[10px] text-orange">{cliTabLabel(cliStatus?.[item])}</span>
-                    ) : (
-                      <span className="text-[10px] text-ink-3">{models.filter((model) => model.provider === item).length}</span>
+            cliStatus={cliStatus}
+            notice={
+              providerNotice ? (
+                <div role="status" className="mx-1 mb-1 flex flex-col gap-2 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">
+                  <p className="leading-snug">
+                    {messageParts(providerNotice).map((part, index) =>
+                      part.code ? (
+                        <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">
+                          {part.text}
+                        </code>
+                      ) : (
+                        part.text
+                      ),
                     )}
-                  </button>
-                ))}
-              </div>
+                  </p>
+                  {onUpdateCli &&
+                    (cliStatus?.[provider]?.state === "outdated" ||
+                      (provider === "antigravity" && ["missing", "broken"].includes(cliStatus?.[provider]?.state ?? ""))) && (
+                      <div className="flex items-center justify-end pt-0.5">
+                        <button
+                          type="button"
+                          disabled={updatingCli === provider}
+                          onClick={() => onUpdateCli(provider)}
+                          className="flex items-center gap-1.5 rounded-chip border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
+                        >
+                          {updatingCli === provider ? (
+                            <>
+                              <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
+                              <span>{cliStatus?.[provider]?.state === "outdated" ? "Updating…" : "Installing…"}</span>
+                            </>
+                          ) : (
+                            <span>
+                              {cliStatus?.[provider]?.state === "outdated" ? "Update" : cliStatus?.[provider]?.state === "broken" ? "Reinstall" : "Install"}{" "}
+                              {provider === "antigravity" ? cliName(provider) : providerName(provider)}
+                            </span>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                </div>
+              ) : null
             }
-          >
-            {providerNotice && (
-              <div role="status" className="mx-1 mb-1 flex flex-col gap-2 rounded-control bg-inset px-2.5 py-2 text-[12px] text-ink-2">
-                <p className="leading-snug">
-                  {messageParts(providerNotice).map((part, index) =>
-                    part.code ? (
-                      <code key={index} className="rounded-chip bg-surface px-1 py-px font-mono text-[11px] text-ink">
-                        {part.text}
-                      </code>
-                    ) : (
-                      part.text
-                    ),
-                  )}
-                </p>
-                {onUpdateCli &&
-                  (cliStatus?.[provider]?.state === "outdated" ||
-                    (provider === "antigravity" && ["missing", "broken"].includes(cliStatus?.[provider]?.state ?? ""))) && (
-                    <div className="flex items-center justify-end pt-0.5">
-                      <button
-                        type="button"
-                        disabled={updatingCli === provider}
-                        onClick={() => onUpdateCli(provider)}
-                        className="flex items-center gap-1.5 rounded-chip border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink shadow-xs transition-colors hover:bg-hover active:scale-[0.98] disabled:opacity-50"
-                      >
-                        {updatingCli === provider ? (
-                          <>
-                            <span className="size-3 animate-spin rounded-full border-2 border-ink border-t-transparent" />
-                            <span>{cliStatus?.[provider]?.state === "outdated" ? "Updating…" : "Installing…"}</span>
-                          </>
-                        ) : (
-                          <span>
-                            {cliStatus?.[provider]?.state === "outdated" ? "Update" : cliStatus?.[provider]?.state === "broken" ? "Reinstall" : "Install"}{" "}
-                            {provider === "antigravity" ? cliName(provider) : providerName(provider)}
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                  )}
-              </div>
-            )}
-            {modelRows.map((model) => (
-              <PickerRow
-                key={model.id}
-                icon={<ProviderLogo provider={model.provider} size={14} />}
-                label={model.name}
-                description={model.description}
-                meta={contextLabel(model)}
-                selected={model.id === selectedModel.id}
-                onClick={() => chooseModel(model)}
-              />
-            ))}
-          </PickerPanel>
+            selectedModel={selectedModel}
+            onModelChange={chooseModel}
+            capability={capability}
+            effort={effort}
+            onEffortChange={onEffortChange}
+            fastMode={fastMode}
+            onFastModeChange={onFastModeChange}
+            ultracode={ultracode}
+            onUltracodeChange={(on) => {
+              onUltracodeChange(on);
+              if (on && ultracodeFatality) setFatality((count) => count + 1);
+            }}
+          />
         )}
-
-        {effortOpen && (
-          <PickerPanel title="Thinking effort" className="absolute w-[320px]" style={anchorStyle}>
-            {effortLevels.map((level, index) => (
-              <PickerRow
-                key={level}
-                icon={
-                  <span className={`flex w-[22px] shrink-0 justify-center ${level === "ultra" ? "text-accent-ink" : "text-ink-2"}`}>
-                    <EffortMeter level={index} total={effortLevels.length} />
-                  </span>
-                }
-                label={effortCopy(level).name}
-                description={effortCopy(level).description}
-                selected={effort === level}
-                onClick={() => {
-                  onEffortChange(level);
-                  setEffortOpen(false);
-                  inputRef.current?.focus();
-                }}
-              />
-            ))}
-            {capability.ultracode && (
-              <button
-                type="button"
-                role="switch"
-                aria-checked={ultracode}
-                onClick={() => onUltracodeChange(!ultracode)}
-                className="mt-1 flex w-full items-center gap-2 rounded-control border border-transparent border-t-line px-2 pt-2.5 pb-1.5 text-left transition-colors hover:bg-inset"
-              >
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <strong className={`text-xs font-medium ${ultracode ? "text-accent-ink" : "text-ink"}`}>Ultracode</strong>
-                  <span className="text-[10px] text-ink-3">Splits big work across parallel agents, at this effort</span>
-                </span>
-                <span
-                  aria-hidden
-                  className={`relative h-[15px] w-[26px] shrink-0 rounded-full transition-colors duration-200 ${ultracode ? "bg-accent-ink" : "bg-line-strong"}`}
-                >
-                  <span
-                    className={`absolute top-[2px] left-[2px] size-[11px] rounded-full bg-surface shadow-xs transition-transform duration-200 ease-out motion-reduce:transition-none ${ultracode ? "translate-x-[11px]" : ""}`}
-                  />
-                </span>
-              </button>
-            )}
-          </PickerPanel>
-        )}
+        {fatality > 0 && <UltracodeFatality key={fatality} onDone={() => setFatality(0)} />}
 
         {permissionOpen && (
           <PickerPanel title="Agent permissions" className="absolute w-[340px]" style={anchorStyle}>
@@ -618,6 +543,7 @@ export function PromptComposer({
         )}
 
         <div
+          data-ultracode={ultracodeOn || undefined}
           className={`promptbar-surface relative isolate flex flex-col overflow-visible border border-line transition-[border-color,border-radius] duration-150 focus-within:border-line-strong ${expanded ? "gap-2.5 rounded-[22px] p-3.5" : "gap-1.5 rounded-[14px] p-1.5"}`}
         >
           <input
@@ -704,51 +630,35 @@ export function PromptComposer({
               <button
                 type="button"
                 aria-expanded={modelOpen}
+                title={[selectedModel.name, effortLabel, canUseFastMode && fastMode ? "Fast mode" : ""].filter(Boolean).join(" · ")}
                 onClick={(event) => {
-                  anchorTo(event.currentTarget, 360);
+                  anchorTo(event.currentTarget, capability.efforts.length > 0 || capability.fastMode || capability.ultracode ? 580 : 300);
                   setPlusOpen(false);
                   setPermissionOpen(false);
-                  setEffortOpen(false);
                   setModelOpen((current) => !current);
                 }}
                 className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"
               >
                 <ProviderLogo provider={selectedModel.provider} size={13} />
-                <span className="max-w-28 truncate">{selectedModel.name}</span>
+                <span data-model-name className="max-w-28 truncate">
+                  {selectedModel.name}
+                </span>
+                {effortLabel && (
+                  <span data-effort-label className={`flex items-center gap-1 ${orchestrating ? "text-purple-ink" : ""}`}>
+                    <span className="text-ink-3">·</span>
+                    <span className="hidden min-[900px]:inline">{effortLabel}</span>
+                    <span className="min-[900px]:hidden">
+                      <EffortMeter level={effortIndex} total={effortLevels.length} />
+                    </span>
+                  </span>
+                )}
+                {canUseFastMode && fastMode && (
+                  <span data-fast-mode className="text-orange">
+                    <Icon icon={FlashIcon} size={13} />
+                  </span>
+                )}
                 <Icon icon={ArrowDown01Icon} size={12} />
               </button>
-              {effortLevels.length > 0 && (
-                <button
-                  type="button"
-                  aria-label={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`}
-                  title={`Thinking effort: ${effortName}${ultracode ? ", ultracode on" : ""}`}
-                  aria-expanded={effortOpen}
-                  onClick={(event) => {
-                    anchorTo(event.currentTarget, 320);
-                    setPlusOpen(false);
-                    setModelOpen(false);
-                    setPermissionOpen(false);
-                    setEffortOpen((current) => !current);
-                  }}
-                  className={`flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${effortOpen ? "bg-hover" : ""} ${orchestrating ? "text-accent-ink" : effortOpen ? "text-ink" : "text-ink-2 hover:text-ink"}`}
-                >
-                  <EffortMeter level={effortIndex} total={effortLevels.length} />
-                  <span className="hidden min-[900px]:inline">{effortLabel}</span>
-                </button>
-              )}
-              {canUseFastMode && (
-                <Tooltip align="end" label={`Fast mode ${fastMode ? "on" : "off"}: faster replies at higher usage rates`}>
-                  <button
-                    type="button"
-                    aria-label="Fast mode"
-                    aria-pressed={fastMode}
-                    onClick={() => onFastModeChange(!fastMode)}
-                    className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-hover ${fastMode ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:text-ink"}`}
-                  >
-                    <Icon icon={FlashIcon} size={15} />
-                  </button>
-                </Tooltip>
-              )}
             </div>
             <button
               type="button"
@@ -758,7 +668,6 @@ export function PromptComposer({
                 anchorTo(event.currentTarget, 340);
                 setPlusOpen(false);
                 setModelOpen(false);
-                setEffortOpen(false);
                 setPermissionOpen((current) => !current);
               }}
               className={`flex h-7 shrink-0 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors hover:bg-hover ${permissionMode === "full" ? "text-ink" : permissionMode === "auto" ? "text-green" : "text-ink-2"} ${expanded ? "col-start-3 row-start-2 justify-self-start" : "col-start-4 row-start-1"}`}
@@ -774,7 +683,7 @@ export function PromptComposer({
                 disabled={!canStop && (!canSend || sendBlocked || imageDraft.loading)}
                 onClick={canStop ? onStop : send}
                 className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] text-surface transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-2`}
-                style={{ background: canStop || (canSend && !sendBlocked) ? "var(--ink)" : "var(--line-strong)" }}
+                style={{ background: canStop || (canSend && !sendBlocked) ? (ultracodeOn ? "var(--purple)" : "var(--ink)") : "var(--line-strong)" }}
               >
                 {canStop ? <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" /> : <Icon icon={ArrowUp01Icon} size={16} />}
               </button>

@@ -6,6 +6,14 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Creepster (Font Diner, SIL OFL 1.1, see assets/Creepster-OFL.txt): the dripping Mortal Kombat lettering of the
+ * Ultracode overlay. Used nowhere else. */
+@font-face {
+  font-family: "Creepster";
+  src: url("./assets/Creepster-Regular.ttf") format("truetype");
+  font-display: block;
+}
+
 .command-palette {
   top: min(14vh, 100px);
   left: 50%;
@@ -89,6 +97,10 @@
   /* semantic */
   --green: oklch(0.603 0.155 150.883);
   --green-tint: oklch(0.958 0.017 159.118);
+  /* Ultracode's color, the same purple as its Fatality overlay */
+  --purple: oklch(0.627 0.265 303.9);
+  --purple-ink: oklch(0.558 0.288 302.321);
+  --purple-tint: oklch(0.977 0.014 308.299);
   --orange: oklch(0.689 0.179 49.902);
   --orange-tint: oklch(0.964 0.021 67.581);
   --red: oklch(0.621 0.192 23.042);
@@ -136,6 +148,9 @@
 
   --green: oklch(0.705 0.154 153.814);
   --green-tint: oklch(0.705 0.154 153.814 / 0.14);
+  --purple: oklch(0.627 0.265 303.9);
+  --purple-ink: oklch(0.827 0.119 306.383);
+  --purple-tint: oklch(0.627 0.265 303.9 / 0.18);
   --orange: oklch(0.746 0.156 55.642);
   --orange-tint: oklch(0.746 0.156 55.642 / 0.14);
   --red: oklch(0.666 0.18 21.433);
@@ -177,6 +192,8 @@
   --color-accent-tint: var(--accent-tint);
   --color-green: var(--green);
   --color-green-tint: var(--green-tint);
+  --color-purple-ink: var(--purple-ink);
+  --color-purple-tint: var(--purple-tint);
   --color-orange: var(--orange);
   --color-orange-tint: var(--orange-tint);
   --color-red: var(--red);
@@ -425,6 +442,41 @@ a {
   box-shadow:
     0 1px 2px oklch(0 0 0 / 0.24),
     0 3px 9px oklch(0 0 0 / 0.2);
+}
+
+/* Ultracode on: the composer takes its purple, and its border and glow breathe slowly, focused or not. The glow is
+ * centred and short: the composer sits 6px above the pane's clipped bottom edge. */
+.promptbar-surface[data-ultracode],
+.promptbar-surface[data-ultracode]:focus-within {
+  border-color: color-mix(in oklab, var(--purple) 55%, transparent);
+  background: color-mix(in oklab, color-mix(in oklab, var(--surface) 88%, var(--purple)) 80%, transparent);
+  animation: ultracode-breathe 3.6s ease-in-out infinite;
+}
+
+@keyframes ultracode-breathe {
+  0%,
+  100% {
+    border-color: color-mix(in oklab, var(--purple) 40%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--purple) 10%, transparent),
+      0 0 6px color-mix(in oklab, var(--purple) 18%, transparent);
+  }
+  50% {
+    border-color: color-mix(in oklab, var(--purple) 75%, transparent);
+    box-shadow:
+      0 0 0 3px color-mix(in oklab, var(--purple) 20%, transparent),
+      0 0 10px color-mix(in oklab, var(--purple) 40%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promptbar-surface[data-ultracode],
+  .promptbar-surface[data-ultracode]:focus-within {
+    animation: none;
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, var(--purple) 16%, transparent),
+      0 0 8px color-mix(in oklab, var(--purple) 30%, transparent);
+  }
 }
 
 .prompt-input-highlighted {

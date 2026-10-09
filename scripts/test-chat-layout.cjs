@@ -19,6 +19,7 @@ function Fixture() {
   const [draft, setDraft] = useState("");
   const [model, setModel] = useState(MODEL_CATALOG[0]);
   const [fastMode, setFastMode] = useState(false);
+  const [ultracode, setUltracode] = useState(false);
   const [prAction, setPrAction] = useState(null);
   const [sending, setSending] = useState(false);
   const [extra, setExtra] = useState([]);
@@ -41,7 +42,7 @@ function Fixture() {
       projectPath="/fixture" draft={draft} onDraftChange={setDraft} onSend={noop} isSending={sending} sendBlocked={false}
       pullRequestAction={prAction ? { ...prAction, onRun: () => window.resolveClicks++ } : undefined}
       models={MODEL_CATALOG} cliStatus={null} onModelPickerOpen={noop} selectedModel={model} onModelChange={noop}
-      capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={false} onUltracodeChange={noop}
+      capability={capabilityFor(model, null)} onEffortChange={noop} ultracode={ultracode} onUltracodeChange={setUltracode}
       fastMode={fastMode} onFastModeChange={setFastMode} permissionMode="auto" onPermissionModeChange={noop}
       onRecommendationSelect={noop} worktrees={[]} onWorktreeChange={noop}
       isolation="local" onIsolationChange={noop} branches={[]} baseBranch="main" onBaseBranchChange={noop} newChatError={null} />
@@ -305,10 +306,35 @@ async function browserChecks() {
     }
     await evaluate('window.setModel("claude-opus-5-5")');
     await evaluate('window.setDraft("")');
-    await waitFor('!!document.querySelector("[aria-label=\\"Fast mode\\"]")');
-    assert.equal(await evaluate('document.querySelector("[aria-label=\\"Fast mode\\"]").getAttribute("aria-pressed")'), "false");
-    await evaluate('document.querySelector("[aria-label=\\"Fast mode\\"]").click()');
-    await waitFor('document.querySelector("[aria-label=\\"Fast mode\\"]").getAttribute("aria-pressed") === "true"');
+    // Fast mode lives in the model picker; the composer's trigger shows a bolt while it is on.
+    const fast = '[data-model-picker] [aria-label="Fast mode"]';
+    const trigger = "[data-promptbar] button[aria-expanded]:not([aria-label])";
+    await evaluate(`document.querySelector('${trigger}').click()`);
+    await waitFor(`!!document.querySelector('${fast}')`);
+    assert.equal(await evaluate(`document.querySelector('${fast}').getAttribute("aria-checked")`), "false");
+    assert.equal(await evaluate(`!!document.querySelector('${trigger} [data-fast-mode]')`), false);
+    await evaluate(`document.querySelector('${fast}').click()`);
+    await waitFor(`document.querySelector('${fast}').getAttribute("aria-checked") === "true"`);
+    await waitFor(`!!document.querySelector('${trigger} [data-fast-mode]')`);
+    const pickerShot = async (name) => {
+      if (!process.env.MILAGRE_SCREENSHOT_DIR) return;
+      // Past the picker's 180 ms pop-in.
+      await delay(400);
+      const image = await window.webContents.capturePage();
+      require("node:fs").writeFileSync(require("node:path").join(process.env.MILAGRE_SCREENSHOT_DIR, `${name}.png`), image.toPNG());
+    };
+    await pickerShot("model-picker-fast");
+    // Ultracode turns its row and the composer purple; the Fatality overlay stays off until Settings > Experimental.
+    const ultracode = '[data-model-picker] [aria-label="Ultracode"]';
+    await evaluate(`document.querySelector('${ultracode}').click()`);
+    await waitFor(`document.querySelector('${ultracode}').getAttribute("aria-checked") === "true"`);
+    await waitFor(`!!document.querySelector('[data-promptbar] [data-ultracode]')`);
+    assert.equal(await evaluate(`!!document.querySelector('[data-ultracode-fatality]')`), false);
+    await pickerShot("model-picker-ultracode");
+    await evaluate(`document.querySelector('${ultracode}').click()`);
+    await waitFor(`!document.querySelector('[data-promptbar] [data-ultracode]')`);
+    await evaluate(`document.querySelector('${trigger}').click()`);
+    await waitFor(`!document.querySelector('[data-model-picker]')`);
     await evaluate('window.setDraft("short")');
     await waitFor('document.querySelector("textarea[aria-label=\\"Prompt\\"]").value === "short"');
     const compactTop = await evaluate('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top');
@@ -317,16 +343,20 @@ async function browserChecks() {
     await evaluate('window.setDraft("")');
     await waitFor('document.querySelector("textarea[aria-label=\\"Prompt\\"]").getBoundingClientRect().top === ' + compactTop);
     await evaluate('window.setModel("claude-sonnet-5-5")');
-    await waitFor('!document.querySelector("[aria-label=\\"Fast mode\\"]")');
+    await waitFor(`!document.querySelector('${trigger} [data-fast-mode]')`);
+    await evaluate(`document.querySelector('${trigger}').click()`);
+    await waitFor(`!!document.querySelector('[data-model-picker]') && !document.querySelector('${fast}')`);
     // Codex models have it too (the priority tier); the toggle keeps its state across models.
     await evaluate('window.setModel("gpt-6.1-sol")');
-    await waitFor('document.querySelector("[aria-label=\\"Fast mode\\"]")?.getAttribute("aria-pressed") === "true"');
+    await waitFor(`document.querySelector('${fast}')?.getAttribute("aria-checked") === "true"`);
     if (process.env.MILAGRE_SCREENSHOT_DIR)
       await window.webContents
         .capturePage()
         .then((image) => require("node:fs").writeFileSync(require("node:path").join(process.env.MILAGRE_SCREENSHOT_DIR, "codex-fast-mode.png"), image.toPNG()));
     await evaluate('window.setModel("claude-fable-5-1")');
-    await waitFor('!document.querySelector("[aria-label=\\"Fast mode\\"]")');
+    await waitFor(`!document.querySelector('${fast}')`);
+    await evaluate(`document.querySelector('${trigger}').click()`);
+    await waitFor(`!document.querySelector('[data-model-picker]')`);
     await evaluate('window.setModel("claude-sonnet-5-5")');
     // A composer narrow enough that the empty prompt's placeholder wraps must not flip between layouts forever.
     window.webContents.setZoomFactor(3);

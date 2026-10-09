@@ -37,6 +37,8 @@ export interface AppSettings {
   muriloMode: boolean;
   /** Experimental: drive the chats of other Macs running Milagre from this window (Add computer, the computers popover). */
   otherComputers: boolean;
+  /** Experimental: turning Ultracode on plays the Mortal Kombat Fatality overlay and the announcer's voice. */
+  ultracodeFatality: boolean;
   /** Let the blurred desktop show through the window (macOS). */
   windowTranslucent: boolean;
   /** How much of the desktop shows through the window's own background, 10 to 100. */
@@ -75,6 +77,7 @@ const DEFAULTS: AppSettings = {
   sidebarAllProjects: false,
   muriloMode: false,
   otherComputers: false,
+  ultracodeFatality: false,
   windowTranslucent: false,
   windowTranslucency: 80,
   panelTranslucency: 40,
@@ -108,6 +111,7 @@ function load(): AppSettings {
       sidebarAllProjects: typeof saved.sidebarAllProjects === "boolean" ? saved.sidebarAllProjects : DEFAULTS.sidebarAllProjects,
       muriloMode: typeof saved.muriloMode === "boolean" ? saved.muriloMode : DEFAULTS.muriloMode,
       otherComputers: typeof saved.otherComputers === "boolean" ? saved.otherComputers : DEFAULTS.otherComputers,
+      ultracodeFatality: typeof saved.ultracodeFatality === "boolean" ? saved.ultracodeFatality : DEFAULTS.ultracodeFatality,
       windowTranslucent: typeof saved.windowTranslucent === "boolean" ? saved.windowTranslucent : DEFAULTS.windowTranslucent,
       windowTranslucency: clampTo(saved.windowTranslucency, WINDOW_TRANSLUCENCY_RANGE, DEFAULTS.windowTranslucency),
       panelTranslucency: clampTo(saved.panelTranslucency, PANEL_TRANSLUCENCY_RANGE, DEFAULTS.panelTranslucency),

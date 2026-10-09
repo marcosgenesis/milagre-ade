@@ -3,6 +3,7 @@ import { LINEAR_HINT, LINEAR_TITLE, linearStatusLine, type LinearStatus } from "
 import { Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { useMuriloMode } from "./murilo-mode";
+import { useUltracodeFatality } from "./ultracode-fatality-setting";
 import { useSession } from "./session";
 import { ErrorNotice, Toggle, styles } from "./ui";
 
@@ -10,6 +11,7 @@ import { ErrorNotice, Toggle, styles } from "./ui";
 export function ExperimentalSection() {
   const session = useSession();
   const [muriloMode, setMuriloMode] = useMuriloMode();
+  const [fatality, setFatality] = useUltracodeFatality();
   // The Mac's Linear switch and connection; null until the Mac answers (an older Mac never does). Re-read on focus:
   // the phone gets no event when the Mac connects or disconnects.
   const [linear, setLinear] = useState<{ enabled: boolean; status: LinearStatus } | null>(null);
@@ -44,11 +46,17 @@ export function ExperimentalSection() {
   }
   return (
     <View style={{ gap: 8 }}>
-      {/* This phone's own switch, kept on the phone. */}
+      {/* This phone's own switches, kept on the phone. */}
       <View style={[styles.card, { gap: 4 }]}>
         <Toggle title="Murilo mode" selected={muriloMode} onPress={() => setMuriloMode(!muriloMode)} />
         <Text style={styles.caption}>
           Shows every tool call in the Chat, one row each, with the agent&apos;s notes between them. Replies no longer fold their activity into one line.
+        </Text>
+      </View>
+      <View style={[styles.card, { gap: 4 }]}>
+        <Toggle title="Ultracode Fatality" selected={fatality} onPress={() => setFatality(!fatality)} />
+        <Text style={styles.caption}>
+          Turning Ultracode on darkens the screen and slams ULTRACODE across it Mortal Kombat style. The Mac also says it out loud.
         </Text>
       </View>
       {!session.client && <Text style={styles.caption}>Connect to a Mac to change its experimental features.</Text>}

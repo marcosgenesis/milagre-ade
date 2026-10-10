@@ -1,3 +1,5 @@
+// oxlint-disable-next-line import/no-unassigned-import -- before every react-lang import: it reads the devtools flag as it loads
+import "./no-devtools";
 import { Component, createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Renderer } from "@openuidev/react-lang";
@@ -46,6 +48,8 @@ export function GenerativeUI({ code, fallback }: { code: string; fallback: React
       setBusy(true);
       try {
         await onSend(event.humanFriendlyMessage);
+      } catch {
+        // A failed send leaves the button as it was; the chat shows the error where it sends from.
       } finally {
         sending.current = false;
         setBusy(false);
@@ -59,8 +63,8 @@ export function GenerativeUI({ code, fallback }: { code: string; fallback: React
     <Boundary fallback={fallback}>
       {empty && fallback}
       {/* Hidden, it is no block: the slot is what a check (or a find) counts as UI in the reply. */}
-      <div data-slot={empty ? undefined : "genui"} hidden={empty} className={`my-2 ${busy ? "pointer-events-none opacity-60" : ""}`}>
-        <Renderer response={code} library={genuiLibrary} isStreaming={streaming} onParseResult={onParseResult} onAction={onAction} />
+      <div data-slot={empty ? undefined : "genui"} hidden={empty} className="my-2">
+        <Renderer response={code} library={genuiLibrary} isStreaming={streaming || busy || !onSend} onParseResult={onParseResult} onAction={onAction} />
       </div>
     </Boundary>
   );

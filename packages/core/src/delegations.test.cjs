@@ -176,6 +176,29 @@ async function waitFor(check, timeoutMs = 15000) {
 const findMessage = (fixture, name, kind) =>
   waitFor(async () => (await fixture.messages(fixture.chatOf(name))).find((message) => message.context?.kind === kind));
 
+test("a new Link writes a line in each Chat it reaches that has messages, without moving it in the lists", async (t) => {
+  const fixture = await linkedProjects(t, { link: false });
+  await fixture.send("api", "Rate limit the uploads route");
+  await waitFor(async () => (await fixture.messages(fixture.chatOf("api"))).some((message) => message.body === "api done"));
+  const lastAt = async () => {
+    const [projectPath, id] = fixture.chatOf("api").split("#");
+    return (await fixture.runtime.invoke("project:snapshot", [projectPath])).state.sessions[id].summary?.lastAt;
+  };
+  const before = await lastAt();
+  assert.ok(before, "the reply stamped the Chat");
+  await fixture.runtime.invoke("canvas:link-add", [{ project_id: fixture.ids.api }, { project_id: fixture.ids.web }]);
+  const line = await findMessage(fixture, "api", "worktree-linked");
+  assert.equal(line.role, "assistant");
+  assert.equal(line.body, "Linked to web main");
+  assert.deepEqual(line.context.project, { name: "web", path: fixture.folders.web });
+  assert.equal(line.context.sameProject, false);
+  assert.deepEqual(line.context.branches, ["main"]);
+  assert.match(line.context.summary, /<linked_worktrees>[\s\S]*## web · branch main/);
+  assert.equal(await lastAt(), before, "the line is not activity");
+  await settled();
+  assert.equal((await fixture.messages(fixture.chatOf("web"))).length, 0, "a Chat without messages gets no line");
+});
+
 test("an idle Chat starts a turn for the Delegation, and the report reaches the requester without a turn", async (t) => {
   const fixture = await linkedProjects(t);
   let result;

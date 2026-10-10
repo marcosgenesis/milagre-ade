@@ -82,6 +82,10 @@
       "types": "./src/chats.d.mts",
       "default": "./src/chats.mjs"
     },
+    "./worktree-link": {
+      "types": "./src/worktree-link.d.mts",
+      "default": "./src/worktree-link.mjs"
+    },
     "./handoff": {
       "types": "./src/handoff.d.mts",
       "default": "./src/handoff.mjs"

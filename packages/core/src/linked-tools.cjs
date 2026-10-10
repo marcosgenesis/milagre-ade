@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { z } = require("zod");
 const { chatTitle } = require("@milagre/shared/chats");
+const { isNote } = require("@milagre/shared/chat-summary");
 const { providerName } = require("@milagre/shared/providers");
 const { projectOfKey, runStatus, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 const { NEGOTIATION_ROUNDS } = require("@milagre/shared/limits");
@@ -17,7 +18,8 @@ const DEFAULT_MESSAGES = 30;
 const cap = (text) => (text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n… truncated` : text);
 
 function lastReply(state, sessionId) {
-  return state.messages.findLast((message) => message.session_id === sessionId && message.role === "assistant" && message.body?.trim())?.body;
+  return state.messages.findLast((message) => message.session_id === sessionId && message.role === "assistant" && !isNote(message) && message.body?.trim())
+    ?.body;
 }
 
 /** What a Chat's agent replied after a Delegation's message (Milagre's own notes left out), or undefined. */

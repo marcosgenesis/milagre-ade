@@ -9,8 +9,6 @@ import { Markdown } from "./markdown/Markdown";
 import { ScrollArea } from "./primitives/ScrollArea";
 import { SpinnerRing } from "./primitives/SpinnerRing";
 
-const HANDOFF_BRIEF_NAME = "Handoff brief";
-
 /**
  * A provider switch inside the chat: a hairline with "Context handoff  Opus 5.5 → GPT-6" centred on it. It spins while
  * the brief is written, and opens the brief the new provider was sent.
@@ -53,7 +51,7 @@ export function HandoffDivider({ context, models }: { context: HandoffContext; m
         {context.status === "failed" && <span className="text-orange">· Handoff failed</span>}
       </button>
       <span className="h-px flex-1 bg-line" />
-      {open && context.brief && <HandoffBriefDialog brief={context.brief} onClose={() => setOpen(false)} />}
+      {open && context.brief && <HandoffBriefDialog title="Handoff brief" brief={context.brief} onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -62,8 +60,11 @@ const FOCUSABLE = 'button:not(:disabled), textarea:not(:disabled), [tabindex]:no
 const BUTTON_PRIMARY =
   "inline-flex h-8 items-center gap-1.5 rounded-control bg-ink px-3 text-[12.5px] font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40";
 
-/** The brief the new provider was sent, in a modal as the GitActionsDialog is built: a Preview with Close. */
-function HandoffBriefDialog({ brief, onClose }: { brief: string; onClose: () => void }) {
+/**
+ * The brief the new provider was sent, or the linked summary a Link gave a Chat, in a modal as the GitActionsDialog is
+ * built: a Preview with Close.
+ */
+export function HandoffBriefDialog({ title, brief, onClose }: { title: string; brief: string; onClose: () => void }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -129,7 +130,7 @@ function HandoffBriefDialog({ brief, onClose }: { brief: string; onClose: () => 
       >
         <header className="flex items-center gap-3 px-4 pb-2 pt-3.5">
           <h2 id="brief-dialog-title" className="min-w-0 flex-1 truncate text-[15px] font-semibold">
-            {HANDOFF_BRIEF_NAME}
+            {title}
           </h2>
           <button
             type="button"

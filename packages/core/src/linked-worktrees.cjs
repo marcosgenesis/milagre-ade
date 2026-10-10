@@ -6,6 +6,7 @@ const { linkedWorktrees } = require("./project-links.cjs");
 const { Delegations, jsonFileStore } = require("./delegations.cjs");
 const { chatLabel, createLinkedReads, delegationReply, linkedToolDefinitions } = require("./linked-tools.cjs");
 const { createLinkedMcpServer } = require("./linked-mcp-server.cjs");
+const { worktreeLinkText } = require("@milagre/shared/worktree-link");
 
 // Every turn and tool call of a linked Chat asks which Worktrees are active; git is asked again after this long.
 const ACTIVE_TTL_MS = 3000;
@@ -174,6 +175,48 @@ function createLinkedWorktrees({
 
   const mcp = createLinkedMcpServer({ toolsFor });
 
+  /**
+   * A line in every Chat a new Link reaches, written when the Link is made: the Worktrees it now sees, and the linked
+   * summary its next turn gets. `reach` is each Project's active Worktree paths, by Project id. Archived Chats and
+   * Chats without messages get none (an empty Chat is the one a Worktree reuses for its next send).
+   */
+  async function linkAdded(link, reach) {
+    const { projects } = await registry().snapshot();
+    const byId = new Map(projects.map((entry) => [entry.id, entry]));
+    for (const endpoint of [link.a, link.b]) {
+      const source = byId.get(endpoint.project_id);
+      if (!source) continue;
+      const state = await project(source.path);
+      const paths = endpoint.worktree_path === undefined ? (reach[source.id] ?? []) : [endpoint.worktree_path];
+      for (const worktreePath of paths) {
+        const reached = linkedWorktrees({ project_id: source.id, worktree_path: worktreePath }, [link], reach);
+        const target = reached.length ? byId.get(reached[0].project_id) : null;
+        const worktree = Object.values(state.worktrees ?? {}).find((item) => item.path === worktreePath);
+        if (!target || !worktree) continue;
+        const targetState = target.path === source.path ? state : await project(target.path);
+        const branches = reached.map(
+          (item) =>
+            Object.values(targetState.worktrees ?? {}).find((candidate) => candidate.path === item.worktree_path)?.name ?? path.basename(item.worktree_path),
+        );
+        for (const session of Object.values(state.sessions)) {
+          if (session.worktree_id !== worktree.id || session.archived) continue;
+          if (!(session.summary?.count ?? state.messages.some((message) => message.session_id === session.id))) continue;
+          const key = chatKey(source.path, session.id);
+          const summary = await reads.summary(key).catch(() => "");
+          const context = {
+            kind: "worktree-linked",
+            linkId: link.id,
+            project: { name: target.name, path: target.path },
+            sameProject: target.path === source.path,
+            branches,
+            ...(summary ? { summary } : {}),
+          };
+          await chats.addNote(key, { body: worktreeLinkText(context), context });
+        }
+      }
+    }
+  }
+
   function toolsFor(chatId) {
     if (!tools.has(chatId))
       tools.set(
@@ -205,6 +248,7 @@ function createLinkedWorktrees({
     /** The summary for the start of a turn, or "" when nothing is linked. A failed read leaves it out. */
     context: (chatId) => reads.summary(chatId).catch(() => ""),
     observe: (chatId, event) => delegations.observe(chatId, event),
+    linkAdded,
     linkRemoved: (id) => delegations.linkRemoved(id),
     stop: (target) => delegations.stop(target),
     snapshot,

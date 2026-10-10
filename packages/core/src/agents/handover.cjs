@@ -40,6 +40,8 @@ function renderTranscript(state, sessionId, { after } = {}) {
     if (message.context?.kind === "handoff") {
       const failed = message.context.status === "failed" ? " (failed)" : "";
       parts.push(`## Handoff${failed}: ${providerName(message.context.from.provider)} → ${providerName(message.context.to.provider)}`);
+    } else if (message.context?.kind === "worktree-linked") {
+      parts.push(`## ${message.body}`);
     } else if (message.role === "assistant") {
       const steps = (message.steps ?? []).filter((step) => step.kind !== "thinking").map(stepLine);
       parts.push(`## Assistant${message.model ? ` (${message.model})` : ""}`, [steps.join("\n"), message.body].filter(Boolean).join("\n\n"));

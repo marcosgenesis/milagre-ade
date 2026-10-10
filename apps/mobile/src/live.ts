@@ -189,6 +189,8 @@ export function syncProject({ connect, snapshot, runs, accounts, links, onError,
         open = next;
         if (open) timers.clearTimeout(poll);
         void pull("project");
+        // A Link made or removed while the socket was down sent its signal to nobody.
+        if (open) links?.();
         if (!open) schedule();
       },
     });

@@ -177,6 +177,3 @@ export async function removeChatLink(call: Call, linkId: string): Promise<{ link
  * notice is drawn as an error, and a Link made or removed already shows as the Link icon coming or going on the rows.
  */
 export const linkNoticeIsProblem = (notice: string) => notice.includes("Could not");
-
-/** What the bridge answers for a method its daemon doesn't list: a Mac older than Links on the phone. */
-export const linksUnsupported = (error: unknown) => /not available from mobile/i.test((error as Error)?.message ?? "");

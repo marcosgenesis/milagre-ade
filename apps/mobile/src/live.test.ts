@@ -214,9 +214,12 @@ test("a Link change passes through the socket and rereads the Links without fetc
     pollDelay: () => 1000,
     timers,
   });
+  made[0].onopen!();
+  assert.equal(linkChanges, 1, "opening the socket catches up on Links changed while it was down");
   made[0].onmessage!({ data: '{"type":"links"}' });
+  assert.equal(linkChanges, 2);
   // A signal a newer bridge adds later is ignored.
   made[0].onmessage!({ data: '{"type":"something-new"}' });
-  assert.equal(linkChanges, 1);
+  assert.equal(linkChanges, 2);
   stop();
 });

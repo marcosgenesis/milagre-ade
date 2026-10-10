@@ -166,6 +166,7 @@ export interface NamedProjectLink {
   name: string;
   projectIds: string[];
   createdAt: string;
+  hidden?: boolean;
 }
 export interface WorktreeBinding {
   projectId: string;

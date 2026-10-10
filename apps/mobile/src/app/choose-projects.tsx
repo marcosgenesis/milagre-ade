@@ -2,35 +2,37 @@ import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useSession } from "../session";
-import { ProjectIcon } from "../project-icon";
+import { ProjectIcon, ProjectIcons } from "../project-icon";
+import type { RecentProject } from "../client";
 import { ErrorNotice, PageScroll, useStyles } from "../ui";
 import { useTheme } from "../theme";
 
-/** A checkbox per Project: unchecked ones leave the Projects list here and the all-Projects sidebar on the Mac. Links are always listed. */
+/** Project and Link visibility is shared with the desktop sidebar. */
 export default function ChooseProjects() {
   const { colors } = useTheme();
   const styles = useStyles();
   const session = useSession();
   // By name, not by recency: opening a Project reorders the recent list, and a row must not move under the finger.
   const projects = session.recent
-    .filter((item) => !item.link)
     .map((item) => ({ ...item, name: item.name || item.path.split("/").at(-1) || "Project" }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.path.localeCompare(b.path));
   // The choice shows at once; the Mac's answer replaces it, or a failure puts it back.
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const shown = (path: string, hidden?: boolean) => !(pending[path] ?? hidden);
-  async function toggle(path: string, show: boolean) {
+  async function toggle(project: RecentProject, show: boolean) {
     const client = session.client;
-    if (!client) return;
+    const { path, link } = project;
+    if (!client || path in pending) return;
     setError("");
     setPending((previous) => ({ ...previous, [path]: !show }));
     try {
-      await client.call("project:set-hidden", [path, !show]);
+      if (link) await client.call("link:update", [{ id: link.id, name: link.name, projectIds: link.projectIds, hidden: !show }]);
+      else await client.call("project:set-hidden", [path, !show]);
       await session.reloadProjects();
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : "Could not change this setting.";
-      setError(/not available from mobile|unknown command/i.test(message) ? "Update Milagre on your Mac to hide Projects from your phone." : message);
+      setError(/not available from mobile|unknown command/i.test(message) ? "Update Milagre on your Mac to hide Projects and Links from your phone." : message);
     } finally {
       setPending((previous) => {
         const next = { ...previous };
@@ -55,7 +57,7 @@ export default function ChooseProjects() {
           <Text style={[styles.text, { fontWeight: "600" }]}>Done</Text>
         </Pressable>
       </View>
-      <Text style={styles.muted}>Checked Projects show in your Projects list, and in the sidebar on your Mac.</Text>
+      <Text style={styles.muted}>Checked Projects and Links show in your Projects list, and in the sidebar on your Mac.</Text>
       <View style={{ borderRadius: 12, backgroundColor: colors.surface, padding: 4 }}>
         {projects.map((project) => {
           const checked = shown(project.path, project.hidden);
@@ -65,8 +67,9 @@ export default function ChooseProjects() {
               key={project.path}
               accessibilityRole="checkbox"
               accessibilityLabel={name}
-              accessibilityState={{ checked }}
-              onPress={() => void toggle(project.path, !checked)}
+              accessibilityState={{ checked, disabled: project.path in pending }}
+              disabled={project.path in pending}
+              onPress={() => toggle(project, !checked)}
               style={({ pressed }) => ({
                 height: 64,
                 paddingHorizontal: 12,
@@ -91,13 +94,19 @@ export default function ChooseProjects() {
               >
                 {checked && <Text style={{ color: colors.surface, fontSize: 15, fontWeight: "600" }}>✓</Text>}
               </View>
-              <ProjectIcon client={session.client} path={project.path} />
+              {project.link ? (
+                <ProjectIcons client={session.client} projects={project.projects ?? []} />
+              ) : (
+                <ProjectIcon client={session.client} path={project.path} />
+              )}
               <View style={{ flex: 1, gap: 4 }}>
                 <Text numberOfLines={1} style={[styles.text, { fontSize: 15, color: checked ? colors.ink : colors.ink3 }]}>
                   {name}
                 </Text>
                 <Text numberOfLines={1} ellipsizeMode="middle" style={styles.caption}>
-                  {project.path}
+                  {project.link
+                    ? project.projects?.map((member) => member.name || member.path.split("/").at(-1)).join(" + ") || "Linked Projects"
+                    : project.path}
                 </Text>
               </View>
             </Pressable>
@@ -105,7 +114,7 @@ export default function ChooseProjects() {
         })}
         {!projects.length && <Text style={[styles.muted, { padding: 16 }]}>Open a Project on your Mac to list it here.</Text>}
       </View>
-      {projects.length > 0 && <Text style={styles.caption}>{hiddenCount ? `${hiddenCount} hidden.` : "All Projects are shown."}</Text>}
+      {projects.length > 0 && <Text style={styles.caption}>{hiddenCount ? `${hiddenCount} hidden.` : "All Projects and Links are shown."}</Text>}
       {error ? <ErrorNotice message={error} /> : null}
     </PageScroll>
   );

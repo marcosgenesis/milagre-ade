@@ -182,7 +182,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     },
     [previewProject],
   );
-  // A Project hidden in its settings stays out of the list, searches included; Links are always listed.
+  // Hidden Projects and Links stay out of the list, searches included.
   const listed = useMemo(() => session.recent.filter((item) => !item.hidden), [session.recent]);
   // Searching or filtering reads every Project; ordinary browsing only reads expanded groups.
   const searching = !!query.trim() || show !== "all";

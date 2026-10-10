@@ -1701,6 +1701,68 @@ test("Choose projects opens as a sheet over the sidebar instead of closing it", 
   assert.deepEqual(nav.secondaryRoutes, ["sheet"]);
 });
 
+function chooseProjectsHost(call) {
+  const react = hookHost();
+  const link = { id: "checkout", name: "Checkout", projectIds: ["shop", "api"] };
+  const session = {
+    client: { call },
+    recent: [
+      { path: "/shop", name: "shop" },
+      { path: "milagre-link:checkout", name: "Checkout", link, projects: [] },
+    ],
+    reloadProjects: async () => {},
+  };
+  const { default: ChooseProjects } = load("app/choose-projects.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Pressable: "Pressable", Text: "Text", View: "View" },
+    "expo-router": { router: { back() {} } },
+    "../session": { useSession: () => session },
+    "../project-icon": { ProjectIcon: "ProjectIcon", ProjectIcons: "ProjectIcons" },
+    "../ui": { ErrorNotice: "ErrorNotice", PageScroll: "PageScroll" },
+  });
+  const render = () => {
+    react.begin();
+    return ChooseProjects();
+  };
+  const row = () => find(render(), (node) => node.props?.accessibilityRole === "checkbox" && node.props.accessibilityLabel === "Checkout");
+  return { render, row, session, link };
+}
+
+test("the phone chooser hides and restores a Link through the shared registry without removing it", async () => {
+  const request = deferred();
+  const calls = [];
+  const host = chooseProjectsHost(async (method, args) => {
+    calls.push([method, args]);
+    await request.promise;
+    host.session.recent[1].hidden = args[0].hidden;
+  });
+  assert.ok(host.row(), "Links are included in the chooser");
+  const hiding = host.row().props.onPress();
+  assert.equal(host.row().props.accessibilityState.checked, false, "the pending choice appears immediately");
+  assert.equal(host.row().props.disabled, true, "pending changes cannot race a second tap");
+  request.resolve();
+  await hiding;
+  assert.equal(host.row().props.accessibilityState.checked, false);
+  await host.row().props.onPress();
+  assert.equal(host.row().props.accessibilityState.checked, true);
+  same(calls, [
+    ["link:update", [{ ...host.link, hidden: true }]],
+    ["link:update", [{ ...host.link, hidden: false }]],
+  ]);
+  assert.equal(host.session.recent[1].link.id, "checkout");
+});
+
+test("a failed phone Link visibility change restores the checkbox and shows the error", async () => {
+  const host = chooseProjectsHost(async () => {
+    throw new Error("Computer offline");
+  });
+  assert.ok(host.row());
+  await host.row().props.onPress();
+  assert.equal(host.row().props.accessibilityState.checked, true);
+  assert.equal(find(host.render(), (node) => node.type === "ErrorNotice").props.message, "Computer offline");
+});
+
 test("a chat search with no matching title lists matching messages, and a tap opens their Chat", () => {
   const nav = navigationHost(deferred().promise);
   nav.state.project.state.sessions[3] = { id: 3, title: "Relay work" };

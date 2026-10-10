@@ -129,6 +129,17 @@ test("a phone opens a named Link and sends one shared Chat with two owned Worktr
   const made = await rpc("link:create", [{ name: "Together", projectIds: registered.map((item) => item.id) }]);
   assert.equal(made.status, 200);
   const link = (await made.json()).result;
+  const desktopReader = await connect({ dataDir });
+  try {
+    const hidden = await rpc("link:update", [{ ...link, hidden: true }]);
+    assert.equal(hidden.status, 200);
+    assert.equal((await desktopReader.call("link:list"))[0].hidden, true, "A phone visibility change reaches the desktop registry");
+    await desktopReader.call("link:update", [{ ...link, hidden: false }]);
+    const listed = await (await rpc("link:list")).json();
+    assert.equal(listed.result[0].hidden, undefined, "A desktop visibility change reaches the phone without deleting the Link");
+  } finally {
+    desktopReader.close();
+  }
   const owner = `milagre-link:${link.id}`;
   assert.equal((await rpc("link:open", [link.id])).status, 200);
   const snapshotRoute = "/snapshot?projectPath=" + encodeURIComponent(owner);

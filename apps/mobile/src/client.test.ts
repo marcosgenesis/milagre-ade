@@ -3,6 +3,26 @@ import assert from "node:assert/strict";
 import { createClient, localEndpoint, type RelayRuntime, type RouteView } from "./client.ts";
 import { RelayTransportError, type RelayResponse, type RelayTransport } from "./relay-transport.ts";
 
+test("recent scopes carry Link visibility so a desktop-hidden Link stays out of the phone sidebar", async () => {
+  const link = { id: "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7", name: "Checkout", projectIds: ["shop", "api"], hidden: true };
+  const client = createClient({ address: "http://127.0.0.1:8787", token: "token" }, async (_url, init) => {
+    const { method } = JSON.parse(init?.body as string);
+    const result =
+      method === "link:list"
+        ? [link]
+        : method === "project:registry"
+          ? [
+              { id: "shop", path: "/shop" },
+              { id: "api", path: "/api" },
+            ]
+          : [];
+    return new Response(JSON.stringify({ v: 1, result }));
+  });
+  const recent = await client.recentScopes();
+  assert.equal(recent[0].hidden, true);
+  assert.equal(recent.filter((item) => !item.hidden).length, 0);
+});
+
 test("endpoint accepts HTTPS and emulator loopback, rejecting plaintext remote and credential/path tricks", () => {
   assert.equal(localEndpoint("http://127.0.0.1:8787/"), "http://127.0.0.1:8787");
   assert.equal(localEndpoint("http://10.0.2.2:8787"), "http://10.0.2.2:8787");

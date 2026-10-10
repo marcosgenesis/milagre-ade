@@ -207,6 +207,7 @@ test("bundles tldr with its checklist for machines without installed skills", as
     [
       { name: "browser", scope: "bundled", provider: "milagre" },
       { name: "design", scope: "bundled", provider: "milagre" },
+      { name: "genui", scope: "bundled", provider: "milagre" },
       ...[
         "milagre",
         "milagre-address-review",

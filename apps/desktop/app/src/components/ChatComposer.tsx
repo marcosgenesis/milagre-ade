@@ -4,6 +4,7 @@ import { UpdatePillSlot } from "./UpdateNotice";
 import { BrowserTrack } from "./agents/BrowserTrack";
 import { SimulatorTrack } from "./agents/SimulatorTrack";
 import { ArtifactCards, ArtifactsProvider, DesignFeedbackCard } from "./agents/ArtifactCard";
+import { GenerativeUIProvider } from "./genui/GenerativeUI";
 import { AnswerCard } from "./agents/AnswerCard";
 import { PullRequestActionCard } from "./agents/PullRequestActionCard";
 import { LinearIssueCard } from "./agents/LinearIssueCard";
@@ -844,7 +845,7 @@ export function ChatComposer({
   }
 
   return (
-    <ArtifactsProvider chatId={artifactChat} steps={artifactSteps} userMessages={userMessages} onSend={onSendDesignMessage}>
+    <ReplyProviders chatId={artifactChat} steps={artifactSteps} userMessages={userMessages} onSend={onSendDesignMessage}>
       <div
         ref={root}
         className={`relative flex h-full min-h-0 w-full flex-col overflow-visible bg-transparent ${isNewChat ? "justify-center" : ""}`}
@@ -1047,6 +1048,27 @@ export function ChatComposer({
           </div>
         </div>
       </div>
+    </ReplyProviders>
+  );
+}
+
+/** The contexts a Chat's replies read: its designs and the send function a generative UI button posts through. */
+function ReplyProviders({
+  chatId,
+  steps,
+  userMessages,
+  onSend,
+  children,
+}: {
+  chatId: string | null;
+  steps: ChatStep[];
+  userMessages: { id: number | string; body: string }[];
+  onSend?: (text: string) => Promise<boolean>;
+  children: ReactNode;
+}) {
+  return (
+    <ArtifactsProvider chatId={chatId} steps={steps} userMessages={userMessages} onSend={onSend}>
+      <GenerativeUIProvider onSend={onSend}>{children}</GenerativeUIProvider>
     </ArtifactsProvider>
   );
 }

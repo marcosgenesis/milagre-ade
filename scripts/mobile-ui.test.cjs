@@ -316,6 +316,8 @@ function markdownHost({ media, basePath } = {}) {
   const routes = [],
     links = [];
   const { Markdown } = load("markdown.tsx", {
+    "@milagre/shared/genui": require("../packages/shared/src/genui.ts"),
+    "./genui/GenerativeUI": { GenerativeUI: "GenerativeUI", MarkdownStreamingContext: "MarkdownStreamingContext" },
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": {
@@ -861,6 +863,7 @@ function chatHost({
     },
   };
   const { default: ChatScreen } = load("app/chat.tsx", {
+    "../genui/GenerativeUI": { GenerativeUIProvider: "GenerativeUIProvider" },
     // A test can stand in for a host that keeps messages by Chat with globalThis.chatPage.
     "../chat-pages": {
       useChatPage: (...args) => globalThis.chatPage?.(...args) ?? { messages: [], hasMore: false, total: 0, loading: false, loadEarlier: async () => {} },
@@ -6296,4 +6299,161 @@ test("an answer completing after computer removal cannot update its activity", a
   await settle();
   assert.deepEqual(ended, ["mac"]);
   assert.deepEqual(completed, [["action", "mac", "unknown", null]]);
+});
+
+function genuiHost({ send = async () => true, streaming = false, withoutProvider = false } = {}) {
+  const react = hookHost({ effects: true });
+  const actions = [];
+  const contexts = new Map();
+  react.createContext = (initial) => {
+    const context = { initial };
+    contexts.set(context, initial);
+    return context;
+  };
+  react.useContext = (context) => contexts.get(context);
+  react.Component = class {
+    constructor(props) {
+      this.props = props;
+    }
+    render() {
+      return this.props.children;
+    }
+  };
+  const source = load(
+    "genui/GenerativeUI.tsx",
+    {
+      react,
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": { View: "View" },
+      "@milagre/shared/genui-renderer": { Renderer: "Renderer" },
+      "@milagre/shared/genui": require("../packages/shared/src/genui.ts"),
+      "./library": { genuiLibrary: "library" },
+    },
+    "\nexports.TestContexts = { send: SendContext, streaming: MarkdownStreamingContext };",
+  );
+  contexts.set(source.TestContexts.send, withoutProvider ? {} : { send });
+  contexts.set(source.TestContexts.streaming, streaming);
+  return {
+    actions,
+    render(code) {
+      react.begin();
+      const tree = source.GenerativeUI({ code, fallback: "Fallback" });
+      react.flush();
+      return tree;
+    },
+  };
+}
+
+test("a genui block renders through the Renderer and a @ToAssistant action sends its message once", async () => {
+  const sent = [];
+  let release;
+  const h = genuiHost({
+    send: (text) =>
+      new Promise((resolve) => {
+        sent.push(text);
+        release = resolve;
+      }),
+  });
+  const renderer = find(h.render("root = Stack([])"), (node) => node.type === "Renderer");
+  assert.equal(renderer.props.library, "library");
+  assert.equal(renderer.props.isStreaming, false);
+  const tap = () => renderer.props.onAction({ type: "continue_conversation", params: {}, humanFriendlyMessage: "Merge them" });
+  void tap();
+  void tap();
+  await settle();
+  assert.deepEqual(sent, ["Merge them"], "the second tap during a send is ignored");
+  release(true);
+  await settle();
+  renderer.props.onAction({ type: "open_url", params: { url: "https://example.com" }, humanFriendlyMessage: "" });
+  await settle();
+  assert.deepEqual(sent, ["Merge them"], "only continue_conversation sends");
+});
+
+test("a genui block over the text cap, or without a root once the reply finished, shows the fallback", () => {
+  const { genuiLimits } = require("../packages/shared/src/genui.ts");
+  const h = genuiHost();
+  assert.equal(h.render("x".repeat(genuiLimits.text + 1)).props.children, "Fallback");
+  const tree = h.render('nothing = Heading("no root")');
+  find(tree, (node) => node.type === "Renderer").props.onParseResult({ root: null, meta: {} });
+  const after = h.render('nothing = Heading("no root")');
+  assert.equal(JSON.stringify(after).includes("Fallback"), true);
+});
+
+test("while streaming, a rootless block stays a live Renderer, not the fallback", () => {
+  const h = genuiHost({ streaming: true });
+  const tree = h.render('root = Stack([title])\ntitle = Heading("Strea');
+  const renderer = find(tree, (node) => node.type === "Renderer");
+  assert.equal(renderer.props.isStreaming, true);
+  renderer.props.onParseResult({ root: null, meta: {} });
+  assert.equal(JSON.stringify(h.render('root = Stack([title])\ntitle = Heading("Strea').props.children).includes("Fallback"), false);
+});
+
+test("the phone library binds a renderer to every component of the contract and a button triggers its action", () => {
+  const { GENUI_COMPONENTS } = require("../packages/shared/src/genui.ts");
+  const triggered = [];
+  const components = load("genui/components.tsx", {
+    react: hookHost(),
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Text: "Text", View: "View" },
+    "react-native-svg": { default: "Svg", Circle: "Circle", Polyline: "Polyline", Rect: "Rect", Text: "SvgText" },
+    "@milagre/shared/genui-renderer": {
+      useTriggerAction:
+        () =>
+        (...args) =>
+          triggered.push(args),
+      useIsStreaming: () => false,
+    },
+    "@milagre/shared/genui": require("../packages/shared/src/genui.ts"),
+    "../ui": { Button: "Button", PageScroll: "PageScroll" },
+    "./charts": load("genui/charts.tsx", {
+      "@milagre/shared/genui": require("../packages/shared/src/genui.ts"),
+      react: hookHost(),
+      "react/jsx-runtime": { jsx, jsxs: jsx },
+      "react-native": { Text: "Text", View: "View" },
+      "react-native-svg": { default: "Svg", Circle: "Circle", Polyline: "Polyline", Rect: "Rect", Text: "SvgText" },
+    }),
+  });
+  assert.deepEqual(Object.keys(components.renderers), Object.keys(GENUI_COMPONENTS));
+  const action = { steps: [{ type: "continue_conversation", message: "Go" }] };
+  const button = components.renderers.Button({ props: { label: "Go", action }, renderNode: () => null });
+  find(button, (node) => node.type === "Button").props.onPress();
+  assert.deepEqual(triggered, [["Go", undefined, action]]);
+  const table = components.renderers.Table({ props: { columns: ["a", "b"], rows: [["1"]] }, renderNode: () => null });
+  assert.match(JSON.stringify(table), /"1"/);
+});
+
+test("genui buttons disable during a send, recover from rejection, and stay disabled outside Chat", async () => {
+  const pending = deferred();
+  const sent = [];
+  const h = genuiHost({
+    send: (message) => {
+      sent.push(message);
+      return pending.promise;
+    },
+  });
+  const renderer = () => find(h.render("root = Stack([])"), (node) => node.type === "Renderer");
+  const action = { type: "continue_conversation", params: {}, humanFriendlyMessage: "Retry" };
+  const first = renderer().props.onAction(action);
+  await renderer().props.onAction(action);
+  assert.equal(renderer().props.isStreaming, true);
+  assert.deepEqual(sent, ["Retry"]);
+  pending.reject(new Error("Offline"));
+  await first;
+  assert.equal(renderer().props.isStreaming, false);
+  await renderer().props.onAction(action);
+  assert.deepEqual(sent, ["Retry", "Retry"]);
+  const outside = genuiHost({ withoutProvider: true });
+  assert.equal(find(outside.render("root = Stack([])"), (node) => node.type === "Renderer").props.isStreaming, true);
+});
+
+test("mobile markdown routes openui fences and passes streaming state", () => {
+  const h = markdownHost();
+  const tree = h.render("```OpenUI title=Example\nroot = Stack([])\n", true);
+  const block = find(tree, (node) => node.type === "GenerativeUI");
+  assert.equal(block.props.code, "root = Stack([])");
+  assert.equal(find(tree, (node) => node.type === "MarkdownStreamingContext").props.value, true);
+  assert.equal(
+    find(h.render("```ts\nconst x = 1\n```"), (node) => node.type === "GenerativeUI"),
+    undefined,
+  );
 });

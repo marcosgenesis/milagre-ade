@@ -1,3 +1,4 @@
+import { GenerativeUIProvider } from "../genui/GenerativeUI";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Reanimated from "react-native-reanimated";
 import { Alert, Image, Keyboard, Linking, Pressable, StyleSheet, Text, View } from "react-native";
@@ -367,6 +368,8 @@ export default function ChatScreen() {
   // A Chat started from an issue: the choice sheet outlives this render, so it calls the latest send through this ref.
   const startIssue = useRef<(issue: LinearIssue) => void>(() => {});
   const sendDesign = useRef<() => void>(() => {});
+  const sendGenui = useRef<(text: string) => Promise<boolean | "busy">>(async () => false);
+  const genuiSend = useCallback((text: string) => sendGenui.current(text), []);
   const designDeferred = useRef(false);
   const designKey = session.client && session.snapshot ? `${session.client.url}|${session.snapshot.project.path}#${params.id}` : null;
   useFocusEffect(
@@ -525,6 +528,8 @@ export default function ChatScreen() {
     }
   }
   // eslint-disable-next-line react-hooks/refs -- latest-callback ref, read only from effects and the choice sheet.
+  sendGenui.current = (text: string) => send(text, false);
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref for design messages.
   sendDesign.current = () => {
     const message = designKey ? peekDesignMessage(designKey) : null;
     if (!message || !designKey) return;
@@ -978,520 +983,528 @@ export default function ChatScreen() {
   const dockPadding = Math.max(insets.bottom, 12);
   const lift = dockPadding - 8;
   return (
-    <View style={[styles.screen, dots]}>
-      <Stack.Screen options={{ title, headerTitle: () => header, headerBackVisible: false, gestureEnabled: false }} />
-      {sidebar}
-      {more}
-      <PanelSwipe panels={panels}>
-        {/* The header clearance is in paddingTop; an automatic iOS inset would add it a second time. */}
-        <KeyboardChatScrollView
-          key={scrollKey}
-          ref={scroll}
-          offset={lift}
-          keyboardLiftBehavior="whenAtEnd"
-          onEndVisible={onEndVisible}
-          contentInsetAdjustmentBehavior="never"
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-          contentContainerStyle={[styles.content, { paddingTop: insets.top + 84, paddingLeft: 28, gap: 16, paddingBottom: dockHeight + 16 }]}
-          scrollEventThrottle={32}
-          onScroll={({ nativeEvent: e }) => {
-            const previous = scrollOffset.current;
-            scrollOffset.current = e.contentOffset.y;
-            following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120;
-            if (placed && e.contentOffset.y < previous && e.contentOffset.y <= 160 && !(historyState.key === scrollKey && historyState.error))
-              void showEarlier();
-          }}
-          style={{ opacity: placed ? 1 : 0 }}
-          onLayout={({ nativeEvent }) => {
-            viewport.current = nativeEvent.layout.height;
-            place();
-          }}
-          onContentSizeChange={(_, height) => {
-            contentHeight.current = height;
-            if (!placed) place();
-            else if (!historyAnchor.current && following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true });
-          }}
-        >
-          {process.env.EXPO_PUBLIC_DEMO === "1" && <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>}
-          {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
-          {chat?.archived && (
-            <View style={styles.card}>
-              <Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text>
-              <PillButton
-                title="Restore Chat"
-                disabled={busy}
-                onPress={() => void action(() => client.call("chat:patch", [project.path, chat.id, { archived: false }]))}
-                style={{ alignSelf: "flex-start" }}
-              />
-            </View>
-          )}
-          {!messages.length && !run && (
-            <View style={{ paddingVertical: 48, alignItems: "center", gap: 8 }}>
-              <Text style={styles.subtitle}>What are we working on?</Text>
-              <Text style={[styles.muted, { textAlign: "center" }]}>
-                {project.link
-                  ? "One Chat, with a new Worktree in each linked Project on your computer."
-                  : newWorktree
-                    ? `Your agent starts in a new worktree from ${base || "the selected branch"} on your computer.`
-                    : `Your agent runs in ${worktree?.name || "this Worktree"} on your computer.`}
-              </Text>
-            </View>
-          )}
-          {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
-          {historyState.key === scrollKey && historyState.error ? <ErrorNotice message={historyState.error} retry={() => void showEarlier()} /> : null}
-          {messages.length + remote > visible && (
-            <PillButton
-              title={
-                historyState.key === scrollKey && historyState.loading
-                  ? "Loading earlier messages..."
-                  : `Show earlier messages (${messages.length + remote - visible})`
-              }
-              secondary
-              disabled={historyState.key === scrollKey && historyState.loading}
-              onPress={showEarlier}
-              style={{ alignSelf: "center" }}
-            />
-          )}
-          {messages.slice(-visible).flatMap((message) => [
-            ...(liveReply && message === pendingInput ? [liveReply] : []),
-            <View
-              key={message.clientMessageId ?? message.id}
-              nativeID={`chat-message-${message.id}`}
-              onLayout={({ nativeEvent: { layout } }) => {
-                messagePositions.current.set(message.id, layout.y);
-                const anchor = historyAnchor.current;
-                if (anchor?.key === scrollKey && anchor.id === message.id) {
-                  historyAnchor.current = null;
-                  const y = Math.max(0, scrollOffset.current + layout.y - anchor.y);
-                  scrollOffset.current = y;
-                  scroll.current?.scrollTo({ y, animated: false });
-                }
-                if (navigationTarget.current === message.id) {
-                  navigationTarget.current = null;
-                  scroll.current?.scrollTo({ y: Math.max(0, layout.y - insets.top - 72), animated: true });
-                }
-              }}
-            >
-              {isHandoff(message) ? (
-                <HandoffDivider context={message.context} models={handoffModels} onOpen={openBrief} />
-              ) : isWorktreeLinked(message) ? (
-                <WorktreeLinkDivider context={message.context} client={session.client} onOpen={(title, text) => openBrief(text, title)} />
-              ) : isCompaction(message) ? (
-                <CompactionDivider context={message.context} />
-              ) : (
-                <ChatReply
-                  message={message}
-                  media={media}
-                  basePath={worktree?.path || project.path}
-                  chatId={chatId}
-                  designChoice={designChoice}
-                  designsMoved={designsMoved}
-                  onActivity={openActivity}
-                />
-              )}
-            </View>,
-          ])}
-          {!pendingInput && liveReply}
-          {answerPreview && <ChatReply key="answers" message={answerPreview} media={media} chatId={chatId} onActivity={openActivity} />}
-          {(run || pending) && (
-            <ThinkingIndicator
-              startedAt={pending?.preview.startedAt ?? run?.startedAt}
-              label={run?.waitingForSubagents ? "Waiting on subagents" : `Working with ${model.name}`}
-            />
-          )}
-          {chat?.resumeTurn && !run && (
-            <PillButton
-              title="Continue interrupted turn"
-              secondary
-              disabled={busy}
-              onPress={() => void action(() => client.call("chat:resume", [project.path, chat.id]))}
-              style={{ alignSelf: "flex-start" }}
-            />
-          )}
-          {error ? <ErrorNotice message={error} /> : null}
-          {session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo("/")} /> : null}
-        </KeyboardChatScrollView>
-        {/* The transcript blurs and fades under the transparent header, as under the composer. iOS's own soft edge can't
-        find this scroll view (it only follows each view's first child), so the blur is drawn here. It ends where the
-        transcript's top padding does and gradually strengthens toward the status bar. */}
-        <EdgeFade edge="top" height={insets.top + 84} />
-        <AttentionPill projectPath={project.path} />
-        {toast ? (
-          <View pointerEvents="none" style={{ position: "absolute", left: 16, right: 16, top: insets.top + 64, alignItems: "center" }}>
-            <View
-              accessibilityLiveRegion="polite"
-              style={{ maxWidth: 360, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.ink }}
-            >
-              <Text style={{ color: colors.surface, fontSize: 14 }}>{toast}</Text>
-            </View>
-          </View>
-        ) : null}
-        <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
-        <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
-          {showJumpToBottom && (
-            <View pointerEvents="box-none" style={{ height: 56, alignItems: "center", zIndex: 1 }}>
-              <GlassIconButton label="Go to bottom" systemImage="chevron.down" icon={ArrowDown01Icon} onPress={jumpToBottom} />
-            </View>
-          )}
-          {/* The transcript blurs and fades under the composer like desktop's. */}
-          <BottomFade height={dockHeight + 48} />
-          <View
-            onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))}
-            style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: dockPadding, gap: 8 }}
+    <GenerativeUIProvider send={genuiSend}>
+      <View style={[styles.screen, dots]}>
+        <Stack.Screen options={{ title, headerTitle: () => header, headerBackVisible: false, gestureEnabled: false }} />
+        {sidebar}
+        {more}
+        <PanelSwipe panels={panels}>
+          {/* The header clearance is in paddingTop; an automatic iOS inset would add it a second time. */}
+          <KeyboardChatScrollView
+            key={scrollKey}
+            ref={scroll}
+            offset={lift}
+            keyboardLiftBehavior="whenAtEnd"
+            onEndVisible={onEndVisible}
+            contentInsetAdjustmentBehavior="never"
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            contentContainerStyle={[styles.content, { paddingTop: insets.top + 84, paddingLeft: 28, gap: 16, paddingBottom: dockHeight + 16 }]}
+            scrollEventThrottle={32}
+            onScroll={({ nativeEvent: e }) => {
+              const previous = scrollOffset.current;
+              scrollOffset.current = e.contentOffset.y;
+              following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120;
+              if (placed && e.contentOffset.y < previous && e.contentOffset.y <= 160 && !(historyState.key === scrollKey && historyState.error))
+                void showEarlier();
+            }}
+            style={{ opacity: placed ? 1 : 0 }}
+            onLayout={({ nativeEvent }) => {
+              viewport.current = nativeEvent.layout.height;
+              place();
+            }}
+            onContentSizeChange={(_, height) => {
+              contentHeight.current = height;
+              if (!placed) place();
+              else if (!historyAnchor.current && following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true });
+            }}
           >
-            {(!question || answering) && (
-              <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 4, gap: 8 }}>
-                {pr && prActionRequest && chat && (
-                  <PullRequestAction pr={pr} disabled={busy || !!run} onRun={() => void send(pullRequestActionBody(prActionRequest), false, prActionRequest)} />
-                )}
-                <View style={{ flex: 1 }} />
-                <BrowserChip chatId={params.id ? chatId : undefined} />
-                {params.id && Number(params.id) > 0 && chat && !chat.archived && (
-                  <TerminalChip key={`terminal-${chatId}`} chatId={chatId} places={terminalPlaces(chat)} />
-                )}
-                {params.id && Number(params.id) > 0 && <PortsChip key={`ports-${chatId}`} chatId={chatId} />}
-                {params.id && Number(params.id) > 0 && <SimulatorChip key={chatId} chatId={chatId} />}
-                {agents.length > 0 && <SubagentChip agents={agents} onPress={() => headerAction("agents")} />}
-              </View>
+            {process.env.EXPO_PUBLIC_DEMO === "1" && (
+              <Text style={styles.caption}>Demo agent. Send tools, approval, question, or slow to try the controls.</Text>
             )}
-            {run?.approvals.map((approval) => (
-              <Approval
-                key={approval.requestId}
-                approval={approval}
-                busy={actionBusy}
-                respond={(decision) =>
-                  void action(async () => {
-                    const accepted = await client.call("agent:respond-permission", [{ chatId, requestId: approval.requestId, decision }]);
-                    if (!accepted) throw new Error("This approval is no longer pending. Refresh the Chat.");
-                  }, true)
-                }
-              />
-            ))}
-            {question && (
-              // Hidden, not unmounted, while the answers travel: if they don't arrive, the card comes back as it was.
-              <View style={answering ? { display: "none" } : undefined}>
-                <ActivityQuestions
-                  hostId={client.url}
-                  projectPath={project.path}
-                  sessionId={Number(params.id)}
-                  key={question.requestId}
-                  request={question}
-                  busy={actionBusy || answering}
-                  submit={(answers, summary) => {
-                    const answered = answeredQuestions(question, answers);
-                    setSentAnswers({
-                      requestId: question.requestId,
-                      message: answered && { id: -1, session_id: Number(params.id), body: summary, context: null, role: "user", answered },
-                      count: messages.length,
-                    });
-                    void action(async () => {
-                      const accepted = await client.call("agent:answer-question", [{ chatId, requestId: question.requestId, answers, summary }]);
-                      if (!accepted) throw new Error("This question is no longer pending. Refresh the Chat.");
-                    }, true).then((ok) => {
-                      if (!ok) setSentAnswers((current) => (current?.requestId === question.requestId ? null : current));
-                    });
-                  }}
+            {session.providerError ? <Text style={styles.caption}>{session.providerError}</Text> : null}
+            {chat?.archived && (
+              <View style={styles.card}>
+                <Text style={styles.muted}>This Chat is archived. Restore it to send a message.</Text>
+                <PillButton
+                  title="Restore Chat"
+                  disabled={busy}
+                  onPress={() => void action(() => client.call("chat:patch", [project.path, chat.id, { archived: false }]))}
+                  style={{ alignSelf: "flex-start" }}
                 />
               </View>
             )}
-            {(!question || answering) && (
+            {!messages.length && !run && (
+              <View style={{ paddingVertical: 48, alignItems: "center", gap: 8 }}>
+                <Text style={styles.subtitle}>What are we working on?</Text>
+                <Text style={[styles.muted, { textAlign: "center" }]}>
+                  {project.link
+                    ? "One Chat, with a new Worktree in each linked Project on your computer."
+                    : newWorktree
+                      ? `Your agent starts in a new worktree from ${base || "the selected branch"} on your computer.`
+                      : `Your agent runs in ${worktree?.name || "this Worktree"} on your computer.`}
+                </Text>
+              </View>
+            )}
+            {newWorktree && branches?.error ? <ErrorNotice message={branches.error} /> : null}
+            {historyState.key === scrollKey && historyState.error ? <ErrorNotice message={historyState.error} retry={() => void showEarlier()} /> : null}
+            {messages.length + remote > visible && (
+              <PillButton
+                title={
+                  historyState.key === scrollKey && historyState.loading
+                    ? "Loading earlier messages..."
+                    : `Show earlier messages (${messages.length + remote - visible})`
+                }
+                secondary
+                disabled={historyState.key === scrollKey && historyState.loading}
+                onPress={showEarlier}
+                style={{ alignSelf: "center" }}
+              />
+            )}
+            {messages.slice(-visible).flatMap((message) => [
+              ...(liveReply && message === pendingInput ? [liveReply] : []),
               <View
-                style={{
-                  backgroundColor: "transparent",
-                  borderWidth: 1,
-                  borderColor: colors.lineStrong,
-                  borderRadius: 24,
-                  borderCurve: "continuous",
-                  overflow: "hidden",
-                  paddingTop: 8,
-                  paddingHorizontal: 8,
-                  paddingBottom: 6,
-                  gap: 4,
-                  boxShadow: ultracodeOn ? `0 4px 22px ${colors.purple}47` : "0 4px 20px #0000000f",
+                key={message.clientMessageId ?? message.id}
+                nativeID={`chat-message-${message.id}`}
+                onLayout={({ nativeEvent: { layout } }) => {
+                  messagePositions.current.set(message.id, layout.y);
+                  const anchor = historyAnchor.current;
+                  if (anchor?.key === scrollKey && anchor.id === message.id) {
+                    historyAnchor.current = null;
+                    const y = Math.max(0, scrollOffset.current + layout.y - anchor.y);
+                    scrollOffset.current = y;
+                    scroll.current?.scrollTo({ y, animated: false });
+                  }
+                  if (navigationTarget.current === message.id) {
+                    navigationTarget.current = null;
+                    scroll.current?.scrollTo({ y: Math.max(0, layout.y - insets.top - 72), animated: true });
+                  }
                 }}
               >
-                <LiquidGlassView
-                  pointerEvents="none"
-                  glassType="clear"
-                  isInteractive={false}
-                  reducedTransparencyFallbackColor={colors.surface}
-                  style={[StyleSheet.absoluteFill, { borderRadius: 24, borderCurve: "continuous" }]}
-                />
-                {/* With Ultracode on, the composer takes its purple: a breathing tint and border, and a glow. */}
-                {ultracodeOn && <UltracodeGlow radius={24} />}
-                {!params.id && !project.link && (
-                  <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
-                    <PullDown
-                      label="Choose isolation"
-                      nativeTrigger={{
-                        title: isolation === "local" ? "Local" : "New worktree",
-                        systemImage: isolation === "local" ? "laptopcomputer" : "arrow.triangle.branch",
-                        icon: isolation === "local" ? "laptop" : "fork",
-                        disabled: targetDisabled,
-                      }}
-                      sections={[
-                        {
-                          title: "Isolation",
-                          items: [
-                            {
-                              id: "local",
-                              title: "Local",
-                              systemImage: "laptopcomputer",
-                              icon: "laptop",
-                              checked: isolation === "local",
-                              disabled: targetDisabled,
-                            },
-                            {
-                              id: "worktree",
-                              title: "New worktree",
-                              systemImage: "arrow.triangle.branch",
-                              icon: "fork",
-                              checked: isolation === "worktree",
-                              disabled: targetDisabled,
-                            },
-                          ],
-                        },
-                      ]}
-                      onSelect={(id) => {
-                        if (!targetDisabled) setIsolation(id === "worktree" ? "worktree" : "local");
-                      }}
-                    >
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                          paddingHorizontal: 10,
-                          paddingVertical: 6,
-                          opacity: targetDisabled ? 0.35 : 1,
-                        }}
-                      >
-                        <Icon icon={isolation === "local" ? LaptopIcon : GitForkIcon} tone="ink2" size={14} />
-                        <Text style={styles.label}>{isolation === "local" ? "Local" : "New worktree"}</Text>
-                        <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
-                      </View>
-                    </PullDown>
-                    <PullDown
-                      label="Choose branch"
-                      searchable={{
-                        placeholder: newWorktree ? "Search branches" : "Search worktrees",
-                        emptyLabel: newWorktree ? "No branches found." : "No worktrees found.",
-                      }}
-                      nativeTrigger={{ title: branchName, systemImage: "arrow.triangle.branch", disabled: branchDisabled, maxWidth: 180 }}
-                      sections={[
-                        {
-                          title: newWorktree ? "Branch from" : "Choose a worktree",
-                          items: newWorktree
-                            ? (branches?.items || []).map((item) => ({
-                                id: item,
-                                title: item,
-                                checked: item === base,
-                                systemImage: "arrow.triangle.branch",
-                                disabled: branchDisabled,
-                              }))
-                            : Object.values(project.state.worktrees).map((item) => ({
-                                id: String(item.id),
-                                title: item.name,
-                                subtitle: item.path?.split("/").filter(Boolean).pop(),
-                                checked: item.id === worktreeId,
-                                systemImage: "arrow.triangle.branch",
-                                disabled: targetDisabled,
-                              })),
-                        },
-                      ]}
-                      onSelect={(id) => {
-                        if (!branchDisabled) {
-                          if (newWorktree) setBaseBranch(id);
-                          else navigation.setParams({ worktreeId: id });
-                        }
-                      }}
-                    >
-                      <View
-                        style={{
-                          maxWidth: 180,
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                          paddingHorizontal: 10,
-                          paddingVertical: 6,
-                          opacity: branchDisabled ? 0.35 : 1,
-                        }}
-                      >
-                        <Icon icon={GitBranchIcon} tone="ink2" size={14} />
-                        <Text numberOfLines={1} style={[styles.label, { flexShrink: 1 }]}>
-                          {branchName}
-                        </Text>
-                        <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
-                      </View>
-                    </PullDown>
-                    {linearActive && (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Start from a Linear issue"
-                        disabled={targetDisabled}
-                        onPress={() => void chooseIssue()}
-                        style={({ pressed }) => ({
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                          paddingHorizontal: 10,
-                          paddingVertical: 6,
-                          opacity: targetDisabled ? 0.35 : pressed ? 0.6 : 1,
-                        })}
-                      >
-                        <LinearLogo size={13} />
-                        <Text style={styles.label}>Linear issue</Text>
-                      </Pressable>
-                    )}
-                  </View>
+                {isHandoff(message) ? (
+                  <HandoffDivider context={message.context} models={handoffModels} onOpen={openBrief} />
+                ) : isWorktreeLinked(message) ? (
+                  <WorktreeLinkDivider context={message.context} client={session.client} onOpen={(title, text) => openBrief(text, title)} />
+                ) : isCompaction(message) ? (
+                  <CompactionDivider context={message.context} />
+                ) : (
+                  <ChatReply
+                    message={message}
+                    media={media}
+                    basePath={worktree?.path || project.path}
+                    chatId={chatId}
+                    designChoice={designChoice}
+                    designsMoved={designsMoved}
+                    onActivity={openActivity}
+                  />
                 )}
-                {!!attachments.length && (
-                  <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>
-                    {attachments.map((item) => (
-                      <View
-                        key={item.id}
-                        style={{
-                          backgroundColor: colors.field,
-                          borderRadius: 12,
-                          borderCurve: "continuous",
-                          paddingLeft: item.image ? 4 : 10,
-                          flexDirection: "row",
-                          alignItems: "center",
-                          maxWidth: 220,
-                        }}
-                      >
-                        {item.image ? (
-                          <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} />
-                        ) : (
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Preview ${item.name}`}
-                            onPress={() =>
-                              router.push({ pathname: "/file-preview", params: item.path ? { path: item.path } : { uri: item.uri, name: item.name } })
-                            }
-                            style={{ flexDirection: "row", alignItems: "center", flexShrink: 1 }}
-                          >
-                            <Icon icon={File01Icon} tone="ink2" size={18} />
-                            <Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>
-                              {item.name}
-                            </Text>
-                          </Pressable>
-                        )}
-                        {item.image && (
-                          <Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>
-                            {item.name}
-                          </Text>
-                        )}
-                        <IconButton
-                          label={`Remove ${item.name}`}
-                          icon={Cancel01Icon}
-                          size={32}
-                          disabled={busy || picking}
-                          onPress={() =>
-                            composer.setAttachments((current) => ({
-                              ...current,
-                              [chatId]: (current[chatId] || []).filter((attachment) => attachment.id !== item.id),
-                            }))
-                          }
-                        />
-                      </View>
-                    ))}
-                  </PageScroll>
-                )}
-                <PromptField
-                  key={chatId}
-                  client={client}
-                  projectPath={worktree?.path || (project.link ? "" : project.path)}
-                  draft={draft}
-                  onImagePaste={(image) => void pasteImage(image)}
-                  onChangeText={(value) => composer.setDrafts((current) => ({ ...current, [chatId]: value }))}
+              </View>,
+            ])}
+            {!pendingInput && liveReply}
+            {answerPreview && <ChatReply key="answers" message={answerPreview} media={media} chatId={chatId} onActivity={openActivity} />}
+            {(run || pending) && (
+              <ThinkingIndicator
+                startedAt={pending?.preview.startedAt ?? run?.startedAt}
+                label={run?.waitingForSubagents ? "Waiting on subagents" : `Working with ${model.name}`}
+              />
+            )}
+            {chat?.resumeTurn && !run && (
+              <PillButton
+                title="Continue interrupted turn"
+                secondary
+                disabled={busy}
+                onPress={() => void action(() => client.call("chat:resume", [project.path, chat.id]))}
+                style={{ alignSelf: "flex-start" }}
+              />
+            )}
+            {error ? <ErrorNotice message={error} /> : null}
+            {session.error ? <ErrorNotice message={session.error} retry={() => router.dismissTo("/")} /> : null}
+          </KeyboardChatScrollView>
+          {/* The transcript blurs and fades under the transparent header, as under the composer. iOS's own soft edge can't
+        find this scroll view (it only follows each view's first child), so the blur is drawn here. It ends where the
+        transcript's top padding does and gradually strengthens toward the status bar. */}
+          <EdgeFade edge="top" height={insets.top + 84} />
+          <AttentionPill projectPath={project.path} />
+          {toast ? (
+            <View pointerEvents="none" style={{ position: "absolute", left: 16, right: 16, top: insets.top + 64, alignItems: "center" }}>
+              <View
+                accessibilityLiveRegion="polite"
+                style={{ maxWidth: 360, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.ink }}
+              >
+                <Text style={{ color: colors.surface, fontSize: 14 }}>{toast}</Text>
+              </View>
+            </View>
+          ) : null}
+          <MessageNavigation items={navigationItems} onSelect={navigateToMessage} top={insets.top + 72} bottom={dockHeight + 12} keyboardOffset={lift} />
+          <KeyboardStickyView pointerEvents="box-none" offset={{ closed: 0, opened: lift }} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
+            {showJumpToBottom && (
+              <View pointerEvents="box-none" style={{ height: 56, alignItems: "center", zIndex: 1 }}>
+                <GlassIconButton label="Go to bottom" systemImage="chevron.down" icon={ArrowDown01Icon} onPress={jumpToBottom} />
+              </View>
+            )}
+            {/* The transcript blurs and fades under the composer like desktop's. */}
+            <BottomFade height={dockHeight + 48} />
+            <View
+              onLayout={({ nativeEvent }) => setDockHeight(Math.round(nativeEvent.layout.height))}
+              style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: dockPadding, gap: 8 }}
+            >
+              {(!question || answering) && (
+                <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 4, gap: 8 }}>
+                  {pr && prActionRequest && chat && (
+                    <PullRequestAction
+                      pr={pr}
+                      disabled={busy || !!run}
+                      onRun={() => void send(pullRequestActionBody(prActionRequest), false, prActionRequest)}
+                    />
+                  )}
+                  <View style={{ flex: 1 }} />
+                  <BrowserChip chatId={params.id ? chatId : undefined} />
+                  {params.id && Number(params.id) > 0 && chat && !chat.archived && (
+                    <TerminalChip key={`terminal-${chatId}`} chatId={chatId} places={terminalPlaces(chat)} />
+                  )}
+                  {params.id && Number(params.id) > 0 && <PortsChip key={`ports-${chatId}`} chatId={chatId} />}
+                  {params.id && Number(params.id) > 0 && <SimulatorChip key={chatId} chatId={chatId} />}
+                  {agents.length > 0 && <SubagentChip agents={agents} onPress={() => headerAction("agents")} />}
+                </View>
+              )}
+              {run?.approvals.map((approval) => (
+                <Approval
+                  key={approval.requestId}
+                  approval={approval}
+                  busy={actionBusy}
+                  respond={(decision) =>
+                    void action(async () => {
+                      const accepted = await client.call("agent:respond-permission", [{ chatId, requestId: approval.requestId, decision }]);
+                      if (!accepted) throw new Error("This approval is no longer pending. Refresh the Chat.");
+                    }, true)
+                  }
                 />
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <PullDown
-                    label="Add photos or files"
-                    nativeTrigger={{ systemImage: "plus", disabled: attachmentDisabled }}
-                    sections={[
-                      {
-                        items: [
-                          { id: "photos", title: "Photo Library", systemImage: "photo.on.rectangle", disabled: attachmentDisabled },
-                          { id: "camera", title: "Take Photo", systemImage: "camera", disabled: attachmentDisabled },
-                          { id: "files", title: "Choose Files", systemImage: "folder", disabled: attachmentDisabled },
-                          { id: "paste", title: "Paste image", systemImage: "doc.on.clipboard", disabled: attachmentDisabled },
-                        ],
-                      },
-                    ]}
-                    onSelect={(kind) => void pick(kind as "photos" | "camera" | "files" | "paste")}
-                  >
-                    <View style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: attachmentDisabled ? 0.35 : 1 }}>
-                      <Icon icon={Add01Icon} tone="ink2" size={21} />
-                    </View>
-                  </PullDown>
-                  <AgentControls
-                    model={model}
-                    effort={preferences.effort}
-                    fastMode={preferences.fastMode}
-                    ultracode={preferences.ultracode}
-                    onToggle={() => {
-                      router.push({
-                        pathname: "/model-sheet",
-                        params: {
-                          chatId,
-                          model: model.id,
-                          provider: actualProvider,
-                          ...(chat?.provider ? { on: chat.provider } : {}),
-                          ...(run ? { busy: "1" } : {}),
-                        },
+              ))}
+              {question && (
+                // Hidden, not unmounted, while the answers travel: if they don't arrive, the card comes back as it was.
+                <View style={answering ? { display: "none" } : undefined}>
+                  <ActivityQuestions
+                    hostId={client.url}
+                    projectPath={project.path}
+                    sessionId={Number(params.id)}
+                    key={question.requestId}
+                    request={question}
+                    busy={actionBusy || answering}
+                    submit={(answers, summary) => {
+                      const answered = answeredQuestions(question, answers);
+                      setSentAnswers({
+                        requestId: question.requestId,
+                        message: answered && { id: -1, session_id: Number(params.id), body: summary, context: null, role: "user", answered },
+                        count: messages.length,
+                      });
+                      void action(async () => {
+                        const accepted = await client.call("agent:answer-question", [{ chatId, requestId: question.requestId, answers, summary }]);
+                        if (!accepted) throw new Error("This question is no longer pending. Refresh the Chat.");
+                      }, true).then((ok) => {
+                        if (!ok) setSentAnswers((current) => (current?.requestId === question.requestId ? null : current));
                       });
                     }}
                   />
-                  <PermissionChip
-                    mode={preferences.permissionMode}
-                    onPress={() => router.push({ pathname: "/permission-sheet", params: { chatId, ...(run ? { busy: "1" } : {}) } })}
-                  />
-                  <View style={{ flex: 1 }} />
-                  {contextUsage && contextUsage.size > 0 && params.id && (
-                    <ContextRing
-                      {...contextUsage}
-                      canCompact={Boolean(chat) && (chat?.provider ?? "claude") === "claude"}
-                      onPress={() => router.push({ pathname: "/context-sheet", params: { id: params.id } })}
-                    />
-                  )}
-                  {run && !draft.trim() && !attachments.length && (
-                    <IconButton
-                      label="Stop"
-                      icon={StopIcon}
-                      filled
-                      size={34}
-                      disabled={actionBusy}
-                      onPress={() => void action(() => client.call("agent:interrupt", [chatId]), true)}
-                    />
-                  )}
-                  {(!run || !!draft.trim() || !!attachments.length) && (
-                    <IconButton
-                      label={busy ? "Sending..." : run ? "Send follow-up" : "Send message"}
-                      icon={ArrowUp01Icon}
-                      filled
-                      size={34}
-                      loading={busy}
-                      disabled={
-                        busy ||
-                        picking ||
-                        (newWorktree && !base) ||
-                        (!draft.trim() && !attachments.length) ||
-                        !!session.error ||
-                        !!chat?.archived ||
-                        unavailable
-                      }
-                      onPress={() => void send()}
-                    />
-                  )}
                 </View>
-              </View>
-            )}
-          </View>
-        </KeyboardStickyView>
-      </PanelSwipe>
-    </View>
+              )}
+              {(!question || answering) && (
+                <View
+                  style={{
+                    backgroundColor: "transparent",
+                    borderWidth: 1,
+                    borderColor: colors.lineStrong,
+                    borderRadius: 24,
+                    borderCurve: "continuous",
+                    overflow: "hidden",
+                    paddingTop: 8,
+                    paddingHorizontal: 8,
+                    paddingBottom: 6,
+                    gap: 4,
+                    boxShadow: ultracodeOn ? `0 4px 22px ${colors.purple}47` : "0 4px 20px #0000000f",
+                  }}
+                >
+                  <LiquidGlassView
+                    pointerEvents="none"
+                    glassType="clear"
+                    isInteractive={false}
+                    reducedTransparencyFallbackColor={colors.surface}
+                    style={[StyleSheet.absoluteFill, { borderRadius: 24, borderCurve: "continuous" }]}
+                  />
+                  {/* With Ultracode on, the composer takes its purple: a breathing tint and border, and a glow. */}
+                  {ultracodeOn && <UltracodeGlow radius={24} />}
+                  {!params.id && !project.link && (
+                    <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
+                      <PullDown
+                        label="Choose isolation"
+                        nativeTrigger={{
+                          title: isolation === "local" ? "Local" : "New worktree",
+                          systemImage: isolation === "local" ? "laptopcomputer" : "arrow.triangle.branch",
+                          icon: isolation === "local" ? "laptop" : "fork",
+                          disabled: targetDisabled,
+                        }}
+                        sections={[
+                          {
+                            title: "Isolation",
+                            items: [
+                              {
+                                id: "local",
+                                title: "Local",
+                                systemImage: "laptopcomputer",
+                                icon: "laptop",
+                                checked: isolation === "local",
+                                disabled: targetDisabled,
+                              },
+                              {
+                                id: "worktree",
+                                title: "New worktree",
+                                systemImage: "arrow.triangle.branch",
+                                icon: "fork",
+                                checked: isolation === "worktree",
+                                disabled: targetDisabled,
+                              },
+                            ],
+                          },
+                        ]}
+                        onSelect={(id) => {
+                          if (!targetDisabled) setIsolation(id === "worktree" ? "worktree" : "local");
+                        }}
+                      >
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            opacity: targetDisabled ? 0.35 : 1,
+                          }}
+                        >
+                          <Icon icon={isolation === "local" ? LaptopIcon : GitForkIcon} tone="ink2" size={14} />
+                          <Text style={styles.label}>{isolation === "local" ? "Local" : "New worktree"}</Text>
+                          <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
+                        </View>
+                      </PullDown>
+                      <PullDown
+                        label="Choose branch"
+                        searchable={{
+                          placeholder: newWorktree ? "Search branches" : "Search worktrees",
+                          emptyLabel: newWorktree ? "No branches found." : "No worktrees found.",
+                        }}
+                        nativeTrigger={{ title: branchName, systemImage: "arrow.triangle.branch", disabled: branchDisabled, maxWidth: 180 }}
+                        sections={[
+                          {
+                            title: newWorktree ? "Branch from" : "Choose a worktree",
+                            items: newWorktree
+                              ? (branches?.items || []).map((item) => ({
+                                  id: item,
+                                  title: item,
+                                  checked: item === base,
+                                  systemImage: "arrow.triangle.branch",
+                                  disabled: branchDisabled,
+                                }))
+                              : Object.values(project.state.worktrees).map((item) => ({
+                                  id: String(item.id),
+                                  title: item.name,
+                                  subtitle: item.path?.split("/").filter(Boolean).pop(),
+                                  checked: item.id === worktreeId,
+                                  systemImage: "arrow.triangle.branch",
+                                  disabled: targetDisabled,
+                                })),
+                          },
+                        ]}
+                        onSelect={(id) => {
+                          if (!branchDisabled) {
+                            if (newWorktree) setBaseBranch(id);
+                            else navigation.setParams({ worktreeId: id });
+                          }
+                        }}
+                      >
+                        <View
+                          style={{
+                            maxWidth: 180,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            opacity: branchDisabled ? 0.35 : 1,
+                          }}
+                        >
+                          <Icon icon={GitBranchIcon} tone="ink2" size={14} />
+                          <Text numberOfLines={1} style={[styles.label, { flexShrink: 1 }]}>
+                            {branchName}
+                          </Text>
+                          <Icon icon={ArrowDown01Icon} tone="ink3" size={12} />
+                        </View>
+                      </PullDown>
+                      {linearActive && (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Start from a Linear issue"
+                          disabled={targetDisabled}
+                          onPress={() => void chooseIssue()}
+                          style={({ pressed }) => ({
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            opacity: targetDisabled ? 0.35 : pressed ? 0.6 : 1,
+                          })}
+                        >
+                          <LinearLogo size={13} />
+                          <Text style={styles.label}>Linear issue</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  )}
+                  {!!attachments.length && (
+                    <PageScroll horizontal contentContainerStyle={{ padding: 4, paddingBottom: 4, gap: 8 }}>
+                      {attachments.map((item) => (
+                        <View
+                          key={item.id}
+                          style={{
+                            backgroundColor: colors.field,
+                            borderRadius: 12,
+                            borderCurve: "continuous",
+                            paddingLeft: item.image ? 4 : 10,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            maxWidth: 220,
+                          }}
+                        >
+                          {item.image ? (
+                            <Image source={{ uri: item.uri }} accessibilityLabel={item.name} style={{ width: 44, height: 44, borderRadius: 8 }} />
+                          ) : (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={`Preview ${item.name}`}
+                              onPress={() =>
+                                router.push({ pathname: "/file-preview", params: item.path ? { path: item.path } : { uri: item.uri, name: item.name } })
+                              }
+                              style={{ flexDirection: "row", alignItems: "center", flexShrink: 1 }}
+                            >
+                              <Icon icon={File01Icon} tone="ink2" size={18} />
+                              <Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>
+                                {item.name}
+                              </Text>
+                            </Pressable>
+                          )}
+                          {item.image && (
+                            <Text numberOfLines={1} style={[styles.label, { flexShrink: 1, paddingLeft: 6 }]}>
+                              {item.name}
+                            </Text>
+                          )}
+                          <IconButton
+                            label={`Remove ${item.name}`}
+                            icon={Cancel01Icon}
+                            size={32}
+                            disabled={busy || picking}
+                            onPress={() =>
+                              composer.setAttachments((current) => ({
+                                ...current,
+                                [chatId]: (current[chatId] || []).filter((attachment) => attachment.id !== item.id),
+                              }))
+                            }
+                          />
+                        </View>
+                      ))}
+                    </PageScroll>
+                  )}
+                  <PromptField
+                    key={chatId}
+                    client={client}
+                    projectPath={worktree?.path || (project.link ? "" : project.path)}
+                    draft={draft}
+                    onImagePaste={(image) => void pasteImage(image)}
+                    onChangeText={(value) => composer.setDrafts((current) => ({ ...current, [chatId]: value }))}
+                  />
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <PullDown
+                      label="Add photos or files"
+                      nativeTrigger={{ systemImage: "plus", disabled: attachmentDisabled }}
+                      sections={[
+                        {
+                          items: [
+                            { id: "photos", title: "Photo Library", systemImage: "photo.on.rectangle", disabled: attachmentDisabled },
+                            { id: "camera", title: "Take Photo", systemImage: "camera", disabled: attachmentDisabled },
+                            { id: "files", title: "Choose Files", systemImage: "folder", disabled: attachmentDisabled },
+                            { id: "paste", title: "Paste image", systemImage: "doc.on.clipboard", disabled: attachmentDisabled },
+                          ],
+                        },
+                      ]}
+                      onSelect={(kind) => void pick(kind as "photos" | "camera" | "files" | "paste")}
+                    >
+                      <View style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: attachmentDisabled ? 0.35 : 1 }}>
+                        <Icon icon={Add01Icon} tone="ink2" size={21} />
+                      </View>
+                    </PullDown>
+                    <AgentControls
+                      model={model}
+                      effort={preferences.effort}
+                      fastMode={preferences.fastMode}
+                      ultracode={preferences.ultracode}
+                      onToggle={() => {
+                        router.push({
+                          pathname: "/model-sheet",
+                          params: {
+                            chatId,
+                            model: model.id,
+                            provider: actualProvider,
+                            ...(chat?.provider ? { on: chat.provider } : {}),
+                            ...(run ? { busy: "1" } : {}),
+                          },
+                        });
+                      }}
+                    />
+                    <PermissionChip
+                      mode={preferences.permissionMode}
+                      onPress={() => router.push({ pathname: "/permission-sheet", params: { chatId, ...(run ? { busy: "1" } : {}) } })}
+                    />
+                    <View style={{ flex: 1 }} />
+                    {contextUsage && contextUsage.size > 0 && params.id && (
+                      <ContextRing
+                        {...contextUsage}
+                        canCompact={Boolean(chat) && (chat?.provider ?? "claude") === "claude"}
+                        onPress={() => router.push({ pathname: "/context-sheet", params: { id: params.id } })}
+                      />
+                    )}
+                    {run && !draft.trim() && !attachments.length && (
+                      <IconButton
+                        label="Stop"
+                        icon={StopIcon}
+                        filled
+                        size={34}
+                        disabled={actionBusy}
+                        onPress={() => void action(() => client.call("agent:interrupt", [chatId]), true)}
+                      />
+                    )}
+                    {(!run || !!draft.trim() || !!attachments.length) && (
+                      <IconButton
+                        label={busy ? "Sending..." : run ? "Send follow-up" : "Send message"}
+                        icon={ArrowUp01Icon}
+                        filled
+                        size={34}
+                        loading={busy}
+                        disabled={
+                          busy ||
+                          picking ||
+                          (newWorktree && !base) ||
+                          (!draft.trim() && !attachments.length) ||
+                          !!session.error ||
+                          !!chat?.archived ||
+                          unavailable
+                        }
+                        onPress={() => void send()}
+                      />
+                    )}
+                  </View>
+                </View>
+              )}
+            </View>
+          </KeyboardStickyView>
+        </PanelSwipe>
+      </View>
+    </GenerativeUIProvider>
   );
 }

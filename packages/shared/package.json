@@ -26,13 +26,15 @@
     "src/terminal.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
+    "src/genui.ts",
     "src/file-link.ts",
     "src/message-search.mjs",
     "src/message-search.d.mts",
     "src/agent-activity.ts",
     "src/advisor-result.ts",
     "src/themes/*.ts",
-    "src/themes/palettes/*.ts"
+    "src/themes/palettes/*.ts",
+    "src/genui-renderer.tsx"
   ],
   "type": "module",
   "exports": {
@@ -174,6 +176,7 @@
     "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
     "./artifact": "./src/artifact.ts",
+    "./genui": "./src/genui.ts",
     "./file-link": "./src/file-link.ts",
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
@@ -201,17 +204,23 @@
     "./agent-activity": "./src/agent-activity.ts",
     "./advisor-result": "./src/advisor-result.ts",
     "./themes": "./src/themes/index.ts",
-    "./chat-row": "./src/chat-row.ts"
+    "./chat-row": "./src/chat-row.ts",
+    "./genui-renderer": "./src/genui-renderer.tsx"
   },
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@openuidev/lang-core": "^0.3.2",
     "refractor": "^5.0.0",
-    "tweetnacl": "1.0.3"
+    "tweetnacl": "1.0.3",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "typescript": "~6.0.3"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   }
 }

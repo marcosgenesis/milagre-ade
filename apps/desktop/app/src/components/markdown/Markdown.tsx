@@ -6,10 +6,12 @@ import remarkGfm from "remark-gfm";
 import { codeLanguageFromClassName } from "../../lib/code-languages";
 import { fileLinkTarget } from "../../lib/file-links";
 import { localFileLink } from "@milagre/shared/file-link";
+import { isGenuiFence } from "@milagre/shared/genui";
 import { useFileOpener, useFilesRoot } from "../editor-links";
 import { lazyView } from "../../lib/lazy-view";
 import { closeOpenMarkdown } from "../../lib/streaming-markdown";
 import { CodeBlock } from "./CodeBlock";
+import { GenerativeUI, MarkdownStreamingContext } from "../genui/GenerativeUI";
 import { splitStreamingBlocks } from "./streaming-blocks";
 import { mediaKind, mediaUrl } from "../../lib/media";
 import { isRemoteKey, useScope } from "../../lib/computer-bridge";
@@ -114,7 +116,9 @@ const components: Components = {
   pre({ children }) {
     const code = Children.toArray(children).find(isValidElement) as { props: { className?: string; children?: ReactNode } } | undefined;
     const text = String(code?.props.children ?? "").replace(/\n$/, "");
-    return <CodeBlock code={text} fence={codeLanguageFromClassName(code?.props.className)} />;
+    const fence = codeLanguageFromClassName(code?.props.className);
+    const plain = <CodeBlock code={text} fence={fence} />;
+    return isGenuiFence(fence) ? <GenerativeUI code={text} fallback={plain} /> : plain;
   },
   code: InlineCode,
   a({ href, children }) {
@@ -163,7 +167,13 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ text }: { tex
   return (
     <div className={WRAPPER}>
       {blocks.map((block, index) =>
-        index === blocks.length - 1 ? <MarkdownBody key={index} text={closeOpenMarkdown(block)} /> : <MarkdownBody key={index} text={block} />,
+        index === blocks.length - 1 ? (
+          <MarkdownStreamingContext key={index} value={true}>
+            <MarkdownBody text={closeOpenMarkdown(block)} />
+          </MarkdownStreamingContext>
+        ) : (
+          <MarkdownBody key={index} text={block} />
+        ),
       )}
     </div>
   );

@@ -89,10 +89,31 @@ async function browserChecks() {
     window.webContents.sendInputEvent({ type: "mouseUp", button: "left", clickCount: 1, ...point });
     await delay(200);
   };
+  // Where the page last saw the pointer: a hidden window never updates :hover, but pointer events still arrive.
+  const pointerOn = (selector) => `!!window.__pointer?.closest(${JSON.stringify(selector)})`;
+  const trackPointer = () => evaluate(`document.addEventListener("pointerover", (event) => { window.__pointer = event.target; }, true)`);
+  // Puts the pointer on an element and waits until the page has seen it arrive. A slow runner can coalesce moves, so
+  // a move that didn't land is sent again.
+  const hover = async (selector) => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      window.webContents.sendInputEvent({ type: "mouseMove", ...(await centre(selector)) });
+      for (let i = 0; i < 20; i++) {
+        if (await evaluate(pointerOn(selector))) return;
+        await delay(25);
+      }
+    }
+    throw new Error(`The pointer never reached ${selector}`);
+  };
+  // Takes the pointer off the rail, waiting until the page has seen it leave.
+  const leaveRail = async () => {
+    window.webContents.sendInputEvent({ type: "mouseMove", x: 900, y: 400 });
+    await waitFor(`!(${pointerOn("[data-scope-rail]")})`);
+  };
   const reset = () => evaluate(`localStorage.removeItem("milagre.sidebarClosedScopes"); localStorage.removeItem("milagre.sidebarScopeOrder")`).catch(() => {});
   const chips = (scope) => evaluate(`document.querySelector('[data-sidebar-scope="${scope}"] [data-chat-id] [data-chat-prs]')?.textContent.trim() ?? ""`);
   try {
     await window.loadURL(process.argv[2]);
+    await trackPointer();
     await waitFor(`!!document.querySelector('[data-sidebar-scope="/work/shop"] [data-chat-id]')`);
     assert.match(await chips("/work/arketa"), /#409/, "The open Project's row shows its PR");
     assert.equal(await chips("/work/shop"), "", "Another Project's row has no PR to show");
@@ -139,8 +160,9 @@ async function browserChecks() {
     await waitFor(`!document.querySelector("[data-filters-panel]")`);
     // Collapsed: one icon per Project, the open one marked, shop's dot over its ring, arketa's ring.
     await evaluate(`document.querySelector('[aria-label="Collapse sidebar"]').click()`);
-    await waitFor(`!!document.querySelector("[data-scope-rail]")`);
-    await delay(350);
+    // The sidebar narrows over 280 ms: hover only once the icons have stopped moving.
+    await waitFor(`!!document.querySelector("[data-scope-rail]") && Math.round(document.querySelector("aside").getBoundingClientRect().width) === 44`);
+    await delay(100);
     assert.deepEqual(
       await evaluate(
         `[...document.querySelectorAll("[data-rail-scope]")].map((node) => [node.dataset.railScope, node.dataset.railStatus, node.getAttribute("aria-current")])`,
@@ -161,7 +183,7 @@ async function browserChecks() {
     );
     await screenshot("rail");
     // Resting on shop lists its live chat; clicking it opens the chat.
-    window.webContents.sendInputEvent({ type: "mouseMove", ...(await centre('[data-rail-scope="/work/shop"]')) });
+    await hover('[data-rail-scope="/work/shop"]');
     await waitFor(`!!document.querySelector('[data-scope-rail-popover="/work/shop"] [data-rail-chat="7"]')`);
     assert.match(await evaluate(`document.querySelector('[data-scope-rail-popover="/work/shop"]').textContent`), /shop[\\s\\S]*Shop chat/);
     assert.equal(
@@ -182,11 +204,9 @@ async function browserChecks() {
     await click('[data-rail-scope="/work/arketa"]');
     assert.equal(await evaluate("window.switched"), null, "The open Project's icon doesn't switch");
     // Moving away closes the popover; the open Project's icon lists its own live chat and opens it in place.
-    // Two moves in one tick coalesce into the last: a pause lets the first one leave the icon.
-    window.webContents.sendInputEvent({ type: "mouseMove", x: 900, y: 400 });
-    await delay(100);
+    await leaveRail();
     await waitFor(`!document.querySelector("[data-scope-rail-popover]")`);
-    window.webContents.sendInputEvent({ type: "mouseMove", ...(await centre('[data-rail-scope="/work/arketa"]')) });
+    await hover('[data-rail-scope="/work/arketa"]');
     await waitFor(`!!document.querySelector('[data-scope-rail-popover="/work/arketa"] [data-rail-chat="1"]')`);
     await click('[data-scope-rail-popover="/work/arketa"] [data-rail-chat="1"]');
     assert.equal(await evaluate("window.picked"), "1", "The open Project's chat opens through onPick");

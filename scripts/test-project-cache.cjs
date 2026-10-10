@@ -102,7 +102,7 @@ const stubs = {
   "./routes-native":
     'export const lanRoutes = { set() {}, forget() {}, checkAll() {}, subscribe: () => () => {}, kind: () => "remote", view: () => ({ current: () => null, subscribe: () => () => {} }) }; export const learnRoutes = async () => {};',
   "./hosts-native":
-    "export const savedHosts = { list: async () => [] }; export const savedNavigation = { read: async () => null }; export const readPermission = async () => null; export const savePermission = async () => {}; export const savedProjectOrder = { apply: async (_host, projects) => projects, save: async () => {} };",
+    "export const savedHosts = { list: async () => [] }; export const savedNavigation = { read: async () => null }; export const readPermission = async () => null; export const savePermission = async () => {}; export const savedProjectOrder = { apply: async (_host, projects) => projects, save: async () => {} }; const noFolds = new Set(); export const savedFoldedProjects = { subscribe: () => () => {}, folded: () => noFolds, loaded: () => true, load: async () => {}, toggle: async () => {} };",
   "./live": "export const syncProject = () => () => {};",
   "./ui": ui,
   "./theme":
@@ -211,26 +211,25 @@ async function browserChecks() {
     await waitFor("!!window.session?.booted");
     await evaluate("window.process = { env: {} }");
     await evaluate("window.session.connect({ address: 'host-one', token: '' }, false)");
+    // Every Project's group starts open; only a group folded by hand stays folded.
     await waitFor(contains("alpha Chat"));
-    await click("Expand beta");
     await waitFor(contains("beta Chat"));
+    assert.equal(await evaluate(`!!document.querySelector('[aria-label="Collapse beta"]')`), true, "another Project's group is open too");
     await evaluate("window.drawer(false)");
     await delay(50);
     await evaluate("window.hold = true; window.drawer(true)");
     await waitFor(contains("alpha Chat"));
     assert.equal(await evaluate(contains("Loading chats...")), false, "drawer remount renders cached list");
-    await waitFor("window.requests.some(request => request.path === '/alpha')");
+    await waitFor("['/alpha', '/beta'].every(path => window.requests.some(request => request.path === path))");
     await evaluate("window.drawer(false)");
     await delay(50);
     await evaluate("window.drawer(true)");
     await delay(100);
-    assert.equal(await evaluate("window.requests.length"), 1, "remount joins the in-flight preview");
+    assert.equal(await evaluate("window.requests.length"), 2, "remount joins the in-flight previews");
+    assert.equal(await evaluate(`!!document.querySelector('[aria-label="Collapse beta"]')`), true, "beta stays open across remounts");
     await evaluate("window.finish('/alpha', 'Fresh alpha')");
     await waitFor(contains("Fresh alpha Chat"));
-    await click("Expand beta");
-    await waitFor(contains("beta Chat"));
-    await waitFor("window.requests.some(request => request.path === '/beta')");
-    await evaluate("window.finish('/alpha', 'Fresh alpha')");
+    assert.equal(await evaluate(contains("beta Chat")), true);
     await evaluate("window.fail('/beta')");
     await waitFor(contains("Could not refresh chats. Tap to retry."));
     assert.equal(await evaluate(contains("beta Chat")), true);

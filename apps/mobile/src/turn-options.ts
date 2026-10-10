@@ -48,9 +48,9 @@ export function sendOptions(model: MobileModel, preferences: Pick<TurnPreference
 export function turnTarget(
   saved: TurnPreferences | undefined,
   chatProvider: ModelProvider | undefined,
-  defaults: Pick<TurnPreferences, "provider">,
+  defaults: Pick<TurnPreferences, "provider"> & Partial<Pick<TurnPreferences, "model">>,
 ): { provider: ModelProvider; model: string; picked: boolean } {
-  if (!chatProvider) return { provider: saved?.provider ?? defaults.provider, model: saved?.model ?? "", picked: false };
+  if (!chatProvider) return { provider: saved?.provider ?? defaults.provider, model: saved?.model ?? defaults.model ?? "", picked: false };
   const picked = !!saved && saved.pickedOn === chatProvider && saved.provider !== chatProvider;
   const provider = picked ? saved.provider : chatProvider;
   return { provider, model: saved && saved.provider === provider ? saved.model : "", picked };

@@ -115,3 +115,9 @@ test("the sheet records a pick only when the provider differs from the chat's", 
   assert.equal(afterSheet({ ...defaultPreferences, provider: "claude", pickedOn: "claude" }, "claude").pickedOn, undefined);
   assert.equal(afterSheet({ ...defaultPreferences, provider: "codex" }, undefined).pickedOn, undefined);
 });
+
+test("a fresh Chat uses the saved default model while an existing Chat keeps its own provider", () => {
+  const defaults = { ...defaultPreferences, provider: "claude" as const, model: "opus" };
+  assert.deepEqual(turnTarget(undefined, undefined, defaults), { provider: "claude", model: "opus", picked: false });
+  assert.deepEqual(turnTarget(undefined, "codex", defaults), { provider: "codex", model: "", picked: false });
+});

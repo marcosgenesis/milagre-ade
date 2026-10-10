@@ -506,14 +506,17 @@ const routesNative = ({ learned = [], forgotten = [] } = {}) => ({
     learned.push([client.url, host]);
   },
 });
-function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [], learned = [], savedProjectOrder } = {}) {
+function sessionHost(
+  client,
+  { effects = false, AppState = {}, created = [], saved = [], learned = [], savedProjectOrder, chatDefaults, permission = "ask" } = {},
+) {
   client.recentScopes ??= () => client.call("project:recent");
   client.open ??= async (owner) => {
     await client.call("project:open", [owner]);
     return client.snapshot(owner);
   };
   const react = hookHost({ effects });
-  const { useSessionState, PendingChatsProvider } = load(
+  const { useSessionState, PendingChatsProvider, ComposerProvider } = load(
     "session.tsx",
     {
       react,
@@ -539,7 +542,9 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
         },
         savedNavigation: { read: async () => null, save: async () => {} },
         savedProjectOrder: savedProjectOrder ?? { apply: async (_host, projects) => projects, save: async () => {} },
-        readPermission: async () => null,
+        readPermission: async () => permission,
+        savedChatDefaults:
+          chatDefaults ?? require("../apps/mobile/src/chat-defaults-store.ts").createChatDefaultsStore({ getItem: () => null, setItemAsync: async () => {} }),
         savePermission: async () => {},
       },
       "./turn-options": require("../apps/mobile/src/turn-options.ts"),
@@ -549,7 +554,7 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
       "./link-operations": require("../apps/mobile/src/link-operations.ts"),
       "./use-links": { refreshLinks: async () => {} },
     },
-    "\nexport { useSessionState, PendingChatsProvider };",
+    "\nexport { useSessionState, PendingChatsProvider, ComposerProvider };",
   );
   return Object.assign(
     () => {
@@ -557,6 +562,10 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
       return useSessionState();
     },
     {
+      composer: () => {
+        react.begin();
+        return ComposerProvider({ children: null }).props.value;
+      },
       unmount: react.unmount,
       pending: (props) => {
         react.begin();
@@ -771,6 +780,7 @@ function chatHost({
   effects = false,
   alert = () => {},
   linear = { active: false },
+  chatDefaults = require("../apps/mobile/src/chat-defaults-store.ts").createChatDefaultsStore({ getItem: () => null, setItemAsync: async () => {} }),
 } = {}) {
   const sending = deferred();
   const calls = [];
@@ -817,6 +827,7 @@ function chatHost({
     },
     defaults: require("../apps/mobile/src/turn-options.ts").defaultPreferences,
     setDefaultPermission() {},
+    setDefaultModel() {},
     models: null,
     cliStatus: null,
     linkOperations: require("../apps/mobile/src/link-operations.ts").createLinkOperations(),
@@ -863,6 +874,7 @@ function chatHost({
     },
   };
   const { default: ChatScreen } = load("app/chat.tsx", {
+    "../hosts-native": { savedChatDefaults: chatDefaults },
     "../genui/GenerativeUI": { GenerativeUIProvider: "GenerativeUIProvider" },
     // A test can stand in for a host that keeps messages by Chat with globalThis.chatPage.
     "../chat-pages": {
@@ -6575,4 +6587,50 @@ test("Privacy settings reset consent and expose policies without a paired comput
   find(tree, (n) => n.props.title === "Milagre privacy policy").props.onPress();
   find(tree, (n) => n.props.title === "Support").props.onPress();
   assert.deepEqual(urls, [shared.PRIVACY_URL, shared.SUPPORT_URL]);
+});
+
+test("new Chat restores worktree choices on reopen, falls back from a removed branch and never starts a Linear issue", async () => {
+  const data = new Map();
+  const storage = { getItem: (key) => data.get(key) ?? null, setItemAsync: async (key, value) => data.set(key, value) };
+  const create = () => require("../apps/mobile/src/chat-defaults-store.ts").createChatDefaultsStore(storage);
+  const first = chatHost({ effects: true, chatDefaults: create(), call: async () => ["main", "release"] });
+  const menu = (screen, label) => find(screen.render(), (node) => node.type === "PullDown" && node.props.label === label);
+  first.render();
+  await settle();
+  menu(first, "Choose isolation").props.onSelect("worktree");
+  menu(first, "Choose branch").props.onSelect("release");
+  await settle();
+  const reopened = chatHost({ effects: true, chatDefaults: create(), linear: { active: true }, call: async () => ["main", "release"] });
+  reopened.render();
+  await settle();
+  assert.equal(menu(reopened, "Choose isolation").props.nativeTrigger.title, "New worktree");
+  assert.equal(menu(reopened, "Choose branch").props.nativeTrigger.title, "release");
+  assert.equal(
+    reopened.calls.some((call) => call.method === "worktree:create"),
+    false,
+  );
+  assert.equal(reopened.field().value, "first message");
+  const removed = chatHost({ effects: true, chatDefaults: create(), call: async () => ["main"] });
+  removed.render();
+  await settle();
+  assert.equal(menu(removed, "Choose branch").props.nativeTrigger.title, "main");
+});
+
+test("Composer restores model and permission defaults after relaunch without a provider switch", async () => {
+  const data = new Map();
+  const storage = { getItem: (key) => data.get(key) ?? null, setItemAsync: async (key, value) => data.set(key, value) };
+  const create = () => require("../apps/mobile/src/chat-defaults-store.ts").createChatDefaultsStore(storage);
+  const first = sessionHost({ call: async () => {} }, { chatDefaults: create() });
+  first
+    .composer()
+    .setDefaultModel({ ...require("../apps/mobile/src/turn-options.ts").defaultPreferences, provider: "claude", model: "claude-opus-5-5", pickedOn: "codex" });
+  await settle();
+  const reopened = sessionHost({ call: async () => {} }, { effects: true, chatDefaults: create(), permission: "full" });
+  reopened.composer();
+  await settle();
+  const defaults = reopened.composer().defaults;
+  assert.equal(defaults.provider, "claude");
+  assert.equal(defaults.model, "claude-opus-5-5");
+  assert.equal(defaults.permissionMode, "full");
+  assert.equal(defaults.pickedOn, undefined);
 });

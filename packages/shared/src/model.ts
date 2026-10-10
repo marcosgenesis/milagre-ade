@@ -166,6 +166,7 @@ export interface NamedProjectLink {
   name: string;
   projectIds: string[];
   createdAt: string;
+  hidden?: boolean;
 }
 export interface WorktreeBinding {
   projectId: string;
@@ -244,6 +245,19 @@ export type HandoffContext = {
   transcriptPath?: string;
 };
 
+/**
+ * A manual or automatic compaction, shown as a divider like a handoff. A manual request keeps `/compact` as its body;
+ * an automatic compaction is an assistant message with an empty body. `before` and `after` are the window's tokens
+ * around it; `size` is the window.
+ */
+export type CompactionContext = {
+  kind: "compaction";
+  status: "preparing" | "done" | "failed";
+  before?: number;
+  after?: number;
+  size?: number;
+};
+
 /** What wrote a message nobody typed in this chat: a Link (see LinkedContext), the commit dialog, a handoff, or a legacy handover note. */
 export type AdvisorResultContext = {
   kind: "advisor-result";
@@ -292,6 +306,7 @@ export type ChatContext =
   | LinkedContext
   | { kind: "git-action" }
   | HandoffContext
+  | CompactionContext
   | PullRequestActionContext
   | LinearIssueContext
   | "handover"
@@ -524,6 +539,9 @@ export type AgentEvent =
   | { type: "subagents-waiting"; waiting: boolean }
   | { type: "tasks-updated"; tasks: AgentTask[] }
   | ({ type: "context-usage" } & ContextUsage)
+  | { type: "context-compacting" }
+  /** The provider compacted the conversation: token counts when reported; `manual` when `/compact` asked for it. */
+  | { type: "context-compacted"; trigger: "manual" | "auto"; before?: number; after?: number }
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }
   /** `continues`: the turn whose steering message arrived as it ended, which this turn the agent started by itself takes. */
@@ -570,6 +588,8 @@ export interface ChatSendRequest {
   prAction?: { action: PullRequestBlocker; pr: number; url: string };
   /** The first message of a Chat started from an issue. Milagre reads the issue and writes the body, prompt and context itself. */
   linearIssue?: { key: string; workspace?: string; note?: string };
+  /** Compact the Chat's context now (Claude only). Milagre writes the body, prompt and context itself, ignoring the ones sent. */
+  compact?: boolean;
 }
 
 /** A code editor found on this Mac. */

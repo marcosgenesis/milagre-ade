@@ -775,6 +775,15 @@ function chatHost({
   const sending = deferred();
   const calls = [];
   const choices = [];
+  const panels = {
+    gesture: {},
+    open: null,
+    shown: [],
+    show(side) {
+      this.open = side;
+      this.shown.push(side);
+    },
+  };
   const params = { worktreeId: "1" };
   const session = {
     client: {
@@ -802,6 +811,10 @@ function chatHost({
       this.attachments = fn(this.attachments);
     },
     preferences: {},
+    compactRequests: {},
+    requestCompact(chatId) {
+      this.compactRequests = { ...this.compactRequests, [chatId]: (this.compactRequests[chatId] ?? 0) + 1 };
+    },
     defaults: require("../apps/mobile/src/turn-options.ts").defaultPreferences,
     setDefaultPermission() {},
     models: null,
@@ -894,7 +907,7 @@ function chatHost({
     "../indicators": require("../apps/mobile/src/indicators.ts"),
     "../icons": { Icon: "Icon" },
     "../bottom-fade": { BottomFade: "BottomFade", EdgeFade: "EdgeFade" },
-    "../side-panels": { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children },
+    "../side-panels": { useSidePanels: () => panels, PanelSwipe: ({ children }) => children },
     "../loading-logo": { LoadingLogo: "LoadingLogo" },
     "../use-open-project": load("use-open-project.ts", {
       react,
@@ -906,7 +919,7 @@ function chatHost({
     "../running-logo": { ThinkingIndicator: "ThinkingIndicator" },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     "@milagre/shared/model": require("@milagre/shared/model"),
-    "@milagre/shared/agent-runs": { lastUserModel: () => "" },
+    "@milagre/shared/agent-runs": { ...require("@milagre/shared/agent-runs"), lastUserModel: () => "" },
     "@milagre/shared/chats": require("@milagre/shared/chats"),
     "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
     "@milagre/shared/linear": require("@milagre/shared/linear"),
@@ -930,9 +943,11 @@ function chatHost({
     "../handoff-sides": require("../apps/mobile/src/handoff-sides.ts"),
     "../handoff-divider": { HandoffDivider: "HandoffDivider" },
     "../worktree-link-divider": { WorktreeLinkDivider: "WorktreeLinkDivider" },
+    "../compaction-divider": { CompactionDivider: "CompactionDivider" },
     "../handoff-brief-store": { showBrief() {} },
     "@milagre/shared/handoff": require("@milagre/shared/handoff"),
     "@milagre/shared/worktree-link": require("@milagre/shared/worktree-link"),
+    "@milagre/shared/compaction": require("@milagre/shared/compaction"),
     "../archive": require("../apps/mobile/src/archive.ts"),
     "../confirm-store": { confirmSheet: (...args) => alert(...args) },
   });
@@ -947,7 +962,7 @@ function chatHost({
     return { ...props, value: props.draft };
   };
   const send = () => find(render(), (node) => node.type === "IconButton" && ["Send message", "Send follow-up"].includes(node.props.label)).props.onPress();
-  return { session, sending, params, field, send, render, router, calls, choices };
+  return { session, sending, params, field, send, render, router, calls, choices, panels };
 }
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -1704,6 +1719,68 @@ test("Choose projects opens as a sheet over the sidebar instead of closing it", 
   assert.deepEqual(nav.secondaryRoutes, ["sheet"]);
 });
 
+function chooseProjectsHost(call) {
+  const react = hookHost();
+  const link = { id: "checkout", name: "Checkout", projectIds: ["shop", "api"] };
+  const session = {
+    client: { call },
+    recent: [
+      { path: "/shop", name: "shop" },
+      { path: "milagre-link:checkout", name: "Checkout", link, projects: [] },
+    ],
+    reloadProjects: async () => {},
+  };
+  const { default: ChooseProjects } = load("app/choose-projects.tsx", {
+    react,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": { Pressable: "Pressable", Text: "Text", View: "View" },
+    "expo-router": { router: { back() {} } },
+    "../session": { useSession: () => session },
+    "../project-icon": { ProjectIcon: "ProjectIcon", ProjectIcons: "ProjectIcons" },
+    "../ui": { ErrorNotice: "ErrorNotice", PageScroll: "PageScroll" },
+  });
+  const render = () => {
+    react.begin();
+    return ChooseProjects();
+  };
+  const row = () => find(render(), (node) => node.props?.accessibilityRole === "checkbox" && node.props.accessibilityLabel === "Checkout");
+  return { render, row, session, link };
+}
+
+test("the phone chooser hides and restores a Link through the shared registry without removing it", async () => {
+  const request = deferred();
+  const calls = [];
+  const host = chooseProjectsHost(async (method, args) => {
+    calls.push([method, args]);
+    await request.promise;
+    host.session.recent[1].hidden = args[0].hidden;
+  });
+  assert.ok(host.row(), "Links are included in the chooser");
+  const hiding = host.row().props.onPress();
+  assert.equal(host.row().props.accessibilityState.checked, false, "the pending choice appears immediately");
+  assert.equal(host.row().props.disabled, true, "pending changes cannot race a second tap");
+  request.resolve();
+  await hiding;
+  assert.equal(host.row().props.accessibilityState.checked, false);
+  await host.row().props.onPress();
+  assert.equal(host.row().props.accessibilityState.checked, true);
+  same(calls, [
+    ["link:update", [{ ...host.link, hidden: true }]],
+    ["link:update", [{ ...host.link, hidden: false }]],
+  ]);
+  assert.equal(host.session.recent[1].link.id, "checkout");
+});
+
+test("a failed phone Link visibility change restores the checkbox and shows the error", async () => {
+  const host = chooseProjectsHost(async () => {
+    throw new Error("Computer offline");
+  });
+  assert.ok(host.row());
+  await host.row().props.onPress();
+  assert.equal(host.row().props.accessibilityState.checked, true);
+  assert.equal(find(host.render(), (node) => node.type === "ErrorNotice").props.message, "Computer offline");
+});
+
 test("a chat search with no matching title lists matching messages, and a tap opens their Chat", () => {
   const nav = navigationHost(deferred().promise);
   nav.state.project.state.sessions[3] = { id: 3, title: "Relay work" };
@@ -2142,7 +2219,7 @@ test("a sidebar Chat Archive asks with the worktree choice, then stops, hides an
   ]);
 });
 
-test("the Chat screen Archive falls back to a plain Archive on an older Mac, then leaves the Chat", async () => {
+test("the Chat screen Archive falls back to a plain Archive on an older Mac, then opens the sidebar", async () => {
   const alerts = [];
   const project = archiveProject();
   const screen = chatHost({
@@ -2174,7 +2251,8 @@ test("the Chat screen Archive falls back to a plain Archive on an older Mac, the
     ["worktree:roots", "chat:patch"],
   );
   assert.deepEqual(screen.calls[1].args, ["/p", 5, { archived: true, unread: false }]);
-  assert.equal(screen.router.replaced, "/projects");
+  assert.equal(screen.panels.open, "left");
+  assert.equal(screen.router.replaced, undefined);
 });
 
 test("a new Chat can switch Worktrees and keep each Worktree draft", async () => {
@@ -2349,6 +2427,28 @@ test("the PR pill sends a PR action whose preview is already a card", async () =
   } finally {
     delete globalThis.chatPullRequest;
   }
+});
+
+test("Compact now from the context sheet sends /compact to the open Chat with the compact flag and no preview", async () => {
+  const screen = chatHost({ effects: true, call: async () => ({ sessionId: 42 }) });
+  screen.params.id = "42";
+  screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "claude", worktree_id: 1, contextUsage: { used: 897_000, size: 1_000_000 } };
+  screen.render();
+  const projectPath = screen.session.snapshot.project.path;
+  screen.session.requestCompact(`${projectPath}#42`);
+  screen.render();
+  await settle();
+  const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
+  assert.equal(sent.body, "/compact");
+  assert.equal(sent.prompt, "/compact");
+  assert.equal(sent.compact, true);
+  assert.equal(sent.sessionId, 42);
+  assert.equal(sent.projectPath, projectPath);
+  assert.equal(Object.keys(screen.session.pendingChats).length, 0);
+  // Rendering again sends nothing more: the counter, not the render, is the trigger.
+  screen.render();
+  await settle();
+  assert.equal(screen.calls.filter((call) => call.method === "chat:send").length, 1);
 });
 
 test("a PR without a number yet shows no PR pill", () => {
@@ -3894,11 +3994,12 @@ function browserHost(client) {
 }
 const BROWSER_PAGE = { id: "browser-1:" + "A".repeat(32), title: "Login", url: "https://example.com/login", browser: "Chrome 141", source: "agent" };
 
-test("mobile browser pill lists only this Chat and hides when there is nothing to show or attach", async (t) => {
+test("mobile browser pill lists only this Chat and hides until the Chat has a page", async (t) => {
   for (const [list, visible] of [
     [{ supported: true, targets: [], others: [] }, false],
     [{ supported: true, targets: [BROWSER_PAGE], others: [] }, true],
-    [{ supported: true, targets: [], others: [{ id: "b", browser: "Chrome 141", pages: 1, title: "Mine" }] }, true],
+    // An attachable browser alone is not a page of this Chat.
+    [{ supported: true, targets: [], others: [{ id: "b", browser: "Chrome 141", pages: 1, title: "Mine" }] }, false],
   ]) {
     const calls = [];
     const h = browserHost({
@@ -3965,6 +4066,17 @@ test("mobile browser sheet opens a sole page directly, lists several, and attach
       attach.props.onPress();
       await settle();
       assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ["browser:attach", [{ chatId: "/p#1", browserId: "b" }]]);
+      // Only attached pages offer Detach, and it names the browser, not the page.
+      const after = h.render("BrowserSheet", { hostId: "mac", chatId: "/p#1" });
+      const detaches = [];
+      find(after, (node) => {
+        if (node.type === "PillButton" && node.props.title === "Detach") detaches.push(node);
+        return false;
+      });
+      assert.equal(detaches.length, 1);
+      detaches[0].props.onPress();
+      await settle();
+      assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ["browser:detach", [{ chatId: "/p#1", browserId: "b" }]]);
     }
     h.cleanup();
   }
@@ -5158,7 +5270,7 @@ test("sidebar archive shows progress over the Chat's row and clears it on failur
   archiveStore.clearArchiveNotice();
 });
 
-test("archiving the open Chat from the sidebar leaves it on confirm and never navigates when it ends", async () => {
+test("archiving the open Chat from the sidebar stays in place through confirmation and completion", async () => {
   const project = archiveProject();
   const patch = deferred();
   const nav = navigationHost(deferred().promise, {
@@ -5174,13 +5286,14 @@ test("archiving the open Chat from the sidebar leaves it on confirm and never na
   });
   nav.more(nav.row("chat")).props.onSelect("archive");
   await settleAll();
-  assert.deepEqual(nav.routes, ["/projects"], "the Chat is left as soon as the archive is confirmed");
+  assert.deepEqual(nav.routes, [], "confirming an archive must not close or replace the sidebar");
+  assert.ok(archiveIndicator(nav.row("chat")), "progress stays on the same sidebar row");
   patch.resolve();
   await settleAll();
-  assert.deepEqual(nav.routes, ["/projects"]);
+  assert.deepEqual(nav.routes, []);
 });
 
-test("the Chat screen leaves for the list on confirm; the archive ends without moving the phone again", async () => {
+test("the Chat screen opens its sidebar once on confirm without replacing the screen", async () => {
   const project = archiveProject();
   const patch = deferred();
   const screen = chatHost({ alert: pressDanger([]), call: (method, args) => (method === "chat:patch" ? patch.promise : project.call(method, args)) });
@@ -5191,7 +5304,9 @@ test("the Chat screen leaves for the list on confirm; the archive ends without m
   const menuAction = () => find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === "Archive");
   menuAction().props.onPress();
   await settleAll();
-  assert.equal(screen.router.replaced, "/projects", "leaves before the archive ends");
+  assert.equal(screen.panels.open, "left", "shows the sidebar before the archive ends");
+  assert.deepEqual(screen.panels.shown, ["left"]);
+  assert.equal(screen.router.replaced, undefined, "no route replacement can reset or slide the sidebar");
   assert.ok(archiveStore.archiveActivity().chats.has("/p#5"), "the list shows the archive on the Chat's row");
   // The phone moves on to another Chat while the archive runs.
   screen.router.replaced = "/chat?id=9";
@@ -5199,6 +5314,7 @@ test("the Chat screen leaves for the list on confirm; the archive ends without m
   await settleAll();
   assert.equal(screen.router.replaced, "/chat?id=9", "the end of the archive does not pull the phone back to the list");
   assert.equal(archiveStore.archiveActivity().chats.has("/p#5"), false);
+  assert.deepEqual(screen.panels.shown, ["left"], "completion must not reopen the sidebar");
 });
 
 test("mobile Ports pill requests only its Chat and hides empty or mismatched responses", async (t) => {

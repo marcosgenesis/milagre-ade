@@ -85,6 +85,7 @@ async function browserChecks(url) {
   const counts = { open: 0, close: 0 };
   ipcMain.handle("browser:list", (_event, request) => service.list(request));
   ipcMain.handle("browser:attach", (_event, request) => service.attach(request));
+  ipcMain.handle("browser:detach", (_event, request) => service.detach(request));
   for (const method of ["open", "frame", "status", "control", "input", "close"])
     ipcMain.handle("browser:" + method, (_event, request) => {
       if (method in counts) counts[method]++;
@@ -249,7 +250,10 @@ async function browserChecks(url) {
     await waitFor('!!document.querySelector("[data-browser-other]")', "picker lists the other browser for explicit attach");
     assert.equal(await evaluate('document.querySelectorAll("[data-browser-target]").length'), 1, "the other browser is not shown as this Chat's page");
     await screenshot("picker-dark");
-    await click("[data-browser-other] button");
+    // Other CDP browsers on the machine (another Milagre, a dev Chrome) may be listed too: attach the fixture's one.
+    await evaluate(
+      '[...document.querySelectorAll("[data-browser-other]")].find(node=>node.textContent.includes("Someone else")).querySelector("button").click()',
+    );
     await waitFor('document.querySelectorAll("[data-browser-target]").length===2', "attached browser joins this Chat");
     await screenshot("picker-attached-dark");
     await evaluate('[...document.querySelectorAll("[data-browser-target]")].find(node=>node.textContent.includes("Attached")).click()');
@@ -280,9 +284,30 @@ async function browserChecks(url) {
     );
     await screenshot("page-closed-light");
     await click('[aria-label="Close browser"]');
+
+    // Detach ends only this Chat's attachment: the browser is offered again and keeps running.
+    await click("[data-slot=browser-track] button");
+    await waitFor('!!document.querySelector("[data-browser-detach]")', "attached pages offer Detach");
+    await click("[data-browser-detach]");
+    await waitFor(
+      'document.querySelectorAll("[data-browser-target]").length===1 && !!document.querySelector("[data-browser-other]")',
+      "detached browser is offered again",
+    );
+    assert.ok(!(await evaluate('document.querySelector("[data-browser-detach]")')), "the agent's own browser has no Detach");
+    await screenshot("picker-detached-light");
+    await click('[aria-label="Close browser"]');
+    await waitFor('document.querySelector("[data-slot=browser-track]")?.textContent.includes("Browser 1")', "count back to the agent's page");
+
+    // No page in this Chat, no pill: an attachable browser alone does not show one.
+    process.kill(-agentChrome.pid, "SIGTERM");
+    await waitUntil(async () => !(await service.list({ chatId: "/fixture#1" })).targets.length, "agent browser gone from the host");
+    await evaluate('document.dispatchEvent(new Event("visibilitychange"))');
+    await waitFor('!document.querySelector("[data-slot=browser-track]")', "pill hides with no page even though another browser is attachable");
+    assert.ok((await service.list({ chatId: "/fixture#1" })).others.length >= 1, "the other browser is still attachable");
+    await screenshot("no-pill-light");
     clearTimeout(watchdog);
     console.log(
-      "PASS: pill order and count, on-demand capture, direct open, live frame, header title/URL, click, typing, Backspace, wheel, live theme without reconnect, expand/collapse, takeover and retake, explicit attach, close keeps browsers running, closed-page failure",
+      "PASS: pill order and count, on-demand capture, direct open, live frame, header title/URL, click, typing, Backspace, wheel, live theme without reconnect, expand/collapse, takeover and retake, explicit attach, close keeps browsers running, closed-page failure, detach, no pill without a page",
     );
     await service.close();
     stopChrome();

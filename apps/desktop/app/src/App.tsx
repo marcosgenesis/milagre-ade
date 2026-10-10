@@ -33,7 +33,6 @@ import {
   QuestionAnswers,
   PermissionMode,
   PullRequestActionContext,
-  EffortLevel,
   AgentCliStatus,
   AgentModels,
   capabilityFor,
@@ -59,6 +58,7 @@ import {
 import { attachmentPrompt } from "./lib/media";
 import { BLOCKERS, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
 import { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } from "@milagre/shared/pr-action";
+import { COMPACT_COMMAND } from "@milagre/shared/compaction";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
 import { chatMark, chatTitle, orderChats } from "./lib/chat-list";
 import type { SessionPatch } from "@milagre/shared/project-edits";
@@ -101,6 +101,7 @@ import { SidebarUsage } from "./components/usage/SidebarUsage";
 import { visibleProviders } from "./components/usage/format";
 import { useUsage } from "./components/usage/useUsage";
 import { loadChatPreferences, saveChatPreferences } from "./lib/chat-preferences";
+import { useComposerPreferences } from "./lib/use-composer-preferences";
 import { startOfflineCache } from "./lib/offline-cache";
 import { isDimmed, isReadOnly, offlineBanner, useApplyOtherComputers, useComputers, withComputer } from "./lib/computers";
 import { OfflineBanner } from "./components/OfflineBanner";
@@ -213,23 +214,16 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<ModelOption>(() =>
     resolveModel(MODEL_CATALOG, getSettings().defaultModelId, providerForId(getSettings().defaultModelId)),
   );
-  const [effort, setEffortState] = useState<EffortLevel>(() => (localStorage.getItem("milagre.effort") as EffortLevel | null) ?? "high");
-  const setEffort = (level: EffortLevel) => {
-    setEffortState(level);
-    localStorage.setItem("milagre.effort", level);
-  };
-  const [ultracode, setUltracodeState] = useState(() => localStorage.getItem("milagre.ultracode") === "on");
-  const setUltracode = (on: boolean) => {
-    setUltracodeState(on);
-    localStorage.setItem("milagre.ultracode", on ? "on" : "off");
-  };
-  const [fastMode, setFastModeState] = useState(() => localStorage.getItem("milagre.fastMode") === "on");
-  const setFastMode = (on: boolean) => {
-    setFastModeState(on);
-    localStorage.setItem("milagre.fastMode", on ? "on" : "off");
-  };
-  // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
   const accountScope = selectedLink ? `milagre-link:${selectedLink.link.id}` : project?.path;
+  const currentChatKey = draftKey(accountScope ?? "", selectedSessionId);
+  const composerPrefs = useComposerPreferences(currentChatKey);
+  const effort = composerPrefs.effort;
+  const setEffort = composerPrefs.setEffort;
+  const ultracode = composerPrefs.ultracode;
+  const setUltracode = composerPrefs.setUltracode;
+  const fastMode = composerPrefs.fastMode;
+  const setFastMode = composerPrefs.setFastMode;
+  // The agents' own model lists; the maintained list stands in until they arrive, and for a missing CLI.
   const accountScopeRef = useRef(accountScope);
   accountScopeRef.current = accountScope;
   const accountGeneration = useRef(0);
@@ -315,7 +309,7 @@ function App() {
     localStorage.setItem(CHAT_MODELS_KEY, JSON.stringify(chatModels.current));
   };
   const selectedCapability = capabilityFor(selectedModel, capabilities);
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => getSettings().defaultPermissionMode);
+  const permissionMode = composerPrefs.permissionMode;
   const [view, setView] = useState<"chat" | "canvas" | "settings">("chat");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
@@ -629,7 +623,7 @@ function App() {
   useEffect(() => {
     if (selectedSessionId !== null) return;
     setSelectedModel(resolveModel(models, defaultModelId, providerForId(defaultModelId)));
-    setPermissionMode(defaultPermissionMode);
+    changePermissionMode(defaultPermissionMode);
   }, [selectedSessionId, defaultModelId, defaultPermissionMode, models]);
 
   const effectiveBaseBranch = baseBranch && branches.includes(baseBranch) ? baseBranch : (selectedWorktree?.name ?? branches[0] ?? "");
@@ -653,8 +647,7 @@ function App() {
 
   // A running turn takes the new mode at once instead of at its next message.
   function changePermissionMode(mode: PermissionMode) {
-    setPermissionMode(mode);
-    updateSettings({ defaultPermissionMode: mode });
+    composerPrefs.setPermissionMode(mode);
     if (project && selectedSession)
       void bridgeForKey(project.path)
         .setAgentPermissionMode(chatKey(project.path, selectedSession.id), mode)
@@ -687,8 +680,8 @@ function App() {
     const own = messages.filter((message) => message.session_id === selectedSession.id);
     const picked = chatModels.current[chatKey(project.path, selectedSession.id)];
     const fallback = resolveModel(models, defaultModelId, providerForId(defaultModelId));
-    const next = modelForOpenChat(picked, selectedSession.provider, own, models, fallback);
-    if (next.id !== selectedModel.id) setSelectedModel(next);
+    const nextModel = modelForOpenChat(picked, selectedSession.provider, own, models, fallback);
+    if (nextModel.id !== selectedModel.id) setSelectedModel(nextModel);
   }, [project?.path, selectedSession?.id, selectedSession?.provider, messages, models]);
 
   function receiveState(projectPath: string, next: CoordinatorState | LinkState) {
@@ -1519,6 +1512,32 @@ function App() {
     await reportChatAction(unlinked(), "Could not unlink issue", setNotice);
   }
 
+  // Compact now on the context card: Claude's /compact as a divider in the chat, with no handoff and no draft touched.
+  async function compactContext() {
+    if (!project || !selectedSession || !selectedWorktree || readOnly) return;
+    const model = selectedModel;
+    try {
+      await agentRuns.send({
+        projectPath: project.path,
+        sessionId: selectedSession.id,
+        worktreeId: selectedWorktree.id,
+        body: COMPACT_COMMAND,
+        prompt: COMPACT_COMMAND,
+        images: [],
+        files: [],
+        provider: model.provider,
+        model: model.id,
+        permissionMode,
+        effort: effortFor(capabilityFor(model, capabilities), effort),
+        replies: getSettings().claudeReplies,
+        tldrEnabled: getSettings().tldrEnabled,
+        compact: true,
+      });
+    } catch (error) {
+      setNotice(`Could not compact the context: ${ipcErrorMessage(error)}`);
+    }
+  }
+
   async function sendMessage() {
     const body = draftStore.get().trim();
     if ((!body && !imageDraft.images.length && !imageDraft.files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
@@ -1908,14 +1927,7 @@ function App() {
             onUpdateCli: handleUpdateCli,
             updatingCli,
             capability: selectedCapability,
-            effort: effortFor(selectedCapability, effort),
-            onEffortChange: setEffort,
-            ultracode,
-            onUltracodeChange: setUltracode,
-            fastMode,
-            onFastModeChange: setFastMode,
-            permissionMode,
-            onPermissionModeChange: setPermissionMode,
+            // Options are now managed internally by LinkWorkspace via useComposerPreferences
           }}
           onSwitchProject={(path) => void switchProject(path)}
           onSwitchLink={(id) => void selectLink(id)}
@@ -2302,6 +2314,7 @@ function App() {
                     messageScope={project.path}
                     earlier={earlierMessages}
                     onSend={() => void sendMessage()}
+                    onCompact={selectedSession && (selectedSession.provider ?? "claude") === "claude" && !readOnly ? () => void compactContext() : undefined}
                     onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
                     linearActive={linear.active}
                     onStartFromIssue={startFromIssue}

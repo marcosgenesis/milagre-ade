@@ -182,7 +182,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     },
     [previewProject],
   );
-  // A Project hidden in its settings stays out of the list, searches included; Links are always listed.
+  // Hidden Projects and Links stay out of the list, searches included.
   const listed = useMemo(() => session.recent.filter((item) => !item.hidden), [session.recent]);
   // Searching or filtering reads every Project; ordinary browsing only reads expanded groups.
   const searching = !!query.trim() || show !== "all";
@@ -424,9 +424,8 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
       });
     else onNavigate({ pathname: "/chat", params: { ...params, id: String(chatId) } });
   }
-  // A Chat's ⋯ choice runs against its own Project's copy, which is reread afterwards. Archiving the Chat showing
-  // behind the navigation leaves it for the project list as soon as the archive is confirmed; the archive then runs on
-  // the Chat's row, and nothing navigates when it ends.
+  // A Chat's ⋯ choice runs against its own Project's copy, which is reread afterwards. Archive stays in this sidebar,
+  // including when its Chat is open behind it, so the row's progress and the list's scroll position stay in place.
   async function act(projectPath: string, chat: AgentSession, action: string) {
     const copy = copyOf(projectPath);
     if (!copy || !session.client) return;
@@ -451,7 +450,6 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         link: copy.project.link,
         onConfirm: () => {
           confirmed = true;
-          if (projectPath === currentPath && chat.id === activeChatId) onNavigate("/projects");
         },
         // The phone may show another Project by the time the archive ends, so the list's copy is read again too.
         refresh: () =>

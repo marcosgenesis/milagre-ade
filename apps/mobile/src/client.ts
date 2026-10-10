@@ -308,6 +308,7 @@ export function createClient(host: ClientHost, fetcher: typeof fetch = fetch, ti
         ...links.map((link) => ({
           path: scopeKey({ kind: "link", linkId: link.id }),
           name: link.name,
+          hidden: link.hidden,
           link,
           projects: link.projectIds.map((id) => registry.find((project) => project.id === id) ?? { id, name: "Unavailable Project", path: "" }),
         })),

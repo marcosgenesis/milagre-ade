@@ -28,6 +28,7 @@ function milagreInstructions(tldrEnabled = true, workspaceInstructions = "") {
     LINKS_INSTRUCTIONS,
     "Linear: when you have the milagre linear_issue, linear_search and linear_file tools, Milagre is already signed in to the user's Linear workspaces. Read issues, comments and uploaded images with them, not with a Linear MCP, connector or the Linear CLI. If one says a workspace isn't connected, tell the user to add it in Milagre's Settings › Experimental › Linear.",
     "Simulators: use milagre simulator_list, simulator_attach and simulator_detach to manage devices for this Chat. After choosing a simulator for mobile work, attach its exact deviceId so the user can view it. The bundled simulator skill has the workflow. Discovery never attaches devices; detach leaves them running.",
+    "Browsers: a Chromium browser this Chat's agent starts with a loopback DevTools port appears in the Chat's Browser pill on desktop and phone by itself, through process lineage. One that lineage cannot see (a browser daemon, one opened with open or from a shell that exited, or one the user started) joins only after milagre browser_attach with an id from browser_list. Attach the browser you drive so the user can watch it. The bundled browser skill has the workflow. Listing never captures; browser_detach leaves the browser running.",
     `Designs: when the user asks to see a UI, screen, mockup or visual design, show it with milagre artifact_show as one self-contained HTML document, with the width and height of the screen it is for (390 by 844 for a phone). The Chat shows it as a card, and the user sees every design of the Chat on a canvas beside it, where they can comment on a spot or choose one; those reach you as their messages. Each comment has an id: once you have addressed one (usually by showing a revised version), resolve it with artifact_resolve_comment and a short note on what you changed. To revise a design, show it again with the same id; to offer variants, show each with its own id. Before your first design in a Chat, read the bundled design skill at ${path.join(BUNDLED_SKILLS_DIRECTORY, "design", "SKILL.md")}: it has the process. When the user names another design tool for the work (Pencil, Figma, Paper or any other MCP or app), use that tool and do not call artifact_show for it, even if the request also matches this one.`,
     `Native UI: a reply can carry tables, metrics, callouts, progress, bar and line charts, and buttons the user taps to send a message, as a fenced block whose info string is \`openui\`, written in OpenUI Lang. Milagre renders it inline on desktop and phone. Before your first block in a Chat, read the bundled genui skill at ${path.join(BUNDLED_SKILLS_DIRECTORY, "genui", "SKILL.md")}: it has the syntax and the components. Use it for results with several attributes, numbers, a status or a choice; not for code or prose.`,
     ...(workspaceInstructions ? [workspaceInstructions] : []),
@@ -143,15 +144,19 @@ function mapClaudeMessage(message, state) {
     events.push({ type: "session-started", nativeId: message.session_id });
   }
   // Claude Code compacts the conversation when the context window fills: a status, then a boundary.
-  if (message.type === "system" && message.subtype === "status" && message.status === "compacting" && !state.compacting) {
-    state.compactCount = (state.compactCount ?? 0) + 1;
-    state.compacting = `compact-${state.compactCount}`;
-    events.push({ type: "step-started", step: { id: state.compacting, kind: "other", title: "Compacting context" } });
+  if (message.parent_tool_use_id == null && message.type === "system" && message.subtype === "status" && message.status === "compacting" && !state.compacting) {
+    state.compacting = true;
+    events.push({ type: "context-compacting" });
   }
-  if (message.type === "system" && message.subtype === "compact_boundary") {
-    if (state.compacting) events.push({ type: "step-completed", id: state.compacting, status: "done", title: "Compacted context" });
+  if (message.parent_tool_use_id == null && message.type === "system" && message.subtype === "compact_boundary") {
     state.compacting = null;
-    const after = message.compact_metadata?.post_tokens;
+    const { trigger, pre_tokens: before, post_tokens: after } = message.compact_metadata ?? {};
+    events.push({
+      type: "context-compacted",
+      trigger: trigger === "manual" ? "manual" : "auto",
+      ...(typeof before === "number" ? { before } : {}),
+      ...(typeof after === "number" ? { after } : {}),
+    });
     if (typeof after === "number") events.push(...claudeContextUsage(state, after));
   }
   if (message.type === "assistant" && message.parent_tool_use_id == null && message.message?.usage) {
@@ -261,6 +266,15 @@ function mapCodexNotification(method, params, state) {
   if ((method === "item/started" || method === "item/completed") && params.item) {
     // An item from an earlier turn is not part of this reply.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
+    if (params.item.type === "contextCompaction") {
+      state.compactions ??= new Map();
+      const id = String(params.item.id);
+      const status = method === "item/started" ? "preparing" : "done";
+      const previous = state.compactions.get(id);
+      if (previous === "done" || previous === status) return [];
+      state.compactions.set(id, status);
+      return status === "preparing" ? [{ type: "context-compacting" }] : [{ type: "context-compacted", trigger: "auto" }];
+    }
     if (params.item.type === "reasoning") return codexReasoning(method, params.item, state);
     const step = codexStep(params.item);
     if (!step) return [];

@@ -39,7 +39,7 @@ test("accepted input followed by a startup failure starts a fresh notification l
   push.observe(chatId, { type: "turn-failed", message: "CLI unavailable" });
   await push.settled();
   assert.equal(messages.length, 2);
-  assert.equal(messages[1].body, "CLI unavailable");
+  assert.equal(messages[1].body, "Turn failed: CLI unavailable");
 });
 
 test("steering an active turn preserves request deduplication", async (t) => {
@@ -87,8 +87,8 @@ test("sends approvals, questions, completion and failure without an attached cli
   push.observe(chatId, { type: "turn-started", turnId: "turn-1" });
   push.observe(chatId, approval);
   await push.settled();
-  assert.match(messages[0].title, /needs approval/);
-  assert.equal(messages[0].body, "Run: ls");
+  assert.equal(messages[0].title, "Login");
+  assert.match(messages[0].body, /needs approval: Run: ls/);
   assert.deepEqual(messages[0].data, {
     kind: "milagre-chat",
     hostId: "https://mac.example.com",
@@ -98,18 +98,18 @@ test("sends approvals, questions, completion and failure without an attached cli
   });
   push.observe(chatId, { type: "question-request", requestId: "question-1", questions: [{ question: "Which branch?" }] });
   await push.settled();
-  assert.match(messages[1].title, /needs input/);
-  assert.equal(messages[1].body, "Which branch?");
+  assert.equal(messages[1].title, "Login");
+  assert.match(messages[1].body, /needs input: Which branch\?/);
   push.observe(chatId, { type: "text-delta", text: "Done fixing login." });
   push.observe(chatId, { type: "turn-completed" });
   await push.settled();
-  assert.match(messages[2].title, /Turn completed/);
-  assert.equal(messages[2].body, "Done fixing login.");
+  assert.equal(messages[2].title, "Login");
+  assert.equal(messages[2].body, "Turn completed: Done fixing login.");
   push.observe(chatId, { type: "turn-started", turnId: "turn-2" });
   push.observe(chatId, { type: "turn-failed", message: "Provider unavailable" });
   await push.settled();
-  assert.match(messages[3].title, /Turn failed/);
-  assert.equal(messages[3].body, "Provider unavailable");
+  assert.equal(messages[3].title, "Login");
+  assert.equal(messages[3].body, "Turn failed: Provider unavailable");
   push.observe(chatId, { type: "turn-started", turnId: "turn-3" });
   push.observe(chatId, { type: "turn-cancelled" });
   await push.settled();
@@ -305,8 +305,8 @@ test("a turn that ends while a background subagent runs is held; the turn its re
   push.observe(chatId, agent("b", "completed"));
   await push.settled();
   assert.equal(messages.length, 1);
-  assert.match(messages[0].title, /Turn completed/);
-  assert.equal(messages[0].body, "First review in; waiting on the second.");
+  assert.equal(messages[0].title, "Login");
+  assert.equal(messages[0].body, "Turn completed: First review in; waiting on the second.");
   push.observe(chatId, { type: "turn-started", turnId: "t3" });
   push.observe(chatId, agent("c", "running"));
   push.observe(chatId, { type: "turn-failed", message: "Provider unavailable" });

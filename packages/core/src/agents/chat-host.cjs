@@ -52,6 +52,14 @@ function revertSwitch(session, from, to) {
   return withNativeSessions({ ...session, provider: from }, resumeId, parked);
 }
 
+// Only Claude Code takes /compact, and only between turns: steered into a running turn it would be read as text.
+function compactionProvider(session, run) {
+  if (run) throw new Error("Wait for the agent to finish before compacting.");
+  const provider = session.provider ?? "claude";
+  if (provider !== "claude") throw new Error("Only Claude chats can be compacted from here.");
+  return provider;
+}
+
 // A handoff that did not happen: its divider fails and the session goes back to the provider it was on.
 function failHandoff(latest, divider, sessionId, from, to) {
   const session = latest.sessions[sessionId];
@@ -373,7 +381,10 @@ class ChatHost {
   async send(request) {
     await this.beforeSend(request);
     if (request.canStart && !request.canStart()) throw new Error("Advisor delivery is deferred.");
-    const { projectPath, body, images = [], files = [], provider, model } = request;
+    const { projectPath, body, images = [], files = [], model } = request;
+    // A /compact runs on the chat's own provider, whatever the picker says: it never hands off.
+    const compaction = request.context?.kind === "compaction";
+    let provider = request.provider;
     const execution = this.states.executionContext && request.sessionId != null ? await this.states.executionContext(projectPath, request.sessionId) : null;
     const storedImages = await storeImages(this.states.storageDirectory?.(projectPath) ?? projectPath, images);
     let target = null;
@@ -408,6 +419,11 @@ class ChatHost {
         brief = firstMessage ? session.handoverDraft : undefined;
         const chatId = chatKey(projectPath, session.id);
         const withSession = started.state;
+        if (compaction) {
+          provider = compactionProvider(session, this.runs[chatId]);
+          runProvider = provider;
+          runModel = lastUserModel(withSession, session.id) || model;
+        }
         // A message that steers a running turn, or one whose handoff is still preparing, never hands off.
         waitFor = this.preparing.get(chatId) ?? null;
         const steering = Boolean(this.runs[chatId]) || Boolean(waitFor);
@@ -436,6 +452,11 @@ class ChatHost {
         };
         pendingId = message.id;
         if (typeof request.clientMessageId === "string") message.clientMessageId = request.clientMessageId;
+        // The divider records the gauge as it stood: the composer's running numbers, else the ones saved with the chat.
+        if (compaction) {
+          const usage = this.runs[chatId]?.contextUsage ?? session.contextUsage;
+          message.context = { ...message.context, ...(usage && usage.size > 0 ? { before: usage.used, size: usage.size } : {}) };
+        }
         // Switching providers parks the old native session and resumes the one parked for the new provider, if any.
         stagedSession = {
           ...withoutDraft(session),

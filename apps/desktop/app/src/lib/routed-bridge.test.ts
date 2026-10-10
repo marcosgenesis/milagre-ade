@@ -62,7 +62,7 @@ const ALLOWED: Record<string, string[]> = {
     "onMainSyncStatus",
     "computers",
   ],
-  "components/SidebarNav.tsx": ["listRecentProjects", "listNamedLinks", "listProjects", "revealInFolder"],
+  "components/SidebarNav.tsx": ["listRecentProjects", "listNamedLinks", "listProjects", "revealInFolder", "updateNamedLink"],
   // Canvas Links are this Mac's own, like the canvas.
   "components/sidebar/SidebarLinks.tsx": ["onLinksChanged"],
   "components/LinkWorkspace.tsx": ["syncNotifications", "revealInFolder"],

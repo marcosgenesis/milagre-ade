@@ -44,9 +44,11 @@ import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { HandoffDivider } from "./Handover";
 import { WorktreeLinkDivider } from "./WorktreeLinkDivider";
+import { CompactionDivider } from "./CompactionDivider";
 import { advisorResultLabel, messageSender } from "@milagre/shared/advisor-result";
 import { LinkedMessageHeader, linkedContext } from "./LinkedMessage";
 import { isHandoff } from "@milagre/shared/handoff";
+import { isCompaction } from "@milagre/shared/compaction";
 import { isWorktreeLinked } from "@milagre/shared/worktree-link";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
@@ -158,6 +160,7 @@ const MessageSection = memo(function MessageSection({
 }) {
   if (isHandoff(message)) return <HandoffDivider context={message.context} models={models} />;
   if (isWorktreeLinked(message)) return <WorktreeLinkDivider context={message.context} />;
+  if (isCompaction(message)) return <CompactionDivider context={message.context} />;
   const linked = linkedContext(message);
   const advisor = typeof message.context === "object" && message.context?.kind === "advisor-result" ? message.context : null;
   // A PR-blocker pill's message shows as a card, not as the skill prompt the agent read.
@@ -451,6 +454,8 @@ interface ChatComposerProps {
   onDraftChange: (draft: string) => void;
   onSend: () => void;
   onStop?: () => void;
+  /** Sends `/compact` to the chat (Claude only); the context card offers it as Compact now. */
+  onCompact?: () => void;
   /** One-click fix for whatever blocks the chat's PR from merging (conflicts, an outdated branch, requested changes). */
   pullRequestAction?: { label: string; tone: "red" | "orange"; onRun: () => void };
   isSending: boolean;
@@ -745,6 +750,7 @@ export function ChatComposer({
   onDraftChange,
   onSend,
   onStop,
+  onCompact,
   pullRequestAction,
   isSending,
   sendBlocked,
@@ -1011,6 +1017,7 @@ export function ChatComposer({
                 onDraftChange={onDraftChange}
                 onSend={onSend}
                 onStop={onStop}
+                onCompact={onCompact}
                 sendBlocked={sendBlocked}
                 running={isSending}
                 models={models}

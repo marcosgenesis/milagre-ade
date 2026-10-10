@@ -4,7 +4,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DomWebView, type DomWebViewRef } from "@expo/dom-webview";
 import { File, Paths } from "expo-file-system";
-import { ArrowLeft01Icon, BrowserIcon, Cancel01Icon, Link01Icon } from "@hugeicons/core-free-icons";
+import { ArrowLeft01Icon, BrowserIcon, Cancel01Icon, Link01Icon, Unlink04Icon } from "@hugeicons/core-free-icons";
 import type { BrowserFrame, BrowserList, BrowserTarget } from "@milagre/shared/browser";
 import { createBrowserBridge, createBrowserReceiverHtml } from "@milagre/shared/browser-receiver";
 import type { Client } from "./client";
@@ -57,12 +57,12 @@ function useBrowsers(client: Client | null, chatId: string | undefined) {
   return { list, setList, refresh: () => refresh.current() };
 }
 
-/** Same border, height, spacing and icon size as the Simulators pill. Hidden until this Chat has a page or a browser to attach. */
+/** Same border, height, spacing and icon size as the Simulators pill. Hidden until this Chat has a page. */
 export function BrowserChip({ chatId }: { chatId?: string }) {
   const { colors } = useTheme();
   const { client } = useSession();
   const { list } = useBrowsers(client, chatId);
-  if (!client || !chatId || !list?.supported || (!list.targets.length && !list.others.length)) return null;
+  if (!client || !chatId || !list?.supported || !list.targets.length) return null;
   const count = list.targets.length;
   return (
     <Pressable
@@ -126,6 +126,26 @@ export function BrowserSheet({ hostId, chatId }: { hostId?: string; chatId?: str
         targets: current?.targets ?? [],
         others: current?.others ?? [],
         error: error instanceof Error ? error.message : "Could not attach the browser.",
+      }));
+    } finally {
+      setAttaching(null);
+    }
+  };
+  const detach = async (browserId: string) => {
+    if (!source || !chatId) return;
+    setAttaching(browserId);
+    try {
+      setList(await source.call<BrowserList>("browser:detach", [{ chatId, browserId }]));
+      if (chosen?.id.startsWith(`${browserId}:`)) {
+        setChosen(null);
+        setPage(null);
+      }
+    } catch (error) {
+      setList((current) => ({
+        supported: true,
+        targets: current?.targets ?? [],
+        others: current?.others ?? [],
+        error: error instanceof Error ? error.message : "Could not detach the browser.",
       }));
     } finally {
       setAttaching(null);
@@ -223,7 +243,18 @@ export function BrowserSheet({ hostId, chatId }: { hostId?: string; chatId?: str
                     {target.url}
                   </Text>
                 </View>
-                <Text style={styles.muted}>{target.source === "attached" ? "Attached" : target.browser}</Text>
+                {target.source === "attached" ? (
+                  <PillButton
+                    title="Detach"
+                    icon={Unlink04Icon}
+                    secondary
+                    loading={attaching === target.id.slice(0, target.id.indexOf(":"))}
+                    disabled={attaching !== null}
+                    onPress={() => void detach(target.id.slice(0, target.id.indexOf(":")))}
+                  />
+                ) : (
+                  <Text style={styles.muted}>{target.browser}</Text>
+                )}
               </Pressable>
             ))}
             {!!list?.others.length && (

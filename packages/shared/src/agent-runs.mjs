@@ -272,6 +272,24 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
       return run ? splitRunForSteer(state, runs, projectPath, chatId) : { state, runs: applyRunEvent(runs, chatId, event), changed: false };
     case "turn-started":
       return { state, runs: applyRunEvent(runs, chatId, event, lastUserModel(state, sessionId)), changed: false };
+    // A /compact the user asked for shows its progress on its divider: Claude's own compaction step stays out of the reply.
+    case "step-started":
+      if (event.step.id.startsWith("compact-") && pendingCompaction(state, sessionId)) return { state, runs, changed: false };
+      return { state, runs: applyRunEvent(runs, chatId, event), changed: false };
+    case "context-compacting":
+      return pendingCompaction(state, sessionId) ? { state, runs, changed: false } : addCompaction(state, runs, projectPath, chatId, "preparing");
+    case "context-compacted": {
+      const request = pendingCompaction(state, sessionId);
+      if (!request) return addCompaction(state, runs, projectPath, chatId, "done", event);
+      const before = request.role === "user" ? (request.context.before ?? event.before) : (event.before ?? request.context.before);
+      const context = {
+        ...request.context,
+        status: "done",
+        ...(before === undefined ? {} : { before }),
+        ...(event.after === undefined ? {} : { after: event.after }),
+      };
+      return { state: withContext(state, request, context), runs, changed: true };
+    }
     case "turn-completed":
     case "turn-cancelled":
     case "turn-failed": {
@@ -279,9 +297,15 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
       const remaining = applyRunEvent(runs, chatId, event);
       // The context gauge outlives the run, so the composer still shows it between turns.
       if (run.contextUsage) state = { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, contextUsage: run.contextUsage } } };
+      // A compaction request whose turn ends before its boundary did not happen.
+      const unfinished = pendingCompaction(state, sessionId);
+      if (unfinished) state = withContext(state, unfinished, { ...unfinished.context, status: "failed" });
       // The reply so far was saved when a steering message split it; there is nothing left to show.
       if (event.type === "turn-completed" && run.split && !run.text.trim() && !run.steps.length)
-        return { state, runs: remaining, changed: Boolean(run.contextUsage) };
+        return { state, runs: remaining, changed: Boolean(run.contextUsage) || Boolean(unfinished) };
+      // A /compact turn says nothing: its divider is the whole reply.
+      if (event.type === "turn-completed" && !run.text.trim() && !run.steps.length && isCompactionRequest(lastUserMessage(state, sessionId)))
+        return { state, runs: remaining, changed: true };
       const message = {
         id: state.next_id,
         session_id: sessionId,
@@ -298,6 +322,47 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
     default:
       return { state, runs: applyRunEvent(runs, chatId, event), changed: false };
   }
+}
+
+const isCompactionRequest = (message) => message?.context?.kind === "compaction";
+const lastUserMessage = (state, sessionId) => state.messages.findLast((message) => message.session_id === sessionId && message.role === "user");
+
+/** The manual or automatic compaction that has not reached its boundary yet, if any. */
+function pendingCompaction(state, sessionId) {
+  const request = state.messages.findLast((message) => message.session_id === sessionId && isCompactionRequest(message));
+  return request?.context.status === "preparing" ? request : null;
+}
+
+/** Save the reply so far above the divider; the same turn continues below it. */
+function addCompaction(state, runs, projectPath, chatId, status, event = {}) {
+  const sessionId = sessionIdFromKey(chatId);
+  const usage = runs[chatId]?.contextUsage ?? state.sessions[sessionId].contextUsage;
+  const split = splitRunForSteer(state, runs, projectPath, chatId);
+  const before = event.before ?? usage?.used;
+  const message = {
+    id: split.state.next_id,
+    session_id: sessionId,
+    role: "assistant",
+    body: "",
+    model: runs[chatId]?.model ?? lastUserModel(state, sessionId),
+    context: {
+      kind: "compaction",
+      status,
+      ...(before === undefined ? {} : { before }),
+      ...(event.after === undefined ? {} : { after: event.after }),
+      ...(usage?.size > 0 ? { size: usage.size } : {}),
+    },
+  };
+  const run = split.runs[chatId];
+  return {
+    state: { ...split.state, next_id: message.id + 1, messages: [...split.state.messages, message] },
+    runs: run ? { ...split.runs, [chatId]: { ...run, split: true } } : split.runs,
+    changed: true,
+  };
+}
+
+function withContext(state, message, context) {
+  return { ...state, messages: state.messages.map((item) => (item === message ? { ...item, context } : item)) };
 }
 
 function replyBody(text, event, hasSteps) {

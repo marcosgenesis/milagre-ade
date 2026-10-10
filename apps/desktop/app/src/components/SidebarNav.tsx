@@ -874,7 +874,9 @@ export default memo(function SidebarNav({
   });
   const localScopes = [
     ...orderedProjects,
-    ...namedLinks.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link, computerId: LOCAL_COMPUTER })),
+    ...namedLinks
+      .filter((link) => link.id === selectedLink?.id || !link.hidden)
+      .map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link, computerId: LOCAL_COMPUTER })),
   ];
   // With other computers, one list by name (their order can't follow this Mac's open history); with this Mac alone, as before.
   const scopes = multi
@@ -1019,6 +1021,29 @@ export default memo(function SidebarNav({
 
   // Checked in the project chooser; the flag lives with the Project, so the phone's list follows.
   const showProject = (path: string, show: boolean) => {
+    if (path.startsWith("milagre-link:")) {
+      const id = path.slice("milagre-link:".length);
+      if (isRemoteKey(path)) {
+        remote.setHidden(path, !show);
+        const linkId = unqualifyKey(id);
+        const bridge = bridgeForKey(path);
+        void bridge.listNamedLinks().then((links) => {
+          const link = links.find((l) => l.id === linkId);
+          if (link) {
+            bridge.updateNamedLink({ id: link.id, name: link.name, projectIds: link.projectIds, hidden: !show }).catch(() => {});
+          }
+        });
+      } else {
+        const link = namedLinks.find((l) => l.id === id);
+        if (link) {
+          setNamedLinks((links) => links.map((l) => (l.id === id ? { ...l, hidden: !show } : l)));
+          window.milagre?.updateNamedLink?.({ id, name: link.name, projectIds: link.projectIds, hidden: !show }).catch(() => {
+            setListsChanged((count) => count + 1);
+          });
+        }
+      }
+      return;
+    }
     if (isRemoteKey(path)) remote.setHidden(path, !show);
     setRecentProjects((list) => list.map((project) => (project.path === path ? { ...project, hidden: !show } : project)));
     bridgeForKey(path)
@@ -1038,6 +1063,14 @@ export default memo(function SidebarNav({
       const recent = recentProjects.find((project) => project.path === row.path);
       return { ...row, shown: !recent?.hidden, listed: !!recent, computer: multi && isRemoteKey(row.path) ? rowComputer(row.path)?.name : undefined };
     }),
+    ...namedLinks.map((link) => ({
+      path: `milagre-link:${link.id}`,
+      name: link.name,
+      initial: link.name.slice(0, 1).toUpperCase(),
+      current: link.id === selectedLink?.id,
+      shown: !link.hidden,
+      listed: true,
+    })),
     ...remote.projects
       .filter((project) => !projects.some((row) => row.path === project.path))
       .map((project) => ({

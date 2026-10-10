@@ -59,15 +59,21 @@ export default function ContextSheet() {
       </View>
       <Text style={styles.muted}>{hint ? `${left}. ${hint}` : left}</Text>
       {canCompact && chatId && (
-        <PillButton
-          title="Compact now"
-          disabled={Boolean(blocked)}
-          disabledReason={blocked || undefined}
-          onPress={() => {
-            composer.requestCompact(chatId);
-            router.back();
-          }}
-        />
+        <View style={{ gap: 8 }}>
+          <PillButton
+            title="Compact now"
+            disabled={Boolean(blocked)}
+            onPress={() => {
+              composer.requestCompact(chatId);
+              router.back();
+            }}
+          />
+          {blocked && (
+            <Text accessibilityLiveRegion="polite" style={[styles.muted, { textAlign: "center", fontSize: 13 }]}>
+              {blocked}
+            </Text>
+          )}
+        </View>
       )}
     </View>
   );

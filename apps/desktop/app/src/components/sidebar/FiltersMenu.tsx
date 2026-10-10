@@ -39,6 +39,11 @@ const FIELD_ICONS: Record<ChatRowField, ReactNode> = {
   lastActivity: <HugeIcon icon={Clock01Icon} />,
 };
 
+// FilterHorizontalIcon with its two knobs filled: the button's look while a filter is on (the free set has no filled style).
+const FilterHorizontalFilledIcon: HugeIconData = FilterHorizontalIcon.map(([tag, attrs]) =>
+  attrs.key === "4" || attrs.key === "5" ? [tag, { ...attrs, fill: "currentColor" }] : [tag, attrs],
+) as HugeIconData;
+
 type Sub = "projects" | "show";
 const ROW = "relative z-10 flex h-9 w-full items-center gap-2 rounded-[8px] px-2 text-left outline-none focus-visible:bg-hover-2 disabled:opacity-40";
 const PANEL = "fixed z-50 flex flex-col overflow-hidden rounded-[14px] bg-surface shadow-overlay";
@@ -166,11 +171,12 @@ export function FiltersButton({
           aria-haspopup="menu"
           aria-expanded={open}
           data-filters
+          data-filters-active={hiddenCount > 0 || undefined}
           onClick={() => (open ? close() : place() && setOpen(true))}
-          className={`${className} relative ${open ? "bg-hover-2 text-ink" : ""}`}
+          className={`${className} relative ${open ? "bg-hover-2 text-ink" : hiddenCount > 0 ? "text-ink" : ""}`}
         >
-          <HugeIcon icon={FilterHorizontalIcon} size={16} />
-          {hiddenCount > 0 && <span aria-hidden className="absolute right-1 top-1 size-1.5 rounded-full bg-accent" />}
+          {/* A filter on fills the icon's knobs; off, they stay outlined. */}
+          <HugeIcon icon={hiddenCount > 0 ? FilterHorizontalFilledIcon : FilterHorizontalIcon} size={16} />
         </button>
       </Tooltip>
       {open &&

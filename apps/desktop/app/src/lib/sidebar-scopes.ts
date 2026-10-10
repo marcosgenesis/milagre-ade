@@ -37,7 +37,43 @@ export function runKeys(runs: AgentRuns) {
   };
 }
 
-/** The chat rows of a Project or Link that isn't open, for the all-Projects sidebar; the marks come from `runKeys`. */
+/** The facts only the open Project's rows learn (its PRs, Linear issues and ports are read for it alone). */
+type RememberedDetails = Pick<NonNullable<SidebarRecent["details"]>, "pullRequests" | "linearIssue" | "linearKey" | "linkable" | "ports">;
+// The last of those facts each chat showed while its Project was open, by scope key then chat id. A Project left
+// behind keeps showing them until it is opened again: its rows don't shrink on a switch.
+const rememberedDetails = new Map<string, Map<string, { path: string | undefined; details: RememberedDetails }>>();
+
+/** Keeps what the open scope's rows show now, for `scopeChats` to carry once the scope isn't open. */
+export function rememberScopeRows(key: string, rows: readonly SidebarRecent[]) {
+  const byId = new Map<string, { path: string | undefined; details: RememberedDetails }>();
+  for (const row of rows) {
+    if (row.pending || !row.details) continue;
+    const { pullRequests, linearIssue, linearKey, linkable, ports } = row.details;
+    byId.set(row.id, { path: row.details.path, details: { pullRequests, linearIssue, linearKey, linkable, ports } });
+  }
+  rememberedDetails.set(key, byId);
+}
+
+/** What a chat row remembers from when its scope was open, if its chat still has the same Worktree. */
+function rememberedFor(key: string, id: string, path: string | undefined): RememberedDetails {
+  const remembered = rememberedDetails.get(key)?.get(id);
+  return remembered && remembered.path === path ? remembered.details : {};
+}
+
+/** What a scope's icon shows on the collapsed rail: a chat asking or waiting wins over one running. */
+export type RailStatus = "attention" | "running" | "idle";
+
+/** The chats with a turn under way or waiting on the user, and what the scope's icon shows for them. */
+export function railLive(rows: readonly SidebarRecent[]): { status: RailStatus; chats: SidebarRecent[] } {
+  const chats = rows.filter((row) => row.mark === "question" || row.mark === "waiting" || row.mark === "delegated" || row.mark === "running");
+  const attention = chats.some((row) => row.mark === "question" || row.mark === "waiting");
+  return { status: attention ? "attention" : chats.length ? "running" : "idle", chats };
+}
+
+/**
+ * The chat rows of a Project or Link that isn't open, for the all-Projects sidebar; the marks come from `runKeys`.
+ * Each row keeps the PRs, Linear issue and ports it showed while its scope was open (`rememberScopeRows`).
+ */
 export function scopeChats(
   key: string,
   state: CoordinatorState | LinkState,
@@ -68,7 +104,9 @@ export function scopeChats(
       mark: chatMark({ asking: asking.has(chatKey), waiting: waiting.has(chatKey), running: running.has(chatKey), unread: Boolean(session.unread) }),
       ...("worktrees" in session ? { worktreeCount: session.worktrees.length } : {}),
       details: {
+        ...rememberedFor(key, String(session.id), worktree?.path),
         ...(worktree ? { branch: worktree.name, path: worktree.path, diff: worktree.diff } : {}),
+        failed: chatSummary(session, sessionMessages).lastOutcome === "failed",
         lastAt: chatSummary(session, sessionMessages).lastAt,
       },
     };

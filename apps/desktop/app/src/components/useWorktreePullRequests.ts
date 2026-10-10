@@ -9,6 +9,8 @@ import { bridgeForKey, onAnyAgentEvent } from "../lib/computer-bridge";
 // Conflict entries are bare PR URLs, so this key keeps its name from when conflicts were the only blocker.
 const DISMISSED_BLOCKERS = "milagre.dismissed-conflict-actions";
 
+const NO_PRS: Record<string, PullRequest | null> = {};
+const NO_CHAT_PRS: Record<string, Record<PullRequestRef, PullRequest | null>> = {};
 const POLL_MS = 30_000;
 const FOCUS_GAP_MS = 5000;
 
@@ -43,6 +45,11 @@ export function pollWhileActive(refresh: () => void, lastRefresh: () => number):
     document.removeEventListener("visibilitychange", onVisibility);
   };
 }
+
+// The last PRs read for each Project, by Worktree path, and the last of each chat's own PRs. A Project opened
+// again starts from them, so its rows keep their chips while gh answers instead of losing and regaining them.
+const lastPullRequests = new Map<string, Record<string, PullRequest | null>>();
+const lastChatPullRequests = new Map<string, Record<string, Record<PullRequestRef, PullRequest | null>>>();
 
 /** PRs stay transient: refresh on opening a project, focus, turn completion, and while visible. */
 export function useWorktreePullRequests(projectPath: string, state: CoordinatorState | null) {
@@ -102,10 +109,11 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
               .catch(() => null);
             if (!disposed) {
               setDismissedBlockers((current) => updateBlockerDismissals(current, pr));
-              setSnapshot((current) => ({
-                projectPath,
-                prs: { ...(current.projectPath === projectPath ? current.prs : {}), [path]: pr },
-              }));
+              setSnapshot((current) => {
+                const prs = { ...(current.projectPath === projectPath ? current.prs : (lastPullRequests.get(projectPath) ?? {})), [path]: pr };
+                lastPullRequests.set(projectPath, prs);
+                return { projectPath, prs };
+              });
             }
           } finally {
             pending.delete(path);
@@ -163,7 +171,7 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
     // A merged PR can't change again, so it's read once; new and open ones follow the branch PR's refreshes.
     const refresh = async () => {
       lastRefresh = Date.now();
-      const known = chatSnapshotRef.current.projectPath === projectPath ? chatSnapshotRef.current.prs : {};
+      const known = chatSnapshotRef.current.projectPath === projectPath ? chatSnapshotRef.current.prs : (lastChatPullRequests.get(projectPath) ?? {});
       await Promise.all(
         entries.map(async ([path, refs]) => {
           const selected = refs.filter((ref) => known[path]?.[ref]?.state !== "MERGED");
@@ -173,9 +181,11 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
             .catch(() => selected.map(() => null));
           if (disposed) return;
           setChatSnapshot((current) => {
-            const previous = current.projectPath === projectPath ? current.prs : {};
+            const previous = current.projectPath === projectPath ? current.prs : (lastChatPullRequests.get(projectPath) ?? {});
             const read = Object.fromEntries(selected.map((ref, index) => [ref, prs[index] ?? null]));
-            return { projectPath, prs: { ...previous, [path]: { ...previous[path], ...read } } };
+            const next = { ...previous, [path]: { ...previous[path], ...read } };
+            lastChatPullRequests.set(projectPath, next);
+            return { projectPath, prs: next };
           });
         }),
       );
@@ -192,8 +202,8 @@ export function useWorktreePullRequests(projectPath: string, state: CoordinatorS
   }, [projectPath, chatRefsKey]);
 
   return {
-    pullRequests: snapshot.projectPath === projectPath ? snapshot.prs : {},
-    chatPullRequests: chatSnapshot.projectPath === projectPath ? chatSnapshot.prs : {},
+    pullRequests: snapshot.projectPath === projectPath ? snapshot.prs : (lastPullRequests.get(projectPath) ?? NO_PRS),
+    chatPullRequests: chatSnapshot.projectPath === projectPath ? chatSnapshot.prs : (lastChatPullRequests.get(projectPath) ?? NO_CHAT_PRS),
     dismissedBlockers,
     dismissBlockerAction,
   };

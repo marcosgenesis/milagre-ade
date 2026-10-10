@@ -1,5 +1,5 @@
 import { chatSummary } from "@milagre/shared/chat-summary";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import type { Href } from "expo-router";
@@ -37,6 +37,7 @@ import type { LinearIssue } from "@milagre/shared/linear";
 import type { ChatSearchMatch, RegisteredProject } from "./client";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
 import { useComposer, usePendingChats, useSession, type MobilePendingChat } from "./session";
+import { savedFoldedProjects } from "./hosts-native";
 import { useLinks } from "./use-links";
 import { endNamer, linkMenuSection, linkWorktree, linkedAccessibilityLabel, linkedLabels, type LinkChat } from "./chat-links";
 import { linkWithChat, removeLinkFromChat } from "./link-actions";
@@ -131,7 +132,14 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const attention = useAttention();
   const { reloadProjects, previewProject, cachedProject } = session;
   const currentPath = session.snapshot?.project.path;
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set([currentPath || session.recent[0]?.path].filter(Boolean) as string[]));
+  // Every group is open unless it was folded by hand, here or in an earlier visit: going back to the sidebar
+  // doesn't fold the others.
+  const hostId = session.client?.url ?? "";
+  const folded = useSyncExternalStore(savedFoldedProjects.subscribe, () => savedFoldedProjects.folded(hostId));
+  const foldsRead = useSyncExternalStore(savedFoldedProjects.subscribe, () => savedFoldedProjects.loaded(hostId));
+  useEffect(() => {
+    void savedFoldedProjects.load(hostId);
+  }, [hostId]);
   // Snapshots live in the session, so closing the drawer or switching Projects keeps them.
   const [revision, setRevision] = useState(0);
   const [failures, setFailures] = useState<Record<string, string>>({});
@@ -184,13 +192,15 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   );
   // Hidden Projects and Links stay out of the list, searches included.
   const listed = useMemo(() => session.recent.filter((item) => !item.hidden), [session.recent]);
-  // Searching or filtering reads every Project; ordinary browsing only reads expanded groups.
+  // Searching or filtering reads every Project; ordinary browsing only reads open groups.
   const searching = !!query.trim() || show !== "all";
   useEffect(() => {
-    const paths = listed.filter((item) => searching || expanded.has(item.path)).map((item) => item.path);
-    // One slow Project must not hold up the other expanded groups.
+    // Until the folds are read, a folded group would be read for nothing.
+    if (!foldsRead && !searching) return;
+    const paths = listed.filter((item) => searching || !folded.has(item.path)).map((item) => item.path);
+    // One slow Project must not hold up the other open groups.
     void Promise.all(paths.map(load));
-  }, [expanded, searching, listed, load]);
+  }, [folded, foldsRead, searching, listed, load]);
   // Projects held without their messages (a drawer preview, or a host that keeps them by Chat) are searched on the host.
   const [hostMatches, setHostMatches] = useState<{ query: string; matches: Record<string, ChatSearchMatch[]> }>({ query: "", matches: {} });
   const hostSearchPaths = useMemo(
@@ -241,7 +251,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         previews.map((item) => [saved ? (pendingChatSessionId(saved.project.state, item.preview) ?? item.preview.session.id) : item.preview.session.id, item]),
       );
       const name = project.name || project.path.split("/").at(-1) || "Project";
-      const open = searching || expanded.has(project.path);
+      const open = searching || !folded.has(project.path);
       // Keep message lookup linear even in large Projects.
       const byChat = new Map<number, NonNullable<typeof copy>["project"]["state"]["messages"]>();
       for (const message of copy?.project.state.messages || []) {
@@ -357,7 +367,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     revision,
     cachedProject,
     currentPath,
-    expanded,
+    folded,
     failures,
     query,
     searching,
@@ -746,7 +756,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
               setRefreshing(true);
               void links.refresh();
               void reloadProjects()
-                .then(() => Promise.all([...expanded].map(load)))
+                .then(() => Promise.all(listed.filter((item) => !folded.has(item.path)).map((item) => load(item.path))))
                 .catch((e) => setError(e.message))
                 .finally(() => setRefreshing(false));
             }}
@@ -785,14 +795,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                   title={item.name}
                   sections={menu}
                   onSelect={choose}
-                  onPress={() =>
-                    setExpanded((previous) => {
-                      const next = new Set(previous);
-                      if (next.has(item.path)) next.delete(item.path);
-                      else next.add(item.path);
-                      return next;
-                    })
-                  }
+                  onPress={() => void savedFoldedProjects.toggle(hostId, item.path)}
                   style={{ flex: 1 }}
                 >
                   <View style={s.projectTitle}>

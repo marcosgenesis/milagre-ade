@@ -868,7 +868,8 @@ function ChatHoverCard({
   );
 }
 
-function ChatMarkDotInline({ mark, failed }: { mark: ChatMark; failed: boolean }) {
+/** A mark without its row: the hover card's status line, and the collapsed rail's list of live chats. */
+export function ChatMarkDotInline({ mark, failed }: { mark: ChatMark; failed: boolean }) {
   if (mark === "running") return <SpinnerRing size={12} color="var(--accent)" />;
   if (mark in MARK_ICON) return <MarkIcon mark={mark as keyof typeof MARK_ICON} />;
   return <span aria-hidden className={`size-2 rounded-full ${mark === "idle" && failed ? "bg-red" : "bg-accent"}`} />;

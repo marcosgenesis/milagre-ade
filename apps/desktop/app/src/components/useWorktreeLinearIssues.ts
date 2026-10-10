@@ -4,6 +4,8 @@ import { pollWhileActive } from "./useWorktreePullRequests";
 import { bridgeForKey } from "../lib/computer-bridge";
 
 const NO_ISSUES: Record<string, LinearIssue> = {};
+// The last issues read for each Project: a Project opened again shows them while the next read is under way.
+const lastIssues = new Map<string, Record<string, LinearIssue>>();
 
 /**
  * Linear issues the Worktrees under a Project were started from or name, keyed by Worktree path. Polls like the PRs do.
@@ -19,7 +21,9 @@ export function useWorktreeLinearIssues(projectPath: string, active: boolean): {
     const refresh = async () => {
       lastRefresh = Date.now();
       const issues = await readIssues(projectPath);
-      if (!disposed) setSnapshot((current) => keepIfSame(current, projectPath, issues));
+      if (disposed) return;
+      lastIssues.set(projectPath, issues);
+      setSnapshot((current) => keepIfSame(current, projectPath, issues));
     };
     refreshRef.current = () => void refresh();
     void refresh();
@@ -34,7 +38,7 @@ export function useWorktreeLinearIssues(projectPath: string, active: boolean): {
     };
   }, [projectPath, active]);
   const refresh = useCallback(() => refreshRef.current(), []);
-  return { issues: active && snapshot.projectPath === projectPath ? snapshot.issues : NO_ISSUES, refresh };
+  return { issues: !active ? NO_ISSUES : snapshot.projectPath === projectPath ? snapshot.issues : (lastIssues.get(projectPath) ?? NO_ISSUES), refresh };
 }
 
 // Never throws: a failed read shows no chips.

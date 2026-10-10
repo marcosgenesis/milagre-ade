@@ -1315,9 +1315,20 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
       entry.buttons.map((button, index) => ({ ...button, onPress: () => entry.choose(index) })),
     );
   });
+  // Groups folded by hand, as the phone's store keeps them; the tests start with none, so every group is open.
+  const folded = new Set();
   const { ProjectNavigation } = load("project-navigation.tsx", {
-    react,
+    react: { ...react, useSyncExternalStore: (_subscribe, read) => read() },
     "react/jsx-runtime": { jsx, jsxs: jsx },
+    "./hosts-native": {
+      savedFoldedProjects: {
+        subscribe: () => () => {},
+        folded: () => folded,
+        loaded: () => true,
+        load: async () => {},
+        toggle: async (_host, path) => (folded.has(path) ? folded.delete(path) : folded.add(path)),
+      },
+    },
     "react-native": {
       ...Object.fromEntries(["FlatList", "KeyboardAvoidingView", "Pressable", "RefreshControl", "Text", "View"].map((name) => [name, name])),
       ...native,

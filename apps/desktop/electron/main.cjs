@@ -179,7 +179,7 @@ async function startDesktop() {
   let runtime;
   // Phones that paired while Milagre was closed are announced once it connects; the host keeps them until then.
   const deviceNotices = createDeviceNotices({
-    methods: () => (runtime && Notification.isSupported() ? runtime.methods : null),
+    methods: () => (runtime && Notification.isSupported() ? runtime.hostMethods() : null),
     invoke: (method, args) => runtime.invoke(method, args),
     notifyPhones: (phones, options) => notifier.notifyPhonesPaired(phones, options),
     notifyDevice: (kind) => notifier.notifyDevicePaired(kind),

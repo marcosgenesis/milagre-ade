@@ -283,7 +283,7 @@ async function fakeHost(t, { capabilities = ["desktop-v1", "snapshot-pages-v1", 
   const socket = socketPath(dataDir);
   prepareSocketDirectory(socket);
   const sockets = new Set();
-  const host = { protocol: null, reads: [] };
+  const host = { protocol: null, reads: [], methods: ["project:open"], drop: () => sockets.forEach((connection) => connection.destroy()) };
   const server = net.createServer((connection) => {
     sockets.add(connection);
     connection.on("error", () => {});
@@ -303,7 +303,13 @@ async function fakeHost(t, { capabilities = ["desktop-v1", "snapshot-pages-v1", 
           void onStop?.(connection, server);
           return;
         }
-        const result = request.method === "daemon:status" ? { capabilities, methods: ["project:open"], version: "test" } : null;
+        // A reconnect ends with a paged snapshot: one empty page.
+        const answers = {
+          "daemon:status": { capabilities, methods: host.methods, version: "test" },
+          "daemon:snapshot": { snapshotId: "s", pageCount: 1, eventSeq: 0 },
+          "daemon:snapshot-page": JSON.stringify({ eventSeq: 0 }),
+        };
+        const result = answers[request.method] ?? null;
         protocol.send({ v: 1, id: request.id, result });
       },
     });
@@ -320,6 +326,23 @@ async function fakeHost(t, { capabilities = ["desktop-v1", "snapshot-pages-v1", 
   return { dataDir, host, server };
 }
 const row = ({ channel, payload }) => [channel, payload.event?.type ?? null, payload.state ?? null, "stateTooLarge" in payload];
+
+test("after a reconnect, hostMethods are the host's it reconnected to, even an older one with fewer", async (t) => {
+  const { dataDir, host } = await fakeHost(t);
+  host.methods = ["project:open", "devices:take-notices"];
+  const events = [];
+  const desktop = await connectDesktopRuntime({ dataDir, version: "test", reconnectMs: 20, emit: (channel, payload) => events.push({ channel, payload }) });
+  t.after(() => desktop.close().catch(() => {}));
+  assert.deepEqual(desktop.hostMethods(), ["project:open", "devices:take-notices"]);
+  // The host is replaced by an older one without the command.
+  host.methods = ["project:open"];
+  events.length = 0;
+  host.drop();
+  await waitFor(() => events.some((event) => event.channel === "runtime:connection" && event.payload.connected));
+  assert.deepEqual(desktop.hostMethods(), ["project:open"]);
+  // `methods` keeps every command an IPC handler was registered for, as before.
+  assert.ok(desktop.methods.includes("devices:take-notices"));
+});
 
 test("events whose state was left out reach the window with it, in order, one read per burst", async (t) => {
   let reads = 0;

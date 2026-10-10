@@ -65,6 +65,7 @@ function makeBridge(invoke, listen, send) {
     browsers: {
       list: (request) => invoke("browser:list", request),
       attach: (request) => invoke("browser:attach", request),
+      detach: (request) => invoke("browser:detach", request),
       open: (request) => invoke("browser:open", request),
       frame: (request) => invoke("browser:frame", request),
       status: (request) => invoke("browser:status", request),

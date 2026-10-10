@@ -3891,11 +3891,12 @@ function browserHost(client) {
 }
 const BROWSER_PAGE = { id: "browser-1:" + "A".repeat(32), title: "Login", url: "https://example.com/login", browser: "Chrome 141", source: "agent" };
 
-test("mobile browser pill lists only this Chat and hides when there is nothing to show or attach", async (t) => {
+test("mobile browser pill lists only this Chat and hides until the Chat has a page", async (t) => {
   for (const [list, visible] of [
     [{ supported: true, targets: [], others: [] }, false],
     [{ supported: true, targets: [BROWSER_PAGE], others: [] }, true],
-    [{ supported: true, targets: [], others: [{ id: "b", browser: "Chrome 141", pages: 1, title: "Mine" }] }, true],
+    // An attachable browser alone is not a page of this Chat.
+    [{ supported: true, targets: [], others: [{ id: "b", browser: "Chrome 141", pages: 1, title: "Mine" }] }, false],
   ]) {
     const calls = [];
     const h = browserHost({
@@ -3962,6 +3963,17 @@ test("mobile browser sheet opens a sole page directly, lists several, and attach
       attach.props.onPress();
       await settle();
       assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ["browser:attach", [{ chatId: "/p#1", browserId: "b" }]]);
+      // Only attached pages offer Detach, and it names the browser, not the page.
+      const after = h.render("BrowserSheet", { hostId: "mac", chatId: "/p#1" });
+      const detaches = [];
+      find(after, (node) => {
+        if (node.type === "PillButton" && node.props.title === "Detach") detaches.push(node);
+        return false;
+      });
+      assert.equal(detaches.length, 1);
+      detaches[0].props.onPress();
+      await settle();
+      assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ["browser:detach", [{ chatId: "/p#1", browserId: "b" }]]);
     }
     h.cleanup();
   }

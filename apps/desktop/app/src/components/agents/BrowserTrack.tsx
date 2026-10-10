@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowLeft01Icon, ArrowExpand01Icon, ArrowShrink01Icon, BrowserIcon, Cancel01Icon, Link01Icon } from "@hugeicons/core-free-icons";
+import { ArrowLeft01Icon, ArrowExpand01Icon, ArrowShrink01Icon, BrowserIcon, Cancel01Icon, Link01Icon, Unlink04Icon } from "@hugeicons/core-free-icons";
 import type { BrowserApi, BrowserList, BrowserTarget } from "@milagre/shared/browser";
 import { createBrowserBridge, createBrowserReceiverHtml } from "@milagre/shared/browser-receiver";
 import { ipcErrorMessage } from "@milagre/shared/result";
@@ -11,7 +11,7 @@ import { useAnchoredPopover } from "./useAnchoredPopover";
 import { viewerTheme } from "./viewerTheme";
 import { useBridge } from "../../lib/computer-bridge";
 
-/** Pages of browsers this Chat's agent started, or that were attached to this Chat. Never inferred from a URL. */
+/** Pages of browsers this Chat's agent started, or that were attached to this Chat. Never inferred from a URL. Hidden until the Chat has a page. */
 export function BrowserTrack({ chatId }: { chatId?: string }) {
   // Read once: the bridge never changes while mounted, and a fresh reference each render would restart polling.
   const bridge = useBridge();
@@ -84,7 +84,7 @@ export function BrowserTrack({ chatId }: { chatId?: string }) {
       document.removeEventListener("visibilitychange", visibility);
     };
   }, [api, chatId, close, refresh]);
-  if (!api || !chatId || !list.supported || (!list.targets.length && !list.others.length)) return null;
+  if (!api || !chatId || !list.supported || !list.targets.length) return null;
   const open = () => {
     if (opened) {
       close();
@@ -99,6 +99,23 @@ export function BrowserTrack({ chatId }: { chatId?: string }) {
     try {
       const next = await api.attach({ chatId, browserId });
       if (mounted.current) setList(next);
+    } catch (error) {
+      if (mounted.current) setList((current) => ({ ...current, error: ipcErrorMessage(error) }));
+    } finally {
+      if (mounted.current) setAttaching(null);
+    }
+  };
+  const detach = async (browserId: string) => {
+    setAttaching(browserId);
+    try {
+      const next = await api.detach({ chatId, browserId });
+      if (mounted.current) {
+        setList(next);
+        if (selected && selected.id.startsWith(`${browserId}:`)) {
+          setSelected(null);
+          setPage(null);
+        }
+      }
     } catch (error) {
       if (mounted.current) setList((current) => ({ ...current, error: ipcErrorMessage(error) }));
     } finally {
@@ -199,20 +216,35 @@ export function BrowserTrack({ chatId }: { chatId?: string }) {
                     <p className="p-3 text-[13px] text-ink-2">This Chat's agent has no open pages. Attach a browser below to view it here.</p>
                   )}
                   {list.targets.map((target) => (
-                    <button
-                      key={target.id}
-                      type="button"
-                      data-browser-target={target.id}
-                      onClick={() => setSelected(target)}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-hover"
-                    >
-                      <HugeiconsIcon icon={BrowserIcon} size={16} aria-hidden className="shrink-0" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px]">{target.title || target.url}</span>
-                        <span className="block truncate text-[11px] text-ink-3">{target.url}</span>
-                      </span>
-                      <span className="shrink-0 text-[11px] text-ink-3">{target.source === "attached" ? "Attached" : target.browser}</span>
-                    </button>
+                    <div key={target.id} className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        data-browser-target={target.id}
+                        onClick={() => setSelected(target)}
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-hover"
+                      >
+                        <HugeiconsIcon icon={BrowserIcon} size={16} aria-hidden className="shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px]">{target.title || target.url}</span>
+                          <span className="block truncate text-[11px] text-ink-3">{target.url}</span>
+                        </span>
+                        <span className="shrink-0 text-[11px] text-ink-3">{target.source === "attached" ? "Attached" : target.browser}</span>
+                      </button>
+                      {target.source === "attached" && (
+                        <Tooltip label="Detach this browser from this Chat">
+                          <button
+                            type="button"
+                            aria-label={`Detach ${target.title || target.url} from this Chat`}
+                            data-browser-detach={target.id.slice(0, target.id.indexOf(":"))}
+                            disabled={attaching !== null}
+                            onClick={() => void detach(target.id.slice(0, target.id.indexOf(":")))}
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover disabled:opacity-40"
+                          >
+                            <HugeiconsIcon icon={Unlink04Icon} size={14} aria-hidden />
+                          </button>
+                        </Tooltip>
+                      )}
+                    </div>
                   ))}
                   {list.others.length > 0 && (
                     <>

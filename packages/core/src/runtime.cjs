@@ -179,6 +179,7 @@ function createRuntime(options) {
   const browsers = options.browsers ?? require("./browsers.cjs").createBrowsers({ roots: () => agents.processes() });
   commands.handle("browser:list", (_context, request) => browsers.list(request));
   commands.handle("browser:attach", (_context, request) => browsers.attach(request));
+  commands.handle("browser:detach", (_context, request) => browsers.detach(request));
   for (const method of ["open", "frame", "status", "control", "input", "close"]) {
     commands.handle(`browser:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Browser access requires an authenticated connection");
@@ -1283,6 +1284,7 @@ function createRuntime(options) {
     emit,
     extraTools: (chatId) => [
       ...simulatorToolDefinitions(chatId, simulators),
+      ...require("./chat-browsers.cjs").browserToolDefinitions(chatId, browsers),
       ...artifactToolDefinitions(chatId, artifacts),
       ...require("./advisor-tools.cjs").advisorToolDefinitions(chatId, advisors),
       // Milagre's own Linear sign-in, so agents don't reach for a Linear MCP or connector.

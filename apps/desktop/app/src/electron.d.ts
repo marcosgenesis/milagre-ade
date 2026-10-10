@@ -1,4 +1,5 @@
 import type { MainSyncSettings, MainSyncStatus } from "@milagre/shared/main-sync";
+import type { McpAccount, McpAccountCheck } from "@milagre/shared/mcp";
 import type { LinearIssue, LinearIssuesResult, LinearStatus } from "@milagre/shared/linear";
 import type {
   ProjectAccountScope,
@@ -257,6 +258,10 @@ export type MilagreBridge = {
   saveLinearMoveToStarted: (value: boolean) => Promise<{ moveToStarted: boolean }>;
   saveLinearEnabled: (value: boolean) => Promise<{ enabled: boolean }>;
   onLinearStatusChanged: (callback: (status: LinearStatus) => void) => () => void;
+  mcp: {
+    accounts: () => Promise<McpAccount[]>;
+    check: (provider: McpAccount["provider"], accountId: string) => Promise<McpAccountCheck>;
+  };
   /** The Experimental Linear switch changed, on this Mac or from a phone. */
   onLinearEnabledChanged: (callback: (value: { enabled: boolean }) => void) => () => void;
   /** Assigned issues when query is empty, otherwise workspace matches (a key also finds that issue first). Never rejects. */

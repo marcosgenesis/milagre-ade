@@ -9,6 +9,9 @@ Milagre coordinates coding agents across projects and git worktrees on one machi
 **Account**:
 A saved Claude, Codex or Antigravity sign-in on one computer. Each provider has a computer default **Account**. Each **Project** and **Named Link** can select its own **Account** or inherit that default. Desktop and paired phones share these selections. A running reply and its active subagents keep their existing **Account**; subsequent idle turns use the owning Project or Named Link's selection. Switching the viewed Project never changes an Account assignment.
 
+**MCP server**:
+A tool server a provider loads into a Chat. A command server is a process on the Mac; a URL server is remote. Settings › MCP lists each account's servers and their status. Not to be confused with Milagre's own `milagre` server, which every Chat gets and which Settings › MCP does not list.
+
 **Project**:
 A git repository that has been opened in Milagre at least once. Every **Worktree** of the repository belongs to the same **Project**, whichever of its folders was opened.
 _Avoid_: folder, workspace, repo

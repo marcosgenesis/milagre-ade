@@ -17,6 +17,9 @@ const SLOW_METHODS = Object.freeze({
   "agent:update-cli": 1200000,
   // A Linear sign-in waits up to five minutes for the browser, plus two 15 s requests.
   "linear:connect": 330000,
+  // Settings › MCP: the server caps one check at 30 s (packages/core/src/mcp/index.cjs); wait a little longer for its answer.
+  "mcp:accounts": 45000,
+  "mcp:check": 45000,
 });
 const deadlineFor = (method, fallback) => Math.max(fallback, SLOW_METHODS[method] ?? 0);
 

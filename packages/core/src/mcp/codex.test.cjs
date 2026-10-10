@@ -1,0 +1,113 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { checkCodex, codexServer } = require("./codex.cjs");
+
+test("a Codex status maps to a report", () => {
+  assert.deepEqual(
+    codexServer(
+      { name: "linear", tools: { a: {}, b: {} }, toolsError: null, authStatus: "oAuth", pluginId: null, httpOrigin: "https://mcp.linear.app" },
+      { url: "https://mcp.linear.app/mcp" },
+    ),
+    {
+      name: "linear",
+      transport: "url",
+      scope: "user",
+      state: "connected",
+      tools: 2,
+      error: null,
+    },
+  );
+  assert.deepEqual(
+    codexServer(
+      { name: "epidemic-sound", tools: {}, toolsError: "MCP startup failed: no key", authStatus: "bearerToken", pluginId: null, httpOrigin: null },
+      { url: "https://x" },
+    ),
+    { name: "epidemic-sound", transport: "url", scope: "user", state: "failed", tools: 0, error: "MCP startup failed: no key" },
+  );
+  assert.equal(codexServer({ name: "m", tools: {}, toolsError: null, authStatus: "notLoggedIn", pluginId: null }, { url: "https://m" }).state, "needs-sign-in");
+  assert.equal(
+    codexServer({ name: "p", tools: {}, toolsError: null, authStatus: "unsupported", pluginId: null }, { command: "p", enabled: false }).state,
+    "disabled",
+  );
+  assert.equal(codexServer({ name: "pl", tools: {}, toolsError: null, authStatus: "unsupported", pluginId: "x@y" }, undefined).scope, "plugin");
+  assert.equal(codexServer({ name: "codex_apps", tools: {}, toolsError: null, authStatus: "bearerToken", pluginId: null }, undefined).scope, "built-in");
+  assert.equal(
+    codexServer({ name: "argent", tools: { a: {} }, toolsError: null, authStatus: "unsupported", pluginId: null, httpOrigin: null }, { command: "argent" })
+      .transport,
+    "command",
+  );
+});
+
+function fakeRpc(pages) {
+  const calls = [];
+  let page = 0;
+  const rpc = {
+    calls,
+    options: null,
+    started: false,
+    closed: false,
+    start() {
+      rpc.started = true;
+    },
+    notify(method) {
+      calls.push(method);
+    },
+    async request(method, params) {
+      calls.push(method);
+      if (method === "initialize") return {};
+      if (method === "config/read") return { config: { mcp_servers: { linear: { url: "https://mcp.linear.app/mcp" }, argent: { command: "argent" } } } };
+      if (method === "mcpServerStatus/list") {
+        assert.equal(params.detail, "toolsAndAuthOnly");
+        return pages[page++];
+      }
+      throw new Error("unexpected " + method);
+    },
+    close() {
+      rpc.closed = true;
+    },
+  };
+  return rpc;
+}
+
+test("checkCodex reads every page and closes the app-server", async () => {
+  const rpc = fakeRpc([
+    { data: [{ name: "linear", tools: { a: {} }, toolsError: null, authStatus: "oAuth", pluginId: null }], nextCursor: "2" },
+    { data: [{ name: "argent", tools: { a: {}, b: {} }, toolsError: null, authStatus: "unsupported", pluginId: null }], nextCursor: null },
+  ]);
+  const servers = await checkCodex({
+    command: "codex",
+    env: { CODEX_HOME: "/x" },
+    cwd: "/home",
+    createRpc: (options) => {
+      rpc.options = options;
+      return rpc;
+    },
+  });
+  assert.deepEqual(
+    servers.map((s) => `${s.name}:${s.transport}:${s.tools}`),
+    ["linear:url:1", "argent:command:2"],
+  );
+  assert.deepEqual(rpc.calls, ["initialize", "initialized", "config/read", "mcpServerStatus/list", "mcpServerStatus/list"]);
+  assert.equal(rpc.options.env.CODEX_HOME, "/x");
+  assert.equal(rpc.closed, true);
+});
+
+test("aborting the signal closes the app-server while the check hangs", async () => {
+  const rpc = fakeRpc([]);
+  rpc.request = (method) => (method === "mcpServerStatus/list" ? new Promise(() => {}) : Promise.resolve(method === "config/read" ? { config: {} } : {}));
+  const controller = new AbortController();
+  void checkCodex({ command: "codex", cwd: "/", signal: controller.signal, createRpc: () => rpc }).catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(rpc.closed, false);
+  controller.abort();
+  assert.equal(rpc.closed, true);
+});
+
+test("a signal that is already aborted closes the app-server right away", async () => {
+  const rpc = fakeRpc([]);
+  rpc.request = () => new Promise(() => {});
+  const controller = new AbortController();
+  controller.abort();
+  void checkCodex({ command: "codex", cwd: "/", signal: controller.signal, createRpc: () => rpc }).catch(() => {});
+  assert.equal(rpc.closed, true);
+});

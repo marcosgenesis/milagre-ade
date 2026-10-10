@@ -128,6 +128,10 @@ function makeBridge(invoke, listen, send) {
     readLinearEnabled: () => invoke("linear:enabled:read"),
     saveLinearEnabled: (value) => invoke("linear:enabled:save", value),
     saveLinearMoveToStarted: (value) => invoke("linear:move-to-started:save", value),
+    mcp: {
+      accounts: () => invoke("mcp:accounts"),
+      check: (provider, accountId) => invoke("mcp:check", provider, accountId),
+    },
     onLinearStatusChanged: (callback) => listen("linear:status-changed", callback),
     onLinearEnabledChanged: (callback) => listen("linear:enabled-changed", callback),
     listLinearIssues: (query, options) => invoke("linear:issues", { query, fresh: options?.fresh === true, workspace: options?.workspace }),

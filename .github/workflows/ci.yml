@@ -136,7 +136,8 @@ jobs:
             node_modules
             apps/*/node_modules
             packages/*/node_modules
-          key: node-modules-core-daemon-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('package-lock.json') }}
+          # Windows workspace junctions contain absolute paths. A repository rename changes the checkout path.
+          key: node-modules-core-daemon-${{ github.repository }}-${{ runner.os }}-${{ runner.arch }}-node24-${{ hashFiles('package-lock.json') }}
       - name: Install core and daemon dependencies
         if: matrix.os == 'windows-latest' && steps.windows-cache.outputs.cache-hit != 'true'
         run: npm ci --workspace @milagre/core --workspace @milagre/daemon --ignore-scripts --omit=optional --no-audit --no-fund

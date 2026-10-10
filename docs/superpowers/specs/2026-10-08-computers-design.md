@@ -115,6 +115,12 @@ name: null }` and show as "Phone", and the old file is deleted. `MAX_DEVICES` st
 shapes; every accepted hello updates the name (so migrated phones pick theirs up) and `lastSeen` (written at most once
 a minute). The hello says `kind: "desktop"`; the store records that device as `kind: "computer"`.
 
+A phone also gets `isNew: true` and `announced: false` when it pairs (#382), since nobody at this Mac saw it pair. The
+desktop takes the "New phone paired" notice with `devices:take-notices`, at launch, after a reconnect and on each
+`phone:paired` event; each pairing is handed out once, so a phone that paired while Milagre was closed is announced
+when it opens, and never twice. Settings › Devices marks `isNew` phones New and clears it with
+`devices:acknowledge(keys)` once shown. A computer pairs after Allow at this Mac, so it is neither.
+
 The pairing check becomes per device: a key in `removed` cannot pair again inside a pairing window that was already
 open when it was removed. Without this, a removed phone redials and re-pairs within seconds, because showing the QR in
 Settings opens the window.

@@ -8,6 +8,7 @@ const { createDevices, MAX_DEVICES } = require("./devices.cjs");
 const tmp = (name) => fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 const saved = async (dir) => JSON.parse(await fs.readFile(path.join(dir, "devices.json"), "utf8"));
 const mode = async (dir, name) => (await fs.stat(path.join(dir, name))).mode & 0o777;
+const isNew = (list) => Object.fromEntries(list.map((device) => [device.key, device.isNew]));
 
 test("a device is remembered with its kind, name and times, privately, across loads", async () => {
   const dir = await tmp("devices");
@@ -20,8 +21,8 @@ test("a device is remembered with its kind, name and times, privately, across lo
   const again = createDevices(dir);
   await again.load();
   assert.deepEqual(again.list(), [
-    { key: "phoneA", kind: "phone", name: "Victor's iPhone", pairedAt: 1000, lastSeen: 1000 },
-    { key: "macB", kind: "computer", name: "studio", pairedAt: 2000, lastSeen: 2000 },
+    { key: "phoneA", kind: "phone", name: "Victor's iPhone", pairedAt: 1000, lastSeen: 1000, isNew: true },
+    { key: "macB", kind: "computer", name: "studio", pairedAt: 2000, lastSeen: 2000, isNew: false },
   ]);
   assert.equal(again.isKnown("phoneA"), true);
   assert.equal(again.count(), 2);
@@ -32,7 +33,7 @@ test("add with no kind or name is a nameless phone, and an unknown kind is refus
   const dir = await tmp("devices-plain");
   const devices = createDevices(dir, { now: () => 7 });
   await devices.add("phoneA");
-  assert.deepEqual(devices.list(), [{ key: "phoneA", kind: "phone", name: null, pairedAt: 7, lastSeen: 7 }]);
+  assert.deepEqual(devices.list(), [{ key: "phoneA", kind: "phone", name: null, pairedAt: 7, lastSeen: 7, isNew: true }]);
   await assert.rejects(devices.add("x", { kind: "tablet" }), /kind/);
 });
 
@@ -69,8 +70,8 @@ test("phones from relay-phones.json move to devices.json as nameless phones, and
   const devices = createDevices(dir);
   await devices.load();
   assert.deepEqual(devices.list(), [
-    { key: "phoneA", kind: "phone", name: null, pairedAt: null, lastSeen: null },
-    { key: "phoneB", kind: "phone", name: null, pairedAt: null, lastSeen: null },
+    { key: "phoneA", kind: "phone", name: null, pairedAt: null, lastSeen: null, isNew: false },
+    { key: "phoneB", kind: "phone", name: null, pairedAt: null, lastSeen: null, isNew: false },
   ]);
   assert.deepEqual(
     (await saved(dir)).devices.map((device) => device.key),
@@ -86,7 +87,15 @@ test("a migrated phone takes its name from its next hello", async () => {
   const devices = createDevices(dir, { now: () => 50 });
   await devices.load();
   await devices.seen("phoneA", { name: "Victor's iPhone" });
-  assert.deepEqual((await saved(dir)).devices[0], { key: "phoneA", kind: "phone", name: "Victor's iPhone", pairedAt: null, lastSeen: 50 });
+  assert.deepEqual((await saved(dir)).devices[0], {
+    key: "phoneA",
+    kind: "phone",
+    name: "Victor's iPhone",
+    pairedAt: null,
+    lastSeen: 50,
+    isNew: false,
+    announced: true,
+  });
 });
 
 test("a store used before load still keeps the migrated phones", async () => {
@@ -124,7 +133,15 @@ test("seen moves lastSeen at every hello but writes at most once a minute, and a
   assert.equal((await saved(dir)).devices[0].lastSeen, 0, "not written within the minute");
   now = 20_000;
   await devices.seen("phoneA", { name: "Victor's iPhone" });
-  assert.deepEqual((await saved(dir)).devices[0], { key: "phoneA", kind: "phone", name: "Victor's iPhone", pairedAt: 0, lastSeen: 20_000 });
+  assert.deepEqual((await saved(dir)).devices[0], {
+    key: "phoneA",
+    kind: "phone",
+    name: "Victor's iPhone",
+    pairedAt: 0,
+    lastSeen: 20_000,
+    isNew: true,
+    announced: false,
+  });
   now = 50_000;
   await devices.seen("phoneA");
   assert.equal((await saved(dir)).devices[0].lastSeen, 20_000);
@@ -204,4 +221,78 @@ test("kindOf says what a device paired as, and null for a key that isn't paired"
   assert.equal(devices.kindOf("nobody"), null);
   await devices.remove("macB");
   assert.equal(devices.kindOf("macB"), null);
+});
+
+test("a phone's pairing is handed out once to whoever takes it first, and that survives a restart", async () => {
+  const dir = await tmp("devices-notices");
+  let now = 10;
+  const devices = createDevices(dir, { now: () => now });
+  await devices.load();
+  await devices.add("phoneA", { name: "Victor's iPhone" });
+  now = 20;
+  await devices.add("phoneB");
+  // A computer pairs only after its owner's Allow in this Mac's window: nothing to announce.
+  await devices.add("macC", { kind: "computer", name: "studio" });
+  // Two windows (or a connect racing a pairing event) asking at once: each pairing goes to exactly one of them.
+  const [first, second] = await Promise.all([devices.takeNotices(), devices.takeNotices()]);
+  assert.deepEqual(
+    [...first, ...second].map((device) => device.key),
+    ["phoneA", "phoneB"],
+  );
+  assert.deepEqual(first[0], { key: "phoneA", kind: "phone", name: "Victor's iPhone", pairedAt: 10, lastSeen: 10, isNew: true });
+  assert.deepEqual(await devices.takeNotices(), []);
+  // A daemon started again doesn't announce them a second time.
+  const again = createDevices(dir);
+  await again.load();
+  assert.deepEqual(await again.takeNotices(), []);
+});
+
+test("a phone that paired while no desktop was there is still announced after the daemon restarts", async () => {
+  const dir = await tmp("devices-notices-restart");
+  await createDevices(dir, { now: () => 5 }).add("phoneA", { name: "Pixel" });
+  const again = createDevices(dir);
+  await again.load();
+  assert.deepEqual(
+    (await again.takeNotices()).map((device) => device.name),
+    ["Pixel"],
+  );
+  assert.equal((await saved(dir)).devices[0].announced, true);
+});
+
+test("a phone stays New until the owner sees it, on disk too; a computer is never New", async () => {
+  const dir = await tmp("devices-new");
+  const devices = createDevices(dir, { now: () => 1 });
+  await devices.add("phoneA");
+  await devices.add("phoneB");
+  await devices.add("macC", { kind: "computer" });
+  assert.deepEqual(isNew(devices.list()), { phoneA: true, phoneB: true, macC: false });
+  // Only the keys the owner saw: a phone that paired after the list was read stays New.
+  assert.equal(await devices.acknowledge(["phoneA", "macC", "stranger"]), 1);
+  assert.equal(await devices.acknowledge(["phoneA"]), 0);
+  assert.deepEqual(isNew(devices.list()), { phoneA: false, phoneB: true, macC: false });
+  const again = createDevices(dir);
+  await again.load();
+  assert.deepEqual(isNew(again.list()), { phoneA: false, phoneB: true, macC: false });
+  // Seeing a phone doesn't announce it, and announcing it doesn't mark it seen: the notice and the marker are separate.
+  assert.deepEqual(
+    (await again.takeNotices()).map((device) => device.key),
+    ["phoneA", "phoneB"],
+  );
+  assert.equal(isNew(again.list()).phoneB, true);
+});
+
+test("a removed phone is no longer announced, and devices saved before these fields are neither announced nor New", async () => {
+  const dir = await tmp("devices-new-old");
+  await fs.writeFile(
+    path.join(dir, "devices.json"),
+    JSON.stringify({ devices: [{ key: "phoneA", kind: "phone", name: null, pairedAt: 1, lastSeen: 1 }], removed: [] }),
+    { mode: 0o600 },
+  );
+  const devices = createDevices(dir, { now: () => 2 });
+  await devices.load();
+  assert.equal(devices.list()[0].isNew, false);
+  assert.deepEqual(await devices.takeNotices(), []);
+  await devices.add("phoneB");
+  await devices.remove("phoneB");
+  assert.deepEqual(await devices.takeNotices(), []);
 });

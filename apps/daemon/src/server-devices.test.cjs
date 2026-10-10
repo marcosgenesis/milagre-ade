@@ -57,7 +57,7 @@ test("devices:list and devices:remove are desktop methods over the saved devices
   const [device] = await desktop.call("devices:list");
   assert.deepEqual(
     { ...device, pairedAt: typeof device.pairedAt, lastSeen: typeof device.lastSeen },
-    { key, kind: "phone", name: "Victor's iPhone", pairedAt: "number", lastSeen: "number", route: null },
+    { key, kind: "phone", name: "Victor's iPhone", pairedAt: "number", lastSeen: "number", isNew: true, route: null },
   );
 
   // The phone's own bridge never manages devices, its own or another's.
@@ -65,6 +65,8 @@ test("devices:list and devices:remove are desktop methods over the saved devices
   for (const [method, args] of [
     ["devices:list", []],
     ["devices:remove", [key]],
+    ["devices:take-notices", []],
+    ["devices:acknowledge", [[key]]],
   ]) {
     const response = await fetch(on.localUrl + "/rpc", {
       method: "POST",
@@ -139,4 +141,68 @@ test("a computer waiting for Allow reaches this Mac's window as devices:pending,
   assert.equal(await lab, "denied");
   await waitFor(() => heard.at(-1)?.length === 0);
   await assert.rejects(desktop.call("devices:allow", ["s".repeat(43)]), /no longer waiting/);
+});
+
+test("a phone that pairs while no window is connected is announced once to the next window, even after a daemon restart", async (t) => {
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-devices-")));
+  const relays = [];
+  const start = () =>
+    startDaemon({
+      dataDir,
+      version: "test",
+      phoneOptions: {
+        localPort: 0,
+        lanPort: null,
+        startRelay: (options) => {
+          relays.push(options);
+          return { close: async () => {}, status: () => "online" };
+        },
+      },
+      runtimeOptions: {
+        cwd: dataDir,
+        environmentReady: Promise.resolve(),
+        titleModels: {},
+        agentCli: Object.assign(async () => ({ command: null }), { invalidate() {} }),
+      },
+    });
+  let daemon = await start();
+  const open = [];
+  t.after(async () => {
+    for (const client of open) client.close();
+    await daemon.close();
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+  const window = async () => {
+    const client = await connect({ dataDir });
+    open.push(client);
+    return client;
+  };
+  const owner = await window();
+  for (const method of ["devices:take-notices", "devices:acknowledge"]) assert.ok((await owner.call("daemon:status")).methods.includes(method), method);
+  await owner.call("phone:set-enabled", [true]);
+  await waitFor(async () => (await owner.call("phone:status")).state === "on");
+  owner.close();
+
+  // The phone pairs with no window connected, and the daemon restarts before one comes back.
+  const key = "n".repeat(43);
+  await relays.at(-1).phones.add(key, { kind: "phone", name: "Victor's iPhone" });
+  await daemon.close();
+  daemon = await start();
+
+  // Two windows ask at once: only one of them shows it.
+  const [first, second] = await Promise.all([window(), window()]);
+  const taken = await Promise.all([first.call("devices:take-notices"), second.call("devices:take-notices")]);
+  assert.deepEqual(
+    taken.flat().map((device) => [device.key, device.name]),
+    [[key, "Victor's iPhone"]],
+  );
+  assert.deepEqual(await first.call("devices:take-notices"), []);
+
+  // Settings › Devices shows it as New until the window says the owner saw it.
+  assert.equal((await first.call("devices:list"))[0].isNew, true);
+  const [after] = await first.call("devices:acknowledge", [[key]]);
+  assert.equal(after.isNew, false);
+  assert.equal((await second.call("devices:list"))[0].isNew, false);
+  await assert.rejects(first.call("devices:acknowledge", ["nope"]), /device keys/);
+  await assert.rejects(first.call("devices:acknowledge", [["nope"]]), /device keys/);
 });

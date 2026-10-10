@@ -39,7 +39,9 @@ const message = (error) => (error instanceof Error ? error.message : String(erro
  * `computerLink` always the relay's. `status()` also carries the relay's `relay` state, `pairingUntil` (ms epoch), the
  * end of the window in which new devices may pair, and `pairedPhones`, how many phones have paired since the last Reset. `onPaired({ pairedPhones })` runs when a phone pairs
  * for the first time. `devices()` lists every paired device with the route it uses now, and `removeDevice(key)` forgets
- * one and closes its channels. While the phone is on, identities a Reset replaced keep their old relay rooms for RETIRED_MS, only
+ * one and closes its channels. A phone's pairing is kept for the desktop until one takes it with `takeDeviceNotices()`
+ * (so a phone that paired while no desktop was open is still announced, once), and the phone is listed `isNew` until
+ * `acknowledgeDevices(keys)` says the owner saw it. While the phone is on, identities a Reset replaced keep their old relay rooms for RETIRED_MS, only
  * to tell the phones that dial them that this Mac was reset.
  * Whatever the remote route, a running phone also listens on the local network (`lanPort`, unless `lan` is switched off
  * with `setLan` or the phone is confined): `status().lan` reports it, and a phone asks `routes` for the Mac's addresses.
@@ -455,6 +457,16 @@ function createPhone({
     allowDevice: (key) => answerPending(key, "allowed"),
     /** Turns a waiting computer away; returns the ones still waiting. */
     denyDevice: (key) => answerPending(key, "denied"),
+    /** Phones whose pairing no desktop has announced yet, each handed out once (devices.cjs `takeNotices`). */
+    async takeDeviceNotices() {
+      return (await deviceStore()).takeNotices();
+    },
+    /** The owner saw these devices in Settings › Devices, so they are no longer New. Returns the list. */
+    async acknowledgeDevices(keys) {
+      if (!Array.isArray(keys) || !keys.every((key) => typeof key === "string" && PHONE_KEY.test(key))) throw new Error("Expected device keys");
+      await (await deviceStore()).acknowledge(keys);
+      return devices();
+    },
     /** Forgets a device and closes its channels on every carrier. It may pair again only in a pairing window opened later. */
     async removeDevice(key) {
       if (typeof key !== "string" || !PHONE_KEY.test(key)) throw new Error("Expected a device key");

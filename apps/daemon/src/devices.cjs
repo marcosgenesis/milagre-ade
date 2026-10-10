@@ -17,8 +17,13 @@ function readDevice(value) {
     name: typeof value.name === "string" && value.name ? value.name : null,
     pairedAt: time(value.pairedAt),
     lastSeen: time(value.lastSeen),
+    // Missing in files from before these: nothing to announce or mark.
+    isNew: value.isNew === true,
+    announced: value.announced !== false,
   };
 }
+// What callers see: `announced` stays inside the store.
+const shown = ({ announced: _announced, ...device }) => ({ ...device });
 
 /**
  * The phones and computers paired to this Mac, oldest first, in `<dataDir>/devices.json` ({ devices, removed }, 0600).
@@ -26,6 +31,11 @@ function readDevice(value) {
  * was removed in. Reset clears both. When devices.json is missing, the bare key list from before devices had names
  * (relay-phones.json) moves in as nameless phones and is deleted. Writes land in call order, so a clear is never
  * overwritten by an add that started before it. Any method may run before load(): the first one reads the file.
+ *
+ * A phone pairs without its owner at this Mac, so it arrives `isNew` (Settings › Devices marks it New until the owner
+ * looks: `acknowledge`) and not yet `announced` (the "New phone paired" notice waits for a desktop to take it:
+ * `takeNotices`). Both survive restarts, so a phone that pairs while no desktop is open is still told about. A computer
+ * pairs only after its owner's Allow in this Mac's window, so it is neither.
  */
 function createDevices(dataDir, { now = Date.now } = {}) {
   const file = path.join(dataDir, "devices.json");
@@ -58,7 +68,7 @@ function createDevices(dataDir, { now = Date.now } = {}) {
     return phones
       .filter((key) => typeof key === "string")
       .slice(-MAX_DEVICES)
-      .map((key) => ({ key, kind: "phone", name: null, pairedAt: null, lastSeen: null }));
+      .map((key) => ({ key, kind: "phone", name: null, pairedAt: null, lastSeen: null, isNew: false, announced: true }));
   }
 
   // Built in locals and swapped in at the end, so the store never reads as empty while the file is being read.
@@ -99,7 +109,7 @@ function createDevices(dataDir, { now = Date.now } = {}) {
     },
     isKnown: (key) => devices.some((device) => device.key === key),
     count: () => devices.length,
-    list: () => devices.map((device) => ({ ...device })),
+    list: () => devices.map(shown),
     removedAt: (key) => removed.get(key) ?? null,
     /** The kind a device paired as ("phone" or "computer"), or null when it isn't paired. */
     kindOf: (key) => find(key)?.kind ?? null,
@@ -108,7 +118,8 @@ function createDevices(dataDir, { now = Date.now } = {}) {
       await ready();
       const at = now();
       const previous = find(key);
-      const device = { key, kind, name: name ?? previous?.name ?? null, pairedAt: previous?.pairedAt ?? at, lastSeen: at };
+      const phone = kind === "phone";
+      const device = { key, kind, name: name ?? previous?.name ?? null, pairedAt: previous?.pairedAt ?? at, lastSeen: at, isNew: phone, announced: !phone };
       devices = [...devices.filter((item) => item.key !== key), device].slice(-MAX_DEVICES);
       removed.delete(key);
       writtenAt = at;
@@ -126,6 +137,33 @@ function createDevices(dataDir, { now = Date.now } = {}) {
       if (!renamed && at - writtenAt < SEEN_WRITE_MS) return;
       writtenAt = at;
       await write();
+    },
+    /**
+     * The devices whose pairing no desktop has announced yet, oldest first, each marked announced as it is handed out:
+     * however many windows or connections ask, each pairing is announced once.
+     */
+    async takeNotices() {
+      await ready();
+      // Taken and marked in one step, with no wait in between, so two callers never get the same device.
+      const due = devices.filter((device) => !device.announced);
+      if (!due.length) return [];
+      for (const device of due) device.announced = true;
+      // A failed write still announces them now; the file may announce them again after a restart, which beats never.
+      await write().catch(() => {});
+      return due.map(shown);
+    },
+    /** The owner saw these devices in Settings › Devices: they are no longer New. Returns how many were. */
+    async acknowledge(keys) {
+      await ready();
+      const seenKeys = new Set(keys);
+      let changed = 0;
+      for (const device of devices)
+        if (device.isNew && seenKeys.has(device.key)) {
+          device.isNew = false;
+          changed++;
+        }
+      if (changed) await write();
+      return changed;
     },
     /** Forgets a device; false when it wasn't paired. */
     async remove(key) {

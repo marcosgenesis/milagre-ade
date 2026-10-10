@@ -84,6 +84,8 @@ test("the paired-desktop policy denies pairing, device management, push, stoppin
     "devices:pending",
     "devices:allow",
     "devices:deny",
+    "devices:take-notices",
+    "devices:acknowledge",
     "push:register",
     "push:focus",
     "daemon:stop",

@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ContextUsage } from "../model";
 import { useDismiss } from "../lib/use-dismiss";
-import { contextAdvice, contextSummary, contextTone } from "./usage/format";
+import { contextHint, contextSummary, contextTone } from "./usage/format";
 import { UsageBar } from "./usage/UsageBar";
+import Tooltip from "./primitives/Tooltip";
 
 const CARD_WIDTH = 264;
 const CARD_GAP = 8;
@@ -23,6 +24,9 @@ const STROKE = { normal: "var(--ink-2)", warning: "var(--accent-ink)", critical:
  */
 export function ContextRing({ onCompact, compactBlocked = null, ...usage }: ContextUsage & { onCompact?: () => void; compactBlocked?: string | null }) {
   const { ratio, percent, tokens, left } = contextSummary(usage);
+  const tone = contextTone(percent);
+  const hint = contextHint(percent);
+  const attention = Boolean(onCompact) && tone !== "normal";
   const radius = 6;
   const circumference = 2 * Math.PI * radius;
   const label = `Context: ${percent}% used (${tokens})`;
@@ -82,6 +86,7 @@ export function ContextRing({ onCompact, compactBlocked = null, ...usage }: Cont
         ref={trigger}
         type="button"
         aria-label={label}
+        aria-description={attention ? "Compaction recommended. Open context details to compact." : undefined}
         aria-expanded={position !== null}
         aria-controls={position ? "context-card" : undefined}
         onPointerEnter={() => schedule(show, OPEN_DELAY_MS)}
@@ -94,7 +99,7 @@ export function ContextRing({ onCompact, compactBlocked = null, ...usage }: Cont
           if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-context-card]"))) hide();
         }}
         onClick={() => (position ? hide() : show())}
-        className={`flex size-7 shrink-0 items-center justify-center rounded-control transition-[background-color] duration-150 hover:bg-hover-2 ${position ? "bg-hover-2" : ""}`}
+        className={`relative flex size-7 shrink-0 items-center justify-center rounded-control transition-[background-color] duration-150 hover:bg-hover-2 ${position ? "bg-hover-2" : ""}`}
       >
         <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
           <circle cx="8" cy="8" r={radius} fill="none" stroke="var(--line-strong)" strokeWidth="2" />
@@ -111,6 +116,15 @@ export function ContextRing({ onCompact, compactBlocked = null, ...usage }: Cont
             className="transition-[stroke-dashoffset] duration-300 ease-out motion-reduce:transition-none"
           />
         </svg>
+        {attention && (
+          <span
+            aria-hidden
+            data-context-attention
+            data-tone={tone}
+            className="absolute right-0.5 top-0.5 size-1.5 rounded-full ring-2 ring-surface"
+            style={{ backgroundColor: STROKE[tone] }}
+          />
+        )}
       </button>
       {position &&
         createPortal(
@@ -139,25 +153,24 @@ export function ContextRing({ onCompact, compactBlocked = null, ...usage }: Cont
               </div>
             </div>
             <div className="flex flex-col gap-2.5 border-t border-line px-4 py-3 text-[12px] leading-[1.45] text-ink-2">
-              <p>
-                {left}. {contextAdvice(percent, Boolean(onCompact))}
-              </p>
+              <p>{hint ? `${left}. ${hint}` : left}</p>
               {onCompact && (
-                <div className="flex items-center gap-2">
+                <Tooltip label={compactBlocked || "Summarize this Chat to free up context."} className="w-full" wrap>
                   <button
                     type="button"
                     data-compact-now
-                    disabled={Boolean(compactBlocked)}
+                    aria-disabled={Boolean(compactBlocked)}
+                    aria-description={compactBlocked || undefined}
                     onClick={() => {
+                      if (compactBlocked) return;
                       hide();
                       onCompact();
                     }}
-                    className="inline-flex h-7 shrink-0 items-center rounded-control bg-ink px-2.5 text-[12px] font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40"
+                    className={`inline-flex h-8 w-full items-center justify-center rounded-control bg-ink px-2.5 text-[12px] font-medium text-surface transition-opacity ${compactBlocked ? "cursor-default opacity-40" : "hover:opacity-85"}`}
                   >
                     Compact now
                   </button>
-                  {compactBlocked && <span className="text-ink-3">{compactBlocked}</span>}
-                </div>
+                </Tooltip>
               )}
             </div>
           </div>,

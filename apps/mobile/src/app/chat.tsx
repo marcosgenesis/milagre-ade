@@ -1449,7 +1449,11 @@ export default function ChatScreen() {
                   />
                   <View style={{ flex: 1 }} />
                   {contextUsage && contextUsage.size > 0 && params.id && (
-                    <ContextRing {...contextUsage} onPress={() => router.push({ pathname: "/context-sheet", params: { id: params.id } })} />
+                    <ContextRing
+                      {...contextUsage}
+                      canCompact={Boolean(chat) && (chat?.provider ?? "claude") === "claude"}
+                      onPress={() => router.push({ pathname: "/context-sheet", params: { id: params.id } })}
+                    />
                   )}
                   {run && !draft.trim() && !attachments.length && (
                     <IconButton

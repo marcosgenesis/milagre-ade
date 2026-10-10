@@ -4,7 +4,6 @@ import type { ProviderUsage, UsageSnapshot } from "../../model";
 import {
   CONTEXT_CRITICAL_PERCENT,
   CONTEXT_WARN_PERCENT,
-  contextAdvice,
   contextSummary,
   contextTone,
   formatResetsIn,
@@ -185,17 +184,11 @@ test("token counts name a million-token window 1M, not 1000k", () => {
   });
 });
 
-test("the context ring warns at 75% and turns critical at 90%, and the card's advice follows", () => {
+test("the context ring warns at 75% and turns critical at 90%", () => {
   assert.equal(CONTEXT_WARN_PERCENT, 75);
   assert.equal(CONTEXT_CRITICAL_PERCENT, 90);
   assert.equal(contextTone(74), "normal");
   assert.equal(contextTone(75), "warning");
   assert.equal(contextTone(89), "warning");
   assert.equal(contextTone(90), "critical");
-  assert.match(contextAdvice(40, true), /close to full/);
-  assert.match(contextAdvice(80, true), /Consider compacting after finishing the current step/);
-  assert.match(contextAdvice(90, true), /Context is nearly full/);
-  // Without Compact now (Codex, Antigravity) the line never suggests it.
-  assert.equal(contextAdvice(40, false), "The agent compacts the conversation when it gets close to full.");
-  for (const percent of [75, 90, 100]) assert.equal(contextAdvice(percent, false), contextAdvice(40, false));
 });

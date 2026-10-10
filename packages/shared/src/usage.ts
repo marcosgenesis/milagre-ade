@@ -102,7 +102,7 @@ export function contextSummary({ used, size }: { used: number; size: number }) {
   };
 }
 
-/** From here the ring turns to the accent colour and suggests a pause for compaction. */
+/** From here the ring turns to the accent colour. */
 export const CONTEXT_WARN_PERCENT = 75;
 /** From here the ring turns red to indicate the window is nearly full. */
 export const CONTEXT_CRITICAL_PERCENT = 90;
@@ -114,14 +114,10 @@ export function contextTone(percent: number): "normal" | "warning" | "critical" 
   return "normal";
 }
 
-/**
- * The card's line under the numbers. `canCompact` is whether the card offers Compact now (a Claude chat): without it
- * the line only says what the agent does by itself.
- */
-export function contextAdvice(percent: number, canCompact: boolean): string {
+/** A short explanation beside the remaining tokens; the button supplies the action. */
+export function contextHint(percent: number): string | null {
   const tone = contextTone(percent);
-  if (!canCompact) return "The agent compacts the conversation when it gets close to full.";
-  if (tone === "critical") return "Context is nearly full. Compact at a pause in your work to make room for the next steps.";
-  if (tone === "warning") return "Context is getting full. Consider compacting after finishing the current step.";
-  return "Claude Code compacts the conversation when it gets close to full. You can also compact at a good moment, such as after a PR merges.";
+  if (tone === "critical") return "Context is nearly full.";
+  if (tone === "warning") return "Context is filling up.";
+  return null;
 }

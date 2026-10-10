@@ -1,6 +1,7 @@
 import React from "react";
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   Platform,
   Pressable,
@@ -160,6 +161,7 @@ export function PillButton({
   onPress,
   icon,
   disabled = false,
+  disabledReason,
   secondary = false,
   loading = false,
   style,
@@ -168,6 +170,8 @@ export function PillButton({
   onPress: () => void;
   icon?: IconData;
   disabled?: boolean;
+  /** Explain a blocked action on tap, since touch devices cannot hover. */
+  disabledReason?: string;
   secondary?: boolean;
   loading?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -178,8 +182,13 @@ export function PillButton({
       accessibilityRole="button"
       accessibilityLabel={title}
       accessibilityState={{ disabled, busy: loading }}
-      disabled={disabled || loading}
+      accessibilityHint={disabled ? disabledReason : undefined}
+      disabled={loading || (disabled && !disabledReason)}
       onPress={() => {
+        if (disabled) {
+          if (disabledReason) Alert.alert(title, disabledReason);
+          return;
+        }
         tap();
         onPress();
       }}

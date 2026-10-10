@@ -115,11 +115,13 @@ async function browserChecks() {
       await waitFor('!!document.querySelector("[data-context-card]")');
       assert.equal(await evaluate(`document.querySelector("${ring}").getAttribute("aria-expanded")`), "true");
       // A Claude chat's card offers Compact now, held while the turn runs.
-      assert.equal(
-        await evaluate('document.querySelector("[data-context-card]").textContent'),
-        "Context37% used366k of 1M tokens634k left. Claude Code compacts the conversation when it gets close to full. You can also compact at a good moment, such as after a PR merges.Compact nowWait for the agent to finish.",
+      assert.equal(await evaluate('document.querySelector("[data-context-card]").textContent'), "Context37% used366k of 1M tokens634k leftCompact now");
+      assert.equal(await evaluate('document.querySelector("[data-compact-now]").getAttribute("aria-disabled")'), "true");
+      await evaluate('document.querySelector("[data-compact-now]").click()');
+      assert.equal(await evaluate("window.compacted.length"), 0);
+      await waitFor(
+        `(() => {const b=document.querySelector("[data-compact-now]"), p=b.parentElement.parentElement; return Math.abs(b.getBoundingClientRect().width - (p.clientWidth - 32)) < 1})()`,
       );
-      assert.equal(await evaluate('document.querySelector("[data-compact-now]").disabled'), true);
       assert.ok(
         await evaluate(
           `(() => {const c=document.querySelector("[data-context-card]").getBoundingClientRect(), r=document.querySelector("${ring}").getBoundingClientRect();return c.bottom<=r.top && Math.abs(c.right-r.right)<1})()`,
@@ -130,34 +132,36 @@ async function browserChecks() {
       await evaluate('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))');
       await waitFor('!document.querySelector("[data-context-card]")');
     }
-    // The ring turns to the accent at 75% and red at 90%, and the card's advice follows.
+    // The ring turns to the accent at 75% and red at 90%; the card keeps its concise footer.
     const stroke = () => evaluate(`document.querySelector("${ring} circle:last-child").getAttribute("stroke")`);
     assert.equal(await stroke(), "var(--ink-2)");
+    assert.equal(await evaluate('document.querySelector("[data-context-attention]")'), null);
     await evaluate("window.setContext({ used: 800000, size: 1000000 })");
     await waitFor(`document.querySelector("${ring}").getAttribute("aria-label") === "Context: 80% used (800k of 1M tokens)"`);
     assert.equal(await stroke(), "var(--accent-ink)");
+    assert.equal(await evaluate('document.querySelector("[data-context-attention]").getAttribute("data-tone")'), "warning");
     await evaluate(`document.querySelector("${ring}").click()`);
     await waitFor('!!document.querySelector("[data-context-card]")');
-    assert.match(
-      await evaluate('document.querySelector("[data-context-card]").textContent'),
-      /200k left\. Context is getting full\. Consider compacting after finishing the current step\./,
-    );
+    assert.match(await evaluate('document.querySelector("[data-context-card]").textContent'), /200k left\. Context is filling up\.Compact now$/);
     await delay(220);
     await screenshot("context-card-warning");
+    await evaluate('document.querySelector("[data-compact-now]").parentElement.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }))');
+    await waitFor('document.querySelector("[role=tooltip]")?.textContent === "Wait for the agent to finish."');
+    await screenshot("context-card-blocked-tooltip");
+    await evaluate('document.querySelector("[data-compact-now]").parentElement.dispatchEvent(new PointerEvent("pointerout", { bubbles: true }))');
+    await waitFor('!document.querySelector("[role=tooltip]")');
     await evaluate('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))');
     await waitFor('!document.querySelector("[data-context-card]")');
     await evaluate("window.setContext({ used: 897000, size: 1000000 })");
     await waitFor(`document.querySelector("${ring}").getAttribute("aria-label") === "Context: 90% used (897k of 1M tokens)"`);
     assert.equal(await stroke(), "var(--red)");
+    assert.equal(await evaluate('document.querySelector("[data-context-attention]").getAttribute("data-tone")'), "critical");
     // Once the turn ends, Compact now sends: the card closes and the chat shows the compaction as a divider.
     await evaluate("window.finishChildren()");
     await evaluate(`document.querySelector("${ring}").click()`);
     await waitFor('!!document.querySelector("[data-context-card]")');
-    await waitFor('document.querySelector("[data-compact-now]") && !document.querySelector("[data-compact-now]").disabled');
-    assert.match(
-      await evaluate('document.querySelector("[data-context-card]").textContent'),
-      /103k left\. Context is nearly full\. Compact at a pause in your work to make room for the next steps\.Compact now$/,
-    );
+    await waitFor('document.querySelector("[data-compact-now]") && document.querySelector("[data-compact-now]").getAttribute("aria-disabled") === "false"');
+    assert.match(await evaluate('document.querySelector("[data-context-card]").textContent'), /103k left\. Context is nearly full\.Compact now$/);
     await delay(220);
     await screenshot("context-card-critical");
     await evaluate('document.querySelector("[data-compact-now]").click()');
@@ -175,6 +179,7 @@ async function browserChecks() {
     assert.equal(await evaluate('document.querySelector("[data-compaction-divider]").textContent'), "Context compacted897k → 42k");
     await evaluate("window.setContext({ used: 42000, size: 1000000 })");
     await waitFor(`document.querySelector("${ring}").getAttribute("aria-label") === "Context: 4% used (42k of 1M tokens)"`);
+    assert.equal(await evaluate('document.querySelector("[data-context-attention]")'), null);
     for (const theme of ["dark", "light"]) {
       await evaluate(`window.setDark(${theme === "dark"})`);
       await screenshot(`compaction-divider-${theme}`);

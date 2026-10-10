@@ -733,15 +733,15 @@ export default function ChatScreen() {
     else if (id === "archive" && chat) void archive(chat);
   }
   // Archive asks first, as desktop does, with what removing the worktree would lose; a running turn is stopped. Once
-  // confirmed the phone goes to the Chat list right away and the archive finishes there, on the Chat's row. Nothing
-  // navigates when it ends, so the phone stays wherever it went in the meantime; a notice shows on the list.
+  // confirmed the sidebar opens and the archive finishes there, on the Chat's row. Keeping the same sidebar mounted
+  // preserves its scroll and avoids a second screen transition. Completion never moves the phone again.
   async function archive(target: NonNullable<typeof chat>) {
     if (busy || archiveRequest.current) return;
     archiveRequest.current = true;
     let left = false;
     const leave = () => {
       left = true;
-      router.replace("/projects");
+      panels.show("left");
     };
     // By the time the archive ends the phone may show another Project, so the list's copy of this one is read too.
     const refresh = () => Promise.all([session.refresh(), session.previewProject(project.path)]);

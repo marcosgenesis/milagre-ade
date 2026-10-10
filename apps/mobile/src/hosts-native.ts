@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { createChatDefaultsStore } from "./chat-defaults-store";
 import { createHostsStore } from "./hosts-store";
 import { createNavigationStore } from "./navigation-store";
 import { createProjectOrderStore } from "./project-order-store";
@@ -24,6 +25,11 @@ export const savedHosts = createHostsStore({
   getItemAsync: SecureStore.getItemAsync,
   setItemAsync: (key, value) => SecureStore.setItemAsync(key, value, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY }),
   deleteItemAsync: SecureStore.deleteItemAsync,
+});
+
+export const savedChatDefaults = createChatDefaultsStore({
+  getItem: SecureStore.getItem,
+  setItemAsync: (key, value) => SecureStore.setItemAsync(key, value, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY }),
 });
 
 const permissionKey = "milagre.permission.v1";

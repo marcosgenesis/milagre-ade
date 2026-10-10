@@ -7,7 +7,7 @@ import { relayRuntime } from "./relay-native";
 import { learnRoutes, lanRoutes } from "./routes-native";
 import { syncProject } from "./live";
 import { refreshLinks } from "./use-links";
-import { readPermission, savedHosts, savedNavigation, savedProjectOrder, savePermission } from "./hosts-native";
+import { readPermission, savedChatDefaults, savedHosts, savedNavigation, savedProjectOrder, savePermission } from "./hosts-native";
 import type { ChatLocation } from "./navigation-store";
 import type { SavedHost } from "./hosts-store";
 import type { AgentCliStatus, AgentModels, PermissionMode } from "@milagre/shared/model";
@@ -436,7 +436,13 @@ function ComposerProvider({ children }: { children: React.ReactNode }) {
       if (saved) setPermission(saved);
     });
   }, []);
-  const defaults = useMemo(() => ({ ...defaultPreferences, permissionMode: permission }), [permission]);
+  const [modelDefaults, setModelDefaults] = useState(() => savedChatDefaults.readModel());
+  const defaults = useMemo(() => ({ ...defaultPreferences, ...modelDefaults, permissionMode: permission }), [modelDefaults, permission]);
+  const setDefaultModel = useCallback((choice: TurnPreferences) => {
+    const { provider, model, effort, fastMode, ultracode } = choice;
+    setModelDefaults({ provider, model, effort, fastMode, ultracode });
+    void savedChatDefaults.saveModel(choice);
+  }, []);
   const setDefaultPermission = useCallback((mode: PermissionMode) => {
     setPermission(mode);
     void savePermission(mode);
@@ -451,17 +457,19 @@ function ComposerProvider({ children }: { children: React.ReactNode }) {
       setPreferences,
       defaults,
       setDefaultPermission,
+      setDefaultModel,
       linkOperations,
       compactRequests,
       requestCompact,
     }),
-    [drafts, attachments, preferences, defaults, setDefaultPermission, linkOperations, compactRequests, requestCompact],
+    [drafts, attachments, preferences, defaults, setDefaultPermission, setDefaultModel, linkOperations, compactRequests, requestCompact],
   );
   return <ComposerContext.Provider value={value}>{children}</ComposerContext.Provider>;
 }
 type Composer = {
   linkOperations: ReturnType<typeof createLinkOperations>;
   defaults: TurnPreferences;
+  setDefaultModel: (choice: TurnPreferences) => void;
   setDefaultPermission: (mode: PermissionMode) => void;
   drafts: Record<string, string>;
   setDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;

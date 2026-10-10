@@ -75,6 +75,7 @@ import { MessageNavigation } from "../message-navigation";
 import { AttentionPill } from "../attention";
 import { useLinear } from "../use-linear";
 import { useWorktreeLinearIssues } from "../use-worktree-linear-issues";
+import { savedChatDefaults } from "../hosts-native";
 import { showChoiceSheet } from "../choice-store";
 
 const PAGE = 40;
@@ -114,8 +115,17 @@ export default function ChatScreen() {
     },
     [],
   );
-  const [isolation, setIsolation] = useState<"local" | "worktree">("local");
-  const [baseBranch, setBaseBranch] = useState("");
+  const targetHost = params.hostId || session.client?.url || "";
+  const targetProject = params.projectPath || session.snapshot?.project.path || "";
+  const targetScope = JSON.stringify([targetHost, targetProject]);
+  const [targetChoice, setTargetChoice] = useState(() => ({ scope: targetScope, ...savedChatDefaults.readTarget(targetHost, targetProject) }));
+  const target = targetChoice.scope === targetScope ? targetChoice : { scope: targetScope, ...savedChatDefaults.readTarget(targetHost, targetProject) };
+  if (targetChoice.scope !== targetScope) setTargetChoice(target);
+  const { isolation, baseBranch = "" } = target;
+  const chooseTarget = (patch: Partial<typeof target>) => {
+    setTargetChoice({ ...target, ...patch });
+    void savedChatDefaults.saveTarget(targetHost, targetProject, patch);
+  };
   const [branchList, setBranchList] = useState<{ client: Client; path: string; items: string[]; error?: string } | null>(null);
   // A failed send can retry in the checkout already created for this draft.
   const preparedTarget = useRef<{ client: Client; path: string; base: string; issueKey?: string; worktreeId: number; sessionId: number } | null>(null);
@@ -1282,7 +1292,7 @@ export default function ChatScreen() {
                           },
                         ]}
                         onSelect={(id) => {
-                          if (!targetDisabled) setIsolation(id === "worktree" ? "worktree" : "local");
+                          if (!targetDisabled) chooseTarget({ isolation: id === "worktree" ? "worktree" : "local" });
                         }}
                       >
                         <View
@@ -1330,7 +1340,7 @@ export default function ChatScreen() {
                         ]}
                         onSelect={(id) => {
                           if (!branchDisabled) {
-                            if (newWorktree) setBaseBranch(id);
+                            if (newWorktree) chooseTarget({ baseBranch: id });
                             else navigation.setParams({ worktreeId: id });
                           }
                         }}

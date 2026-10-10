@@ -57,11 +57,13 @@ export default function ModelSheet() {
     ]),
   );
   const close = (apply: boolean) => {
-    if (apply)
+    if (apply) {
+      if (/#new:/.test(params.chatId)) composer.setDefaultModel({ ...draft, model: model.id });
       composer.setPreferences((current) => ({
         ...current,
         [params.chatId]: afterSheet({ ...draft, model: model.id }, (params.on as ModelProvider | undefined) || undefined),
       }));
+    }
     setClosing(true);
     setTimeout(() => router.back(), 0);
   };

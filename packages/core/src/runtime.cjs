@@ -1515,7 +1515,18 @@ function createRuntime(options) {
     const projects = await projectRegistry().list();
     await pruneLinks(await canvasActiveWorktrees());
     const registry = await projectRegistry().snapshot();
-    const statesByPath = await Promise.all(projects.map(async (project) => ({ path: project.path, state: (await readProject(project.path)).state })));
+    const recent = await withHidden(await recentProjects().list());
+    const sidebarPaths = new Set(recent.filter((p) => !p.hidden).map((p) => p.path));
+    const linkedIds = new Set();
+    for (const link of registry.links) {
+      if (link.a?.project_id) linkedIds.add(link.a.project_id);
+      if (link.b?.project_id) linkedIds.add(link.b.project_id);
+    }
+    for (const group of registry.projectGroups || []) {
+      for (const id of group.projectIds) linkedIds.add(id);
+    }
+    registry.projects = registry.projects.filter((project) => sidebarPaths.has(project.path) || linkedIds.has(project.id));
+    const statesByPath = await Promise.all(registry.projects.map(async (project) => ({ path: project.path, state: (await readProject(project.path)).state })));
     return { ...registry, states: statesByPath };
   });
   commands.handle("canvas:link-add", async (_event, a, b) => {

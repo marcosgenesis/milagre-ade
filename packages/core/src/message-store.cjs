@@ -24,7 +24,7 @@ const stores = new Map();
 
 function storeOf(directory) {
   let store = stores.get(directory);
-  if (!store) stores.set(directory, (store = { saved: null, rest: new Map(), restUsedAt: 0 }));
+  if (!store) stores.set(directory, (store = { saved: null, rest: new Map(), restUsedAt: 0, wholes: new WeakMap() }));
   return store;
 }
 
@@ -223,7 +223,6 @@ function settle(directory, previous, next) {
 // each state it gets shares their objects with the one before and a patch between them stays small. A client that only
 // briefly took whole states (a desktop before it asks for patches) leaves them cached no longer than this.
 const REST_TTL_MS = 60 * 1000;
-const wholeStates = new WeakMap();
 
 /**
  * `state` with every message, for a client that takes whole states: the unloaded Chats' messages read back from
@@ -233,13 +232,13 @@ const wholeStates = new WeakMap();
 function wholeState(state) {
   const unloaded = readableUnloaded(state);
   if (!unloaded.size) return state;
-  let whole = wholeStates.get(state);
+  const { directory } = tags.get(state.messages);
+  const store = storeOf(directory);
+  let whole = store.wholes.get(state);
   if (!whole) {
-    const { directory } = tags.get(state.messages);
-    const store = storeOf(directory);
     store.restUsedAt = Date.now();
     whole = { ...state, messages: mergeRows(state.messages, rowsOf(directory, unloaded, { cache: true }), positionsOf(directory, state)) };
-    wholeStates.set(state, whole);
+    store.wholes.set(state, whole);
   }
   return whole;
 }
@@ -252,9 +251,14 @@ function wholeState(state) {
 function forgetRest(directory, { chats, all = false, now = Date.now() } = {}) {
   const store = stores.get(directory);
   if (!store) return;
+  // The whole states made from them go too: a state outlives its whole copy in the daemon and the runtime.
+  const expire = () => {
+    store.rest.clear();
+    store.wholes = new WeakMap();
+  };
   if (all) store.rest.clear();
   else if (chats) for (const chat of chats) store.rest.delete(Number(chat));
-  else if (now - store.restUsedAt >= REST_TTL_MS) store.rest.clear();
+  else if (now - store.restUsedAt >= REST_TTL_MS) expire();
 }
 
 /** Gives `messages` the tag of `from` (a copy of the same messages, made by a step that maps them one to one). */

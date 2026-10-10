@@ -224,6 +224,25 @@ test("a store that forgot its rows anyway (read again) keeps a Chat loaded durin
   assert.deepEqual(ids(await readMessages(projectPath)), [...ids(all), 100]);
 });
 
+test("once no whole state was asked for in a minute, the cached whole states let go of their messages", async (t) => {
+  const { forgetRest, REST_TTL_MS } = require("./message-store.cjs");
+  const projectPath = await tempProject(t);
+  const all = await seed(projectPath);
+  const { states, advance } = harness(projectPath);
+  await states.get(projectPath);
+  advance(2000);
+  await states.unloadIdle();
+  const state = await states.get(projectPath);
+  const whole = wholeState(state);
+  assert.deepEqual(whole.messages, all);
+  assert.equal(wholeState(state), whole, "cached while whole states are read");
+  // The sweep's expiry, a minute after the last whole read: the state lives on (the runtime and the daemon hold it).
+  forgetRest(projectPath, { now: Date.now() + REST_TTL_MS + 1 });
+  const again = wholeState(state);
+  assert.notEqual(again, whole, "the old whole state is no longer kept for this state");
+  assert.deepEqual(again.messages, all);
+});
+
 test("a loaded Chat goes back to its place in the Project's order", async (t) => {
   const projectPath = await tempProject(t);
   const all = await seed(projectPath);

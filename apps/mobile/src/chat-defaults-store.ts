@@ -1,0 +1,70 @@
+import type { ModelProvider } from "@milagre/shared/model";
+import type { TurnPreferences } from "./turn-options";
+
+type Storage = { getItem: (key: string) => string | null; setItemAsync: (key: string, value: string) => Promise<void> };
+export type ChatTargetDefaults = { isolation: "local" | "worktree"; baseBranch?: string };
+type ModelDefaults = Pick<TurnPreferences, "provider" | "model" | "effort" | "fastMode" | "ultracode">;
+const isolationKey = "milagre.chat-isolation.v1";
+const modelKey = "milagre.chat-model.v1";
+
+function targetKey(scope: string) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < scope.length; i++) hash = Math.imul(hash ^ scope.charCodeAt(i), 0x01000193) >>> 0;
+  return `milagre.chat-target.v1.${hash.toString(16)}`;
+}
+
+/** Only explicit new-Chat choices are saved. Linear issues and provider-switch markers never become defaults. */
+export function createChatDefaultsStore(storage: Storage) {
+  const cache = new Map<string, string>();
+  let pending = Promise.resolve();
+  function read(key: string) {
+    try {
+      return JSON.parse(cache.get(key) ?? storage.getItem(key) ?? "null");
+    } catch {
+      return null;
+    }
+  }
+  function write(key: string, value: object) {
+    const raw = JSON.stringify(value);
+    cache.set(key, raw);
+    pending = pending.then(() => storage.setItemAsync(key, raw)).catch(() => {});
+    return pending;
+  }
+  function readTarget(hostId: string, projectPath: string): ChatTargetDefaults {
+    const scope = JSON.stringify([hostId, projectPath]);
+    const saved = read(targetKey(scope));
+    return {
+      isolation: read(isolationKey)?.isolation === "worktree" ? "worktree" : "local",
+      ...(saved?.scope === scope && typeof saved.baseBranch === "string" ? { baseBranch: saved.baseBranch } : {}),
+    };
+  }
+  function modelDefaults(value: ModelDefaults): ModelDefaults {
+    return { provider: value.provider, model: value.model, effort: value.effort, fastMode: !!value.fastMode, ultracode: !!value.ultracode };
+  }
+  return {
+    readTarget,
+    saveTarget(hostId: string, projectPath: string, patch: Partial<ChatTargetDefaults>) {
+      const scope = JSON.stringify([hostId, projectPath]);
+      const previous = readTarget(hostId, projectPath);
+      if (patch.isolation) void write(isolationKey, { isolation: patch.isolation });
+      return write(targetKey(scope), {
+        scope,
+        baseBranch: patch.baseBranch ?? previous.baseBranch,
+      });
+    },
+    readModel(): ModelDefaults | null {
+      const saved = read(modelKey);
+      if (
+        !saved ||
+        !(["claude", "codex", "antigravity"] as ModelProvider[]).includes(saved.provider) ||
+        typeof saved.model !== "string" ||
+        typeof saved.effort !== "string"
+      )
+        return null;
+      return modelDefaults(saved);
+    },
+    saveModel(value: ModelDefaults) {
+      return write(modelKey, modelDefaults(value));
+    },
+  };
+}

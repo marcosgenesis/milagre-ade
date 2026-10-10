@@ -153,6 +153,9 @@ function loadChats(directory, state, chats) {
   if (saved) for (const row of fresh) saved.set(row.message.id, row);
   const messages = mergeRows(state.messages, fresh, positions);
   const remaining = new Set([...unloaded].filter((chat) => !wanted.has(chat)));
+  // Every Chat back in memory: the store may be forgotten again like any other (see forgetStore). A save of an older
+  // state that still had unloaded Chats reads what it needs from chats.db.
+  if (!remaining.size) store.unloaded = false;
   return { ...state, messages: tag(messages === state.messages ? [...messages] : messages, directory, remaining) };
 }
 

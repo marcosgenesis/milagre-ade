@@ -243,6 +243,32 @@ test("once no whole state was asked for in a minute, the cached whole states let
   assert.deepEqual(again.messages, all);
 });
 
+test("a store is kept while its Project has unloaded Chats, and can be forgotten again once they are all back", async (t) => {
+  const { forgetStore, savedRows } = require("./message-store.cjs");
+  const projectPath = await tempProject(t);
+  const all = await seed(projectPath);
+  const { states, advance } = harness(projectPath);
+  await states.get(projectPath);
+  advance(2000);
+  await states.unloadIdle();
+  forgetStore(projectPath);
+  assert.ok(savedRows(projectPath), "kept: Chats are unloaded");
+  await states.load(projectPath, [1, 2]);
+  forgetStore(projectPath);
+  assert.ok(savedRows(projectPath), "kept: Chat 3 is still unloaded");
+  await states.load(projectPath, [3]);
+  forgetStore(projectPath);
+  assert.equal(savedRows(projectPath), null, "forgotten once every Chat is back");
+  assert.deepEqual((await states.get(projectPath)).messages, all);
+  // It still saves and unloads correctly afterwards.
+  await states.update(projectPath, (state) => ({ ...state, messages: [...state.messages, reply(100, 2)] }), { chats: [2] });
+  await states.flush(projectPath);
+  advance(2000);
+  await states.unloadIdle();
+  assert.deepEqual(ids(await states.allMessages(projectPath)), [...ids(all), 100]);
+  assert.deepEqual(ids(await readMessages(projectPath)), [...ids(all), 100]);
+});
+
 test("a loaded Chat goes back to its place in the Project's order", async (t) => {
   const projectPath = await tempProject(t);
   const all = await seed(projectPath);

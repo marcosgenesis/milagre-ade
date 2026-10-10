@@ -23,6 +23,8 @@ import { DotBackground } from "./DotBackground";
 import SidebarNav from "./SidebarNav";
 import { runKeys } from "../lib/sidebar-scopes";
 import { DraftChatComposer } from "./DraftChatComposer";
+import { useComposerPreferences } from "../lib/use-composer-preferences";
+import { effortFor } from "../model";
 import { createDraftStore, draftKey } from "../lib/draft-store";
 import { createScopeDrafts, linkChatRows, memberWorktreeForAction } from "../lib/link-scope";
 import { REMOTE_FILES_NOTICE, usePastedImages } from "./usePastedImages";
@@ -57,14 +59,6 @@ type Preferences = Pick<
   | "onUpdateCli"
   | "updatingCli"
   | "capability"
-  | "effort"
-  | "onEffortChange"
-  | "ultracode"
-  | "onUltracodeChange"
-  | "fastMode"
-  | "onFastModeChange"
-  | "permissionMode"
-  | "onPermissionModeChange"
 >;
 export function LinkWorkspace({
   opened,
@@ -150,6 +144,7 @@ export function LinkWorkspace({
     [remoteCount, chatWindow.loadEarlier, chatWindow.loadAll],
   );
   const chatMessagesOf = (id: number) => (lean ? (id === sessionId ? messages : []) : state.messages.filter((message) => message.session_id === id));
+  const composerPrefs = useComposerPreferences(`${owner}#${sessionId ?? "new"}`);
   const imageDraft = usePastedImages(`${owner}:${sessionId ?? "new"}`, isRemoteKey(owner));
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -329,10 +324,10 @@ export function LinkWorkspace({
         files: imageDraft.files,
         provider: model.provider,
         model: model.id,
-        permissionMode: preferences.permissionMode,
-        effort: preferences.effort,
-        ultracode: preferences.ultracode,
-        fastMode: preferences.fastMode,
+        permissionMode: composerPrefs.permissionMode,
+        effort: preferences.capability ? effortFor(preferences.capability, composerPrefs.effort) : composerPrefs.effort,
+        ultracode: composerPrefs.ultracode,
+        fastMode: composerPrefs.fastMode,
         replies: getSettings().claudeReplies,
         tldrEnabled: getSettings().tldrEnabled,
       });
@@ -521,6 +516,13 @@ export function LinkWorkspace({
                     <EditorLinks root={root}>
                       <DraftChatComposer
                         {...preferences}
+                        effort={preferences.capability ? effortFor(preferences.capability, composerPrefs.effort) : composerPrefs.effort}
+                        onEffortChange={composerPrefs.setEffort}
+                        ultracode={composerPrefs.ultracode}
+                        onUltracodeChange={composerPrefs.setUltracode}
+                        fastMode={composerPrefs.fastMode}
+                        onFastModeChange={composerPrefs.setFastMode}
+                        permissionMode={composerPrefs.permissionMode}
                         scopeKind="link"
                         store={draftStore}
                         projectPath={root}
@@ -563,7 +565,7 @@ export function LinkWorkspace({
                           if (session) void bridge.archiveFinishedSubagents(owner, session.id).catch((error) => setError(ipcErrorMessage(error)));
                         }}
                         onPermissionModeChange={(mode) => {
-                          preferences.onPermissionModeChange(mode);
+                          composerPrefs.setPermissionMode(mode);
                           if (chatId) void bridge.setAgentPermissionMode(chatId, mode);
                         }}
                         onRecommendationSelect={(option) => void send(option)}

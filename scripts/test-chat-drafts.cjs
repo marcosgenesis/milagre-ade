@@ -55,6 +55,18 @@ async function browserChecks() {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     })()`);
   const promptIs = (text) => waitFor(`${prompt}?.value === ${JSON.stringify(text)}`);
+  const setPermissionMode = async (mode) => {
+    // Mode is "Ask", "Auto", or "Full"
+    // Wait for the permission mode dropdown and click it
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent === 'Ask' || b.textContent === 'Auto' || b.textContent === 'Full')?.click()`);
+    await waitFor(`!![...document.querySelectorAll('button[data-picker-row]')].find(b => b.textContent.includes('${mode}'))`);
+    await evaluate(`[...document.querySelectorAll('button[data-picker-row]')].find(b => b.textContent.includes('${mode}'))?.click()`);
+    // Wait for it to apply
+    await waitFor(`[...document.querySelectorAll('button')].find(b => b.textContent === '${mode}')`);
+  };
+  const expectPermissionMode = async (mode) => {
+    await waitFor(`[...document.querySelectorAll('button')].find(b => b.textContent === '${mode}')`);
+  };
   async function openChat(title) {
     const row = `[...document.querySelectorAll('aside [data-row]')].find(row => row.textContent.includes(${JSON.stringify(title)}))`;
     await waitFor(`!!(${row})`);
@@ -98,6 +110,19 @@ async function browserChecks() {
     await promptIs("Draft for a new chat");
     await screenshot("new-chat-restored");
     console.log("PASS: the new-chat draft comes back after visiting another Chat");
+
+    // Test permission mode options
+    await openChat("Alpha chat");
+    await setPermissionMode("Auto");
+    await openChat("Beta chat");
+    await expectPermissionMode("Ask");
+    await setPermissionMode("Full");
+    await openChat("Alpha chat");
+    await expectPermissionMode("Auto");
+    await openChat("Beta chat");
+    await expectPermissionMode("Full");
+    await screenshot("beta-permission-full");
+    console.log("PASS: permission mode is attached to each chat separately");
     app.exit(0);
   } catch (error) {
     console.error(error);

@@ -926,8 +926,10 @@ function chatHost({
     "../turn-options": require("../apps/mobile/src/turn-options.ts"),
     "../handoff-sides": require("../apps/mobile/src/handoff-sides.ts"),
     "../handoff-divider": { HandoffDivider: "HandoffDivider" },
+    "../worktree-link-divider": { WorktreeLinkDivider: "WorktreeLinkDivider" },
     "../handoff-brief-store": { showBrief() {} },
     "@milagre/shared/handoff": require("@milagre/shared/handoff"),
+    "@milagre/shared/worktree-link": require("@milagre/shared/worktree-link"),
     "../archive": require("../apps/mobile/src/archive.ts"),
     "../confirm-store": { confirmSheet: (...args) => alert(...args) },
   });

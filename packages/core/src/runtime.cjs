@@ -1538,8 +1538,14 @@ function createRuntime(options) {
     return { ...registry, states: statesByPath };
   });
   commands.handle("canvas:link-add", async (_event, a, b) => {
-    await projectRegistry().addLink(a, b, await canvasActiveWorktrees());
-    return linksChanged();
+    const active = await canvasActiveWorktrees();
+    const before = new Set((await projectRegistry().snapshot()).links.map((link) => link.id));
+    await projectRegistry().addLink(a, b, active);
+    const links = await linksChanged();
+    // The Chats the new Link reaches each get a line saying so, in the background: a Project Link can reach many.
+    const added = links.find((link) => !before.has(link.id));
+    if (added) void linked.linkAdded(added, active).catch((error) => console.warn("Milagre couldn't mark the linked Chats:", error.message));
+    return links;
   });
   commands.handle("canvas:link-remove", async (_event, id) => {
     await projectRegistry().removeLink(id);

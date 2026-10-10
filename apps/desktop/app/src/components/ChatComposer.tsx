@@ -42,9 +42,11 @@ import { LinearIssuePicker } from "./LinearIssuePicker";
 import Tooltip from "./primitives/Tooltip";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { HandoffDivider } from "./Handover";
+import { WorktreeLinkDivider } from "./WorktreeLinkDivider";
 import { advisorResultLabel, messageSender } from "@milagre/shared/advisor-result";
 import { LinkedMessageHeader, linkedContext } from "./LinkedMessage";
 import { isHandoff } from "@milagre/shared/handoff";
+import { isWorktreeLinked } from "@milagre/shared/worktree-link";
 import { MessageScroller } from "./agents/message-scroller";
 import { RecommendationCard } from "./agents/recommendation-card";
 import { parseRecommendation } from "../lib/recommendation";
@@ -154,6 +156,7 @@ const MessageSection = memo(function MessageSection({
   onOpenChat?: (chatKey: string) => void;
 }) {
   if (isHandoff(message)) return <HandoffDivider context={message.context} models={models} />;
+  if (isWorktreeLinked(message)) return <WorktreeLinkDivider context={message.context} />;
   const linked = linkedContext(message);
   const advisor = typeof message.context === "object" && message.context?.kind === "advisor-result" ? message.context : null;
   // A PR-blocker pill's message shows as a card, not as the skill prompt the agent read.

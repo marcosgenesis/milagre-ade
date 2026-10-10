@@ -44,7 +44,9 @@ import { chosenDesign, designActivity } from "@milagre/shared/artifact";
 import { handoffSides } from "../handoff-sides";
 import { HandoffDivider } from "../handoff-divider";
 import { showBrief } from "../handoff-brief-store";
+import { WorktreeLinkDivider } from "../worktree-link-divider";
 import { isHandoff } from "@milagre/shared/handoff";
+import { isWorktreeLinked, worktreeLinkText } from "@milagre/shared/worktree-link";
 import { ThinkingIndicator } from "../running-logo";
 import { BottomFade, EdgeFade } from "../bottom-fade";
 import { useDotBackground } from "../dot-background";
@@ -290,7 +292,9 @@ export default function ChatScreen() {
         index,
         label: isHandoff(messages[index])
           ? `Go to ${handoffSides(messages[index].context, handoffModels).restored ? "context restored" : "context handoff"} ${index + 1} of ${messages.length}.`
-          : `Go to ${messageSender(messages[index])} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
+          : isWorktreeLinked(messages[index])
+            ? `Go to ${worktreeLinkText(messages[index].context)}, ${index + 1} of ${messages.length}.`
+            : `Go to ${messageSender(messages[index])} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
       })),
     [messages, handoffModels],
   );
@@ -321,8 +325,8 @@ export default function ChatScreen() {
       }
     }
   };
-  const openBrief = useCallback((brief: string) => {
-    showBrief(brief);
+  const openBrief = useCallback((brief: string, title?: string) => {
+    showBrief(brief, title);
     router.push("/handoff-brief");
   }, []);
   const openActivity = useCallback((message: string) => router.push({ pathname: "/activity", params: { id: String(params.id), message } }), [params.id]);
@@ -1027,6 +1031,8 @@ export default function ChatScreen() {
             >
               {isHandoff(message) ? (
                 <HandoffDivider context={message.context} models={handoffModels} onOpen={openBrief} />
+              ) : isWorktreeLinked(message) ? (
+                <WorktreeLinkDivider context={message.context} client={session.client} onOpen={(title, text) => openBrief(text, title)} />
               ) : (
                 <ChatReply
                   message={message}

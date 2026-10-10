@@ -5,10 +5,13 @@ import { pullRequestRefs } from "./chat-pull-requests.mjs";
 /** A line the commit dialog saved in the chat, as opposed to an agent's reply. */
 export const isGitNote = (message) => typeof message?.context === "object" && message.context?.kind === "git-action";
 
+/** A line Milagre saved in the chat that isn't a reply: a commit dialog note, or a Link reaching the Chat. */
+export const isNote = (message) => isGitNote(message) || message?.context?.kind === "worktree-linked";
+
 /** The summary of a Chat whose messages, in the Project's order, are `messages`. */
 export function summarizeChat(messages) {
   const input = messages.find((message) => message.role !== "assistant" && message.body?.trim());
-  const lastReply = messages.findLast((message) => message.role === "assistant" && !isGitNote(message));
+  const lastReply = messages.findLast((message) => message.role === "assistant" && !isNote(message));
   const lastModel = messages.findLast((message) => message.role === "user" && message.model)?.model;
   const openHandoff = messages.findLast((message) => message.context?.kind === "handoff" && message.context.status === "preparing")?.id;
   const summary = { count: messages.length };

@@ -271,8 +271,24 @@ export type LinearIssueContext = {
   note?: string;
 };
 
+/**
+ * A Link made on the canvas that reached this Chat's Worktree, as a line in the Chat. Milagre writes it when the Link is
+ * made; `summary` is the linked summary the Chat's next turn gets, as of then.
+ */
+export type WorktreeLinkedContext = {
+  kind: "worktree-linked";
+  linkId: string;
+  /** The Project the Link reached: another one, or the Chat's own when it links two of its Worktrees. */
+  project: { name: string; path: string };
+  sameProject: boolean;
+  /** The branches of the Worktrees the Link reached, more than one for a whole-Project Link. */
+  branches: string[];
+  summary?: string;
+};
+
 export type ChatContext =
   | AdvisorResultContext
+  | WorktreeLinkedContext
   | LinkedContext
   | { kind: "git-action" }
   | HandoffContext

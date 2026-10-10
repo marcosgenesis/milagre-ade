@@ -361,9 +361,14 @@ function publishFixture(t, files) {
   fs.mkdirSync(path.join(root, "bin"));
   for (const name of files) fs.writeFileSync(path.join(root, "release", name), "x");
   const log = '#!/bin/bash\nprintf \'%s %s\\n\' "$(basename "$0")" "$*" >> "$CALL_LOG"\n';
-  fs.writeFileSync(path.join(root, "bin/gh"), `${log}if [ "$2" = view ]; then echo true; fi\n`, { mode: 0o755 });
+  // Like the real gh, an asset path that doesn't exist fails the upload.
+  const missing = 'for a in "$@"; do case "$a" in release/*) [ -e "$a" ] || { echo "no matches found for \\`$a\\`" >&2; exit 1; };; esac; done\n';
+  fs.writeFileSync(path.join(root, "bin/gh"), `${log}${missing}if [ "$2" = view ]; then echo true; fi\n`, { mode: 0o755 });
   fs.writeFileSync(path.join(root, "bin/node"), `${log}exit "\${FEED_EXIT:-0}"\n`, { mode: 0o755 });
-  fs.writeFileSync(path.join(root, "bin/npm"), log, { mode: 0o755 });
+  // `npm run package:managers` writes the package manager files the stable upload names.
+  const managers =
+    'if [ "$2" = package:managers ]; then mkdir -p release/package-managers/homebrew release/package-managers/winget; touch release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb release/package-managers/winget/Milagre.Milagre.yaml; fi\n';
+  fs.writeFileSync(path.join(root, "bin/npm"), `${log}${managers}`, { mode: 0o755 });
   const env = {
     PATH: `${path.join(root, "bin")}${path.delimiter}${process.env.PATH}`,
     CALL_LOG: path.join(root, "calls.log"),

@@ -2,6 +2,7 @@ const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat
 const { diffState } = require("@milagre/shared/state-patch");
 const { sessionWithArchivedSummaries, sessionWithTranscriptTails, withArchivedSummary, withTranscriptTail } = require("@milagre/shared/subagent-transcript");
 const { preparePrivateDirectory } = require("@milagre/core/private-files");
+const { wholeState, unloadedChats, isFromDisk } = require("@milagre/core/message-store");
 const { prepareToken, validToken, authenticationProof, authenticationNonce, validNonce } = require("./local-auth.cjs");
 const net = require("node:net");
 const os = require("node:os");
@@ -180,32 +181,49 @@ function leanSessions(sessions, form) {
   }
   return lean;
 }
+// The host keeps only some Chats' messages in memory (#321, message-store.cjs); a client that takes messages in its
+// states gets every message, the unloaded Chats' read back from chats.db (wholeState: one object per state).
 function leanState(state, form = WHOLE) {
-  if (!state || typeof state !== "object" || isWhole(form)) return state;
+  if (!state || typeof state !== "object") return state;
+  if (isWhole(form)) return wholeState(state);
   const key = formKey(form);
   let cache = leanStates.get(key);
   if (!cache) leanStates.set(key, (cache = new WeakMap()));
-  let lean = cache.get(state);
+  // A copy with every message is kept against the whole state, which the message store drops a minute after the last
+  // whole read; kept against the state, which the runtime and sentStates hold, it would keep every message alive.
+  const base = form.messages ? wholeState(state) : state;
+  let lean = cache.get(base);
   if (!lean) {
-    lean = { ...state };
+    lean = { ...base };
     // One empty array, so no patch ever touches it.
     if (!form.messages) Object.assign(lean, { messages: NO_MESSAGES, messagesInChats: true });
     if (!wholeSubagents(form)) lean.sessions = leanSessions(state.sessions, form);
-    cache.set(state, lean);
+    cache.set(base, lean);
   }
   return lean;
 }
-/** A reply as a client of `form` gets it: every state in it as leanState gives it. */
+/**
+ * A reply as a client of `form` gets it: every state in it as leanState gives it, the one in a `project` too
+ * (worktree:create and the issue links answer with one).
+ */
 function leanResult(result, form = WHOLE) {
-  if (!result || typeof result !== "object" || Array.isArray(result) || isWhole(form)) return result;
-  let lean = result;
-  if (result.state && typeof result.state === "object") lean = { ...lean, state: leanState(result.state, form) };
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  const withState = (item) => {
+    if (!item?.state || typeof item.state !== "object") return item;
+    const state = leanState(item.state, form);
+    return state === item.state ? item : { ...item, state };
+  };
+  let lean = withState(result);
   // worktree:create and the Linear link/unlink replies carry their Project as `project: { path, name, state }`.
-  if (result.project?.state && typeof result.project.state === "object")
-    lean = { ...lean, project: { ...result.project, state: leanState(result.project.state, form) } };
+  if (result.project && typeof result.project === "object" && !Array.isArray(result.project)) {
+    const project = withState(result.project);
+    if (project !== result.project) lean = { ...lean, project };
+  }
   for (const key of ["projects", "links"])
-    if (Array.isArray(result[key]))
-      lean = { ...lean, [key]: result[key].map((item) => (item?.state ? { ...item, state: leanState(item.state, form) } : item)) };
+    if (Array.isArray(result[key])) {
+      const items = result[key].map(withState);
+      if (items.some((item, index) => item !== result[key][index])) lean = { ...lean, [key]: items };
+    }
   return lean;
 }
 /**
@@ -218,13 +236,22 @@ function agentEventAsTaken(channel, payload, form) {
   const taken = agent && subagentAsTaken(agent, form);
   return taken && taken !== agent ? { ...payload, event: { ...payload.event, agent: taken } } : null;
 }
-/** The messages `next` has that `previous` didn't (new or changed), each after the message before it in its Chat, and the ids it no longer has. */
-function messageChanges(previous = [], next = []) {
+/**
+ * The messages state `next` has that `previous` didn't (new or changed), each after the message before it in its Chat,
+ * and the ids it no longer has. A Chat the host unloaded (message-store.cjs) leaves the state without its messages being
+ * removed, and one it loads back brings messages read from chats.db that clients already had: neither is a change.
+ */
+function messageChanges(previousState, nextState) {
+  const previous = previousState?.messages ?? [];
+  const next = nextState?.messages ?? [];
   if (previous === next) return { changed: [], removed: [] };
   const before = new Set(previous);
-  const changed = next.filter((message) => !before.has(message));
+  const changed = next.filter((message) => !before.has(message) && !isFromDisk(message));
   const ids = new Set(next.map((message) => message.id));
-  const removed = previous.filter((message) => !ids.has(message.id)).map((message) => message.id);
+  const unloaded = unloadedChats(nextState);
+  // A Chat removed while unloaded is removed: its messages are announced as before.
+  const kept = (message) => unloaded.has(Number(message.session_id)) && Object.hasOwn(nextState?.sessions ?? {}, String(message.session_id));
+  const removed = previous.filter((message) => !ids.has(message.id) && !kept(message)).map((message) => message.id);
   if (!changed.length) return { changed: [], removed };
   const chats = new Map();
   for (const message of next) {
@@ -369,7 +396,8 @@ async function startDaemon({
         const frame =
           patched && taker
             ? patched.form(taker)
-            : (taker && !wholeSubagents(taker) && agentFrame(taker)) || (whole ??= eventFrame(channel, payload, seq, inlineLimit));
+            : (taker && !wholeSubagents(taker) && agentFrame(taker)) ||
+              (whole ??= eventFrame(channel, hasState(payload) ? { ...payload, state: wholeState(payload.state) } : payload, seq, inlineLimit));
         connection.send(null, frame.json, frame.bytes);
       } catch (error) {
         onError(new Error(`Milagre couldn't send a ${channel} event: ${error.message}`));
@@ -408,7 +436,7 @@ async function startDaemon({
             key,
             numbered(() => ({
               patch: diffState(leanState(previous.state, form), leanState(state, form)),
-              ...(form.messages ? {} : { messages: messageChanges(previous.state.messages, state.messages) }),
+              ...(form.messages ? {} : { messages: messageChanges(previous.state, state) }),
             })),
           );
         return forms.get(key);
@@ -419,7 +447,9 @@ async function startDaemon({
    * A scope's state with its number, for a client that takes patches, beside the rest of its snapshot (a Project's path
    * and name, a Link's definition). A newer state than the one sent goes out first.
    */
-  async function readState(owner, form = WHOLE) {
+  // `withRest`: the client needs the rest of the snapshot (the phone bridge, which takes states without messages and
+  // still hands phones a Project's path and name).
+  async function readState(owner, form = WHOLE, { withRest = false } = {}) {
     if (typeof owner !== "string" || !owner) throw new Error("Choose a Project or Link");
     const link = isLinkScopeKey(owner);
     const answer = (sent) => ({ ...snapshotRest.get(owner), state: leanState(sent.state, form), version: sent.version, epoch });
@@ -427,7 +457,7 @@ async function startDaemon({
     // snapshot waits behind whatever the Project or Link is busy with (a shared Chat's Worktrees being prepared). Its
     // next change follows as a patch on it. A client that needs the rest of the snapshot (a name) reads it once.
     const sent = sentStates.get(owner);
-    if (sent && (!form.messages || snapshotRest.has(owner))) return answer(sent);
+    if (sent && ((!form.messages && !withRest) || snapshotRest.has(owner))) return answer(sent);
     const { state, ...rest } = await runtime.invoke(link ? "link:snapshot" : "project:snapshot", [link ? scopeFromKey(owner).linkId : owner]);
     snapshotRest.set(owner, rest);
     if (sentStates.get(owner)?.state !== state)
@@ -670,7 +700,8 @@ async function startDaemon({
         else if (request.method === "daemon:state-patches") {
           if (!closed) patchClients.set(key, formOf(request.args[0]));
           result = { epoch };
-        } else if (request.method === "state:read") result = await readState(request.args[0], patchClients.get(key));
+        } else if (request.method === "state:read")
+          result = await readState(request.args[0], patchClients.get(key), { withRest: request.args[1]?.rest === true });
         else if (request.method === "daemon:focus") {
           const next = request.args[0];
           if (!next || typeof next.focused !== "boolean") throw new Error("Expected a focused boolean");
@@ -790,6 +821,8 @@ async function startDaemon({
     await close();
     throw error;
   }
-  return { socketPath, close, acceptConnection };
+  // unloadIdle: what the runtime's sweep does every minute, now (for checks; see ProjectStates).
+  return { socketPath, close, acceptConnection, unloadIdle: () => runtime.unloadIdle() };
 }
-module.exports = { startDaemon, createResultPages, formOf, agentEventAsTaken, eventFrame };
+// leanState: for checks of how each form of a state is cached.
+module.exports = { startDaemon, createResultPages, formOf, agentEventAsTaken, eventFrame, leanState };

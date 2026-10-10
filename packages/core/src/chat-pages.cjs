@@ -23,9 +23,12 @@ function chatPage(messages, chatId, { before, turns = 10, limit = 75 } = {}) {
   return { messages: chat.slice(start, end), hasMore: start > 0, total: chat.length };
 }
 
-/** Matches for `query` across the Chats of `sessions` that aren't archived, best first: where they are and what matched. */
-function chatSearch(state, query, { limit = 200 } = {}) {
-  const messages = state.messages.filter((message) => state.sessions[message.session_id] && !state.sessions[message.session_id].archived);
+/**
+ * Matches for `query` across the Chats of `sessions` that aren't archived, best first: where they are and what matched.
+ * `all` is every message to search ({ id, session_id, body } is enough); the state's own by default.
+ */
+function chatSearch(state, query, { limit = 200 } = {}, all = state.messages) {
+  const messages = all.filter((message) => state.sessions[message.session_id] && !state.sessions[message.session_id].archived);
   return searchMessages(messages, String(query ?? ""), limit).map(({ message, score, snippet, highlight, term }) => ({
     message: { id: message.id, session_id: message.session_id },
     score,

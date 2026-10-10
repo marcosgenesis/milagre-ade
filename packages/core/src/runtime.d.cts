@@ -28,6 +28,11 @@ export interface RuntimeOptions {
   readPullRequest?: (worktreePath: string) => Promise<unknown>;
   /** worktree:link-issue's PR lookup: `known: false` when it couldn't ask; the default asks `gh`. */
   readPullRequestState?: (worktreePath: string) => Promise<{ known: boolean; pr: unknown }>;
+  /**
+   * Which Chats' messages stay in memory (see project-states.cjs): a Chat not touched for `idleMs` (10 minutes) whose
+   * turn isn't busy is unloaded by a sweep every `sweepMs` (a minute; 0 for none). false keeps every message in memory.
+   */
+  lazyMessages?: false | { idleMs?: number; sweepMs?: number };
   /** The Linear connection; tests point it at a fake Linear and a fake browser. */
   linear?: {
     clientId?: string;
@@ -48,6 +53,8 @@ export interface Runtime {
   resumeRecentProjects(): Promise<void>;
   environmentReady: Promise<unknown>;
   focused(): Promise<void>;
+  /** Unloads the idle Chats of every open Project and Link now, as the sweep does. */
+  unloadIdle(): Promise<void>;
   close(): Promise<void>;
 }
 export function createRuntime(options: RuntimeOptions): Runtime;

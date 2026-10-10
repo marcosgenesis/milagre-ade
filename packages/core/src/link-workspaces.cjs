@@ -17,11 +17,15 @@ function createLinkWorkspaces({
 }) {
   const queues = new Map();
   async function save(id, preparation) {
-    await store.update(id, (state) => ({
-      ...state,
-      next_id: Math.max(state.next_id, preparation.chatId + 1),
-      preparations: { ...state.preparations, [preparation.operationId]: preparation },
-    }));
+    await store.update(
+      id,
+      (state) => ({
+        ...state,
+        next_id: Math.max(state.next_id, preparation.chatId + 1),
+        preparations: { ...state.preparations, [preparation.operationId]: preparation },
+      }),
+      { chats: [] },
+    );
     await store.flush(id);
   }
   async function membersAvailable(link) {

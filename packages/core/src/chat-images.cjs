@@ -108,18 +108,26 @@ class ChatImages {
       const message = { ...run, session_id: sessionIdFromKey(key) };
       if (imagePaths(message, this.cwd(state, message, projectPath)).has(requested)) return (await this.copy(projectPath, requested)).path;
     }
-    for (const message of [...state.messages].reverse()) {
+    // An unloaded Chat's messages (see message-store.cjs) are looked at only where their saved JSON names the file.
+    const name = path.basename(requested);
+    const needles = [...new Set([JSON.stringify(name).slice(1, -1), encodeURIComponent(name), encodeURI(name)])];
+    const messages = this.states.messagesContaining ? await this.states.messagesContaining(projectPath, needles) : state.messages;
+    for (const message of [...messages].reverse()) {
       if (message.role !== "assistant") continue;
       const stored = message.images?.find((image) => image.sourcePath === requested);
       if (stored?.path) return stored.path;
       if (!imagePaths(message, this.cwd(state, message, projectPath)).has(requested)) continue;
       const image = await this.copy(projectPath, requested);
-      const result = await this.states.update(projectPath, (latest) => {
-        const current = latest.messages.find((item) => item.id === message.id);
-        if (!current || !imagePaths(current, this.cwd(latest, current, projectPath)).has(requested)) return latest;
-        if (current.images?.some((item) => item.sourcePath === requested)) return latest;
-        return { ...latest, messages: latest.messages.map((item) => (item !== current ? item : { ...item, images: [...(item.images || []), image] })) };
-      });
+      const result = await this.states.update(
+        projectPath,
+        (latest) => {
+          const current = latest.messages.find((item) => item.id === message.id);
+          if (!current || !imagePaths(current, this.cwd(latest, current, projectPath)).has(requested)) return latest;
+          if (current.images?.some((item) => item.sourcePath === requested)) return latest;
+          return { ...latest, messages: latest.messages.map((item) => (item !== current ? item : { ...item, images: [...(item.images || []), image] })) };
+        },
+        { chats: [message.session_id] },
+      );
       if (result.changed) this.broadcast(projectPath, result.state);
       return image.path;
     }

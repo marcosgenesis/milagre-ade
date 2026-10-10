@@ -13,13 +13,20 @@ const ACTIVE_TTL_MS = 3000;
 /**
  * What a Chat gets from its Links (spec 003): the summary at the start of each turn, the linked tools for
  * either provider, and the Delegations they make. The runtime supplies its parts:
- *   registry() -> the Project registry; project(path) -> the Project's state, loading the Project if needed
+ *   registry() -> the Project registry; project(path) -> the Project's state, loading the Project if needed (it can
+ *   leave out unloaded Chats' messages: see message-store.cjs); messages(path, chatIds) -> those Chats' messages, whole,
+ *   or every message without chatIds; bodies(path, chatIds) -> their ids, roles and bodies
  *   chats -> the ChatHost; agents -> the SessionManager; emit(channel, payload) -> the windows
  */
 function createLinkedWorktrees({
   dataDir,
   registry,
   project,
+  messages = async (projectPath, chatIds) => {
+    const all = (await project(projectPath)).messages;
+    return chatIds ? all.filter((message) => chatIds.includes(message.session_id)) : all;
+  },
+  bodies = messages,
   chats,
   agents,
   emit,
@@ -80,6 +87,8 @@ function createLinkedWorktrees({
   const reads = createLinkedReads({
     sides,
     state: project,
+    messages,
+    bodies,
     runs: () => chats.runs,
     receiveOnly: (key) => receiveOnly.has(key),
     open: (side) => delegations.openBetween(side.sourceWorktree, side.worktree_path),
@@ -118,9 +127,11 @@ function createLinkedWorktrees({
   // Resolves once the message is saved, with `started`: what took it (see Delegations' deliver port).
   async function deliver(key, { body, prompt, context }) {
     const projectPath = projectOfKey(key);
-    const state = await project(projectPath);
+    let state = await project(projectPath);
     const session = state.sessions[sessionIdFromKey(key)];
     if (!session) throw new Error("that Chat is no longer in its Project");
+    // The Project's last used model is read across every Chat, unloaded ones too, when the Chat has no turn this run.
+    if (!chats.turnSettings(key)) state = { ...state, messages: await messages(projectPath) };
     const { started } = await chats.send({
       body,
       prompt,
@@ -165,7 +176,7 @@ function createLinkedWorktrees({
       status: (key) => runStatus(chats.runs[key]),
       deliver,
       note: (key, note) => chats.addNote(key, note),
-      reply: async (key, delegationId) => delegationReply(await project(projectOfKey(key)), sessionIdFromKey(key), delegationId),
+      reply: async (key, delegationId) => delegationReply(await messages(projectOfKey(key), [sessionIdFromKey(key)]), sessionIdFromKey(key), delegationId),
       permissionMode: (key) => agents.permissionMode(key),
       approve: (key, request) => agents.askApproval(key, request),
       changed: () => emit("linked:changed", snapshot()),

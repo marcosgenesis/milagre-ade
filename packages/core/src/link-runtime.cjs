@@ -16,16 +16,20 @@ function registerLinkRuntime({ commands, registry, store, workspaces, chats, bro
     } catch {
       /* The saved failure remains readable below. */
     }
-    await store.update(id, (latest) => {
-      const sessions = { ...latest.sessions };
-      let changed = false;
-      for (const prep of Object.values(latest.preparations))
-        if (prep.status === "ready" && !sessions[prep.chatId]) {
-          sessions[prep.chatId] = { id: prep.chatId, agent_name: link.name, status: "Created", workspacePath: prep.workspacePath, worktrees: prep.members };
-          changed = true;
-        }
-      return changed ? { ...latest, sessions } : latest;
-    });
+    await store.update(
+      id,
+      (latest) => {
+        const sessions = { ...latest.sessions };
+        let changed = false;
+        for (const prep of Object.values(latest.preparations))
+          if (prep.status === "ready" && !sessions[prep.chatId]) {
+            sessions[prep.chatId] = { id: prep.chatId, agent_name: link.name, status: "Created", workspacePath: prep.workspacePath, worktrees: prep.members };
+            changed = true;
+          }
+        return changed ? { ...latest, sessions } : latest;
+      },
+      { chats: [] },
+    );
     let state = await store.get(id);
     await chats.resumeInterrupted(key, state).catch(() => {});
     state = await store.get(id);
@@ -80,17 +84,23 @@ function registerLinkRuntime({ commands, registry, store, workspaces, chats, bro
         if (!validLinkId(operationId)) throw new Error("Invalid send operation");
         if (!store.has(link.id)) throw new Error("Open the Link before sending");
         let state = await store.get(link.id);
-        const earlier = state.messages.find((message) => message.operationId === operationId);
+        // A send already made with this operation, in a Chat that may be unloaded (see message-store.cjs).
+        const earlier = store.findMessage
+          ? await store.findMessage(link.id, "operationId", operationId)
+          : state.messages.find((message) => message.operationId === operationId);
         if (earlier) return { sessionId: earlier.session_id };
         await workspaces.membersAvailable(link);
         let sessionId = request.sessionId;
         if (sessionId == null) {
           sessionId = Object.values(state.preparations).find((prep) => prep.operationId === operationId)?.chatId ?? state.next_id;
           const prepared = await workspaces.prepareLinkChat({ link, chatId: sessionId, prompt: request.body || "", operationId });
-          await store.update(link.id, (latest) =>
-            latest.sessions[sessionId]
-              ? latest
-              : { ...latest, sessions: { ...latest.sessions, [sessionId]: { id: sessionId, agent_name: link.name, status: "Created", ...prepared } } },
+          await store.update(
+            link.id,
+            (latest) =>
+              latest.sessions[sessionId]
+                ? latest
+                : { ...latest, sessions: { ...latest.sessions, [sessionId]: { id: sessionId, agent_name: link.name, status: "Created", ...prepared } } },
+            { chats: [] },
           );
           await store.flush(link.id);
         }

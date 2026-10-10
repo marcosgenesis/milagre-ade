@@ -61,7 +61,7 @@ const { createLinearTools, linearToolDefinitions } = require("./linear/tools.cjs
 const { isIssueKey } = require("./linear/links.cjs");
 const { ProjectStates } = require("./project-states.cjs");
 const { DiffRefresher } = require("./diff-refresh.cjs");
-const { projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
+const { chatKey, projectOfKey, sessionIdFromKey } = require("@milagre/shared/agent-runs");
 const { archiveFinishedSubagents, archiveSubagent, patchSession, renameWorktree } = require("@milagre/shared/project-edits");
 const { attentionContext, attentionNotice } = require("@milagre/shared/attention");
 const { resolveProjectImage } = require("./project-image.cjs");
@@ -81,6 +81,7 @@ const git = createGit().read;
 // OS/UI actions belong to the host; command names and payloads match the preload.
 function createRuntime(options) {
   const { dataDir, version, cwd = process.cwd(), emit = () => {}, isFocused = () => false } = options;
+  let { lazyMessages } = options;
   if (typeof dataDir !== "string" || !path.isAbsolute(dataDir)) throw new Error("An absolute data directory is required");
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const dataOwner = acquireOwnership(path.join(realpathSync(dataDir), "runtime.lock"));
@@ -329,7 +330,22 @@ function createRuntime(options) {
   }
 
   // Every project's state goes through here: this runtime is its only writer (see ADR-0001 and ADR-0003).
-  const linkStore = createLinkStore({ dataDir });
+  // A Chat nobody touched for a while leaves memory, unless its turn is busy (see ProjectStates and message-store.cjs).
+  // MILAGRE_LAZY_MESSAGES=0 keeps every message in memory, as before #321. MILAGRE_LAZY_MESSAGES_IDLE_MS sets how long a
+  // Chat stays idle before it leaves (the sweep runs as often, between 250 ms and a minute): for trying it out and checks.
+  let busyChat = () => true;
+  const lazy = process.env.MILAGRE_LAZY_MESSAGES !== "0" && lazyMessages !== false;
+  const idleOverride = Number(process.env.MILAGRE_LAZY_MESSAGES_IDLE_MS);
+  if (lazy && process.env.MILAGRE_LAZY_MESSAGES_IDLE_MS && Number.isFinite(idleOverride) && idleOverride >= 0)
+    lazyMessages = { ...lazyMessages, idleMs: idleOverride, sweepMs: Math.min(60_000, Math.max(250, idleOverride)) };
+  // A sweep's new state goes out like any other, so the daemon lets go of the state it last sent, unloaded messages too.
+  const linkStore = createLinkStore({
+    dataDir,
+    active: (linkId, chat) => busyChat(chatKey(scopeKey({ kind: "link", linkId }), chat)),
+    lazyMessages: lazy
+      ? { ...lazyMessages, unloaded: (linkId, state) => broadcastProjectState(scopeKey({ kind: "link", linkId }), state) }
+      : { idleMs: Infinity, sweepMs: 0 },
+  });
   const states = new ProjectStates({
     read: async (projectPath) => {
       const stored = await readStoredState(projectPath);
@@ -338,6 +354,14 @@ function createRuntime(options) {
     },
     save: saveProjectState,
     compact: compactProjectState,
+    messages: lazy
+      ? {
+          directory: (projectPath) => projectPath,
+          active: (projectPath, chat) => busyChat(chatKey(projectPath, chat)),
+          unloaded: (projectPath, state) => broadcastProjectState(projectPath, state),
+          ...lazyMessages,
+        }
+      : null,
   });
 
   const scopeStates = createChatScopes({
@@ -356,17 +380,20 @@ function createRuntime(options) {
     emit("project:state", { path: projectPath, state });
   }
 
-  /** Applies a change to a project's state and tells the windows when it changed. */
-  async function updateProject(projectPath, change) {
-    const result = await scopeStates.update(projectPath, change);
+  /**
+   * Applies a change to a project's state and tells the windows when it changed. `options.chats` lists the Chats whose
+   * messages the change reads or writes ([] for none); without it every Chat is loaded first (see ProjectStates.update).
+   */
+  async function updateProject(projectPath, change, options) {
+    const result = await scopeStates.update(projectPath, change, options);
     if (result.changed) broadcastProjectState(projectPath, result.state);
     return result.state;
   }
 
   // Explicit user edits keep their existing error contract. The flush waits outside
   // the mutation queue, so other Chats continue receiving streaming events.
-  async function editProject(projectPath, change) {
-    const result = await scopeStates.update(projectPath, change);
+  async function editProject(projectPath, change, options) {
+    const result = await scopeStates.update(projectPath, change, options);
     if (result.changed) broadcastProjectState(projectPath, result.state);
     await scopeStates.flush(projectPath);
   }
@@ -383,10 +410,15 @@ function createRuntime(options) {
       const entry = agents.sessions.get(`${projectPath}#${sessionId}`);
       return Boolean(entry && !entry.session.closed);
     };
-    let state = await updateProject(projectPath, async (current) => {
-      const next = reconcileState(current, projectName(projectPath), discovered, await linkStore.ownedWorktrees());
-      return migrateImages(projectPath, markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live))));
-    });
+    // Reads no Chat's messages: a Chat that leaves with its Worktree takes its saved rows with it (see project-store.cjs).
+    let state = await updateProject(
+      projectPath,
+      async (current) => {
+        const next = reconcileState(current, projectName(projectPath), discovered, await linkStore.ownedWorktrees());
+        return migrateImages(projectPath, markDisconnectedSubagents(next, new Set(Object.keys(next.sessions).map(Number).filter(live))));
+      },
+      { chats: [] },
+    );
     // A chat a quit stopped continues now; its message is saved before the project is returned, so the window shows it.
     await chats.resumeInterrupted(projectPath, state).catch((error) => console.warn("Milagre couldn't resume a chat:", error.message));
     state = await states.get(projectPath);
@@ -397,8 +429,10 @@ function createRuntime(options) {
   }
 
   commands.handle("attachment:preview", async (_event, file) => {
-    const snapshots = await Promise.all(scopeStates.projects().map((project) => scopeStates.get(project)));
-    const attached = snapshots.flatMap((state) => (state.messages || []).flatMap((message) => message.files || []));
+    // An unloaded Chat's messages (see message-store.cjs) are looked at only where their saved JSON names the file.
+    const needles = typeof file === "string" ? [JSON.stringify(file).slice(1, -1)] : [];
+    const scopes = await Promise.all(scopeStates.projects().map((project) => scopeStates.messagesContaining(project, needles)));
+    const attached = scopes.flatMap((messages) => (messages || []).flatMap((message) => message.files || []));
     return require("./attachment-preview.cjs").readAttachment(file, scopeStates.worktreePaths(), attached);
   });
   commands.handle("project:files", async (_event, root, query) => {
@@ -642,7 +676,7 @@ function createRuntime(options) {
     if (closing) return;
     const name = await renameWorktreeBranch({ worktreePath: created.path, branch: created.branch, slug });
     if (!name) return;
-    await updateProject(projectPath, (state) => renameWorktree(state, { path: created.path, from: created.branch, name }));
+    await updateProject(projectPath, (state) => renameWorktree(state, { path: created.path, from: created.branch, name }), { chats: [] });
     emit("worktree:renamed", { projectPath, path: created.path, from: created.branch, name });
   }
 
@@ -676,18 +710,22 @@ function createRuntime(options) {
     const project = await readProject(request.projectPath);
     const listed = Object.values(project.state.worktrees).find((item) => item.name === created.branch);
     if (!listed) throw new Error(`Created ${created.branch}, but git did not list it as a worktree.`);
-    const state = await updateProject(request.projectPath, (latest) => {
-      const worktree = latest.worktrees[listed.id];
-      return worktree
-        ? {
-            ...latest,
-            worktrees: {
-              ...latest.worktrees,
-              [worktree.id]: { ...worktree, base: created.base, ...(issue ? { linearIssue: issue.key, linearWorkspace: issue.workspace } : {}) },
-            },
-          }
-        : latest;
-    });
+    const state = await updateProject(
+      request.projectPath,
+      (latest) => {
+        const worktree = latest.worktrees[listed.id];
+        return worktree
+          ? {
+              ...latest,
+              worktrees: {
+                ...latest.worktrees,
+                [worktree.id]: { ...worktree, base: created.base, ...(issue ? { linearIssue: issue.key, linearWorkspace: issue.workspace } : {}) },
+              },
+            }
+          : latest;
+      },
+      { chats: [] },
+    );
     // The issue moves to In Progress once its Worktree exists, unless that's switched off or the sign-in can only read.
     // Best effort and in the background: the Chat never waits on Linear.
     if (issue && linear.moveToStarted() && linear.workspaces().find((item) => item.id === issue.workspace)?.canWrite)
@@ -721,22 +759,30 @@ function createRuntime(options) {
       const suffix = worktree.name.match(/-([a-z0-9]{4})$/)?.[1] ?? newSuffix();
       const branch = await issueBranch({ projectPath, issue, suffix });
       await moveWorktreeBranch({ worktreePath: worktree.path, from: worktree.name, to: branch });
-      const state = await updateProject(projectPath, (latest) => {
-        const renamed = renameWorktree(latest, { path: worktree.path, from: worktree.name, name: branch });
-        const item = renamed.worktrees[worktreeId];
-        return item
-          ? { ...renamed, worktrees: { ...renamed.worktrees, [worktreeId]: { ...item, linearIssue: issue.key, linearWorkspace: issue.workspace } } }
-          : renamed;
-      });
+      const state = await updateProject(
+        projectPath,
+        (latest) => {
+          const renamed = renameWorktree(latest, { path: worktree.path, from: worktree.name, name: branch });
+          const item = renamed.worktrees[worktreeId];
+          return item
+            ? { ...renamed, worktrees: { ...renamed.worktrees, [worktreeId]: { ...item, linearIssue: issue.key, linearWorkspace: issue.workspace } } }
+            : renamed;
+        },
+        { chats: [] },
+      );
       emit("worktree:renamed", { projectPath, path: worktree.path, from: worktree.name, name: branch });
       return { project: { ...project, state }, mode: "renamed", branch };
     }
-    const state = await updateProject(projectPath, (latest) => {
-      const item = latest.worktrees[worktreeId];
-      return item
-        ? { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: { ...item, linearIssue: issue.key, linearWorkspace: issue.workspace } } }
-        : latest;
-    });
+    const state = await updateProject(
+      projectPath,
+      (latest) => {
+        const item = latest.worktrees[worktreeId];
+        return item
+          ? { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: { ...item, linearIssue: issue.key, linearWorkspace: issue.workspace } } }
+          : latest;
+      },
+      { chats: [] },
+    );
     return { project: { ...project, state }, mode: "stored", branch: worktree.name };
   });
   // Removes the stored issue link. The branch keeps its name: a branch that still names the issue keeps the chip.
@@ -745,12 +791,16 @@ function createRuntime(options) {
     await environmentReady;
     const project = await readProject(projectPath);
     if (!project.state.worktrees[worktreeId]) throw new Error("That worktree is no longer in this project.");
-    const state = await updateProject(projectPath, (latest) => {
-      const item = latest.worktrees[worktreeId];
-      if (!item) return latest;
-      const { linearIssue: _unlinked, linearWorkspace: _workspace, ...rest } = item;
-      return { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: rest } };
-    });
+    const state = await updateProject(
+      projectPath,
+      (latest) => {
+        const item = latest.worktrees[worktreeId];
+        if (!item) return latest;
+        const { linearIssue: _unlinked, linearWorkspace: _workspace, ...rest } = item;
+        return { ...latest, worktrees: { ...latest.worktrees, [worktreeId]: rest } };
+      },
+      { chats: [] },
+    );
     return { project: { ...project, state } };
   });
   // Re-reads some worktrees' diff stats at once, e.g. after a commit from the "Commit and open PR" dialog.
@@ -924,6 +974,9 @@ function createRuntime(options) {
     },
   });
 
+  // A Chat stays in memory while its turn runs or prepares, and while a window shows it.
+  busyChat = (chatId) => chats.isBusy(chatId) || Boolean(options.isChatFocused?.(chatId));
+
   // A setup's steps show in the chat's turn like the agent's own.
   const worktreeSetups = new WorktreeSetups({ send: (chatId, event) => void chats.receive(chatId, event), keepAwake });
 
@@ -1068,16 +1121,16 @@ function createRuntime(options) {
       await advisorDelivery.stop(`${projectPath}#${sessionId}`);
       await advisors.stopChat(`${projectPath}#${sessionId}`);
     }
-    await editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {}));
+    await editProject(projectPath, (state) => patchSession(state, sessionId, patch ?? {}), { chats: [] });
   });
   // Opening a chat reads it. Only on opening: "Mark as unread" on the open chat sticks until it's opened again.
   commands.handle("chat:archive-subagent", (_event, projectPath, sessionId, id, archived) =>
     scopeStates.has(projectPath)
-      ? editProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true)).then(() => {})
+      ? editProject(projectPath, (state) => archiveSubagent(state, sessionId, String(id), archived === true), { chats: [] }).then(() => {})
       : undefined,
   );
   commands.handle("chat:archive-finished-subagents", (_event, projectPath, sessionId) =>
-    scopeStates.has(projectPath) ? editProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId)).then(() => {}) : undefined,
+    scopeStates.has(projectPath) ? editProject(projectPath, (state) => archiveFinishedSubagents(state, sessionId), { chats: [] }).then(() => {}) : undefined,
   );
   // What the "Commit and open PR" dialog did, as a line in its chat.
   commands.handle("chat:git-note", (_event, chatId, body) => {
@@ -1087,7 +1140,7 @@ function createRuntime(options) {
   /** Reads the chat on screen: on opening it, and when a window regains focus over it. */
   async function readOpenChat(chatId = chats.openChat) {
     if (chatId && scopeStates.has(projectOfKey(chatId))) {
-      await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }));
+      await updateProject(projectOfKey(chatId), (state) => patchSession(state, sessionIdFromKey(chatId), { unread: false }), { chats: [] });
       void track(async () => {
         await advisors.reconcile(chatId);
         await chats.recoverSubagents(chatId);
@@ -1202,10 +1255,21 @@ function createRuntime(options) {
     }
     return (await readProject(projectPath)).state;
   }
+  // Whole messages for linked reads, read without loading the Chats (see message-store.cjs). The Project is read first,
+  // as linkedState does, so one not open yet opens.
+  const linkedMessages = async (projectPath, chatIds) => {
+    await linkedState(projectPath);
+    return chatIds ? scopeStates.chatMessages(projectPath, chatIds) : scopeStates.allMessages(projectPath);
+  };
   const linked = createLinkedWorktrees({
     dataDir,
     registry: projectRegistry,
     project: linkedState,
+    messages: linkedMessages,
+    bodies: async (projectPath, chatIds) => {
+      await linkedState(projectPath);
+      return scopeStates.searchableMessages(projectPath, chatIds);
+    },
     chats,
     agents,
     emit,
@@ -1224,7 +1288,8 @@ function createRuntime(options) {
     await existingChat("using advisors")(chatId);
     const scope = projectOfKey(chatId);
     const id = sessionIdFromKey(chatId);
-    const state = await scopeStates.get(scope);
+    // The Chat's own messages give its last model, so it is loaded (see message-store.cjs).
+    const state = await scopeStates.load(scope, [id]);
     const session = state.sessions[id];
     if (session.archived) throw new Error("This Chat is archived.");
     const execution = await scopeStates.executionContext(scope, id);
@@ -1491,7 +1556,8 @@ function createRuntime(options) {
   // desktop or the phone. A Project, open already, or a Link (read like link:snapshot does), by scope key.
   commands.handle("chat:message", async (_event, scope, id) => {
     if (typeof scope !== "string" || (!isLinkScopeKey(scope) && !states.has(scope))) throw new Error("Open the Project before reading its messages.");
-    const message = (await scopeStates.get(scope)).messages.find((item) => item.id === id);
+    // From chats.db when its Chat is unloaded (see message-store.cjs).
+    const message = await scopeStates.findMessage(scope, "id", id);
     if (!message) throw new Error("That message is no longer in this Project.");
     return withDetails(scopeStates.storageDirectory(scope), message);
   });
@@ -1500,8 +1566,26 @@ function createRuntime(options) {
     if (typeof scope !== "string" || (!isLinkScopeKey(scope) && !states.has(scope))) throw new Error("Open the Project before reading its messages.");
     return scopeStates.get(scope);
   };
-  commands.handle("chat:messages", async (_event, scope, chatId, options) => chatPage((await readScope(scope)).messages, chatId, options ?? {}));
-  commands.handle("chat:search", async (_event, scope, query, options) => chatSearch(await readScope(scope), query, options ?? {}));
+  // Every message of a Project or Link, in its order, for a reader that needs them all where a state may leave out an
+  // unloaded Chat's (see message-store.cjs): the phone's bridge, for a phone app that doesn't read pages. `marks` gives
+  // only { id, session_id, role, outcome, clientMessageId } of each, what a chat list reads, without reading them whole.
+  commands.handle("chat:all-messages", async (_event, scope, options) => {
+    await readScope(scope);
+    return options?.marks === true ? scopeStates.messageMarks(scope) : scopeStates.allMessages(scope);
+  });
+  // A Chat a client pages through is loaded (see message-store.cjs): it is likely to get the next message too.
+  commands.handle("chat:messages", async (_event, scope, chatId, options) => {
+    await readScope(scope);
+    return chatPage((await scopeStates.load(scope, [chatId])).messages, chatId, options ?? {});
+  });
+  // A search reads the bodies of unloaded Chats from chats.db, without loading them.
+  commands.handle("chat:search", async (_event, scope, query, options) => {
+    const state = await readScope(scope);
+    const open = Object.values(state.sessions ?? {})
+      .filter((session) => !session.archived)
+      .map((session) => session.id);
+    return chatSearch(state, query, options ?? {}, await scopeStates.searchableMessages(scope, open));
+  });
   // One subagent with its whole transcript, for a client that takes only each transcript's last entries (the panel that
   // shows it). `chatId` is the Chat's number in the scope.
   commands.handle("chat:subagent", async (_event, scope, chatId, agentId) => {
@@ -1590,6 +1674,8 @@ function createRuntime(options) {
         diffs.focused(view ? view.projectPath : shownProjectPath);
         return readOpenChat(view ? view.chatId : chats.openChat);
       }),
+    /** Unloads the idle Chats of every open Project and Link now, as the sweep does every minute (see ProjectStates). */
+    unloadIdle: () => Promise.all([states.unloadIdle(), linkStore.unloadIdle()]).then(() => undefined),
     flush: async () => {
       // A waiting Linear sign-in is an accepted command, but its window is gone when this runs on quit: end it.
       await linear.dispose();

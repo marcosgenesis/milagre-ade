@@ -206,6 +206,7 @@ test("bundles tldr with its checklist for machines without installed skills", as
     skills.map(({ name, scope, provider }) => ({ name, scope, provider })),
     [
       { name: "design", scope: "bundled", provider: "milagre" },
+      { name: "genui", scope: "bundled", provider: "milagre" },
       ...[
         "milagre",
         "milagre-address-review",

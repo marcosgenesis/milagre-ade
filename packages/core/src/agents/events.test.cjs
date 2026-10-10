@@ -630,3 +630,10 @@ test("the design instructions point the agent at the bundled design skill, which
 test("the design instructions defer to a design tool the user names", () => {
   assert.match(MILAGRE_INSTRUCTIONS, /When the user names another design tool .*do not call artifact_show/);
 });
+
+test("the instructions point the agent at the bundled genui skill, which exists", () => {
+  const file = /read the bundled genui skill at (\S+SKILL\.md)/.exec(MILAGRE_INSTRUCTIONS)?.[1];
+  assert.ok(file, "the instructions name the skill's file");
+  assert.match(require("node:fs").readFileSync(file, "utf8"), /^name: genui$/m);
+  assert.match(MILAGRE_INSTRUCTIONS, /fenced block whose info string is `openui`/);
+});

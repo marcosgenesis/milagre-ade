@@ -11,4 +11,8 @@ desktop-file-validate /usr/share/applications/milagre.desktop
 mkdir -p /workspace
 cp -a "$source_dir"/. /workspace/
 chown -R tester:tester /workspace
-runuser -u tester -- bash -c 'cd /workspace; npm ci > /tmp/milagre-npm.log 2>&1; npm run build > /tmp/milagre-build.log 2>&1; xvfb-run -a node scripts/test-desktop.cjs --packaged /opt/Milagre/milagre'
+# Keep the install and build logs quiet, but print them when a step fails instead of failing later on a missing module.
+runuser -u tester -- bash -c 'set -e; cd /workspace
+npm ci > /tmp/milagre-npm.log 2>&1 || { tail -n 80 /tmp/milagre-npm.log; exit 1; }
+npm run build > /tmp/milagre-build.log 2>&1 || { tail -n 80 /tmp/milagre-build.log; exit 1; }
+xvfb-run -a node scripts/test-desktop.cjs --packaged /opt/Milagre/milagre'

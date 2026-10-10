@@ -122,6 +122,11 @@ export default function ChatScreen() {
   const scroll = useRef<Reanimated.ScrollView>(null);
   const dots = useDotBackground();
   const following = useRef(true);
+  const scrollingToBottom = useRef(false);
+  const scrollToBottom = useCallback((animated: boolean) => {
+    scrollingToBottom.current = true;
+    scroll.current?.scrollToEnd({ animated });
+  }, []);
   const contentHeight = useRef(0);
   const scrollOffset = useRef(0);
   const historyRead = useRef<object | null>(null);
@@ -152,11 +157,12 @@ export default function ChatScreen() {
   );
   const jumpToBottom = useCallback(() => {
     following.current = true;
-    scroll.current?.scrollToEnd({ animated: false });
+    scrollToBottom(false);
     setJumpState({ key: scrollKey, visible: false });
-  }, [scrollKey]);
+  }, [scrollKey, scrollToBottom]);
   useEffect(() => {
     following.current = true;
+    scrollingToBottom.current = false;
     contentHeight.current = 0;
     scrollOffset.current = 0;
     currentScrollKey.current = scrollKey;
@@ -170,7 +176,7 @@ export default function ChatScreen() {
   const placed = placedKey === scrollKey;
   const place = () => {
     if (placed || !viewport.current || !contentHeight.current) return;
-    if (contentHeight.current > viewport.current) scroll.current?.scrollToEnd({ animated: false });
+    if (contentHeight.current > viewport.current) scrollToBottom(false);
     setPlacedKey(scrollKey);
   };
   const worktreeOf =
@@ -313,10 +319,11 @@ export default function ChatScreen() {
     if (index === messages.length - 1) {
       navigationTarget.current = null;
       following.current = true;
-      scroll.current?.scrollToEnd({ animated: true });
+      scrollToBottom(true);
       return;
     }
     following.current = false;
+    scrollingToBottom.current = false;
     const id = messages[index].id;
     navigationTarget.current = id;
     if (index < messages.length - visible) {
@@ -1001,10 +1008,19 @@ export default function ChatScreen() {
             keyboardDismissMode="interactive"
             contentContainerStyle={[styles.content, { paddingTop: insets.top + 84, paddingLeft: 28, gap: 16, paddingBottom: dockHeight + 16 }]}
             scrollEventThrottle={32}
+            onScrollBeginDrag={() => {
+              scrollingToBottom.current = false;
+            }}
             onScroll={({ nativeEvent: e }) => {
               const previous = scrollOffset.current;
               scrollOffset.current = e.contentOffset.y;
-              following.current = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height < 120;
+              const distance = e.contentSize.height - e.contentOffset.y - e.layoutMeasurement.height;
+              // Native scroll events can arrive before the jump catches up with image layout.
+              if (scrollingToBottom.current) {
+                if (distance <= 1) scrollingToBottom.current = false;
+                return;
+              }
+              following.current = distance < 120;
               if (placed && e.contentOffset.y < previous && e.contentOffset.y <= 160 && !(historyState.key === scrollKey && historyState.error))
                 void showEarlier();
             }}
@@ -1016,7 +1032,7 @@ export default function ChatScreen() {
             onContentSizeChange={(_, height) => {
               contentHeight.current = height;
               if (!placed) place();
-              else if (!historyAnchor.current && following.current && height > viewport.current) scroll.current?.scrollToEnd({ animated: true });
+              else if (!historyAnchor.current && following.current && height > viewport.current) scrollToBottom(false);
             }}
           >
             {process.env.EXPO_PUBLIC_DEMO === "1" && (

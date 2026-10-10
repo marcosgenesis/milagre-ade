@@ -2538,7 +2538,7 @@ test("a long Chat opens hidden and jumps to its newest message without animating
   const placed = page();
   assert.equal(placed.props.style.opacity, 1);
   placed.props.onContentSizeChange(0, 2100);
-  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }, { animated: true }]));
+  assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }, { animated: false }]));
   screen.params.id = "42";
   screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "codex" };
   assert.equal(page().props.style.opacity, 0, "switching Chats hides the next transcript until it is placed");
@@ -2672,6 +2672,7 @@ test("Go to bottom returns the mobile transcript to the end and resumes followin
   scrolls.length = 0;
   page().props.onEndVisible(true);
   assert.equal(jump(), undefined, "No button when the end is visible, including short chats");
+  page().props.onScrollBeginDrag({ nativeEvent: {} });
   page().props.onScroll({ nativeEvent: { contentSize: { height: 1800 }, contentOffset: { y: 200 }, layoutMeasurement: { height: 600 } } });
   page().props.onEndVisible(false);
   assert.ok(jump(), "The keyboard-aware end callback reveals the button");
@@ -2680,8 +2681,17 @@ test("Go to bottom returns the mobile transcript to the end and resumes followin
   jump().props.onPress();
   assert.equal(JSON.stringify(scrolls), JSON.stringify([{ animated: false }]), "The jump reaches the end without intermediate scroll events disabling follow");
   assert.equal(jump(), undefined);
+  // A native scroll/layout event can arrive before the jump command has caught up with loaded images.
+  page().props.onScroll({ nativeEvent: { contentSize: { height: 2000 }, contentOffset: { y: 200 }, layoutMeasurement: { height: 600 } } });
   page().props.onContentSizeChange(0, 2000);
   assert.equal(scrolls.length, 2, "Following resumes after the jump");
+  page().props.onScroll({ nativeEvent: { contentSize: { height: 2600 }, contentOffset: { y: 1400 }, layoutMeasurement: { height: 600 } } });
+  page().props.onContentSizeChange(0, 2600);
+  assert.equal(scrolls.length, 3, "Late image sizes cannot disable following before the end is reached");
+  page().props.onScrollBeginDrag?.({ nativeEvent: {} });
+  page().props.onScroll({ nativeEvent: { contentSize: { height: 2600 }, contentOffset: { y: 600 }, layoutMeasurement: { height: 600 } } });
+  page().props.onContentSizeChange(0, 2800);
+  assert.equal(scrolls.length, 3, "Dragging up interrupts the jump and preserves the reading position");
   page().props.onEndVisible(false);
   assert.ok(jump());
   page().props.onEndVisible(true);

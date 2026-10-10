@@ -213,8 +213,17 @@ function readDetailRefs(projectPath, chats) {
  * (`saved` itself, updated, when given), also handed to `commit(map, stats)` right after the transaction, before any
  * other code runs. `stats`, when given, gets how many rows were written and removed, and whether positions were
  * numbered again (`renumbered`).
+ * @param {string} projectPath
+ * @param {any[]} messages
+ * @param {Map<any, { message: any, position: number, chat: any }> | null | undefined} saved
+ * @param {{ durable?: boolean, keep?: ReadonlySet<any>, drop?: ReadonlySet<any>, stats?: { written: number, removed: number, renumbered?: boolean }, commit?: (saved: Map<any, any>, stats: { written: number, removed: number, renumbered?: boolean }) => void }} [options]
  */
-function writeMessages(projectPath, messages, saved, { durable = false, keep = NONE, drop = NONE, stats = { written: 0, removed: 0 }, commit } = {}) {
+function writeMessages(
+  projectPath,
+  messages,
+  saved,
+  { durable = false, keep = NONE, drop = NONE, stats = { written: 0, removed: 0, renumbered: false }, commit } = {},
+) {
   return withDatabase(
     projectPath,
     (db) => {

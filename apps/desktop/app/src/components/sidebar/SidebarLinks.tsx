@@ -186,32 +186,32 @@ export function SidebarLinksProvider({
       showToast(`Could not create the Link: ${ipcErrorMessage(error)}`);
       return;
     }
+    // A step after the Link that fails leaves the Link in place and says what didn't happen, in the phone's words.
     const undo = created && (() => void remove(created!, false));
-    const problems: string[] = [];
     if (choice.allow && created) {
       try {
         await bridge.grantDelegations?.(`${ask.source.scopeKey}#${ask.source.item.id}`, created.id);
       } catch (error) {
-        problems.push(`Always allow wasn't saved: ${ipcErrorMessage(error)}`);
+        showToast(`Link created. Could not always allow Delegations: ${ipcErrorMessage(error)}`, { undo });
+        return;
       }
     }
     const text = choice.text.trim();
-    if (text && latest.current.onAskChat && ask.target.item.details?.path) {
-      const message = linkAskMessage(text, {
-        label: ask.target.item.label,
-        chatRef: `${ask.target.scopeKey}#${ask.target.item.id}`,
-        worktreePath: ask.target.item.details.path,
-        projectName: targetProject ? projectName(targetProject) : undefined,
-        branch: ask.target.item.details.branch,
-      });
-      try {
-        await latest.current.onAskChat(ask.source.scopeKey, ask.source.item.id, message);
-      } catch (error) {
-        problems.push(`the message to “${ask.source.item.label}” wasn't sent: ${ipcErrorMessage(error)}`);
-      }
+    if (!text || !latest.current.onAskChat || !ask.target.item.details?.path) return showToast("Link created", { undo });
+    const message = linkAskMessage(text, {
+      label: ask.target.item.label,
+      chatRef: `${ask.target.scopeKey}#${ask.target.item.id}`,
+      worktreePath: ask.target.item.details.path,
+      projectName: targetProject ? projectName(targetProject) : undefined,
+      branch: ask.target.item.details.branch,
+    });
+    try {
+      await latest.current.onAskChat(ask.source.scopeKey, ask.source.item.id, message);
+    } catch (error) {
+      showToast(`Link created. Could not ask “${ask.source.item.label}”: ${ipcErrorMessage(error)}`, { undo });
+      return;
     }
-    const done = text && !problems.some((problem) => problem.startsWith("the message")) ? `Link created. Asked “${ask.source.item.label}”.` : "Link created";
-    showToast(problems.length ? `${done}, but ${problems.join("; ")}` : done, { undo });
+    showToast(`Link created. Asked “${ask.source.item.label}”.`, { undo });
   }
 
   async function remove(link: ProjectLink, offerUndo = true) {
@@ -589,8 +589,8 @@ function LinkPicker({
           data-link-search
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Filter chats"
-          aria-label="Filter chats"
+          placeholder="Search chats"
+          aria-label="Search chats"
           className="mx-1 mb-1 h-8 shrink-0 rounded-[8px] border border-line bg-field px-2 text-[13px] text-ink outline-none placeholder:text-ink-3 focus:border-line-strong"
         />
       )}

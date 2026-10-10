@@ -56,7 +56,8 @@ import { linkBetween } from "@milagre/shared/chat-links";
 import { SidebarLinksProvider, useSidebarLinks, type LinkListHandle, type LinkScopeChats } from "./sidebar/SidebarLinks";
 import { updateSettings, useSettings } from "../lib/settings";
 import { RECENT_PROJECTS_CHANGED } from "../lib/project-list";
-import { cachedProjectCopy, scopeChats, useScopeStates } from "../lib/sidebar-scopes";
+import { cachedProjectCopy, railLive, rememberScopeRows, scopeChats, useScopeStates } from "../lib/sidebar-scopes";
+import { ScopeRail, type RailScope } from "./sidebar/ScopeRail";
 import { bridgeForKey, isRemoteKey } from "../lib/computer-bridge";
 
 type HugeIconProps = { size?: number; className?: string };
@@ -896,9 +897,13 @@ export default memo(function SidebarNav({
     failed: failedScopes,
     retry: retryScope,
   } = useScopeStates(
-    showAll,
+    // Collapsed too: the rail's icons show each scope's chats' state and list the live ones.
+    everyProject,
     scopes.filter((scope) => scope.key !== currentKey).map((scope) => scope.key),
   );
+  // The open scope's rows carry facts read for it alone (PRs, Linear issues, ports); its rows keep them once another
+  // scope is open, so switching doesn't shrink them.
+  useEffect(() => rememberScopeRows(currentKey, recents), [currentKey, recents]);
   const marks = useMemo(
     () => ({
       running: new Set(runningKeys.split("\n").filter(Boolean)),
@@ -976,6 +981,37 @@ export default memo(function SidebarNav({
         };
       })
     : [];
+  // Collapsed with two or more scopes: one icon per scope instead of the open one's chat initials.
+  const scopeIcon = (scope: (typeof scopes)[number], current: boolean) =>
+    scope.link ? (
+      <ProjectAvatarStack
+        projects={scope.link.projectIds.map((id) => registeredProjects.find((project) => project.id === id) ?? { path: "", name: "Project" })}
+      />
+    ) : (
+      <span className="flex size-6 items-center justify-center overflow-hidden rounded-[6px] bg-ink text-[10px] font-semibold text-surface">
+        <WorkspaceIcon src={current && !selectedLink ? workspace.image : scopeImage(scope.key)} fallback={scope.initial} />
+      </span>
+    );
+  const railScopes: RailScope[] | null =
+    everyProject && collapsed && scopes.length > 1
+      ? scopes.map((scope) => {
+          const current = scope.key === currentKey;
+          const state = scopeStates[scope.key] ?? (scope.link ? undefined : cachedProjectCopy(scope.key)?.state);
+          const rows = current ? recents : state ? scopeChats(scope.key, state, chatOrder, marks) : [];
+          const { status, chats } = railLive(rows);
+          return { key: scope.key, name: scope.name, icon: scopeIcon(scope, current), current, status, chats };
+        })
+      : null;
+  const openRailScope = (key: string) => {
+    if (key.startsWith("milagre-link:")) onSwitchLink?.(key.slice("milagre-link:".length));
+    else onSwitchProject?.(key);
+  };
+  const openRailChat = (key: string, id: string) => {
+    if (key === currentKey) {
+      const item = recents.find((row) => row.id === id);
+      if (item) pickChat(item);
+    } else onOpenScopeChat?.(key, id);
+  };
   // Every list whose chats can take a canvas Link: the Link icons, "Link with…" and drops across Projects read these.
   const currentLinkId = selectedLink ? null : linkProjectIdOf(projectPath);
   const linkScopes: LinkScopeChats[] = showAll
@@ -1439,6 +1475,8 @@ export default memo(function SidebarNav({
                     );
                   })}
                 </>
+              ) : railScopes ? (
+                <ScopeRail scopes={railScopes} onOpenScope={openRailScope} onOpenChat={openRailChat} />
               ) : (
                 <ChatList
                   recents={recents}

@@ -16,6 +16,7 @@ const MANIFEST = {
   "test-chat-pins.cjs": { seconds: 15 },
   // 7s for the check plus about 20s for its shard to install ffmpeg (.github/workflows/ci.yml).
   "test-chat-titles.cjs": { seconds: 27 },
+  "test-sidebar-rail.cjs": { seconds: 12 },
   "test-windows-cli.cjs": { platforms: ["win32"] },
   "test-ports.cjs": { needs: ["zsh", "ps", "lsof"] },
   "test-desktop.cjs": { needsBuild: true },

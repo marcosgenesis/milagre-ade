@@ -545,6 +545,7 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
       "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
       "@milagre/shared/model": {},
       "./link-operations": require("../apps/mobile/src/link-operations.ts"),
+      "./use-links": { refreshLinks: async () => {} },
     },
     "\nexport { useSessionState, PendingChatsProvider };",
   );

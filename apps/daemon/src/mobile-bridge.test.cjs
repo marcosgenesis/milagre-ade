@@ -1228,6 +1228,30 @@ test("account assignment changes notify live phones independently of Project sta
   assert.equal(phone.messages.filter((type) => type === "accounts").length, 1);
 });
 
+test("a Link made or removed on the computer tells live phones to read the Links again", async (t) => {
+  const { project, bridge, rpc, token } = await fixture(t);
+  const commit = (folder) =>
+    execFileSync("git", ["-C", folder, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "Initial"], {
+      stdio: "ignore",
+    });
+  commit(project);
+  const other = path.join(path.dirname(project), "other");
+  await fs.mkdir(other);
+  execFileSync("git", ["init", "-b", "main", other], { stdio: "ignore" });
+  commit(other);
+  assert.equal((await rpc("project:open", [project])).status, 200);
+  assert.equal((await rpc("project:open", [other])).status, 200);
+  const registry = (await (await rpc("project:registry")).json()).result;
+  const id = (folder) => registry.find((entry) => entry.path === folder).id;
+  const phone = await openLive(bridge, project, { authorization: `Bearer ${token}` });
+  const added = await rpc("canvas:link-add", [{ project_id: id(project) }, { project_id: id(other) }]);
+  assert.equal(added.status, 200);
+  await until(() => phone.messages.includes("links"));
+  const [link] = (await added.json()).result;
+  assert.equal((await rpc("canvas:link-remove", [link.id])).status, 200);
+  await until(() => phone.messages.filter((type) => type === "links").length === 2);
+});
+
 test("an app that says what snapshot it holds gets the next one as a patch, kept current from the host's patches", async (t) => {
   const { applyStatePatch } = require("@milagre/shared/state-patch");
   const { project, request, rpc } = await fixture(t);

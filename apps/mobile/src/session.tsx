@@ -6,6 +6,7 @@ import { createClient, type ClientHost, type Client, type OpenProject, type Rece
 import { relayRuntime } from "./relay-native";
 import { learnRoutes, lanRoutes } from "./routes-native";
 import { syncProject } from "./live";
+import { refreshLinks } from "./use-links";
 import { readPermission, savedHosts, savedNavigation, savedProjectOrder, savePermission } from "./hosts-native";
 import type { ChatLocation } from "./navigation-store";
 import type { SavedHost } from "./hosts-store";
@@ -362,6 +363,7 @@ function useSessionState() {
         providerCache.current.clear();
         void refreshProviders();
       },
+      links: () => void refreshLinks(client),
       onError: (error) => setError(error.message),
       active: () => AppState.currentState === "active",
       watchActive: (listener) => {

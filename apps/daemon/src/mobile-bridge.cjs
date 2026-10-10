@@ -487,6 +487,7 @@ async function startMobileBridge({
       // A snapshot carries the runs too, so "project" covers "runs".
       const types = [];
       if (entry.kinds.has("accounts")) types.push("accounts");
+      if (entry.kinds.has("links")) types.push("links");
       if (entry.kinds.has("project")) types.push("project");
       else if (entry.kinds.has("runs")) types.push("runs");
       entry.kinds.clear();
@@ -533,6 +534,9 @@ async function startMobileBridge({
     followState(channel, payload);
     for (const entry of live) {
       if (channel === "accounts:changed" && !confine) signal(entry, "accounts", 0);
+      // A Link made or removed anywhere (canvas, sidebar, another phone): the phone reads canvas:links again. A confined
+      // phone is refused canvas:links, so it isn't told.
+      if (channel === "canvas:links-changed" && !confine) signal(entry, "links", 0);
       if (
         (channel === "project:state" && payload?.path === entry.projectPath) ||
         (channel === "link:state" && isLinkScopeKey(entry.projectPath) && payload?.linkId === scopeFromKey(entry.projectPath).linkId)

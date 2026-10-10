@@ -192,3 +192,31 @@ test("account changes pass through the socket and refresh account state without 
   assert.equal(accountChanges, 1);
   stop();
 });
+
+test("a Link change passes through the socket and rereads the Links without fetching a Project", () => {
+  const { timers } = clock();
+  const { made, create } = sockets();
+  let linkChanges = 0;
+  const stop = syncProject({
+    connect: (options) => openLive("ws://mac/live", {}, { ...options, create, timers }),
+    snapshot: async () => {},
+    runs: async () => {
+      throw new Error("Links must not fetch runs");
+    },
+    links: () => {
+      linkChanges++;
+    },
+    onError: (error) => {
+      throw error;
+    },
+    active: () => true,
+    watchActive: () => () => {},
+    pollDelay: () => 1000,
+    timers,
+  });
+  made[0].onmessage!({ data: '{"type":"links"}' });
+  // A signal a newer bridge adds later is ignored.
+  made[0].onmessage!({ data: '{"type":"something-new"}' });
+  assert.equal(linkChanges, 1);
+  stop();
+});

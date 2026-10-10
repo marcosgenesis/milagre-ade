@@ -58,7 +58,9 @@ async function browserChecks() {
   const setPermissionMode = async (mode) => {
     // Mode is "Ask", "Auto", or "Full"
     // Wait for the permission mode dropdown and click it
-    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent === 'Ask' || b.textContent === 'Auto' || b.textContent === 'Full')?.click()`);
+    await evaluate(
+      `[...document.querySelectorAll('button')].find(b => b.textContent === 'Ask' || b.textContent === 'Auto' || b.textContent === 'Full')?.click()`,
+    );
     await waitFor(`!![...document.querySelectorAll('button[data-picker-row]')].find(b => b.textContent.includes('${mode}'))`);
     await evaluate(`[...document.querySelectorAll('button[data-picker-row]')].find(b => b.textContent.includes('${mode}'))?.click()`);
     // Wait for it to apply

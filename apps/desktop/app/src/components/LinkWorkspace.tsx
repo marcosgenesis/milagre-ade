@@ -51,14 +51,7 @@ const CANVAS_STATES = {};
 
 type Preferences = Pick<
   ComponentProps<typeof DraftChatComposer>,
-  | "models"
-  | "selectedModel"
-  | "onModelChange"
-  | "cliStatus"
-  | "onModelPickerOpen"
-  | "onUpdateCli"
-  | "updatingCli"
-  | "capability"
+  "models" | "selectedModel" | "onModelChange" | "cliStatus" | "onModelPickerOpen" | "onUpdateCli" | "updatingCli" | "capability"
 >;
 export function LinkWorkspace({
   opened,

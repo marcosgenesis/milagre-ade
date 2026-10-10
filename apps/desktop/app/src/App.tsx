@@ -681,7 +681,6 @@ function App() {
     const fallback = resolveModel(models, defaultModelId, providerForId(defaultModelId));
     const nextModel = modelForOpenChat(picked, selectedSession.provider, own, models, fallback);
     if (nextModel.id !== selectedModel.id) setSelectedModel(nextModel);
-
   }, [project?.path, selectedSession?.id, selectedSession?.provider, messages, models]);
 
   function receiveState(projectPath: string, next: CoordinatorState | LinkState) {

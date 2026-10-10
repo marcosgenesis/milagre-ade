@@ -5,7 +5,7 @@ import { getSettings, updateSettings } from "./settings";
 
 export function useComposerPreferences(chatKey: string) {
   const [prefs, setPrefs] = useState<Record<string, ComposerPreferences>>(() => readComposerPreferences(localStorage));
-  
+
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === "milagre.composer-preferences") {
@@ -17,7 +17,7 @@ export function useComposerPreferences(chatKey: string) {
   }, []);
 
   const updatePrefs = useCallback((patch: Partial<ComposerPreferences>, key: string) => {
-    setPrefs(prev => {
+    setPrefs((prev) => {
       const current = prev[key] ?? {};
       const next = { ...prev, [key]: { ...current, ...patch } };
       saveComposerPreferences(localStorage, key, patch);
@@ -33,30 +33,46 @@ export function useComposerPreferences(chatKey: string) {
   const fastMode = current.fastMode ?? localStorage.getItem("milagre.fastMode") === "on";
   const permissionMode = current.permissionMode ?? getSettings().defaultPermissionMode;
 
-  const setEffort = useCallback((level: EffortLevel) => {
-    if (isNew) localStorage.setItem("milagre.effort", level);
-    updatePrefs({ effort: level }, chatKey);
-  }, [chatKey, updatePrefs, isNew]);
+  const setEffort = useCallback(
+    (level: EffortLevel) => {
+      if (isNew) localStorage.setItem("milagre.effort", level);
+      updatePrefs({ effort: level }, chatKey);
+    },
+    [chatKey, updatePrefs, isNew],
+  );
 
-  const setUltracode = useCallback((on: boolean) => {
-    if (isNew) localStorage.setItem("milagre.ultracode", on ? "on" : "off");
-    updatePrefs({ ultracode: on }, chatKey);
-  }, [chatKey, updatePrefs, isNew]);
+  const setUltracode = useCallback(
+    (on: boolean) => {
+      if (isNew) localStorage.setItem("milagre.ultracode", on ? "on" : "off");
+      updatePrefs({ ultracode: on }, chatKey);
+    },
+    [chatKey, updatePrefs, isNew],
+  );
 
-  const setFastMode = useCallback((on: boolean) => {
-    if (isNew) localStorage.setItem("milagre.fastMode", on ? "on" : "off");
-    updatePrefs({ fastMode: on }, chatKey);
-  }, [chatKey, updatePrefs, isNew]);
+  const setFastMode = useCallback(
+    (on: boolean) => {
+      if (isNew) localStorage.setItem("milagre.fastMode", on ? "on" : "off");
+      updatePrefs({ fastMode: on }, chatKey);
+    },
+    [chatKey, updatePrefs, isNew],
+  );
 
-  const setPermissionMode = useCallback((mode: PermissionMode) => {
-    if (isNew) updateSettings({ defaultPermissionMode: mode });
-    updatePrefs({ permissionMode: mode }, chatKey);
-  }, [chatKey, updatePrefs, isNew]);
+  const setPermissionMode = useCallback(
+    (mode: PermissionMode) => {
+      if (isNew) updateSettings({ defaultPermissionMode: mode });
+      updatePrefs({ permissionMode: mode }, chatKey);
+    },
+    [chatKey, updatePrefs, isNew],
+  );
 
   return {
-    effort, setEffort,
-    ultracode, setUltracode,
-    fastMode, setFastMode,
-    permissionMode, setPermissionMode
+    effort,
+    setEffort,
+    ultracode,
+    setUltracode,
+    fastMode,
+    setFastMode,
+    permissionMode,
+    setPermissionMode,
   };
 }

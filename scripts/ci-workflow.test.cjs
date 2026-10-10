@@ -241,6 +241,8 @@ test("Windows readiness packaging is opt-in, unsigned and cannot publish", () =>
   const job = workflow.jobs.windows;
   assert.equal(job["runs-on"], "windows-latest");
   assert.match(job.if, /preview:windows/);
+  assert.doesNotMatch(JSON.stringify(job.env), /runner\./, "job env cannot use the runner context; export temporary paths from a step");
+  assert.match(runs(job).join("\n"), /MILAGRE_SCREENSHOT_DIR=.*RUNNER_TEMP.*GITHUB_ENV/);
   const commands = runs(job).join("\n");
   assert.match(commands, /npm run package:win/);
   assert.match(commands, /test-windows-installation.ps1/);

@@ -3546,6 +3546,7 @@ test("relay transports: one per Mac, replaced by a new code, closed in the backg
   const identity = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) };
   const phoneRandom = (n) => new Uint8Array(n);
   const { relayRuntime } = load("relay-native.ts", {
+    "./ai-consent": { beforeAiCall: async () => {} },
     "react-native": {
       AppState: {
         addEventListener: (_event, listener) => {
@@ -6489,6 +6490,103 @@ test("mobile markdown routes openui fences and passes streaming state", () => {
     find(h.render("```ts\nconst x = 1\n```"), (node) => node.type === "GenerativeUI"),
     undefined,
   );
+});
+
+test("AI consent: native alert cancellation, persistence, reset and headless replies fail closed", async () => {
+  const shared = await import("../packages/shared/src/ai-consent.mjs");
+  let saved = null,
+    alert,
+    prompts = 0;
+  const appState = { currentState: "active" };
+  const { aiConsent, beforeAiCall } = load("ai-consent.ts", {
+    "@milagre/shared/ai-consent": shared,
+    "react-native": {
+      AppState: appState,
+      Linking: { openURL: async () => {} },
+      Alert: {
+        alert: (title, body, buttons, options) => {
+          prompts++;
+          alert = { title, body, buttons, options };
+        },
+      },
+    },
+    "expo-secure-store": {
+      getItemAsync: async () => saved,
+      setItemAsync: async (_key, value) => {
+        saved = value;
+      },
+      deleteItemAsync: async () => {
+        saved = null;
+      },
+      WHEN_UNLOCKED_THIS_DEVICE_ONLY: "device-only",
+    },
+  });
+  const cancelled = beforeAiCall("chat:send", []);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(alert.body, /Anthropic.*OpenAI.*Google/);
+  alert.buttons.find((button) => button.text === "Not now").onPress();
+  await assert.rejects(cancelled, /not sent/);
+  assert.equal(saved, null);
+  const accepted = beforeAiCall("link:send", []);
+  await new Promise((resolve) => setImmediate(resolve));
+  alert.buttons.find((button) => button.text === "Allow sharing").onPress();
+  await accepted;
+  await beforeAiCall("chat:resume", []);
+  assert.equal(prompts, 2);
+  await aiConsent.reset();
+  await assert.rejects(beforeAiCall("live-activity:answer", []), /permission/);
+  appState.currentState = "background";
+  await assert.rejects(beforeAiCall("chat:send", []), /permission/);
+  await beforeAiCall("agent:interrupt", []);
+  assert.equal(prompts, 2);
+});
+
+test("Privacy settings reset consent and expose policies without a paired computer", async () => {
+  const shared = await import("../packages/shared/src/ai-consent.mjs");
+  const host = hookHost({ effects: true });
+  let resets = 0;
+  const urls = [];
+  const { PrivacyView } = load("app/privacy.tsx", {
+    react: host,
+    "react/jsx-runtime": { jsx, jsxs: jsx },
+    "react-native": {
+      Text: "Text",
+      View: "View",
+      Linking: {
+        openURL: async (url) => {
+          urls.push(url);
+        },
+      },
+    },
+    "expo-router": { Stack: { Screen: "Screen" } },
+    "@milagre/shared/ai-consent": shared,
+    "../ai-consent": {
+      aiConsent: {
+        allowed: async () => true,
+        reset: async () => {
+          resets++;
+        },
+      },
+    },
+    "../ui": { ErrorNotice: "ErrorNotice", ListRow: "ListRow", PageScroll: "PageScroll", PillButton: "PillButton" },
+  });
+  const render = () => {
+    host.begin();
+    return PrivacyView();
+  };
+  render();
+  await new Promise((resolve) => setImmediate(resolve));
+  let tree = render();
+  const reset = find(tree, (n) => n.props.title === "Reset AI sharing permission");
+  assert.equal(reset.props.disabled, false);
+  reset.props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  tree = render();
+  assert.equal(resets, 1);
+  assert.equal(find(tree, (n) => n.props.title === "Reset AI sharing permission").props.disabled, true);
+  find(tree, (n) => n.props.title === "Milagre privacy policy").props.onPress();
+  find(tree, (n) => n.props.title === "Support").props.onPress();
+  assert.deepEqual(urls, [shared.PRIVACY_URL, shared.SUPPORT_URL]);
 });
 
 test("new Chat restores worktree choices on reopen, falls back from a removed branch and never starts a Linear issue", async () => {

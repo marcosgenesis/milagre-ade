@@ -45,6 +45,7 @@ test("a desktop pairs through the relay in the pairing window and drives this Ma
     "devices:allow",
     "devices:deny",
     "devices:take-notices",
+    "devices:confirm-notices",
     "devices:acknowledge",
     "phone:status",
     "phone:open-pairing",

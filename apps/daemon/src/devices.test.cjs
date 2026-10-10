@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createDevices, MAX_DEVICES } = require("./devices.cjs");
+const { createDevices, MAX_DEVICES, CLAIM_MS } = require("./devices.cjs");
 
 const tmp = (name) => fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 const saved = async (dir) => JSON.parse(await fs.readFile(path.join(dir, "devices.json"), "utf8"));
@@ -223,6 +223,14 @@ test("kindOf says what a device paired as, and null for a key that isn't paired"
   assert.equal(devices.kindOf("macB"), null);
 });
 
+// Takes the pairing notices and confirms them, as a window does once it has shown them.
+async function announce(devices) {
+  const { claim, devices: list } = await devices.takeNotices();
+  if (claim) await devices.confirmNotices(claim);
+  return list;
+}
+const keysOf = (list) => list.map((device) => device.key);
+
 test("a phone's pairing is handed out once to whoever takes it first, and that survives a restart", async () => {
   const dir = await tmp("devices-notices");
   let now = 10;
@@ -235,16 +243,15 @@ test("a phone's pairing is handed out once to whoever takes it first, and that s
   await devices.add("macC", { kind: "computer", name: "studio" });
   // Two windows (or a connect racing a pairing event) asking at once: each pairing goes to exactly one of them.
   const [first, second] = await Promise.all([devices.takeNotices(), devices.takeNotices()]);
-  assert.deepEqual(
-    [...first, ...second].map((device) => device.key),
-    ["phoneA", "phoneB"],
-  );
-  assert.deepEqual(first[0], { key: "phoneA", kind: "phone", name: "Victor's iPhone", pairedAt: 10, lastSeen: 10, isNew: true });
-  assert.deepEqual(await devices.takeNotices(), []);
+  assert.deepEqual(keysOf([...first.devices, ...second.devices]), ["phoneA", "phoneB"]);
+  assert.deepEqual(first.devices[0], { key: "phoneA", kind: "phone", name: "Victor's iPhone", pairedAt: 10, lastSeen: 10, isNew: true });
+  assert.deepEqual(second, { claim: null, devices: [] });
+  assert.equal(await devices.confirmNotices(first.claim), 2);
+  assert.deepEqual(await devices.takeNotices(), { claim: null, devices: [] });
   // A daemon started again doesn't announce them a second time.
   const again = createDevices(dir);
   await again.load();
-  assert.deepEqual(await again.takeNotices(), []);
+  assert.deepEqual(await again.takeNotices(), { claim: null, devices: [] });
 });
 
 test("a phone that paired while no desktop was there is still announced after the daemon restarts", async () => {
@@ -253,9 +260,60 @@ test("a phone that paired while no desktop was there is still announced after th
   const again = createDevices(dir);
   await again.load();
   assert.deepEqual(
-    (await again.takeNotices()).map((device) => device.name),
+    (await announce(again)).map((device) => device.name),
     ["Pixel"],
   );
+  assert.equal((await saved(dir)).devices[0].announced, true);
+});
+
+test("a notice taken but never confirmed (its reply was lost) goes back to pending: released, timed out, or after a restart", async () => {
+  const dir = await tmp("devices-notices-claim");
+  let now = 0;
+  const devices = createDevices(dir, { now: () => now });
+  await devices.add("phoneA");
+  // The claim is in memory only: the file still says it waits to be announced.
+  const lost = await devices.takeNotices();
+  assert.deepEqual(keysOf(lost.devices), ["phoneA"]);
+  assert.equal((await saved(dir)).devices[0].announced, false);
+  // While the claim holds, no other window shows it.
+  assert.deepEqual(await devices.takeNotices(), { claim: null, devices: [] });
+  // The connection that took it closed before showing it: the next window gets it.
+  devices.releaseNotices(lost.claim);
+  const second = await devices.takeNotices();
+  assert.deepEqual(keysOf(second.devices), ["phoneA"]);
+  // A confirm for a released claim does nothing.
+  assert.equal(await devices.confirmNotices(lost.claim), 0);
+  // Nobody confirms or releases: after the claim times out it is offered again.
+  now = CLAIM_MS - 1;
+  assert.deepEqual((await devices.takeNotices()).devices, []);
+  now = CLAIM_MS;
+  const third = await devices.takeNotices();
+  assert.deepEqual(keysOf(third.devices), ["phoneA"]);
+  assert.equal(await devices.confirmNotices(second.claim), 0, "a claim that timed out and was taken again no longer confirms");
+  // A restart with the claim still open loses nothing.
+  const again = createDevices(dir);
+  await again.load();
+  assert.deepEqual(keysOf(await announce(again)), ["phoneA"]);
+  assert.deepEqual((await again.takeNotices()).devices, []);
+});
+
+test("a confirm whose write fails keeps the notice pending on disk and doesn't hand it out again until its claim ends", async () => {
+  const dir = await tmp("devices-notices-confirm-fail");
+  let now = 0;
+  const devices = createDevices(dir, { now: () => now });
+  await devices.add("phoneA");
+  const taken = await devices.takeNotices();
+  await fs.chmod(dir, 0o500);
+  try {
+    await assert.rejects(devices.confirmNotices(taken.claim));
+  } finally {
+    await fs.chmod(dir, 0o700);
+  }
+  assert.deepEqual((await devices.takeNotices()).devices, [], "no second window shows it right away");
+  now = CLAIM_MS;
+  const retry = await devices.takeNotices();
+  assert.deepEqual(keysOf(retry.devices), ["phoneA"]);
+  assert.equal(await devices.confirmNotices(retry.claim), 1);
   assert.equal((await saved(dir)).devices[0].announced, true);
 });
 
@@ -274,11 +332,23 @@ test("a phone stays New until the owner sees it, on disk too; a computer is neve
   await again.load();
   assert.deepEqual(isNew(again.list()), { phoneA: false, phoneB: true, macC: false });
   // Seeing a phone doesn't announce it, and announcing it doesn't mark it seen: the notice and the marker are separate.
-  assert.deepEqual(
-    (await again.takeNotices()).map((device) => device.key),
-    ["phoneA", "phoneB"],
-  );
+  assert.deepEqual(keysOf(await announce(again)), ["phoneA", "phoneB"]);
   assert.equal(isNew(again.list()).phoneB, true);
+});
+
+test("an acknowledge whose write fails leaves the phone New, so the next one writes it", async () => {
+  const dir = await tmp("devices-new-fail");
+  const devices = createDevices(dir, { now: () => 1 });
+  await devices.add("phoneA");
+  await fs.chmod(dir, 0o500);
+  try {
+    await assert.rejects(devices.acknowledge(["phoneA"]));
+  } finally {
+    await fs.chmod(dir, 0o700);
+  }
+  assert.equal(devices.list()[0].isNew, true, "memory agrees with the file");
+  assert.equal(await devices.acknowledge(["phoneA"]), 1);
+  assert.equal((await saved(dir)).devices[0].isNew, false);
 });
 
 test("a removed phone is no longer announced, and devices saved before these fields are neither announced nor New", async () => {
@@ -291,8 +361,8 @@ test("a removed phone is no longer announced, and devices saved before these fie
   const devices = createDevices(dir, { now: () => 2 });
   await devices.load();
   assert.equal(devices.list()[0].isNew, false);
-  assert.deepEqual(await devices.takeNotices(), []);
+  assert.deepEqual((await devices.takeNotices()).devices, []);
   await devices.add("phoneB");
   await devices.remove("phoneB");
-  assert.deepEqual(await devices.takeNotices(), []);
+  assert.deepEqual((await devices.takeNotices()).devices, []);
 });

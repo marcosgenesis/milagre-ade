@@ -237,11 +237,13 @@ async function browserChecks() {
     const notices = await Promise.all([host.call("devices:take-notices"), host.call("devices:take-notices")]);
     // The removed phone is gone with its notice; the computer was allowed here and has none.
     assert.deepEqual(
-      notices.flat().map((device) => device.name),
+      notices.flatMap((reply) => reply.devices).map((device) => device.name),
       ["Pixel 9"],
       "announced once, whoever asks",
     );
-    assert.deepEqual(await host.call("devices:take-notices"), []);
+    // The window that took it shows it, then confirms.
+    assert.equal(await host.call("devices:confirm-notices", [notices.find((reply) => reply.claim).claim]), 1);
+    assert.deepEqual(await host.call("devices:take-notices"), { claim: null, devices: [] });
     await click("Devices");
     await waitFor(`${newMark(awayKey)} === 'New'`);
     await evaluate(`document.querySelector('[data-device-row="phone"]').scrollIntoView({ block: 'center' })`);

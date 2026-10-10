@@ -1,14 +1,17 @@
 // @ts-check
 const TAKE = "devices:take-notices";
+const CONFIRM = "devices:confirm-notices";
 
 /**
- * The "New phone paired" notice, kept by this Mac's host until a window takes it (devices:take-notices), so a phone
- * that pairs while Milagre is closed is still announced when it opens. The host hands each pairing out once, so two
- * windows, or a connect racing the pairing event, never show it twice.
+ * The "New phone paired" notice, kept by this Mac's host until a window shows it, so a phone that pairs while Milagre
+ * is closed is still announced when it opens. The window takes the notices (devices:take-notices: the host holds them
+ * for it, so no other window shows them meanwhile), shows them, then confirms (devices:confirm-notices). A reply lost on
+ * the way never loses one: the host offers it again when this connection closes or the claim times out.
  *
  * `connected()` runs when the window has its host (at launch, and after a reconnect): whatever paired meanwhile is
- * announced as having paired while Milagre was closed. `paired(payload)` runs on the host's phone:paired event. A host
- * from before devices:take-notices keeps nothing for later, so its event is announced straight away, as before.
+ * announced as having paired while Milagre was closed. `paired(payload)` runs on the host's phone:paired event.
+ * `methods()` must be the commands of the host connected now: a host without devices:take-notices (an older one, maybe
+ * reconnected to after a newer one) keeps nothing for later, so its event is announced straight away, as before.
  *
  * @param {{
  *   methods: () => readonly string[] | null | undefined;
@@ -20,16 +23,23 @@ const TAKE = "devices:take-notices";
 function createDeviceNotices({ methods, invoke, notifyPhones, notifyDevice }) {
   /** @param {boolean} away */
   async function take(away) {
+    /** @type {any} */
     let taken;
     try {
       taken = await invoke(TAKE, []);
     } catch {
-      return; // The host went away; the next connect asks again for whatever it still keeps.
+      return; // Nothing was shown; the host offers whatever it held again.
     }
-    const phones = (Array.isArray(taken) ? taken : [])
-      .filter((device) => device && device.kind === "phone")
-      .map((device) => ({ name: typeof device.name === "string" ? device.name : null }));
+    const phones = (Array.isArray(taken?.devices) ? taken.devices : [])
+      .filter((/** @type {any} */ device) => device && device.kind === "phone")
+      .map((/** @type {any} */ device) => ({ name: typeof device.name === "string" ? device.name : null }));
     if (phones.length) notifyPhones(phones, { away });
+    if (typeof taken?.claim !== "string") return;
+    try {
+      await invoke(CONFIRM, [taken.claim]);
+    } catch {
+      // Shown but not confirmed: the host may offer it again, which beats never showing it.
+    }
   }
   return {
     connected() {

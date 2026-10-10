@@ -117,8 +117,10 @@ a minute). The hello says `kind: "desktop"`; the store records that device as `k
 
 A phone also gets `isNew: true` and `announced: false` when it pairs (#382), since nobody at this Mac saw it pair. The
 desktop takes the "New phone paired" notice with `devices:take-notices`, at launch, after a reconnect and on each
-`phone:paired` event; each pairing is handed out once, so a phone that paired while Milagre was closed is announced
-when it opens, and never twice. Settings › Devices marks `isNew` phones New and clears it with
+`phone:paired` event, and confirms it with `devices:confirm-notices(claim)` once shown. A taken notice is only claimed,
+in memory: no other window gets it meanwhile, and it is offered again if the connection closes first, the claim times
+out (60 s) or the daemon restarts. So a phone that paired while Milagre was closed is announced when it opens, a lost
+reply never loses it, and two windows never both show it. Settings › Devices marks `isNew` phones New and clears it with
 `devices:acknowledge(keys)` once shown. A computer pairs after Allow at this Mac, so it is neither.
 
 The pairing check becomes per device: a key in `removed` cannot pair again inside a pairing window that was already

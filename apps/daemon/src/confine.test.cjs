@@ -619,7 +619,16 @@ test("advisor controls are allowlisted and confined to the owning Project", asyn
 
 test("device management is never a phone command, confined or not", async () => {
   const confine = createConfinement({ allowedRoot: os.tmpdir() });
-  for (const method of ["devices:list", "devices:remove", "devices:pending", "devices:allow", "devices:deny", "devices:take-notices", "devices:acknowledge"]) {
+  for (const method of [
+    "devices:list",
+    "devices:remove",
+    "devices:pending",
+    "devices:allow",
+    "devices:deny",
+    "devices:take-notices",
+    "devices:confirm-notices",
+    "devices:acknowledge",
+  ]) {
     assert.equal(METHODS.has(method), false, method);
     assert.equal(PATHS[method], undefined, method);
     await assert.rejects(confine.checkCall(method, []), { status: 403, message: REFUSED });

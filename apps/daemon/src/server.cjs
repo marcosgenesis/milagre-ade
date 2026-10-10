@@ -26,8 +26,8 @@ const PUSH_METHODS = Object.freeze(["push:register", "push:unregister", "push:fo
 const LIVE_ACTIVITY_METHODS = Object.freeze(["live-activity:state", "live-activity:open", "live-activity:answer", "live-activity:forget"]);
 const PHONE_METHODS = Object.freeze(["phone:status", "phone:set-enabled", "phone:reset", "phone:open-pairing", "phone:set-lan"]);
 // Paired phones and computers, listed and removed from this Mac's own window only (Settings > Devices), the computers
-// waiting for its Allow, the phone pairings no window has announced yet (each taken once, by whichever asks first), and
-// which devices the owner has seen there.
+// waiting for its Allow, the phone pairings no window has announced yet (taken by whichever window asks first, then
+// confirmed once shown; a connection that closes first gives back what it took), and which devices the owner has seen.
 const DEVICE_METHODS = Object.freeze([
   "devices:list",
   "devices:remove",
@@ -35,6 +35,7 @@ const DEVICE_METHODS = Object.freeze([
   "devices:allow",
   "devices:deny",
   "devices:take-notices",
+  "devices:confirm-notices",
   "devices:acknowledge",
 ]);
 // A paired desktop's own channel (peer-channel.cjs): rpc / evt / part messages over the relay or the LAN.
@@ -430,6 +431,8 @@ async function startDaemon({
     const authenticationTimeout = authenticated ? null : setTimeout(destroy, authTimeoutMs);
     authenticationTimeout?.unref();
     const inflight = new Set();
+    // Pairing notices this connection took and hasn't confirmed: offered to other windows again when it closes.
+    const noticeClaims = new Set();
     // Requests whose reply waits for paging room: they don't hold a MAX_PENDING slot, so a reader's page reads get through.
     const awaitingPages = new Set();
     // Result pages and paged snapshots share one store and its rules.
@@ -579,8 +582,16 @@ async function startDaemon({
         else if (request.method === "phone:set-lan") result = await phone.setLan(request.args[0]);
         else if (request.method === "devices:list") result = await phone.devices();
         else if (request.method === "devices:remove") result = await phone.removeDevice(request.args[0]);
-        else if (request.method === "devices:take-notices") result = await phone.takeDeviceNotices();
-        else if (request.method === "devices:acknowledge") result = await phone.acknowledgeDevices(request.args[0]);
+        else if (request.method === "devices:take-notices") {
+          result = await phone.takeDeviceNotices();
+          if (result.claim) {
+            if (closed || isClosed()) phone.releaseDeviceNotices(result.claim);
+            else noticeClaims.add(result.claim);
+          }
+        } else if (request.method === "devices:confirm-notices") {
+          result = await phone.confirmDeviceNotices(request.args[0]);
+          noticeClaims.delete(request.args[0]);
+        } else if (request.method === "devices:acknowledge") result = await phone.acknowledgeDevices(request.args[0]);
         else if (request.method === "devices:pending") result = phone.pendingDevices();
         else if (request.method === "devices:allow") result = phone.allowDevice(request.args[0]);
         else if (request.method === "devices:deny") result = phone.denyDevice(request.args[0]);
@@ -674,6 +685,8 @@ async function startDaemon({
         clients.delete(key);
         views.delete(key);
         patchClients.delete(key);
+        for (const claim of noticeClaims) phone.releaseDeviceNotices(claim);
+        noticeClaims.clear();
         Promise.resolve(runtime.disconnect?.(context.clientId)).catch(onError);
       },
     };

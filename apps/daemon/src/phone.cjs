@@ -457,9 +457,18 @@ function createPhone({
     allowDevice: (key) => answerPending(key, "allowed"),
     /** Turns a waiting computer away; returns the ones still waiting. */
     denyDevice: (key) => answerPending(key, "denied"),
-    /** Phones whose pairing no desktop has announced yet, each handed out once (devices.cjs `takeNotices`). */
+    /** Phones whose pairing no desktop has announced yet and no window holds, claimed: `{ claim, devices }` (devices.cjs). */
     async takeDeviceNotices() {
       return (await deviceStore()).takeNotices();
+    },
+    /** The window showed what it took under `claim`; returns how many were announced. */
+    async confirmDeviceNotices(claim) {
+      if (typeof claim !== "string") throw new Error("Expected a notice claim");
+      return (await deviceStore()).confirmNotices(claim);
+    },
+    /** The window that took `claim` is gone: what it held is offered again. */
+    releaseDeviceNotices(claim) {
+      relayPhones?.releaseNotices(claim);
     },
     /** The owner saw these devices in Settings › Devices, so they are no longer New. Returns the list. */
     async acknowledgeDevices(keys) {

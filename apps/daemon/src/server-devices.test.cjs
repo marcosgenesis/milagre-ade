@@ -66,6 +66,7 @@ test("devices:list and devices:remove are desktop methods over the saved devices
     ["devices:list", []],
     ["devices:remove", [key]],
     ["devices:take-notices", []],
+    ["devices:confirm-notices", ["n1"]],
     ["devices:acknowledge", [[key]]],
   ]) {
     const response = await fetch(on.localUrl + "/rpc", {
@@ -178,7 +179,8 @@ test("a phone that pairs while no window is connected is announced once to the n
     return client;
   };
   const owner = await window();
-  for (const method of ["devices:take-notices", "devices:acknowledge"]) assert.ok((await owner.call("daemon:status")).methods.includes(method), method);
+  for (const method of ["devices:take-notices", "devices:confirm-notices", "devices:acknowledge"])
+    assert.ok((await owner.call("daemon:status")).methods.includes(method), method);
   await owner.call("phone:set-enabled", [true]);
   await waitFor(async () => (await owner.call("phone:status")).state === "on");
   owner.close();
@@ -189,14 +191,29 @@ test("a phone that pairs while no window is connected is announced once to the n
   await daemon.close();
   daemon = await start();
 
-  // Two windows ask at once: only one of them shows it.
-  const [first, second] = await Promise.all([window(), window()]);
-  const taken = await Promise.all([first.call("devices:take-notices"), second.call("devices:take-notices")]);
+  // A window takes it and its connection drops before it can show it (the reply was lost): nothing is lost.
+  const lost = await window();
   assert.deepEqual(
-    taken.flat().map((device) => [device.key, device.name]),
+    (await lost.call("devices:take-notices")).devices.map((device) => device.key),
+    [key],
+  );
+  lost.close();
+
+  // Two windows ask at once: only one of them shows it, and confirms it.
+  const [first, second] = await Promise.all([window(), window()]);
+  let taken = [];
+  for (let n = 0; n < 200 && !taken.some((reply) => reply.claim); n++) {
+    taken = await Promise.all([first.call("devices:take-notices"), second.call("devices:take-notices")]);
+    if (!taken.some((reply) => reply.claim)) await delay(10); // the dropped connection's close is still on its way
+  }
+  assert.deepEqual(
+    taken.flatMap((reply) => reply.devices).map((device) => [device.key, device.name]),
     [[key, "Victor's iPhone"]],
   );
-  assert.deepEqual(await first.call("devices:take-notices"), []);
+  const shower = taken[0].claim ? first : second;
+  assert.equal(await shower.call("devices:confirm-notices", [taken.find((reply) => reply.claim).claim]), 1);
+  assert.deepEqual(await first.call("devices:take-notices"), { claim: null, devices: [] });
+  await assert.rejects(first.call("devices:confirm-notices", [42]), /notice claim/);
 
   // Settings › Devices shows it as New until the window says the owner saw it.
   assert.equal((await first.call("devices:list"))[0].isNew, true);

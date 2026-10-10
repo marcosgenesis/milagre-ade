@@ -1,5 +1,6 @@
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import type { ModelProvider, ProviderUsage, UsageSnapshot } from "./model";
+import { formatTokens } from "./tokens.mjs";
 export type UsageDisplay = "used" | "remaining";
 
 const MINUTE = 60_000;
@@ -87,13 +88,7 @@ export function mergeSnapshot(previous: UsageSnapshot | null, next: UsageSnapsho
   };
 }
 
-/** A token count the way model windows are named: 366k, 1M, 1.5M. */
-export function formatTokens(tokens: number) {
-  const thousands = Math.round(tokens / 1000);
-  if (thousands < 1) return String(Math.round(tokens));
-  if (thousands < 1000) return `${thousands}k`;
-  return `${Math.round(tokens / 100_000) / 10}M`;
-}
+export { formatTokens };
 
 /** How full the agent's context window is: the percent used and the token counts behind it. */
 export function contextSummary({ used, size }: { used: number; size: number }) {
@@ -105,4 +100,21 @@ export function contextSummary({ used, size }: { used: number; size: number }) {
     tokens: `${formatTokens(used)} of ${formatTokens(size)} tokens`,
     left: `${formatTokens(Math.max(0, size - used))} left`,
   };
+}
+
+/** From here the ring turns to the accent colour. */
+export const CONTEXT_WARN_PERCENT = 75;
+/** From here the ring turns red to indicate the window is nearly full. */
+export const CONTEXT_CRITICAL_PERCENT = 90;
+
+/** How the ring is drawn for a percent used: the colour step it has reached. */
+export function contextTone(percent: number): "normal" | "warning" | "critical" {
+  if (percent >= CONTEXT_CRITICAL_PERCENT) return "critical";
+  if (percent >= CONTEXT_WARN_PERCENT) return "warning";
+  return "normal";
+}
+
+/** Explain the warning threshold; the button supplies the action. */
+export function contextHint(percent: number): string | null {
+  return percent >= CONTEXT_WARN_PERCENT ? `Context above ${CONTEXT_WARN_PERCENT}% may reduce response quality and slow replies.` : null;
 }

@@ -650,3 +650,113 @@ test("subagentActive: one still at work or waiting on an approval is active; one
   for (const status of ["completed", "failed", "cancelled", "unknown"] as const) assert.equal(subagentActive({ status }), false);
   assert.equal(subagentActive(undefined), false);
 });
+
+test("a /compact the user asked for: its divider goes from preparing to done at the boundary, and the empty turn saves no reply", () => {
+  let state = base();
+  state = {
+    ...state,
+    messages: [
+      { id: 8, session_id: 2, body: "fix it", context: null, role: "user" },
+      { id: 9, session_id: 2, body: "/compact", context: { kind: "compaction", status: "preparing", before: 897_000, size: 1_000_000 }, role: "user" },
+    ],
+  };
+  let runs = startRun({}, key(2), "claude-opus-5-5");
+  // The existing manual divider handles progress without adding another message.
+  let result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "context-compacting" });
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.runs[key(2)].steps, []);
+  ({ state, runs } = result);
+  result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "step-completed", id: "compact-1", status: "done", title: "Compacted context" });
+  ({ state, runs } = result);
+  result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "context-compacted", trigger: "manual", before: 897_000, after: 42_000 });
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.state.messages[1].context, { kind: "compaction", status: "done", before: 897_000, after: 42_000, size: 1_000_000 });
+  ({ state, runs } = result);
+  result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "context-usage", used: 42_000, size: 1_000_000 });
+  ({ state, runs } = result);
+  result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "turn-completed" });
+  assert.deepEqual(result.runs, {});
+  assert.equal(result.state.messages.length, 2);
+  assert.deepEqual(result.state.sessions["2"].contextUsage, { used: 42_000, size: 1_000_000 });
+  assert.equal(result.changed, true);
+});
+
+test("a manual compaction that never reaches its boundary fails with the turn", () => {
+  let state = base();
+  state = { ...state, messages: [{ id: 8, session_id: 2, body: "fix it", context: null, role: "user" }] };
+  const runs = startRun({}, key(2), "claude-opus-5-5");
+  const pending = {
+    ...state,
+    messages: [
+      ...state.messages,
+      { id: 9, session_id: 2, body: "/compact", context: { kind: "compaction", status: "preparing", before: 190_000 }, role: "user" },
+    ],
+  };
+  const failed = applyAgentEvent(pending, runs, PROJECT, key(2), { type: "turn-failed", message: "boom" });
+  assert.deepEqual(failed.state.messages[1].context, { kind: "compaction", status: "failed", before: 190_000 });
+  assert.equal(failed.state.messages.at(-1)?.body, "Agent error: boom");
+  const cancelled = applyAgentEvent(pending, runs, PROJECT, key(2), { type: "turn-cancelled" });
+  assert.equal(cancelled.state.messages[1].context.status, "failed");
+  const silent = applyAgentEvent(pending, runs, PROJECT, key(2), { type: "turn-completed" });
+  assert.equal(silent.state.messages[1].context.status, "failed");
+  assert.equal(silent.state.messages.length, 2);
+});
+
+test("automatic compaction splits a reply around one saved divider, then the turn continues", () => {
+  let state = base();
+  let runs = startRun({}, key(2), "claude-opus-5-5");
+  const apply = (event: AgentEvent) => ({ state, runs } = applyAgentEvent(state, runs, PROJECT, key(2), event));
+  apply({ type: "context-usage", used: 180_000, size: 200_000 });
+  apply({ type: "text-delta", messageId: "t", text: "Before compaction." });
+  apply({ type: "step-started", step: { id: "tool", kind: "command", title: "Running command" } });
+  apply({ type: "context-compacting" });
+  assert.deepEqual(
+    state.messages.map((m) => m.body),
+    ["Before compaction.", ""],
+  );
+  const id = state.messages[1].id;
+  assert.deepEqual(state.messages[1].context, { kind: "compaction", status: "preparing", before: 180_000, size: 200_000 });
+  assert.equal(state.messages[1].role, "assistant");
+  assert.equal(runs[key(2)].steps[0].id, "tool");
+  assert.equal(runs[key(2)].steps[0].offset, 0);
+  apply({ type: "context-compacting" });
+  assert.equal(state.messages.length, 2, "repeated start does not add a second divider");
+  apply({ type: "context-compacted", trigger: "auto", before: 190_000, after: 20_000 });
+  assert.equal(state.messages[1].id, id);
+  assert.deepEqual(state.messages[1].context, { kind: "compaction", status: "done", before: 190_000, after: 20_000, size: 200_000 });
+  apply({ type: "context-usage", used: 20_000, size: 200_000 });
+  apply({ type: "step-completed", id: "tool", status: "done" });
+  apply({ type: "text-delta", messageId: "t", text: "After compaction." });
+  apply({ type: "turn-completed" });
+  assert.deepEqual(
+    state.messages.map((m) => m.body),
+    ["Before compaction.", "", "After compaction."],
+  );
+  assert.deepEqual(
+    state.messages[2].steps?.map((s) => s.id),
+    ["tool"],
+  );
+  assert.deepEqual(state.sessions[2].contextUsage, { used: 20_000, size: 200_000 });
+  assert.equal(state.next_id, 13);
+  assert.deepEqual(runs, {});
+});
+
+test("a boundary without a start saves a divider without inventing token counts or an empty reply", () => {
+  const state = base();
+  const runs = startRun({}, key(1), "gpt-6");
+  const result = applyAgentEvent(state, runs, PROJECT, key(1), { type: "context-compacted", trigger: "auto" });
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.state.messages[0].context, { kind: "compaction", status: "done" });
+  const ended = applyAgentEvent(result.state, result.runs, PROJECT, key(1), { type: "turn-completed" });
+  assert.equal(ended.state.messages.length, 1);
+});
+
+test("an automatic compaction interrupted before its boundary saves a failed divider", () => {
+  for (const event of [{ type: "turn-completed" }, { type: "turn-cancelled" }, { type: "turn-failed", message: "boom" }] as AgentEvent[]) {
+    const started = applyAgentEvent(base(), startRun({}, key(2), "claude"), PROJECT, key(2), { type: "context-compacting" });
+    const ended = applyAgentEvent(started.state, started.runs, PROJECT, key(2), event);
+    assert.equal(ended.changed, true);
+    assert.equal(ended.state.messages[0].context?.kind, "compaction");
+    assert.equal((ended.state.messages[0].context as { status: string }).status, "failed");
+  }
+});

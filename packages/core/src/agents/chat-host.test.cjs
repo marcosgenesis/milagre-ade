@@ -348,6 +348,89 @@ async function chatWithReply(host, session, saved) {
   return sessionId;
 }
 
+test("Compact now: the /compact runs on the chat's own provider, its divider records the gauge, and the empty turn saves no reply", async (t) => {
+  const { host, manager, saved, states, session, created } = harness();
+  t.after(() => manager.closeAll());
+  const sessionId = await chatWithReply(host, session, saved);
+  // The gauge stood at 897k when the turn ended, so the composer offered Compact now.
+  session(ALPHA).emit({ type: "context-usage", used: 1, size: 1 });
+  await states.update(ALPHA, (state) => ({
+    ...state,
+    sessions: { ...state.sessions, [sessionId]: { ...state.sessions[sessionId], contextUsage: { used: 897_000, size: 1_000_000 } } },
+  }));
+  const { compactionMessage } = require("@milagre/shared/compaction");
+  // The picker may sit on Codex: the compaction still runs on Claude, where the chat is, with no handoff.
+  await host.send(message(ALPHA, "", { sessionId, ...compactionMessage(), provider: "codex", model: "gpt-6" }));
+  await waitUntil(() => session(ALPHA).turns.length === 2);
+  assert.equal(session(ALPHA).turns[1].prompt, "/compact");
+  // The same Claude session took it: no Codex session was created.
+  assert.deepEqual(
+    created.map((item) => item.provider),
+    ["claude"],
+  );
+  assert.equal(session(ALPHA).turns[1].model, "claude-opus-5-5");
+  assert.deepEqual(dividers(saved.get(ALPHA), sessionId), []);
+  const request = () => saved.get(ALPHA).messages.find((item) => item.context?.kind === "compaction");
+  assert.deepEqual(request().context, { kind: "compaction", status: "preparing", before: 897_000, size: 1_000_000 });
+
+  session(ALPHA).emit({ type: "turn-started", turnId: "t2" });
+  session(ALPHA).emit({ type: "context-compacting" });
+  session(ALPHA).emit({ type: "context-compacted", trigger: "manual", before: 897_000, after: 42_000 });
+  session(ALPHA).emit({ type: "context-usage", used: 42_000, size: 1_000_000 });
+  session(ALPHA).emit({ type: "turn-completed" });
+  await waitUntil(() => request().context.status === "done" && !host.runs[`${ALPHA}#${sessionId}`]);
+  assert.deepEqual(request().context, { kind: "compaction", status: "done", before: 897_000, after: 42_000, size: 1_000_000 });
+  assert.deepEqual(chatMessages(saved.get(ALPHA), sessionId), [
+    { role: "user", body: "fix the login redirect" },
+    { role: "assistant", body: "Done.", outcome: "completed" },
+    { role: "user", body: "/compact" },
+  ]);
+  assert.deepEqual(saved.get(ALPHA).sessions[sessionId].contextUsage, { used: 42_000, size: 1_000_000 });
+});
+
+test("automatic compaction saves a divider between the reply before and after it", async (t) => {
+  const { host, manager, saved, session } = harness();
+  t.after(() => manager.closeAll());
+  const chat = await host.send(message(ALPHA, "keep working"));
+  await waitUntil(() => session(ALPHA));
+  session(ALPHA).emit({ type: "turn-started", turnId: "t1" });
+  session(ALPHA).emit({ type: "context-usage", used: 190_000, size: 200_000 });
+  session(ALPHA).emit({ type: "text-delta", messageId: "t1", text: "Before." });
+  session(ALPHA).emit({ type: "context-compacting" });
+  const divider = () => saved.get(ALPHA).messages.find((item) => item.context?.kind === "compaction");
+  await waitUntil(() => divider()?.context.status === "preparing");
+  session(ALPHA).emit({ type: "context-compacted", trigger: "auto", before: 190_000, after: 20_000 });
+  session(ALPHA).emit({ type: "text-delta", messageId: "t1", text: "After." });
+  session(ALPHA).emit({ type: "turn-completed" });
+  await waitUntil(() => divider()?.context.status === "done" && !host.runs[`${ALPHA}#${chat.sessionId}`]);
+  assert.deepEqual(
+    saved.get(ALPHA).messages.map((item) => item.body),
+    ["keep working", "Before.", "", "After."],
+  );
+  assert.deepEqual(divider().context, { kind: "compaction", status: "done", before: 190_000, after: 20_000, size: 200_000 });
+});
+
+test("Compact now is refused while a turn runs and on a Codex chat", async (t) => {
+  const { host, manager, saved, states, session } = harness();
+  t.after(() => manager.closeAll());
+  const { compactionMessage } = require("@milagre/shared/compaction");
+  const chat = await host.send(message(ALPHA, "start"));
+  await waitUntil(() => session(ALPHA));
+  session(ALPHA).emit({ type: "turn-started", turnId: "t1" });
+  await assert.rejects(host.send(message(ALPHA, "", { sessionId: chat.sessionId, ...compactionMessage() })), /Wait for the agent to finish/);
+  session(ALPHA).emit({ type: "turn-completed" });
+  await waitUntil(() => !host.runs[`${ALPHA}#${chat.sessionId}`]);
+  await states.update(ALPHA, (state) => ({
+    ...state,
+    sessions: { ...state.sessions, [chat.sessionId]: { ...state.sessions[chat.sessionId], provider: "codex" } },
+  }));
+  await assert.rejects(host.send(message(ALPHA, "", { sessionId: chat.sessionId, ...compactionMessage(), provider: "codex" })), /Only Claude chats/);
+  assert.equal(
+    saved.get(ALPHA).messages.some((item) => item.context?.kind === "compaction"),
+    false,
+  );
+});
+
 const dividers = (state, sessionId) =>
   state.messages.filter((item) => item.session_id === sessionId && item.context?.kind === "handoff").map((item) => item.context);
 

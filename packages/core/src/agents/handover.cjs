@@ -3,6 +3,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { chatTitle } = require("@milagre/shared/chats");
+const { compactionText } = require("@milagre/shared/compaction");
 const { claudeModel, codexModel, antigravityModel } = require("../git-text.cjs");
 
 // Handing a chat off to the other provider in place: the chat as a markdown transcript on disk, and a short brief
@@ -42,6 +43,8 @@ function renderTranscript(state, sessionId, { after } = {}) {
       parts.push(`## Handoff${failed}: ${providerName(message.context.from.provider)} → ${providerName(message.context.to.provider)}`);
     } else if (message.context?.kind === "worktree-linked") {
       parts.push(`## ${message.body}`);
+    } else if (message.context?.kind === "compaction") {
+      parts.push(`## ${compactionText(message.context)}`);
     } else if (message.role === "assistant") {
       const steps = (message.steps ?? []).filter((step) => step.kind !== "thinking").map(stepLine);
       parts.push(`## Assistant${message.model ? ` (${message.model})` : ""}`, [steps.join("\n"), message.body].filter(Boolean).join("\n\n"));

@@ -25,7 +25,7 @@ import { messageNavigationIndices } from "@milagre/shared/message-navigation";
 import { LINK_PR_HINT, issueChipLabel, issueFirstMessage, type LinearIssue, type LinearIssuesResult } from "@milagre/shared/linear";
 import { worktreeShared } from "@milagre/shared/archive";
 import type { Client, OpenProject } from "../client";
-import { answeredQuestions, lastUserModel } from "@milagre/shared/agent-runs";
+import { answeredQuestions, lastUserModel, projectOfKey, sessionIdFromKey } from "@milagre/shared/agent-runs";
 import { pullRequestBlockers } from "@milagre/shared/pr-blockers";
 import { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } from "@milagre/shared/pr-action";
 import { linearIssueContext, linearIssueRequest } from "@milagre/shared/linear-issue";
@@ -45,7 +45,9 @@ import { handoffSides } from "../handoff-sides";
 import { HandoffDivider } from "../handoff-divider";
 import { showBrief } from "../handoff-brief-store";
 import { WorktreeLinkDivider } from "../worktree-link-divider";
+import { CompactionDivider } from "../compaction-divider";
 import { isHandoff } from "@milagre/shared/handoff";
+import { COMPACT_COMMAND, compactionText, isCompaction } from "@milagre/shared/compaction";
 import { isWorktreeLinked, worktreeLinkText } from "@milagre/shared/worktree-link";
 import { ThinkingIndicator } from "../running-logo";
 import { BottomFade, EdgeFade } from "../bottom-fade";
@@ -294,7 +296,9 @@ export default function ChatScreen() {
           ? `Go to ${handoffSides(messages[index].context, handoffModels).restored ? "context restored" : "context handoff"} ${index + 1} of ${messages.length}.`
           : isWorktreeLinked(messages[index])
             ? `Go to ${worktreeLinkText(messages[index].context)}, ${index + 1} of ${messages.length}.`
-            : `Go to ${messageSender(messages[index])} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
+            : isCompaction(messages[index])
+              ? `Go to ${compactionText(messages[index].context)}, ${index + 1} of ${messages.length}.`
+              : `Go to ${messageSender(messages[index])} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
       })),
     [messages, handoffModels],
   );
@@ -373,6 +377,46 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!busy && !picking && designDeferred.current) sendDesign.current();
   }, [busy, picking]);
+  // Compact now, pressed on the context sheet: Claude's /compact as a divider in the chat, with no handoff and the
+  // draft kept. Each new count per chat key sends once; counts already there when the screen mounts are old news.
+  // The Chat's values are read from the key here, so the effect sits above the Redirect with the other hooks.
+  const compactSeen = useRef<Record<string, number> | null>(null);
+  const compactRequests = composer.compactRequests;
+  useEffect(() => {
+    if (!compactSeen.current) {
+      compactSeen.current = { ...compactRequests };
+      return;
+    }
+    const snapshot = session.snapshot;
+    const client = session.client;
+    for (const [key, count] of Object.entries(compactRequests)) {
+      if (compactSeen.current[key] === count) continue;
+      compactSeen.current[key] = count;
+      const target = snapshot?.project.state.sessions[sessionIdFromKey(key)];
+      if (!snapshot || !client || !target || projectOfKey(key) !== snapshot.project.path) continue;
+      const turn = turnTarget(composer.preferences[key], target.provider, composer.defaults);
+      const model = selectedModel(turn.provider, turn.model || lastUserModel(snapshot.project.state, target.id), session.models);
+      setError("");
+      client
+        .call("chat:send", [
+          {
+            projectPath: snapshot.project.path,
+            sessionId: target.id,
+            worktreeId: target.worktree_id,
+            body: COMPACT_COMMAND,
+            prompt: COMPACT_COMMAND,
+            images: [],
+            files: [],
+            ...sendOptions(model, composer.preferences[key] || composer.defaults),
+            compact: true,
+          },
+        ])
+        .then(() => session.expectActivity())
+        .catch((e: Error) => setError(e.message));
+    }
+    // The counters are the trigger; the rest is read as it stands when one moves.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [compactRequests]);
   if (!session.client || (!session.snapshot && !wanted)) return <Redirect href="/" />;
   if (!session.snapshot || !targetMatches || needsWorktree) {
     return (
@@ -1033,6 +1077,8 @@ export default function ChatScreen() {
                 <HandoffDivider context={message.context} models={handoffModels} onOpen={openBrief} />
               ) : isWorktreeLinked(message) ? (
                 <WorktreeLinkDivider context={message.context} client={session.client} onOpen={(title, text) => openBrief(text, title)} />
+              ) : isCompaction(message) ? (
+                <CompactionDivider context={message.context} />
               ) : (
                 <ChatReply
                   message={message}
@@ -1405,7 +1451,11 @@ export default function ChatScreen() {
                   />
                   <View style={{ flex: 1 }} />
                   {contextUsage && contextUsage.size > 0 && params.id && (
-                    <ContextRing {...contextUsage} onPress={() => router.push({ pathname: "/context-sheet", params: { id: params.id } })} />
+                    <ContextRing
+                      {...contextUsage}
+                      canCompact={Boolean(chat) && (chat?.provider ?? "claude") === "claude"}
+                      onPress={() => router.push({ pathname: "/context-sheet", params: { id: params.id } })}
+                    />
                   )}
                   {run && !draft.trim() && !attachments.length && (
                     <IconButton

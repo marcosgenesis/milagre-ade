@@ -228,3 +228,20 @@ test("handover models cover all three providers; Antigravity writes the brief th
   assert.match(brief, /ran on Antigravity/);
   assert.match(brief, /Its summary couldn't be written/);
 });
+
+test("a compaction the user asked for is a heading in the transcript, with the tokens around it", () => {
+  const state = {
+    sessions: { 3: { id: 3, worktree_id: 1, agent_name: "main", status: "Created", provider: "claude" } },
+    worktrees: { 1: { id: 1, name: "main", path: "/work/app" } },
+    messages: [
+      { id: 1, session_id: 3, role: "user", body: "fix it", context: null },
+      { id: 2, session_id: 3, role: "assistant", body: "Fixed.", context: null },
+      { id: 3, session_id: 3, role: "user", body: "/compact", context: { kind: "compaction", status: "done", before: 897_000, after: 42_000 } },
+      { id: 4, session_id: 3, role: "user", body: "/compact", context: { kind: "compaction", status: "failed", before: 900_000 } },
+    ],
+  };
+  const text = renderTranscript(state, 3);
+  assert.match(text, /## Context compacted: 897k → 42k\n/);
+  assert.match(text, /## Compaction failed: 900k\n/);
+  assert.doesNotMatch(text, /## User\n\n\/compact/);
+});

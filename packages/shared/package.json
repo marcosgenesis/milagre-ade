@@ -48,6 +48,14 @@
       "types": "./src/pr-action.d.mts",
       "default": "./src/pr-action.mjs"
     },
+    "./compaction": {
+      "types": "./src/compaction.d.mts",
+      "default": "./src/compaction.mjs"
+    },
+    "./tokens": {
+      "types": "./src/tokens.d.mts",
+      "default": "./src/tokens.mjs"
+    },
     "./prompt-skills": {
       "types": "./src/prompt-skills.d.mts",
       "default": "./src/prompt-skills.mjs"

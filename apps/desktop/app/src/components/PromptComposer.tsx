@@ -57,6 +57,8 @@ interface PromptComposerProps {
   sendBlocked: boolean;
   /** A turn is running in this chat; a message sent now steers it. */
   running?: boolean;
+  /** Sends `/compact` to the chat (Claude only); the context card offers it as Compact now. */
+  onCompact?: () => void;
   /** The models each agent offers, or the maintained list until it reports them. */
   models: ModelOption[];
   /** How each agent's CLI stands; a problem is flagged on its tab and in a notice above the models. */
@@ -116,6 +118,7 @@ export function PromptComposer({
   onStop,
   sendBlocked,
   running = false,
+  onCompact,
   models,
   cliStatus,
   onModelPickerOpen,
@@ -681,7 +684,13 @@ export function PromptComposer({
               <span className="hidden min-[900px]:inline">{permissionMode === "ask" ? "Ask" : permissionMode === "auto" ? "Auto" : "Full"}</span>
             </button>
             <div className={`flex shrink-0 items-center gap-0.5 ${expanded ? "col-start-5 row-start-2" : "col-start-5 row-start-1"}`}>
-              {contextUsage && contextUsage.size > 0 && <ContextRing {...contextUsage} />}
+              {contextUsage && contextUsage.size > 0 && (
+                <ContextRing
+                  {...contextUsage}
+                  onCompact={onCompact}
+                  compactBlocked={running ? "Wait for the agent to finish." : sendBlocked ? "Not available right now." : null}
+                />
+              )}
               <button
                 type="button"
                 aria-label={canStop ? "Stop agent" : "Send"}

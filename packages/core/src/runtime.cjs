@@ -8,6 +8,7 @@ const { registerLinkRuntime } = require("./link-runtime.cjs");
 const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { PROVIDERS } = require("@milagre/shared/providers");
 const { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } = require("@milagre/shared/pr-action");
+const { compactionMessage } = require("@milagre/shared/compaction");
 const { issueFirstMessage, linearIssueContext, linearIssuePrompt, linearIssueRequest } = require("@milagre/shared/linear-issue");
 const { ChatTitles, createChatTitleModels, generateChatTitle } = require("./chat-title.cjs");
 const { createGit } = require("./git/client.cjs");
@@ -1083,14 +1084,17 @@ function createRuntime(options) {
     if (isLinkScopeKey(request?.projectPath) || !scopeStates.has(request?.projectPath)) throw new Error("Open the project before sending to its chats.");
     // Only Milagre marks a message as coming from another Chat. A PR-blocker pill and a Chat started from a Linear issue
     // are the contexts a renderer can ask for, and Milagre checks them and writes their message and prompt itself.
-    const { prAction, linearIssue, ...rest } = request;
+    const { prAction, linearIssue, compact, ...rest } = request;
     const action = prAction === undefined ? null : pullRequestActionContext(prAction);
     if (prAction !== undefined && !action) throw new Error("That pull request action isn't valid.");
+    if (compact && rest.sessionId == null) throw new Error("Open a chat before compacting it.");
     const message = action
       ? { ...rest, body: pullRequestActionBody(action), prompt: pullRequestActionPrompt(action), images: [], files: [], context: action }
-      : linearIssue !== undefined
-        ? await linearIssueMessage(rest, linearIssue)
-        : { ...rest, context: undefined };
+      : compact
+        ? { ...rest, ...compactionMessage() }
+        : linearIssue !== undefined
+          ? await linearIssueMessage(rest, linearIssue)
+          : { ...rest, context: undefined };
     return chats.send(message).then(({ sessionId }) => ({ sessionId }));
   });
   // The issue is read again here, so the card and prompt are Linear's copy. If Linear can't answer now, the Chat still

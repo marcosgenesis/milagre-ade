@@ -246,7 +246,9 @@ function messageChanges(previousState, nextState) {
   const changed = next.filter((message) => !before.has(message) && !isFromDisk(message));
   const ids = new Set(next.map((message) => message.id));
   const unloaded = unloadedChats(nextState);
-  const removed = previous.filter((message) => !ids.has(message.id) && !unloaded.has(Number(message.session_id))).map((message) => message.id);
+  // A Chat removed while unloaded is removed: its messages are announced as before.
+  const kept = (message) => unloaded.has(Number(message.session_id)) && Object.hasOwn(nextState?.sessions ?? {}, String(message.session_id));
+  const removed = previous.filter((message) => !ids.has(message.id) && !kept(message)).map((message) => message.id);
   if (!changed.length) return { changed: [], removed };
   const chats = new Map();
   for (const message of next) {
@@ -442,7 +444,9 @@ async function startDaemon({
    * A scope's state with its number, for a client that takes patches, beside the rest of its snapshot (a Project's path
    * and name, a Link's definition). A newer state than the one sent goes out first.
    */
-  async function readState(owner, form = WHOLE) {
+  // `withRest`: the client needs the rest of the snapshot (the phone bridge, which takes states without messages and
+  // still hands phones a Project's path and name).
+  async function readState(owner, form = WHOLE, { withRest = false } = {}) {
     if (typeof owner !== "string" || !owner) throw new Error("Choose a Project or Link");
     const link = isLinkScopeKey(owner);
     const answer = (sent) => ({ ...snapshotRest.get(owner), state: leanState(sent.state, form), version: sent.version, epoch });
@@ -450,7 +454,7 @@ async function startDaemon({
     // snapshot waits behind whatever the Project or Link is busy with (a shared Chat's Worktrees being prepared). Its
     // next change follows as a patch on it. A client that needs the rest of the snapshot (a name) reads it once.
     const sent = sentStates.get(owner);
-    if (sent && (!form.messages || snapshotRest.has(owner))) return answer(sent);
+    if (sent && ((!form.messages && !withRest) || snapshotRest.has(owner))) return answer(sent);
     const { state, ...rest } = await runtime.invoke(link ? "link:snapshot" : "project:snapshot", [link ? scopeFromKey(owner).linkId : owner]);
     snapshotRest.set(owner, rest);
     if (sentStates.get(owner)?.state !== state)
@@ -693,7 +697,8 @@ async function startDaemon({
         else if (request.method === "daemon:state-patches") {
           if (!closed) patchClients.set(key, formOf(request.args[0]));
           result = { epoch };
-        } else if (request.method === "state:read") result = await readState(request.args[0], patchClients.get(key));
+        } else if (request.method === "state:read")
+          result = await readState(request.args[0], patchClients.get(key), { withRest: request.args[1]?.rest === true });
         else if (request.method === "daemon:focus") {
           const next = request.args[0];
           if (!next || typeof next.focused !== "boolean") throw new Error("Expected a focused boolean");

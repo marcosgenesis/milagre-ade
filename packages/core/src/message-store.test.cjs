@@ -215,6 +215,39 @@ test("a Chat removed while unloaded loses its rows, as it did when every Chat wa
   assert.deepEqual(ids(await onDisk()), [1, 2, 3, 5, 7, 8]);
 });
 
+test("a Chat removed while unloaded is never read back, so its rows don't return after the save deletes them", async (t) => {
+  const projectPath = await tempProject(t);
+  await seed(projectPath);
+  const { states, advance, onDisk } = harness(projectPath);
+  await states.get(projectPath);
+  advance(2000);
+  await states.unloadIdle();
+  await states.update(
+    projectPath,
+    (state) => {
+      const { 1: _gone, ...sessions } = state.sessions;
+      return { ...state, sessions };
+    },
+    { chats: [] },
+  );
+  // Before the save: a stale page read of it, and a change that names no Chats (which loads every unloaded one).
+  const read = await states.load(projectPath, [1]);
+  assert.deepEqual(ids(read.messages), []);
+  let seen;
+  await states.update(projectPath, (state) => {
+    seen = state.messages;
+    return state;
+  });
+  assert.deepEqual(ids(seen), [2, 4, 5, 6]);
+  assert.deepEqual(ids(await states.allMessages(projectPath)), [2, 4, 5, 6]);
+  assert.deepEqual(ids(wholeState(await states.get(projectPath)).messages), [2, 4, 5, 6]);
+  await states.flush(projectPath);
+  assert.deepEqual(ids(await onDisk()), [2, 4, 5, 6]);
+  await states.update(projectPath, (state) => ({ ...state, messages: [...state.messages, reply(100, 2)] }), { chats: [2] });
+  await states.flush(projectPath);
+  assert.deepEqual(ids(await onDisk()), [2, 4, 5, 6, 100]);
+});
+
 test("a whole state has every message in the Project's order, the same object for the same state", async (t) => {
   const projectPath = await tempProject(t);
   const all = await seed(projectPath);

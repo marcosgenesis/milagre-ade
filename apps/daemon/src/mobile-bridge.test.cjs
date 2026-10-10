@@ -1369,6 +1369,8 @@ test("a phone reads a Chat the host unloaded: snapshots old and new, the chat li
   );
   assert.equal(older.project.state.messagesInChats, undefined);
   assert.deepEqual(older.project.pullRequestRefs, { 2: [url] });
+  // The bridge holds lean states, yet phones still get the Project's path and name, which key it on the phone.
+  assert.deepEqual([older.project.path, older.project.name], [project, path.basename(project)]);
   // The chat list: each Chat's boundary messages and send identities, without bodies.
   const list = await json(`/snapshot?projectPath=${at}&view=chats`);
   assert.deepEqual(
@@ -1382,6 +1384,7 @@ test("a phone reads a Chat the host unloaded: snapshots old and new, the chat li
   // An app that reads pages: no messages in the snapshot, the PR refs from the Chat's summary.
   const paged = await json(`/snapshot?projectPath=${at}`, { "x-milagre-chat-pages": "1" });
   assert.deepEqual(paged.project.state.messages, []);
+  assert.deepEqual([list.project.path, paged.project.path, paged.project.name], [project, project, path.basename(project)]);
   assert.deepEqual(paged.project.pullRequestRefs, { 2: [url] });
   const found = await json(`/search?projectPath=${at}&q=needle`);
   assert.deepEqual(found[0].message, { id: 11, session_id: 2 });

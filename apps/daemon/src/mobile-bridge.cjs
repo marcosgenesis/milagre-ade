@@ -374,7 +374,8 @@ async function startMobileBridge({
   async function heldProject(owner) {
     let held = heldProjects.get(owner);
     if (!held) {
-      const { state, version, epoch, ...rest } = await client.call("state:read", [owner]);
+      // With the rest of the snapshot: phones key a Project by its path and show its name.
+      const { state, version, epoch, ...rest } = await client.call("state:read", [owner, { rest: true }]);
       held = { epoch, version, project: { ...rest, state } };
       heldProjects.set(owner, held);
       if (heldProjects.size > HELD_PROJECTS) heldProjects.delete(heldProjects.keys().next().value);

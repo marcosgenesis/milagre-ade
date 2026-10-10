@@ -36,6 +36,17 @@ function unloadedChats(value) {
   return (messages && tags.get(messages)?.unloaded) ?? NONE;
 }
 
+/**
+ * The unloaded Chats of a state that it still has: a Chat removed while unloaded keeps its tag until the next save
+ * deletes its rows, and nothing reads them back meanwhile.
+ */
+function readableUnloaded(state) {
+  const unloaded = unloadedChats(state);
+  if (!unloaded.size || !state?.sessions) return unloaded;
+  const live = new Set([...unloaded].filter((chat) => Object.hasOwn(state.sessions, String(chat))));
+  return live.size === unloaded.size ? unloaded : live;
+}
+
 /** Whether `chatId`'s messages are in `state`. */
 const isLoaded = (state, chatId) => !unloadedChats(state).has(Number(chatId));
 
@@ -105,7 +116,9 @@ function rowsOf(directory, chats, { cache = false } = {}) {
  */
 function loadChats(directory, state, chats) {
   const unloaded = unloadedChats(state);
-  const wanted = new Set([...chats].map(Number).filter((chat) => unloaded.has(chat)));
+  // A Chat removed while unloaded stays out: the next save deletes its rows.
+  const live = readableUnloaded(state);
+  const wanted = new Set([...chats].map(Number).filter((chat) => live.has(chat)));
   if (!wanted.size) return state;
   const store = storeOf(directory);
   const rows = rowsOf(directory, wanted);
@@ -194,7 +207,7 @@ const wholeStates = new WeakMap();
  * every message.
  */
 function wholeState(state) {
-  const unloaded = unloadedChats(state);
+  const unloaded = readableUnloaded(state);
   if (!unloaded.size) return state;
   let whole = wholeStates.get(state);
   if (!whole) {
@@ -230,7 +243,7 @@ function retag(from, messages) {
 
 /** Every message of `state`, unloaded Chats' read from chats.db for this call only, in the Project's order. */
 function allMessages(directory, state) {
-  const unloaded = unloadedChats(state);
+  const unloaded = readableUnloaded(state);
   if (!unloaded.size) return state.messages;
   return mergeRows(state.messages, rowsOf(directory, unloaded), savedRows(directory));
 }
@@ -239,7 +252,7 @@ function allMessages(directory, state) {
 function chatMessages(directory, state, chats) {
   const wanted = new Set([...chats].map(Number));
   const loaded = state.messages.filter((message) => wanted.has(Number(message.session_id)));
-  const unloaded = [...unloadedChats(state)].filter((chat) => wanted.has(chat));
+  const unloaded = [...readableUnloaded(state)].filter((chat) => wanted.has(chat));
   if (!unloaded.length) return loaded;
   return mergeRows(loaded, rowsOf(directory, unloaded), savedRows(directory));
 }
@@ -249,7 +262,7 @@ function chatMessages(directory, state, chats) {
  * only), in the Project's order: what a lookup that matches on some text has to look at.
  */
 function messagesContaining(directory, state, needles) {
-  const unloaded = unloadedChats(state);
+  const unloaded = readableUnloaded(state);
   if (!unloaded.size) return state.messages;
   const rows = readChatRowsContaining(directory, unloaded, needles);
   for (const row of rows) fromDisk.add(row.message);
@@ -264,7 +277,7 @@ const mark = ({ id, session_id, role, outcome, clientMessageId }) => ({ id, sess
  */
 function messageMarks(directory, state) {
   const loaded = state.messages.map(mark);
-  const unloaded = unloadedChats(state);
+  const unloaded = readableUnloaded(state);
   if (!unloaded.size) return loaded;
   const saved = savedRows(directory);
   const keyed = state.messages.map((message, index) => ({ mark: loaded[index], position: positionOf(saved, message) }));
@@ -284,7 +297,7 @@ function messageMarks(directory, state) {
 function searchableMessages(directory, state, chats) {
   const wanted = chats ? new Set([...chats].map(Number)) : null;
   const loaded = state.messages.filter((message) => !wanted || wanted.has(Number(message.session_id)));
-  const unloaded = [...unloadedChats(state)].filter((chat) => !wanted || wanted.has(chat));
+  const unloaded = [...readableUnloaded(state)].filter((chat) => !wanted || wanted.has(chat));
   if (!unloaded.length) return loaded;
   return mergeRows(loaded, readChatBodies(directory, unloaded), savedRows(directory));
 }
@@ -295,7 +308,7 @@ function searchableMessages(directory, state, chats) {
  */
 function findMessage(directory, state, field, value) {
   const found = state.messages.find((message) => message[field] === value);
-  const unloaded = unloadedChats(state);
+  const unloaded = readableUnloaded(state);
   if (!unloaded.size || value === undefined || value === null) return found;
   const row = findRow(directory, unloaded, field, value);
   if (!row) return found;
@@ -304,7 +317,7 @@ function findMessage(directory, state, field, value) {
 }
 
 /** The details sidecars the unloaded Chats of `state` point at, which a sweep must keep. */
-const unloadedDetailRefs = (directory, state) => readDetailRefs(directory, unloadedChats(state));
+const unloadedDetailRefs = (directory, state) => readDetailRefs(directory, readableUnloaded(state));
 
 module.exports = {
   unloadedChats,

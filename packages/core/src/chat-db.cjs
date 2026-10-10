@@ -265,11 +265,23 @@ function writeMessages(
               .all()
               .map((row) => [row.id, { message: undefined, position: row.position, chat: row.session_id }]),
           );
+        // A message the map lacks but chats.db has (a Chat loaded while the save that made the map ran) keeps its row's
+        // place instead of moving after every row.
+        const unknown = saved ? messages.filter((message) => !saved.has(message.id)).map((message) => message.id) : [];
+        const found = unknown.length
+          ? new Map(
+              db
+                .prepare("SELECT id, session_id, position FROM messages WHERE id IN (SELECT value FROM json_each(?))")
+                .all(JSON.stringify(unknown))
+                .map((row) => [row.id, { message: undefined, position: row.position, chat: row.session_id }]),
+            )
+          : null;
+        const lookup = (id) => known.get(id) ?? found?.get(id);
         let top = db.prepare("SELECT MAX(position) AS top FROM messages").get()?.top ?? -1;
         let previous = -Infinity;
         const ids = new Set();
         for (const message of messages) {
-          const last = known.get(message.id);
+          const last = lookup(message.id);
           const position = last && last.position > previous ? last.position : ++top;
           previous = position;
           ids.add(message.id);

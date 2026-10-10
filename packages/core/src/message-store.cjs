@@ -72,6 +72,14 @@ function resetStore(directory) {
   stores.delete(directory);
 }
 
+/**
+ * Forgets a directory's store to save memory (project-store keeps the last 50 Projects it saved), unless its state may
+ * hold unloaded Chats: their loads and saves rely on the saved rows the store keeps.
+ */
+function forgetStore(directory) {
+  if (!stores.get(directory)?.unloaded) stores.delete(directory);
+}
+
 const positionOf = (saved, message) => saved?.get(message.id)?.position ?? Infinity;
 
 /**
@@ -79,13 +87,13 @@ const positionOf = (saved, message) => saved?.get(message.id)?.position ?? Infin
  * forgotten (project-store keeps it for the 50 Projects saved last), read from chats.db again.
  */
 function positionsOf(directory, state) {
-  return (
-    storeOf(directory).saved ??
-    readPositions(
-      directory,
-      state.messages.map((message) => message.id),
-    )
-  );
+  const saved = storeOf(directory).saved;
+  // A record the store lacks is read too: a map can miss messages (a Chat loaded while the save that made it ran).
+  const missing = state.messages.filter((message) => !saved?.has(message.id)).map((message) => message.id);
+  if (!missing.length) return saved;
+  const read = readPositions(directory, missing);
+  if (!saved) return read;
+  return { get: (id) => saved.get(id) ?? read.get(id) };
 }
 
 /**
@@ -169,6 +177,7 @@ function unloadChats(directory, state, chats) {
   for (const row of saved.values()) if (candidates.has(Number(row.chat))) rows.set(Number(row.chat), (rows.get(Number(row.chat)) ?? 0) + 1);
   const going = new Set([...candidates].filter((chat) => counts.has(chat) && rows.get(chat) === counts.get(chat)));
   if (!going.size) return state;
+  store.unloaded = true;
   const keepRest = Date.now() - store.restUsedAt < REST_TTL_MS;
   const evicted = new Map([...going].map((chat) => [chat, []]));
   const messages = [];
@@ -343,6 +352,7 @@ module.exports = {
   savedRows,
   setSavedRows,
   resetStore,
+  forgetStore,
   loadChats,
   unloadChats,
   settle,

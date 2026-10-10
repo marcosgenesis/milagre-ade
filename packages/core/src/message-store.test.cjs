@@ -149,6 +149,81 @@ test("a Chat loaded after the store forgot its saved rows (50 other Projects sav
   assert.deepEqual(ids(await onDisk()), [...ids(all), 100]);
 });
 
+test("50 other Projects saved don't make a Project with unloaded Chats forget its rows, even with a load during a save", async (t) => {
+  const projectPath = await tempProject(t);
+  const all = await seed(projectPath, [user(1, 1), user(2, 2), user(3, 3), reply(4, 1), reply(5, 2), reply(6, 3)]);
+  let duringSave = () => {};
+  let now = 1_000_000;
+  const states = new ProjectStates({
+    read: (key) => readProjectState(key),
+    save: (key, state) => {
+      const saving = saveProjectState(key, state);
+      duringSave();
+      return saving;
+    },
+    compact: compactProjectState,
+    debounceMs: 0,
+    messages: { directory: (key) => key, idleMs: 1000, sweepMs: 0, active: () => false, now: () => now },
+  });
+  await states.get(projectPath);
+  now += 2000;
+  await states.load(projectPath, [1]);
+  await states.unloadIdle();
+  // project-store remembers the saved rows of the last 50 Projects it saved.
+  for (let index = 0; index < 51; index++) {
+    const other = await tempProject(t);
+    await saveProjectState(other, { next_id: 2, sessions: { 1: { id: 1 } }, messages: [user(1, 1)] });
+  }
+  // A change that reads no messages is saved, and Chat 2 loads while that save is under way.
+  duringSave = () => {
+    duringSave = () => {};
+    void states.load(projectPath, [2]);
+  };
+  await states.update(projectPath, (state) => ({ ...state, next_id: 101 }), { chats: [] });
+  await states.flush(projectPath);
+  await states.load(projectPath, [2]);
+  assert.deepEqual(ids(await states.allMessages(projectPath)), ids(all));
+  await states.update(projectPath, (state) => ({ ...state, messages: [...state.messages, reply(100, 1)] }), { chats: [1] });
+  await states.flush(projectPath);
+  assert.deepEqual(ids(await readMessages(projectPath)), [...ids(all), 100]);
+});
+
+test("a store that forgot its rows anyway (read again) keeps a Chat loaded during a save in place", async (t) => {
+  const projectPath = await tempProject(t);
+  const all = await seed(projectPath, [user(1, 1), user(2, 2), user(3, 3), reply(4, 1), reply(5, 2), reply(6, 3)]);
+  let duringSave = () => {};
+  let now = 1_000_000;
+  const states = new ProjectStates({
+    read: (key) => readProjectState(key),
+    save: (key, state) => {
+      const saving = saveProjectState(key, state);
+      duringSave();
+      return saving;
+    },
+    compact: compactProjectState,
+    debounceMs: 0,
+    messages: { directory: (key) => key, idleMs: 1000, sweepMs: 0, active: () => false, now: () => now },
+  });
+  await states.get(projectPath);
+  now += 2000;
+  await states.load(projectPath, [1]);
+  await states.unloadIdle();
+  // As if the store were dropped while the state lives on: the saves and loads below fill its rows from chats.db.
+  require("./message-store.cjs").resetStore(projectPath);
+  // A change that reads no messages is saved, and Chat 2 loads while that save is under way.
+  duringSave = () => {
+    duringSave = () => {};
+    void states.load(projectPath, [2]);
+  };
+  await states.update(projectPath, (state) => ({ ...state, next_id: 101 }), { chats: [] });
+  await states.flush(projectPath);
+  await states.load(projectPath, [2]);
+  assert.deepEqual(ids(await states.allMessages(projectPath)), ids(all));
+  await states.update(projectPath, (state) => ({ ...state, messages: [...state.messages, reply(100, 1)] }), { chats: [1] });
+  await states.flush(projectPath);
+  assert.deepEqual(ids(await readMessages(projectPath)), [...ids(all), 100]);
+});
+
 test("a loaded Chat goes back to its place in the Project's order", async (t) => {
   const projectPath = await tempProject(t);
   const all = await seed(projectPath);

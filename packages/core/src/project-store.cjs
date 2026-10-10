@@ -11,7 +11,7 @@ const {
   sweepDetailContent,
 } = require("./project-content.cjs");
 const { MESSAGES_MARKER, isMarker, readRows, writeMessages } = require("./chat-db.cjs");
-const { unloadedChats, savedRows, setSavedRows, resetStore, unloadedDetailRefs, forgetRest, retag } = require("./message-store.cjs");
+const { unloadedChats, savedRows, setSavedRows, resetStore, forgetStore, unloadedDetailRefs, forgetRest, retag } = require("./message-store.cjs");
 const { withChatSummaries } = require("./chat-summaries.cjs");
 // ProjectStates owns write ordering. This adapter performs one atomic snapshot write.
 const stateFile = (projectPath) => path.join(projectPath, ".milagre", "coordination.json");
@@ -83,7 +83,7 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
     const oldest = settled.keys().next().value;
     settled.delete(oldest);
     swept.delete(oldest);
-    resetStore(oldest);
+    forgetStore(oldest);
   }
   settled.set(projectPath, tracker.next);
   // A new sidecar supersedes the one before it; the first save of a run also clears older leftovers.

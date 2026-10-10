@@ -1712,6 +1712,34 @@ function App() {
   });
   const sidebarRunKeys = runKeys(agentRuns.runs);
   const openScopeChat = useEvent((scopeKey: string, id: string) => void openCanvasChat(scopeKey, Number(id)));
+  // "Link and ask A…" from the sidebar's Link popover: a plain user message to chat A on its own model, as its composer
+  // would pick it, and the permission mode new turns get. A's agent decides whether to make a Delegation. Then A opens,
+  // so the message and the reply are in view.
+  const askLinkedChat = useEvent(async (scopeKey: string, id: string, message: { body: string; prompt: string }) => {
+    const sessionId = Number(id);
+    const state = statesRef.current[scopeKey] ?? (await window.milagre.readProject(scopeKey)).state;
+    const session = state.sessions[sessionId];
+    if (!session || session.archived) throw new Error("That chat is no longer in its Project.");
+    const fallback = resolveModel(models, defaultModelId, providerForId(defaultModelId));
+    const own = state.messages.filter((item) => item.session_id === sessionId);
+    const model = modelForOpenChat(chatModels.current[chatKey(scopeKey, sessionId)], session.provider, own, models, fallback);
+    await agentRuns.send({
+      projectPath: scopeKey,
+      sessionId,
+      worktreeId: session.worktree_id,
+      body: message.body,
+      images: [],
+      files: [],
+      prompt: message.prompt,
+      provider: model.provider,
+      model: model.id,
+      permissionMode: getSettings().defaultPermissionMode,
+      effort: effortFor(capabilityFor(model, capabilities), effort),
+      replies: getSettings().claudeReplies,
+      tldrEnabled: getSettings().tldrEnabled,
+    });
+    void openCanvasChat(scopeKey, sessionId);
+  });
   const openSettings = useEvent(() => setView("settings"));
   // The computers popover's gears: a computer's own section, or This Mac's devices.
   const openComputerSettings = useEvent((id: string | null) => {
@@ -2193,6 +2221,7 @@ function App() {
                 waitingKeys={sidebarRunKeys.waiting}
                 askingKeys={sidebarRunKeys.asking}
                 onOpenScopeChat={openScopeChat}
+                onAskChat={askLinkedChat}
               />
             </div>
             {view === "settings" && (

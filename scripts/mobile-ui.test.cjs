@@ -1228,8 +1228,20 @@ test("launch restoration shows the splash animation while the saved Chat opens",
   assert.ok(find(tree, (node) => node.props.accessibilityRole === "progressbar" && node.props.accessibilityLabel === "Reopening your Chat..."));
 });
 
-function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId, effects = false } = {}) {
+// The computer's Links as useLinks hands them out; none (an older Mac) unless a test gives some.
+const linksState = ({ links = [], projects = [], available = projects.length > 0 } = {}) => ({
+  available,
+  links,
+  projects,
+  projectIdOf: (path) => projects.find((project) => project.path === path)?.id,
+  projectNameOf: (id) => projects.find((project) => project.id === id)?.name,
+  refresh: async () => {},
+});
+const chatLinks = () => load("chat-links.ts", { "@milagre/shared/chat-links": require("@milagre/shared/chat-links") });
+
+function navigationHost(opening, { session: extra = {}, alert = () => {}, calls = [], activeChatId, effects = false, links = linksState() } = {}) {
   const react = hookHost({ effects });
+  const linkRequests = [];
   const routes = [];
   const secondaryRoutes = [];
   const opened = [];
@@ -1298,6 +1310,13 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
     "@milagre/shared/message-search": require("@milagre/shared/message-search"),
     "./session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
+    "./use-links": { useLinks: () => links },
+    "./chat-links": chatLinks(),
+    "./link-actions": {
+      linkWithChat: (request) => linkRequests.push(["link-with", request]),
+      removeLinkFromChat: async (request) => linkRequests.push(["link-remove", request]),
+    },
+    "./turn-options": require("../apps/mobile/src/turn-options.ts"),
     "./indicators": require("../apps/mobile/src/indicators.ts"),
     "./status-indicators": { ChatMarkIcon: "ChatMarkIcon" },
     "./use-chat-pull-requests": { useChatPullRequests: () => ({}) },
@@ -1320,7 +1339,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
     "./archive-progress": archiveProgress,
     "./archive": archiveStore,
     "./attention": { AttentionDot: "AttentionDot", useAttention: () => [] },
-    "@milagre/shared/agent-runs": { projectOfKey: (key) => key.slice(0, key.lastIndexOf("#")) },
+    "@milagre/shared/agent-runs": { projectOfKey: (key) => key.slice(0, key.lastIndexOf("#")), lastUserModel: () => "" },
     "./chat-actions": load("chat-actions.ts", {
       "react-native": native,
       "expo-clipboard": { setStringAsync: async () => {} },
@@ -1357,7 +1376,7 @@ function navigationHost(opening, { session: extra = {}, alert = () => {}, calls 
   const open = (node) => find(node, (child) => child.type === "PullDown" && child.props.onPress);
   const more = (node) => find(node, (child) => child.type === "PullDown" && !child.props.onPress);
   const filter = () => find(render(), (node) => node.type === "PullDown" && node.props.label === "Filter Chats");
-  return { state, session, routes, secondaryRoutes, opened, calls, external, render, rows, row, open, more, filter };
+  return { state, session, routes, secondaryRoutes, opened, calls, external, render, rows, row, open, more, filter, linkRequests };
 }
 
 test("mobile chat titles use summaries before transcripts load and switch to generated or renamed titles", () => {
@@ -1610,6 +1629,66 @@ test("the sidebar filter shows archived, running or waiting Chats across Project
   );
   nav.filter().props.onSelect("running");
   assert.equal(ids(), "[]", "chatMark is idle in this host, so nothing is running");
+});
+
+/** Two Chats of web in their own Worktrees: Login (3) and Docs (4). */
+function withTwoWorktrees(nav) {
+  nav.state.project.name = "web";
+  nav.state.project.state.messages = [];
+  nav.state.project.state.sessions = { 3: { id: 3, title: "Login", worktree_id: 1 }, 4: { id: 4, title: "Docs", worktree_id: 2 } };
+  nav.state.project.state.worktrees = { 1: { id: 1, path: "/wt/login", name: "login-form" }, 2: { id: 2, path: "/wt/docs", name: "docs" } };
+  return nav;
+}
+// Values made in a loaded module's own realm compare as JSON.
+const same = (actual, expected) => assert.equal(JSON.stringify(actual), JSON.stringify(expected));
+
+test("a linked Chat shows the Link icon, and its ⋯ menu links with another Chat or removes a Link", () => {
+  const links = linksState({
+    projects: [
+      { id: "w", path: "/last", name: "web" },
+      { id: "a", path: "/api", name: "api" },
+    ],
+    links: [{ id: "9", a: { project_id: "w", worktree_path: "/wt/login" }, b: { project_id: "a" }, created_at: "2026-10-10" }],
+  });
+  const setUp = withTwoWorktrees;
+  const nav = setUp(navigationHost(deferred().promise, { links }));
+  const ids = (row) => nav.more(row).props.sections.map((section) => section.items.map((item) => item.id));
+  // Rows list the newest Chat first: Docs (no Link), then Login (linked to all of api).
+  const login = nav.row("chat", 1);
+  assert.ok(find(login, (node) => node.type === "View" && node.props.accessibilityLabel === "Linked to All of api"));
+  assert.match(nav.open(login).props.label, /, Linked to All of api$/);
+  assert.equal(
+    find(nav.row("chat", 0), (node) => node.props?.accessibilityLabel?.startsWith?.("Linked to")),
+    undefined,
+  );
+  same(ids(login), [["copy-path", "copy-branch"], ["rename", "unread"], ["pin"], ["link-with", "link-remove"], ["archive"]]);
+  same(ids(nav.row("chat", 0))[3], ["link-with"]);
+  nav.more(login).props.onSelect("link-with");
+  const [action, request] = nav.linkRequests[0];
+  assert.equal(action, "link-with");
+  same(
+    { ...request.source },
+    { projectPath: "/last", projectName: "web", projectId: "w", chatId: 3, title: "Login", branch: "login-form", worktreePath: "/wt/login" },
+  );
+  same(
+    request.chats.map((chat) => chat.chatId),
+    [4, 3],
+  );
+  nav.more(login).props.onSelect("link-remove");
+  assert.equal(nav.linkRequests[1][0], "link-remove");
+  same(
+    nav.linkRequests[1][1].ends.map((end) => [end.link.id, end.label]),
+    [["9", "All of api"]],
+  );
+  // A Mac without Links on the phone shows no Link items or icons.
+  const old = setUp(navigationHost(deferred().promise));
+  same(
+    old
+      .more(old.row("chat", 1))
+      .props.sections.flatMap((section) => section.items.map((item) => item.id))
+      .filter((id) => id.startsWith("link")),
+    [],
+  );
 });
 
 test("Choose projects opens as a sheet over the sidebar instead of closing it", () => {
@@ -2570,6 +2649,8 @@ test("late Chat rename cannot pop another screen after its form loses focus", as
       },
     },
     "../session": { useSession: () => session, useComposer: () => session, usePendingChats: () => session },
+    "../use-links": { useLinks: () => linksState() },
+    "../chat-links": chatLinks(),
     "../attachment-picker": { pickAttachments: async () => [] },
     "../attachments": require("../apps/mobile/src/attachments.ts"),
     "../status-indicators": { ChatStatus: "ChatStatus", AgentStatus: "AgentStatus", WorktreeStatus: "WorktreeStatus" },

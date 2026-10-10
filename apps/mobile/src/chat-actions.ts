@@ -7,8 +7,11 @@ import { archiveFromPhone, startArchiving, type ArchiveRequest } from "./archive
 import { confirm, confirmSheet } from "./confirm-store";
 import { pinPatch } from "./pins";
 
-/** Desktop's ⋯ menu for a Chat, less what only makes sense at the Mac (Finder, editor, commit). */
-export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: string }): MenuSection[] {
+/**
+ * Desktop's ⋯ menu for a Chat, less what only makes sense at the Mac (Finder, editor, commit). `links` is the Link
+ * section (chat-links.ts `linkMenuSection`), which goes after the pins when the Chat can be linked.
+ */
+export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: string }, links?: MenuSection | null): MenuSection[] {
   return [
     {
       items: [
@@ -32,6 +35,7 @@ export function chatMenu(chat: AgentSession, worktree?: { path?: string; name?: 
           ]
         : [{ id: "pin", title: "Pin", systemImage: "pin" }],
     },
+    ...(links ? [links] : []),
     {
       items: [
         chat.archived

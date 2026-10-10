@@ -773,6 +773,15 @@ function chatHost({
   const sending = deferred();
   const calls = [];
   const choices = [];
+  const panels = {
+    gesture: {},
+    open: null,
+    shown: [],
+    show(side) {
+      this.open = side;
+      this.shown.push(side);
+    },
+  };
   const params = { worktreeId: "1" };
   const session = {
     client: {
@@ -891,7 +900,7 @@ function chatHost({
     "../indicators": require("../apps/mobile/src/indicators.ts"),
     "../icons": { Icon: "Icon" },
     "../bottom-fade": { BottomFade: "BottomFade", EdgeFade: "EdgeFade" },
-    "../side-panels": { useSidePanels: () => ({ gesture: {}, open: null, show() {} }), PanelSwipe: ({ children }) => children },
+    "../side-panels": { useSidePanels: () => panels, PanelSwipe: ({ children }) => children },
     "../loading-logo": { LoadingLogo: "LoadingLogo" },
     "../use-open-project": load("use-open-project.ts", {
       react,
@@ -944,7 +953,7 @@ function chatHost({
     return { ...props, value: props.draft };
   };
   const send = () => find(render(), (node) => node.type === "IconButton" && ["Send message", "Send follow-up"].includes(node.props.label)).props.onPress();
-  return { session, sending, params, field, send, render, router, calls, choices };
+  return { session, sending, params, field, send, render, router, calls, choices, panels };
 }
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -2201,7 +2210,7 @@ test("a sidebar Chat Archive asks with the worktree choice, then stops, hides an
   ]);
 });
 
-test("the Chat screen Archive falls back to a plain Archive on an older Mac, then leaves the Chat", async () => {
+test("the Chat screen Archive falls back to a plain Archive on an older Mac, then opens the sidebar", async () => {
   const alerts = [];
   const project = archiveProject();
   const screen = chatHost({
@@ -2233,7 +2242,8 @@ test("the Chat screen Archive falls back to a plain Archive on an older Mac, the
     ["worktree:roots", "chat:patch"],
   );
   assert.deepEqual(screen.calls[1].args, ["/p", 5, { archived: true, unread: false }]);
-  assert.equal(screen.router.replaced, "/projects");
+  assert.equal(screen.panels.open, "left");
+  assert.equal(screen.router.replaced, undefined);
 });
 
 test("a new Chat can switch Worktrees and keep each Worktree draft", async () => {
@@ -5229,7 +5239,7 @@ test("sidebar archive shows progress over the Chat's row and clears it on failur
   archiveStore.clearArchiveNotice();
 });
 
-test("archiving the open Chat from the sidebar leaves it on confirm and never navigates when it ends", async () => {
+test("archiving the open Chat from the sidebar stays in place through confirmation and completion", async () => {
   const project = archiveProject();
   const patch = deferred();
   const nav = navigationHost(deferred().promise, {
@@ -5245,13 +5255,14 @@ test("archiving the open Chat from the sidebar leaves it on confirm and never na
   });
   nav.more(nav.row("chat")).props.onSelect("archive");
   await settleAll();
-  assert.deepEqual(nav.routes, ["/projects"], "the Chat is left as soon as the archive is confirmed");
+  assert.deepEqual(nav.routes, [], "confirming an archive must not close or replace the sidebar");
+  assert.ok(archiveIndicator(nav.row("chat")), "progress stays on the same sidebar row");
   patch.resolve();
   await settleAll();
-  assert.deepEqual(nav.routes, ["/projects"]);
+  assert.deepEqual(nav.routes, []);
 });
 
-test("the Chat screen leaves for the list on confirm; the archive ends without moving the phone again", async () => {
+test("the Chat screen opens its sidebar once on confirm without replacing the screen", async () => {
   const project = archiveProject();
   const patch = deferred();
   const screen = chatHost({ alert: pressDanger([]), call: (method, args) => (method === "chat:patch" ? patch.promise : project.call(method, args)) });
@@ -5262,7 +5273,9 @@ test("the Chat screen leaves for the list on confirm; the archive ends without m
   const menuAction = () => find(screen.render(), (node) => node.type === "ToolbarMenuAction" && node.props.children === "Archive");
   menuAction().props.onPress();
   await settleAll();
-  assert.equal(screen.router.replaced, "/projects", "leaves before the archive ends");
+  assert.equal(screen.panels.open, "left", "shows the sidebar before the archive ends");
+  assert.deepEqual(screen.panels.shown, ["left"]);
+  assert.equal(screen.router.replaced, undefined, "no route replacement can reset or slide the sidebar");
   assert.ok(archiveStore.archiveActivity().chats.has("/p#5"), "the list shows the archive on the Chat's row");
   // The phone moves on to another Chat while the archive runs.
   screen.router.replaced = "/chat?id=9";
@@ -5270,6 +5283,7 @@ test("the Chat screen leaves for the list on confirm; the archive ends without m
   await settleAll();
   assert.equal(screen.router.replaced, "/chat?id=9", "the end of the archive does not pull the phone back to the list");
   assert.equal(archiveStore.archiveActivity().chats.has("/p#5"), false);
+  assert.deepEqual(screen.panels.shown, ["left"], "completion must not reopen the sidebar");
 });
 
 test("mobile Ports pill requests only its Chat and hides empty or mismatched responses", async (t) => {

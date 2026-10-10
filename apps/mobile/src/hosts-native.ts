@@ -1,6 +1,12 @@
 import * as SecureStore from "expo-secure-store";
 import { createHostsStore } from "./hosts-store";
 import { createNavigationStore } from "./navigation-store";
+import { createProjectOrderStore } from "./project-order-store";
+
+export const savedProjectOrder = createProjectOrderStore({
+  getItemAsync: SecureStore.getItemAsync,
+  setItemAsync: (key, value) => SecureStore.setItemAsync(key, value, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY }),
+});
 
 export const savedNavigation = createNavigationStore({
   getItemAsync: SecureStore.getItemAsync,

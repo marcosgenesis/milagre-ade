@@ -170,6 +170,33 @@ function readClosedScopes(): string[] {
   }
 }
 
+// The Projects' group order in the all-Projects sidebar, so a restart or a new window keeps it (see stableOrder).
+const SCOPE_ORDER_KEY = "milagre.sidebarScopeOrder";
+// What this window last read from or wrote to storage. Another window may have saved a newer order since, so a window
+// writes only when its own order differs from this: a re-render with an unchanged order never puts an old one back.
+let syncedScopeOrder = "";
+function readScopeOrder(): string[] {
+  try {
+    const raw = window.localStorage.getItem(SCOPE_ORDER_KEY) ?? "[]";
+    const saved = JSON.parse(raw);
+    const order = Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string") : [];
+    syncedScopeOrder = JSON.stringify(order);
+    return order;
+  } catch {
+    return [];
+  }
+}
+function writeScopeOrder(order: string[]) {
+  try {
+    const next = JSON.stringify(order);
+    if (next === syncedScopeOrder) return;
+    syncedScopeOrder = next;
+    window.localStorage.setItem(SCOPE_ORDER_KEY, next);
+  } catch {
+    // Storage full or blocked: the order lasts for this session only.
+  }
+}
+
 type ScopeMenuItem = {
   key: string;
   label: string;
@@ -365,7 +392,8 @@ const lastLists = {
   registered: [] as Array<{ id: string; name: string; path: string }>,
   recent: [] as RecentProject[],
   recentLoaded: false,
-  order: [] as string[],
+  // Null until the first sidebar of this window reads the saved order.
+  order: null as string[] | null,
 };
 
 function AttentionDot({ className = "" }: { className?: string }) {
@@ -760,8 +788,8 @@ export default memo(function SidebarNav({
   const [registeredProjects, setRegisteredProjects] = useState(() => lastLists.registered);
   const [recentProjects, setRecentProjects] = useState(() => lastLists.recent);
   const [recentLoaded, setRecentLoaded] = useState(() => lastLists.recentLoaded);
-  // The Projects' group order for this session; see stableOrder.
-  const scopeOrder = useRef<string[]>(lastLists.order);
+  // The Projects' group order, saved across restarts and windows; see stableOrder.
+  const scopeOrder = useRef<string[]>(lastLists.order ?? readScopeOrder());
   const showHints = useShortcutHints() && hintsEnabled && !workspaceOpen;
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -812,6 +840,17 @@ export default memo(function SidebarNav({
     window.addEventListener(RECENT_PROJECTS_CHANGED, changed);
     return () => window.removeEventListener(RECENT_PROJECTS_CHANGED, changed);
   }, []);
+  // Another window saved a new group order: follow it.
+  const [, setOrderSynced] = useState(0);
+  useEffect(() => {
+    const follow = (event: StorageEvent) => {
+      if (event.key !== SCOPE_ORDER_KEY) return;
+      scopeOrder.current = readScopeOrder();
+      setOrderSynced((count) => count + 1);
+    };
+    window.addEventListener("storage", follow);
+    return () => window.removeEventListener("storage", follow);
+  }, []);
 
   // Every recent Project the user didn't hide, then every Link, like the phone's list. The open one is always there.
   const currentKey = selectedLink ? `milagre-link:${selectedLink.id}` : (projectPath ?? "");
@@ -827,6 +866,8 @@ export default memo(function SidebarNav({
   // The next sidebar to mount (a Link's, or the Project one again) starts from what this one has.
   useEffect(() => {
     Object.assign(lastLists, { links: namedLinks, registered: registeredProjects, recent: recentProjects, recentLoaded, order: scopeOrder.current });
+    // Saved only once the recent list has loaded, so the empty list before that doesn't wipe it.
+    if (recentLoaded) writeScopeOrder(scopeOrder.current);
   });
   const localScopes = [
     ...orderedProjects,

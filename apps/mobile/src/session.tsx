@@ -6,7 +6,7 @@ import { createClient, type ClientHost, type Client, type OpenProject, type Rece
 import { relayRuntime } from "./relay-native";
 import { learnRoutes, lanRoutes } from "./routes-native";
 import { syncProject } from "./live";
-import { readPermission, savedHosts, savedNavigation, savePermission } from "./hosts-native";
+import { readPermission, savedHosts, savedNavigation, savedProjectOrder, savePermission } from "./hosts-native";
 import type { ChatLocation } from "./navigation-store";
 import type { SavedHost } from "./hosts-store";
 import type { AgentCliStatus, AgentModels, PermissionMode } from "@milagre/shared/model";
@@ -28,6 +28,8 @@ export type HostLink = ClientHost & { name?: string };
 function useSessionState() {
   const [client, setClient] = useState<Client | null>(null);
   const [recent, setRecent] = useState<RecentProject[]>([]);
+  // The computer whose Projects list `recent` holds, once it has answered: an empty list before that is not "no Projects".
+  const listedFor = useRef<string | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState("");
   const [models, setModels] = useState<AgentModels | null>(null);
@@ -147,7 +149,7 @@ function useSessionState() {
     const previous = selection.current;
     try {
       await next.call("daemon:status");
-      const projects = await next.recentScopes();
+      const projects = await savedProjectOrder.apply(next.url, await next.recentScopes());
       if (current !== generation.current) return false;
       if (process.env.EXPO_PUBLIC_DEMO !== "1") {
         if (remember) {
@@ -173,6 +175,7 @@ function useSessionState() {
       autoOpen.current = false;
       selection.current = null;
       setClient(next);
+      listedFor.current = next.url;
       setRecent(projects);
       setSnapshot(null);
       setError("");
@@ -191,7 +194,7 @@ function useSessionState() {
       await next.call("daemon:status");
       if (current !== generation.current) return false;
       if (process.env.EXPO_PUBLIC_DEMO !== "1") void learnRoutes(next, { token: host.token, relay: host.relay }).catch(() => {});
-      const projects = await next.recentScopes();
+      const projects = await savedProjectOrder.apply(next.url, await next.recentScopes());
       const state = await next.open(projectPath);
       const project = state.project;
       if (current !== generation.current) return false;
@@ -203,6 +206,7 @@ function useSessionState() {
       setCliStatus(null);
       setProviderError("");
       setClient(next);
+      listedFor.current = next.url;
       setRecent(projects);
       setSnapshot(state);
       setError("");
@@ -292,8 +296,20 @@ function useSessionState() {
     const current = generation.current;
     const projects = await client.recentScopes();
     // Opening a Chat opens its Project, which moves it to the top of the host's recent list; rows keep their place.
-    if (current === generation.current) setRecent((previous) => keepOrder(previous, projects, (item) => item.path));
+    if (current === generation.current) {
+      listedFor.current = client.url;
+      setRecent((previous) => keepOrder(previous, projects, (item) => item.path));
+    }
   }, [client]);
+  // The order shown is this computer's saved order, so the next launch starts from it. An empty list is saved too once
+  // the computer has answered, so Projects removed and added back don't return to their old places.
+  useEffect(() => {
+    if (!client || listedFor.current !== client.url || process.env.EXPO_PUBLIC_DEMO === "1") return;
+    void savedProjectOrder.save(
+      client.url,
+      recent.map((item) => item.path),
+    );
+  }, [client, recent]);
   const projectPath = snapshot?.project.path;
   const refresh = useCallback(async () => {
     const current = selection.current;

@@ -504,7 +504,7 @@ const routesNative = ({ learned = [], forgotten = [] } = {}) => ({
     learned.push([client.url, host]);
   },
 });
-function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [], learned = [] } = {}) {
+function sessionHost(client, { effects = false, AppState = {}, created = [], saved = [], learned = [], savedProjectOrder } = {}) {
   client.recentScopes ??= () => client.call("project:recent");
   client.open ??= async (owner) => {
     await client.call("project:open", [owner]);
@@ -536,6 +536,7 @@ function sessionHost(client, { effects = false, AppState = {}, created = [], sav
           list: async () => [],
         },
         savedNavigation: { read: async () => null, save: async () => {} },
+        savedProjectOrder: savedProjectOrder ?? { apply: async (_host, projects) => projects, save: async () => {} },
         readPermission: async () => null,
         savePermission: async () => {},
       },
@@ -598,6 +599,39 @@ test("reloading Projects keeps their order when opening a Chat moves its Project
     ["D", "B", "C"],
     "a new Project goes on top and a removed one leaves",
   );
+});
+
+test("the Projects order survives a relaunch, per computer", async () => {
+  const { createProjectOrderStore } = require("../apps/mobile/src/project-order-store.ts");
+  const disk = new Map();
+  const store = createProjectOrderStore({ getItemAsync: async (key) => disk.get(key) ?? null, setItemAsync: async (key, value) => void disk.set(key, value) });
+  const launch = async (url, recent) => {
+    const render = sessionHost(
+      { url, call: async (method) => (method === "project:recent" ? recent : {}) },
+      {
+        effects: true,
+        AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
+        savedProjectOrder: store,
+      },
+    );
+    await render().connect({ address: url, token: "token" });
+    await settle();
+    render();
+    await settle();
+    return render;
+  };
+  const paths = (render) => render().recent.map((item) => item.path);
+  // First launch: the Mac lists A, B, C and the phone shows them so.
+  assert.deepEqual(paths(await launch("https://mac", [{ path: "A" }, { path: "B" }, { path: "C" }])), ["A", "B", "C"]);
+  // Next launch the Mac's recent list has C first; the phone keeps its order, drops a gone Project and puts a new one on top.
+  assert.deepEqual(paths(await launch("https://mac", [{ path: "C" }, { path: "A" }, { path: "B" }])), ["A", "B", "C"]);
+  assert.deepEqual(paths(await launch("https://mac", [{ path: "D" }, { path: "C" }, { path: "B" }])), ["D", "B", "C"]);
+  // Another computer has its own order.
+  assert.deepEqual(paths(await launch("https://studio", [{ path: "C" }, { path: "B" }])), ["C", "B"]);
+  assert.deepEqual(paths(await launch("https://mac", [{ path: "C" }, { path: "B" }, { path: "D" }])), ["D", "B", "C"]);
+  // Every Project removed: the empty list is saved too, so Projects added back later start from the Mac's order.
+  assert.deepEqual(paths(await launch("https://mac", [])), []);
+  assert.deepEqual(paths(await launch("https://mac", [{ path: "B" }, { path: "C" }, { path: "D" }])), ["B", "C", "D"]);
 });
 
 test("a poll from the previous Project cannot restore it after another Project opens", async () => {

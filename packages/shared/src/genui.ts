@@ -17,12 +17,14 @@ export const GENUI_ROOT = "Stack";
 export const GENUI_ACTION_TYPE = "continue_conversation";
 
 // An `Action([...])` evaluates to a plan of steps; the two object forms are the language's legacy action values.
+// lang-core tags schema instances, and `.describe()` returns a clone, so the instance that is tagged is the one Button uses.
 const action = z.union([
   z.object({ steps: z.array(z.any()) }),
   z.object({ type: z.literal("continue_conversation"), context: z.string().optional() }),
   z.object({ type: z.string(), params: z.record(z.string(), z.any()).optional() }),
 ]);
-tagSchemaId(action, "ActionExpression");
+const actionProp = action.describe('Action([@ToAssistant("message")]); only @ToAssistant steps act');
+tagSchemaId(actionProp, "ActionExpression");
 
 const cell = z.string().max(2000);
 const label = z.string().max(200);
@@ -108,7 +110,7 @@ export const GENUI_COMPONENTS = {
     description: 'A button that sends a message to the assistant when tapped: Button("Approve", Action([@ToAssistant("Approve the plan")])).',
     props: z.object({
       label: label.describe("Button text"),
-      action: action.describe('Action([@ToAssistant("message")]); only @ToAssistant steps act'),
+      action: actionProp,
       variant: z.enum(["primary", "secondary"]).optional().describe("primary (default) or secondary"),
     }),
   },

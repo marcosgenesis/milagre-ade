@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createLibrary, defineComponent, generatePrompt } from "@openuidev/lang-core";
 import {
   CHART_HEIGHT,
   CHART_PAD,
@@ -82,4 +83,18 @@ test("chart geometry puts zero on the baseline, scales to the largest value and 
   assert.equal(slot, (CHART_WIDTH - CHART_PAD.left - CHART_PAD.right) / 3);
   assert.equal(chartGeometry([]).y(0), chartGeometry([]).zero);
   assert.equal(chartGeometry([3, 3]).y(3), CHART_PAD.top);
+});
+
+test("the prompt names the button action by its tag instead of spelling out the union", () => {
+  const names = Object.keys(GENUI_COMPONENTS) as (keyof typeof GENUI_COMPONENTS)[];
+  const renderers = Object.fromEntries(names.map((name) => [name, null])) as Record<keyof typeof GENUI_COMPONENTS, null>;
+  const library = createLibrary({
+    root: GENUI_ROOT,
+    components: genuiDefinitions(renderers).map((definition) => defineComponent(definition)),
+  });
+  const prompt = generatePrompt(library.toSpec());
+  const button = prompt.split("\n").find((line) => line.startsWith("Button("));
+  assert.ok(button, "the prompt has a Button signature line");
+  assert.ok(button.includes("ActionExpression"), button);
+  assert.equal(button.includes("continue_conversation"), false, button);
 });

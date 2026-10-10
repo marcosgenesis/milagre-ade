@@ -61,3 +61,37 @@ test("the large Project's idle Chats leave the daemon's memory, and every reader
   assert.equal(page.total, fixture.messages.filter((message) => message.session_id === longest).length);
   assert.ok([...savedRows(project).values()].every((row) => row.chat === longest));
 });
+
+test("a state with every message for a client that takes transcript tails expires with the whole-state cache", async (t) => {
+  const { leanState } = require("./server.cjs");
+  const { ProjectStates } = require("@milagre/core/project-states");
+  const { saveProjectState, readProjectState, compactProjectState } = require("@milagre/core/project-store");
+  const { forgetRest, REST_TTL_MS, unloadedChats } = require("@milagre/core/message-store");
+  const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-lean-expiry-")));
+  t.after(() => fs.rm(project, { recursive: true, force: true }));
+  const messages = [1, 2, 3].map((id) => ({ id, session_id: id, role: "user", body: `ask ${id}`, context: null }));
+  await saveProjectState(project, { next_id: 10, sessions: { 1: { id: 1 }, 2: { id: 2 }, 3: { id: 3 } }, messages, tasks: {} });
+  let now = 1_000_000;
+  const states = new ProjectStates({
+    read: readProjectState,
+    save: saveProjectState,
+    compact: compactProjectState,
+    debounceMs: 0,
+    messages: { directory: (key) => key, idleMs: 1000, sweepMs: 0, active: () => false, now: () => now },
+  });
+  t.after(() => states.close());
+  await states.get(project);
+  now += 2000;
+  await states.unloadIdle();
+  const state = await states.get(project);
+  assert.equal(unloadedChats(state).size, 3);
+  const form = { messages: true, transcripts: false };
+  const lean = leanState(state, form);
+  assert.equal(lean.messages.length, 3);
+  assert.equal(leanState(state, form), lean, "the same copy while whole states are read");
+  // The expiry a minute after the last whole read: the state lives on, but no copy with every message stays for it.
+  forgetRest(project, { now: Date.now() + REST_TTL_MS + 1 });
+  const again = leanState(state, form);
+  assert.notEqual(again, lean);
+  assert.equal(again.messages.length, 3);
+});

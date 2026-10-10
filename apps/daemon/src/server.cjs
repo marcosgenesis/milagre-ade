@@ -189,13 +189,16 @@ function leanState(state, form = WHOLE) {
   const key = formKey(form);
   let cache = leanStates.get(key);
   if (!cache) leanStates.set(key, (cache = new WeakMap()));
-  let lean = cache.get(state);
+  // A copy with every message is kept against the whole state, which the message store drops a minute after the last
+  // whole read; kept against the state, which the runtime and sentStates hold, it would keep every message alive.
+  const base = form.messages ? wholeState(state) : state;
+  let lean = cache.get(base);
   if (!lean) {
-    lean = { ...(form.messages ? wholeState(state) : state) };
+    lean = { ...base };
     // One empty array, so no patch ever touches it.
     if (!form.messages) Object.assign(lean, { messages: NO_MESSAGES, messagesInChats: true });
     if (!wholeSubagents(form)) lean.sessions = leanSessions(state.sessions, form);
-    cache.set(state, lean);
+    cache.set(base, lean);
   }
   return lean;
 }
@@ -821,4 +824,5 @@ async function startDaemon({
   // unloadIdle: what the runtime's sweep does every minute, now (for checks; see ProjectStates).
   return { socketPath, close, acceptConnection, unloadIdle: () => runtime.unloadIdle() };
 }
-module.exports = { startDaemon, createResultPages, formOf, agentEventAsTaken, eventFrame };
+// leanState: for checks of how each form of a state is cached.
+module.exports = { startDaemon, createResultPages, formOf, agentEventAsTaken, eventFrame, leanState };

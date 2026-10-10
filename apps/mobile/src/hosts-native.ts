@@ -2,8 +2,15 @@ import * as SecureStore from "expo-secure-store";
 import { createHostsStore } from "./hosts-store";
 import { createNavigationStore } from "./navigation-store";
 import { createProjectOrderStore } from "./project-order-store";
+import { createFoldedProjectsStore } from "./folded-projects-store";
 
 export const savedProjectOrder = createProjectOrderStore({
+  getItemAsync: SecureStore.getItemAsync,
+  setItemAsync: (key, value) => SecureStore.setItemAsync(key, value, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY }),
+});
+
+/** The Project groups folded by hand in the sidebar, per computer; every other group is open. */
+export const savedFoldedProjects = createFoldedProjectsStore({
   getItemAsync: SecureStore.getItemAsync,
   setItemAsync: (key, value) => SecureStore.setItemAsync(key, value, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY }),
 });

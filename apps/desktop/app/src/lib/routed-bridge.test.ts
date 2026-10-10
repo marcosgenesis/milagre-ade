@@ -41,6 +41,7 @@ const ALLOWED: Record<string, string[]> = {
     "getPhoneStatus",
     "listDevices",
     "removeDevice",
+    "acknowledgeDevices",
     "openPhonePairing",
     "setPhoneEnabled",
     "setPhoneLan",

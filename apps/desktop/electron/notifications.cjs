@@ -176,14 +176,36 @@ class AttentionNotifier {
   // Shown even while Milagre has focus: it is about who can reach the agents, and the pairing window opens just by
   // looking at Settings → Devices. Clicking it opens that page.
   notifyDevicePaired(kind = "phone") {
-    const computer = kind === "computer";
-    const notification = this.createNotification({
-      title: computer ? "New computer paired" : "New phone paired",
+    if (kind !== "computer") return this.notifyPhonesPaired([{ name: null }]);
+    return this.showPaired({
+      title: "New computer paired",
       subtitle: "",
-      body: computer
-        ? "Another Mac can now drive your agents on this Mac. If it wasn't you, remove it in Settings → Devices."
-        : "A phone can now reach your agents on this Mac. If it wasn't you, remove it in Settings → Devices.",
+      body: "Another Mac can now drive your agents on this Mac. If it wasn't you, remove it in Settings → Devices.",
     });
+  }
+
+  /**
+   * Phones that paired with this Mac and no window announced yet (devices:take-notices), named when they sent a name.
+   * `away`: they paired while this desktop wasn't connected (Milagre was closed), so the notice says so.
+   * @param {Array<{ name?: unknown }>} phones
+   * @param {{ away?: boolean }} [options]
+   */
+  notifyPhonesPaired(phones, { away = false } = {}) {
+    const list = Array.isArray(phones) ? phones : [];
+    if (!list.length) return false;
+    const name = list.length === 1 ? capped(list[0]?.name, 60) : "";
+    const who = list.length === 1 ? name || "A phone" : `${list.length} phones`;
+    const removeIt = list.length === 1 ? "If it wasn't you, remove it in Settings → Devices." : "If one wasn't you, remove it in Settings → Devices.";
+    return this.showPaired({
+      title: list.length === 1 ? "New phone paired" : `${list.length} new phones paired`,
+      subtitle: "",
+      body: away ? `${who} paired with this Mac while Milagre was closed. ${removeIt}` : `${who} can now reach your agents on this Mac. ${removeIt}`,
+    });
+  }
+
+  /** @param {{ title: string; subtitle: string; body: string }} notice */
+  showPaired(notice) {
+    const notification = this.createNotification(notice);
     this.phonePaired?.close();
     this.phonePaired = notification;
     notification.on("click", () => this.openPhoneSettings());

@@ -30,6 +30,7 @@ const { applyTranslucency, OPAQUE_BACKGROUND } = require("./window-translucency.
 const { guardNavigation } = require("./links.cjs");
 const { forwardAppShortcuts } = require("./app-shortcuts.cjs");
 const { AttentionNotifier, labelFor } = require("./notifications.cjs");
+const { createDeviceNotices } = require("./device-notices.cjs");
 const { createMediaHandler } = require("./media.cjs");
 protocol.registerSchemesAsPrivileged([{ scheme: "milagre-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 async function startDesktop() {
@@ -176,6 +177,13 @@ async function startDesktop() {
   let connectionState = { connected: true };
   ipcMain.handle("runtime:connection", () => connectionState);
   let runtime;
+  // Phones that paired while Milagre was closed are announced once it connects; the host keeps them until then.
+  const deviceNotices = createDeviceNotices({
+    methods: () => (runtime && Notification.isSupported() ? runtime.methods : null),
+    invoke: (method, args) => runtime.invoke(method, args),
+    notifyPhones: (phones, options) => notifier.notifyPhonesPaired(phones, options),
+    notifyDevice: (kind) => notifier.notifyDevicePaired(kind),
+  });
   const { createLinearSignInWindow } = require("./linear-sign-in-window.cjs");
   // Closing the sign-in window before it finished ends the waiting sign-in, so Settings stops saying it is waiting.
   const linearSignIn = createLinearSignInWindow({ BrowserWindow, shell, cancel: () => void runtime?.invoke("linear:cancel", []).catch(() => {}) });
@@ -190,13 +198,15 @@ async function startDesktop() {
       emit(channel, payload) {
         if (channel === "agent:event") notifier.observe(payload.chatId, payload.event);
         if (channel === "notification:waiting" && notifyWhenWaiting && Notification.isSupported()) notifier.notify(payload);
-        // A computer pairs only once its owner clicked Allow here, so only a phone's pairing needs telling.
-        if (channel === "phone:paired" && payload?.kind !== "computer" && Notification.isSupported()) notifier.notifyDevicePaired(payload?.kind);
+        if (channel === "phone:paired") void deviceNotices.paired(payload);
         if (channel === "devices:pending" && Notification.isSupported()) notifier.notifyComputerWaiting(payload?.requests);
         if (channel === "runtime:connection") {
           connectionState = payload;
           // A host started again after it went away can be newer, with more commands. (Not yet set during the first connect.)
-          if (payload.connected && runtime) registerHostMethods();
+          if (payload.connected && runtime) {
+            registerHostMethods();
+            void deviceNotices.connected();
+          }
         }
         // Add workspace's sign-in opens in a window of its own, and only when this window asked for one.
         if (channel === "linear:sign-in-window") {
@@ -370,6 +380,7 @@ async function startDesktop() {
     }
     createWindow();
     void runtime.resumeRecentProjects().catch((error) => console.warn(error.message));
+    void deviceNotices.connected();
     app.on("browser-window-focus", () => {
       void runtime.setFocused(true).catch(() => {});
       computers.setFocused(true);

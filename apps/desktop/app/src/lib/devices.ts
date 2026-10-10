@@ -14,6 +14,11 @@ export function deviceSeenLine(device: Pick<PairedDevice, "route" | "lastSeen">,
   return `Last seen ${ago(device.lastSeen, now)}`;
 }
 
+/** Keys of the phones that paired since the owner last looked at Settings › Devices. */
+export function newDeviceKeys(devices: Pick<PairedDevice, "key" | "isNew">[]): string[] {
+  return devices.filter((device) => device.isNew === true).map((device) => device.key);
+}
+
 /** Shown in place of that line while Remove waits for a second click. */
 export const removeDeviceQuestion = (device: Pick<PairedDevice, "kind" | "name">) => `Remove ${deviceName(device)}? It can pair again from Pair a device.`;
 

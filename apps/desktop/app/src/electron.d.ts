@@ -102,6 +102,8 @@ export type PairedDevice = {
   name: string | null;
   pairedAt: number | null;
   lastSeen: number | null;
+  /** A phone that paired since the owner last looked at Settings › Devices. Missing from hosts before it. */
+  isNew?: boolean;
   route: "lan" | "relay" | null;
 };
 
@@ -425,6 +427,8 @@ export type MilagreBridge = {
   listDevices: () => Promise<PairedDevice[]>;
   /** Forgets one and closes its connections; resolves with the devices left. */
   removeDevice: (key: string) => Promise<PairedDevice[]>;
+  /** The owner saw these devices in Settings › Devices, so they are no longer New; resolves with every device. */
+  acknowledgeDevices: (keys: string[]) => Promise<PairedDevice[]>;
   /** Computers waiting for Allow, oldest first. */
   listPendingDevices: () => Promise<PendingComputer[]>;
   /** Lets a waiting computer pair; resolves with the ones still waiting. */

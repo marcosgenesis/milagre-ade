@@ -1,5 +1,6 @@
 import { PROVIDERS, providerName } from "@milagre/shared/providers";
 import type { ModelProvider, ProviderUsage, UsageSnapshot } from "./model";
+import { formatTokens } from "./tokens.mjs";
 export type UsageDisplay = "used" | "remaining";
 
 const MINUTE = 60_000;
@@ -87,13 +88,7 @@ export function mergeSnapshot(previous: UsageSnapshot | null, next: UsageSnapsho
   };
 }
 
-/** A token count the way model windows are named: 366k, 1M, 1.5M. */
-export function formatTokens(tokens: number) {
-  const thousands = Math.round(tokens / 1000);
-  if (thousands < 1) return String(Math.round(tokens));
-  if (thousands < 1000) return `${thousands}k`;
-  return `${Math.round(tokens / 100_000) / 10}M`;
-}
+export { formatTokens };
 
 /** How full the agent's context window is: the percent used and the token counts behind it. */
 export function contextSummary({ used, size }: { used: number; size: number }) {
@@ -105,4 +100,32 @@ export function contextSummary({ used, size }: { used: number; size: number }) {
     tokens: `${formatTokens(used)} of ${formatTokens(size)} tokens`,
     left: `${formatTokens(Math.max(0, size - used))} left`,
   };
+}
+
+/** From here the ring turns to the accent colour: compacting keeps the agent sharp, and the CLI itself waits until near full. */
+export const CONTEXT_WARN_PERCENT = 75;
+/** From here the ring turns red: the CLI is about to compact on its own, mid-task. */
+export const CONTEXT_CRITICAL_PERCENT = 90;
+
+/** How the ring is drawn for a percent used: the colour step it has reached. */
+export function contextTone(percent: number): "normal" | "warning" | "critical" {
+  if (percent >= CONTEXT_CRITICAL_PERCENT) return "critical";
+  if (percent >= CONTEXT_WARN_PERCENT) return "warning";
+  return "normal";
+}
+
+/**
+ * The card's line under the numbers. `canCompact` is whether the card offers Compact now (a Claude chat): without it
+ * the line only says what the agent does by itself.
+ */
+export function contextAdvice(percent: number, canCompact: boolean): string {
+  const tone = contextTone(percent);
+  if (!canCompact)
+    return tone === "normal"
+      ? "The agent compacts the conversation when it gets close to full."
+      : "Claude Code compacts the conversation by itself at about 95%.";
+  if (tone === "critical")
+    return "Claude Code compacts by itself at about 95%, in the middle of whatever it is doing. Compacting now, at a point you choose, keeps more.";
+  if (tone === "warning") return "Replies get slower and the agent recalls less from here. Compacting now keeps it sharp; Claude Code waits until about 95%.";
+  return "Claude Code compacts the conversation when it gets close to full. You can also compact at a good moment, such as after a PR merges.";
 }

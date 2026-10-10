@@ -11,7 +11,8 @@ export function linkedContext({ context }: Pick<ChatMessage, "context">): Linked
     context.kind !== "worktree-linked" &&
     context.kind !== "advisor-result" &&
     context.kind !== "pr-action" &&
-    context.kind !== "linear-issue"
+    context.kind !== "linear-issue" &&
+    context.kind !== "compaction"
     ? context
     : null;
 }

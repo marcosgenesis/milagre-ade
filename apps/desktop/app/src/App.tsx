@@ -59,6 +59,7 @@ import {
 import { attachmentPrompt } from "./lib/media";
 import { BLOCKERS, isBlockerDismissed, pullRequestBlockers } from "./lib/pr-blockers";
 import { pullRequestActionBody, pullRequestActionContext, pullRequestActionPrompt } from "@milagre/shared/pr-action";
+import { COMPACT_COMMAND } from "@milagre/shared/compaction";
 import { capabilitiesFrom, keepIfSame, mergeModels, nextSelection, providerForId, resolveModel } from "./lib/models";
 import { chatMark, chatTitle, orderChats } from "./lib/chat-list";
 import type { SessionPatch } from "@milagre/shared/project-edits";
@@ -1519,6 +1520,32 @@ function App() {
     await reportChatAction(unlinked(), "Could not unlink issue", setNotice);
   }
 
+  // Compact now on the context card: Claude's /compact as a divider in the chat, with no handoff and no draft touched.
+  async function compactContext() {
+    if (!project || !selectedSession || !selectedWorktree || readOnly) return;
+    const model = selectedModel;
+    try {
+      await agentRuns.send({
+        projectPath: project.path,
+        sessionId: selectedSession.id,
+        worktreeId: selectedWorktree.id,
+        body: COMPACT_COMMAND,
+        prompt: COMPACT_COMMAND,
+        images: [],
+        files: [],
+        provider: model.provider,
+        model: model.id,
+        permissionMode,
+        effort: effortFor(capabilityFor(model, capabilities), effort),
+        replies: getSettings().claudeReplies,
+        tldrEnabled: getSettings().tldrEnabled,
+        compact: true,
+      });
+    } catch (error) {
+      setNotice(`Could not compact the context: ${ipcErrorMessage(error)}`);
+    }
+  }
+
   async function sendMessage() {
     const body = draftStore.get().trim();
     if ((!body && !imageDraft.images.length && !imageDraft.files.length) || !state || !selectedWorktree || !project || preparing || imageDraft.loading) return;
@@ -2302,6 +2329,7 @@ function App() {
                     messageScope={project.path}
                     earlier={earlierMessages}
                     onSend={() => void sendMessage()}
+                    onCompact={selectedSession && (selectedSession.provider ?? "claude") === "claude" && !readOnly ? () => void compactContext() : undefined}
                     onSendDesignMessage={(text) => executeSend(text, permissionMode, [], [], true)}
                     linearActive={linear.active}
                     onStartFromIssue={startFromIssue}

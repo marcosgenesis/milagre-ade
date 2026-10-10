@@ -650,3 +650,61 @@ test("subagentActive: one still at work or waiting on an approval is active; one
   for (const status of ["completed", "failed", "cancelled", "unknown"] as const) assert.equal(subagentActive({ status }), false);
   assert.equal(subagentActive(undefined), false);
 });
+
+test("a /compact the user asked for: its divider goes from preparing to done at the boundary, and the empty turn saves no reply", () => {
+  let state = base();
+  state = {
+    ...state,
+    messages: [
+      { id: 8, session_id: 2, body: "fix it", context: null, role: "user" },
+      { id: 9, session_id: 2, body: "/compact", context: { kind: "compaction", status: "preparing", before: 897_000, size: 1_000_000 }, role: "user" },
+    ],
+  };
+  let runs = startRun({}, key(2), "claude-opus-5-5");
+  // Claude's own compaction step stays out of the reply: the divider shows the progress.
+  let result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "step-started", step: { id: "compact-1", kind: "other", title: "Compacting context" } });
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.runs[key(2)].steps, []);
+  ({ state, runs } = result);
+  result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "step-completed", id: "compact-1", status: "done", title: "Compacted context" });
+  ({ state, runs } = result);
+  result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "context-compacted", trigger: "manual", before: 897_000, after: 42_000 });
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.state.messages[1].context, { kind: "compaction", status: "done", before: 897_000, after: 42_000, size: 1_000_000 });
+  ({ state, runs } = result);
+  result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "context-usage", used: 42_000, size: 1_000_000 });
+  ({ state, runs } = result);
+  result = applyAgentEvent(state, runs, PROJECT, key(2), { type: "turn-completed" });
+  assert.deepEqual(result.runs, {});
+  assert.equal(result.state.messages.length, 2);
+  assert.deepEqual(result.state.sessions["2"].contextUsage, { used: 42_000, size: 1_000_000 });
+  assert.equal(result.changed, true);
+});
+
+test("a compaction nobody asked for changes no message, and one that never reaches its boundary fails with the turn", () => {
+  let state = base();
+  state = { ...state, messages: [{ id: 8, session_id: 2, body: "fix it", context: null, role: "user" }] };
+  const runs = startRun({}, key(2), "claude-opus-5-5");
+  const auto = applyAgentEvent(state, runs, PROJECT, key(2), { type: "context-compacted", trigger: "auto", before: 190_000, after: 20_000 });
+  assert.equal(auto.changed, false);
+  assert.deepEqual(auto.state.messages, state.messages);
+  // Its step stays in the reply, as before.
+  const step = applyAgentEvent(state, runs, PROJECT, key(2), { type: "step-started", step: { id: "compact-1", kind: "other", title: "Compacting context" } });
+  assert.equal(step.runs[key(2)].steps.length, 1);
+
+  const pending = {
+    ...state,
+    messages: [
+      ...state.messages,
+      { id: 9, session_id: 2, body: "/compact", context: { kind: "compaction", status: "preparing", before: 190_000 }, role: "user" },
+    ],
+  };
+  const failed = applyAgentEvent(pending, runs, PROJECT, key(2), { type: "turn-failed", message: "boom" });
+  assert.deepEqual(failed.state.messages[1].context, { kind: "compaction", status: "failed", before: 190_000 });
+  assert.equal(failed.state.messages.at(-1)?.body, "Agent error: boom");
+  const cancelled = applyAgentEvent(pending, runs, PROJECT, key(2), { type: "turn-cancelled" });
+  assert.equal(cancelled.state.messages[1].context.status, "failed");
+  const silent = applyAgentEvent(pending, runs, PROJECT, key(2), { type: "turn-completed" });
+  assert.equal(silent.state.messages[1].context.status, "failed");
+  assert.equal(silent.state.messages.length, 2);
+});

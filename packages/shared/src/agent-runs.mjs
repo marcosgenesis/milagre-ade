@@ -272,6 +272,22 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
       return run ? splitRunForSteer(state, runs, projectPath, chatId) : { state, runs: applyRunEvent(runs, chatId, event), changed: false };
     case "turn-started":
       return { state, runs: applyRunEvent(runs, chatId, event, lastUserModel(state, sessionId)), changed: false };
+    // A /compact the user asked for shows its progress on its divider: Claude's own compaction step stays out of the reply.
+    case "step-started":
+      if (event.step.id.startsWith("compact-") && pendingCompaction(state, sessionId)) return { state, runs, changed: false };
+      return { state, runs: applyRunEvent(runs, chatId, event), changed: false };
+    case "context-compacted": {
+      const request = pendingCompaction(state, sessionId);
+      if (!request) return { state, runs, changed: false };
+      const before = request.context.before ?? event.before;
+      const context = {
+        ...request.context,
+        status: "done",
+        ...(before === undefined ? {} : { before }),
+        ...(event.after === undefined ? {} : { after: event.after }),
+      };
+      return { state: withContext(state, request, context), runs, changed: true };
+    }
     case "turn-completed":
     case "turn-cancelled":
     case "turn-failed": {
@@ -279,9 +295,15 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
       const remaining = applyRunEvent(runs, chatId, event);
       // The context gauge outlives the run, so the composer still shows it between turns.
       if (run.contextUsage) state = { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, contextUsage: run.contextUsage } } };
+      // A compaction request whose turn ends before its boundary did not happen.
+      const unfinished = pendingCompaction(state, sessionId);
+      if (unfinished) state = withContext(state, unfinished, { ...unfinished.context, status: "failed" });
       // The reply so far was saved when a steering message split it; there is nothing left to show.
       if (event.type === "turn-completed" && run.split && !run.text.trim() && !run.steps.length)
         return { state, runs: remaining, changed: Boolean(run.contextUsage) };
+      // A /compact turn says nothing: its divider is the whole reply.
+      if (event.type === "turn-completed" && !run.text.trim() && !run.steps.length && isCompactionRequest(lastUserMessage(state, sessionId)))
+        return { state, runs: remaining, changed: true };
       const message = {
         id: state.next_id,
         session_id: sessionId,
@@ -298,6 +320,19 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
     default:
       return { state, runs: applyRunEvent(runs, chatId, event), changed: false };
   }
+}
+
+const isCompactionRequest = (message) => message?.context?.kind === "compaction";
+const lastUserMessage = (state, sessionId) => state.messages.findLast((message) => message.session_id === sessionId && message.role === "user");
+
+/** The /compact the user sent that Claude has not reached the boundary of yet, if any. */
+function pendingCompaction(state, sessionId) {
+  const request = state.messages.findLast((message) => message.session_id === sessionId && isCompactionRequest(message));
+  return request?.context.status === "preparing" ? request : null;
+}
+
+function withContext(state, message, context) {
+  return { ...state, messages: state.messages.map((item) => (item === message ? { ...item, context } : item)) };
 }
 
 function replyBody(text, event, hasSteps) {

@@ -113,9 +113,14 @@ test("Claude: usage fills the context gauge once a result names the window, and 
     mapClaudeMessage({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: 190_000, post_tokens: 20_000 } }, state),
     [
       { type: "step-completed", id: "compact-1", status: "done", title: "Compacted context" },
+      { type: "context-compacted", trigger: "auto", before: 190_000, after: 20_000 },
       { type: "context-usage", used: 20_000, size: 200_000 },
     ],
   );
+  // A /compact the user sent: the boundary says so, and the host turns the request's divider from preparing to done.
+  assert.deepEqual(mapClaudeMessage({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "manual", pre_tokens: 190_000 } }, state), [
+    { type: "context-compacted", trigger: "manual", before: 190_000 },
+  ]);
 });
 
 test("Antigravity's CLI failures point at Milagre Settings, not a shell command", () => {

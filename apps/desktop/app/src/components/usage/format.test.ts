@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProviderUsage, UsageSnapshot } from "../../model";
 import {
+  CONTEXT_CRITICAL_PERCENT,
+  CONTEXT_WARN_PERCENT,
+  contextAdvice,
   contextSummary,
+  contextTone,
   formatResetsIn,
   formatTokens,
   formatUpdatedAgo,
@@ -179,4 +183,19 @@ test("token counts name a million-token window 1M, not 1000k", () => {
     tokens: "366k of 1M tokens",
     left: "634k left",
   });
+});
+
+test("the context ring warns at 75% and turns critical at 90%, and the card's advice follows", () => {
+  assert.equal(CONTEXT_WARN_PERCENT, 75);
+  assert.equal(CONTEXT_CRITICAL_PERCENT, 90);
+  assert.equal(contextTone(74), "normal");
+  assert.equal(contextTone(75), "warning");
+  assert.equal(contextTone(89), "warning");
+  assert.equal(contextTone(90), "critical");
+  assert.match(contextAdvice(40, true), /close to full/);
+  assert.match(contextAdvice(80, true), /Compacting now keeps it sharp/);
+  assert.match(contextAdvice(90, true), /in the middle of whatever it is doing/);
+  // Without Compact now (Codex, Antigravity) the line never suggests it.
+  assert.equal(contextAdvice(40, false), "The agent compacts the conversation when it gets close to full.");
+  assert.doesNotMatch(contextAdvice(90, false), /Compacting now/);
 });

@@ -800,6 +800,10 @@ function chatHost({
       this.attachments = fn(this.attachments);
     },
     preferences: {},
+    compactRequests: {},
+    requestCompact(chatId) {
+      this.compactRequests = { ...this.compactRequests, [chatId]: (this.compactRequests[chatId] ?? 0) + 1 };
+    },
     defaults: require("../apps/mobile/src/turn-options.ts").defaultPreferences,
     setDefaultPermission() {},
     models: null,
@@ -903,7 +907,7 @@ function chatHost({
     "../running-logo": { ThinkingIndicator: "ThinkingIndicator" },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) },
     "@milagre/shared/model": require("@milagre/shared/model"),
-    "@milagre/shared/agent-runs": { lastUserModel: () => "" },
+    "@milagre/shared/agent-runs": { ...require("@milagre/shared/agent-runs"), lastUserModel: () => "" },
     "@milagre/shared/chats": require("@milagre/shared/chats"),
     "@milagre/shared/chat-summary": require("@milagre/shared/chat-summary"),
     "@milagre/shared/linear": require("@milagre/shared/linear"),
@@ -927,9 +931,11 @@ function chatHost({
     "../handoff-sides": require("../apps/mobile/src/handoff-sides.ts"),
     "../handoff-divider": { HandoffDivider: "HandoffDivider" },
     "../worktree-link-divider": { WorktreeLinkDivider: "WorktreeLinkDivider" },
+    "../compaction-divider": { CompactionDivider: "CompactionDivider" },
     "../handoff-brief-store": { showBrief() {} },
     "@milagre/shared/handoff": require("@milagre/shared/handoff"),
     "@milagre/shared/worktree-link": require("@milagre/shared/worktree-link"),
+    "@milagre/shared/compaction": require("@milagre/shared/compaction"),
     "../archive": require("../apps/mobile/src/archive.ts"),
     "../confirm-store": { confirmSheet: (...args) => alert(...args) },
   });
@@ -2346,6 +2352,28 @@ test("the PR pill sends a PR action whose preview is already a card", async () =
   } finally {
     delete globalThis.chatPullRequest;
   }
+});
+
+test("Compact now from the context sheet sends /compact to the open Chat with the compact flag and no preview", async () => {
+  const screen = chatHost({ effects: true, call: async () => ({ sessionId: 42 }) });
+  screen.params.id = "42";
+  screen.session.snapshot.project.state.sessions[42] = { id: 42, provider: "claude", worktree_id: 1, contextUsage: { used: 897_000, size: 1_000_000 } };
+  screen.render();
+  const projectPath = screen.session.snapshot.project.path;
+  screen.session.requestCompact(`${projectPath}#42`);
+  screen.render();
+  await settle();
+  const sent = screen.calls.find((call) => call.method === "chat:send").args[0];
+  assert.equal(sent.body, "/compact");
+  assert.equal(sent.prompt, "/compact");
+  assert.equal(sent.compact, true);
+  assert.equal(sent.sessionId, 42);
+  assert.equal(sent.projectPath, projectPath);
+  assert.equal(Object.keys(screen.session.pendingChats).length, 0);
+  // Rendering again sends nothing more: the counter, not the render, is the trigger.
+  screen.render();
+  await settle();
+  assert.equal(screen.calls.filter((call) => call.method === "chat:send").length, 1);
 });
 
 test("a PR without a number yet shows no PR pill", () => {

@@ -150,7 +150,13 @@ function mapClaudeMessage(message, state) {
   if (message.type === "system" && message.subtype === "compact_boundary") {
     if (state.compacting) events.push({ type: "step-completed", id: state.compacting, status: "done", title: "Compacted context" });
     state.compacting = null;
-    const after = message.compact_metadata?.post_tokens;
+    const { trigger, pre_tokens: before, post_tokens: after } = message.compact_metadata ?? {};
+    events.push({
+      type: "context-compacted",
+      trigger: trigger === "manual" ? "manual" : "auto",
+      ...(typeof before === "number" ? { before } : {}),
+      ...(typeof after === "number" ? { after } : {}),
+    });
     if (typeof after === "number") events.push(...claudeContextUsage(state, after));
   }
   if (message.type === "assistant" && message.parent_tool_use_id == null && message.message?.usage) {

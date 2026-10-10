@@ -426,6 +426,9 @@ function ComposerProvider({ children }: { children: React.ReactNode }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [preferences, setPreferences] = useState<Record<string, TurnPreferences>>({});
+  // Compact now, pressed on the context sheet: the chat screen sends `/compact` when its counter moves (see chat.tsx).
+  const [compactRequests, setCompactRequests] = useState<Record<string, number>>({});
+  const requestCompact = useCallback((chatId: string) => setCompactRequests((current) => ({ ...current, [chatId]: (current[chatId] ?? 0) + 1 })), []);
   // Like desktop's default permission mode: the last one picked starts every Chat, and survives a relaunch.
   const [permission, setPermission] = useState<PermissionMode>("ask");
   useEffect(() => {
@@ -439,8 +442,20 @@ function ComposerProvider({ children }: { children: React.ReactNode }) {
     void savePermission(mode);
   }, []);
   const value = useMemo(
-    () => ({ drafts, setDrafts, attachments, setAttachments, preferences, setPreferences, defaults, setDefaultPermission, linkOperations }),
-    [drafts, attachments, preferences, defaults, setDefaultPermission, linkOperations],
+    () => ({
+      drafts,
+      setDrafts,
+      attachments,
+      setAttachments,
+      preferences,
+      setPreferences,
+      defaults,
+      setDefaultPermission,
+      linkOperations,
+      compactRequests,
+      requestCompact,
+    }),
+    [drafts, attachments, preferences, defaults, setDefaultPermission, linkOperations, compactRequests, requestCompact],
   );
   return <ComposerContext.Provider value={value}>{children}</ComposerContext.Provider>;
 }
@@ -454,6 +469,9 @@ type Composer = {
   setAttachments: React.Dispatch<React.SetStateAction<Record<string, Attachment[]>>>;
   preferences: Record<string, TurnPreferences>;
   setPreferences: React.Dispatch<React.SetStateAction<Record<string, TurnPreferences>>>;
+  /** How many times Compact now was pressed per chat key; the chat screen acts on each change. */
+  compactRequests: Record<string, number>;
+  requestCompact: (chatId: string) => void;
 };
 const ComposerContext = createContext<Composer | null>(null);
 export type MobilePendingChat = {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ContextUsage } from "../model";
 import { useDismiss } from "../lib/use-dismiss";
-import { contextSummary } from "./usage/format";
+import { contextAdvice, contextSummary, contextTone } from "./usage/format";
 import { UsageBar } from "./usage/UsageBar";
 
 const CARD_WIDTH = 264;
@@ -13,11 +13,15 @@ const CLOSE_DELAY_MS = 150;
 
 type Position = { left: number; bottom: number };
 
+// The ring's colour by how full the window is: ink, then the accent from 75%, then red from 90% (see contextTone).
+const STROKE = { normal: "var(--ink-2)", warning: "var(--accent-ink)", critical: "var(--red)" } as const;
+
 /**
  * A ring that fills as the agent's context window does; the agent compacts it when it gets close to full.
- * Hover, focus or click opens a card above it with the numbers, styled like the plan usage card.
+ * Hover, focus or click opens a card above it with the numbers, styled like the plan usage card. On a Claude chat the
+ * card offers Compact now (`onCompact`), which sends `/compact`; `compactBlocked` says why it can't right now.
  */
-export function ContextRing(usage: ContextUsage) {
+export function ContextRing({ onCompact, compactBlocked = null, ...usage }: ContextUsage & { onCompact?: () => void; compactBlocked?: string | null }) {
   const { ratio, percent, tokens, left } = contextSummary(usage);
   const radius = 6;
   const circumference = 2 * Math.PI * radius;
@@ -85,7 +89,10 @@ export function ContextRing(usage: ContextUsage) {
         onFocus={(event) => {
           if (event.currentTarget.matches(":focus-visible")) show();
         }}
-        onBlur={hide}
+        onBlur={(event) => {
+          // Focus moving into the card (its Compact now button) keeps it open.
+          if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-context-card]"))) hide();
+        }}
         onClick={() => (position ? hide() : show())}
         className={`flex size-7 shrink-0 items-center justify-center rounded-control transition-[background-color] duration-150 hover:bg-hover-2 ${position ? "bg-hover-2" : ""}`}
       >
@@ -96,7 +103,7 @@ export function ContextRing(usage: ContextUsage) {
             cy="8"
             r={radius}
             fill="none"
-            stroke={percent >= 90 ? "var(--red)" : percent >= 75 ? "var(--accent-ink)" : "var(--ink-2)"}
+            stroke={STROKE[contextTone(percent)]}
             strokeWidth="2"
             strokeLinecap="round"
             strokeDasharray={circumference}
@@ -131,9 +138,28 @@ export function ContextRing(usage: ContextUsage) {
                 <span>{tokens}</span>
               </div>
             </div>
-            <p className="border-t border-line px-4 py-3 text-[12px] leading-[1.45] text-ink-2">
-              {left}. The agent compacts the conversation when it gets close to full.
-            </p>
+            <div className="flex flex-col gap-2.5 border-t border-line px-4 py-3 text-[12px] leading-[1.45] text-ink-2">
+              <p>
+                {left}. {contextAdvice(percent, Boolean(onCompact))}
+              </p>
+              {onCompact && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-compact-now
+                    disabled={Boolean(compactBlocked)}
+                    onClick={() => {
+                      hide();
+                      onCompact();
+                    }}
+                    className="inline-flex h-7 shrink-0 items-center rounded-control bg-ink px-2.5 text-[12px] font-medium text-surface transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40"
+                  >
+                    Compact now
+                  </button>
+                  {compactBlocked && <span className="text-ink-3">{compactBlocked}</span>}
+                </div>
+              )}
+            </div>
           </div>,
           document.body,
         )}

@@ -2,21 +2,27 @@ import { useEffect } from "react";
 import { Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { contextSummary } from "@milagre/shared/usage";
-import { useSession } from "../session";
-import { useStyles } from "../ui";
+import { contextAdvice, contextSummary } from "@milagre/shared/usage";
+import { useComposer, useSession } from "../session";
+import { Button, useStyles } from "../ui";
 import { useTheme } from "../theme";
 
-/** Desktop's context card as a sheet: how full the Chat's context window is. Reads the live numbers, so it fills while a turn runs. */
+/**
+ * Desktop's context card as a sheet: how full the Chat's context window is. Reads the live numbers, so it fills while
+ * a turn runs. On a Claude chat it offers Compact now, which the chat screen sends as `/compact` once the sheet closes.
+ */
 export default function ContextSheet() {
   const { colors } = useTheme();
   const styles = useStyles();
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const session = useSession();
+  const composer = useComposer();
   const project = session.snapshot?.project;
   const chat = project && id ? project.state.sessions[Number(id)] : undefined;
-  const usage = (project && chat ? session.snapshot?.runs.runs[`${project.path}#${id}`]?.contextUsage : undefined) ?? chat?.contextUsage;
+  const chatId = project ? `${project.path}#${id}` : null;
+  const run = chatId ? session.snapshot?.runs.runs[chatId] : undefined;
+  const usage = (project && chat ? run?.contextUsage : undefined) ?? chat?.contextUsage;
   const missing = !usage || usage.size <= 0;
   // The Chat went away (another host, a reset session): nothing to show.
   useEffect(() => {
@@ -24,6 +30,8 @@ export default function ContextSheet() {
   }, [missing]);
   if (missing) return null;
   const { percent, tokens, left } = contextSummary(usage);
+  const canCompact = Boolean(chat) && (chat?.provider ?? "claude") === "claude";
+  const blocked = run ? "Wait for the agent to finish." : null;
   return (
     <View style={{ paddingTop: 28, paddingHorizontal: 20, paddingBottom: Math.max(insets.bottom, 16) + 4, gap: 16 }}>
       <Text accessibilityRole="header" style={styles.subtitle}>
@@ -48,7 +56,26 @@ export default function ContextSheet() {
           </Text>
         </View>
       </View>
-      <Text style={styles.muted}>{left}. The agent compacts the conversation when it gets close to full.</Text>
+      <Text style={styles.muted}>
+        {left}. {contextAdvice(percent, canCompact)}
+      </Text>
+      {canCompact && chatId && (
+        <View style={{ gap: 8 }}>
+          <Button
+            title="Compact now"
+            disabled={Boolean(blocked)}
+            onPress={() => {
+              composer.requestCompact(chatId);
+              router.back();
+            }}
+          />
+          {blocked && (
+            <Text style={[styles.muted, { textAlign: "center", fontSize: 13 }]} accessibilityLiveRegion="polite">
+              {blocked}
+            </Text>
+          )}
+        </View>
+      )}
     </View>
   );
 }

@@ -374,8 +374,7 @@ test("Compact now: the /compact runs on the chat's own provider, its divider rec
   assert.deepEqual(request().context, { kind: "compaction", status: "preparing", before: 897_000, size: 1_000_000 });
 
   session(ALPHA).emit({ type: "turn-started", turnId: "t2" });
-  session(ALPHA).emit({ type: "step-started", step: { id: "compact-1", kind: "other", title: "Compacting context" } });
-  session(ALPHA).emit({ type: "step-completed", id: "compact-1", status: "done", title: "Compacted context" });
+  session(ALPHA).emit({ type: "context-compacting" });
   session(ALPHA).emit({ type: "context-compacted", trigger: "manual", before: 897_000, after: 42_000 });
   session(ALPHA).emit({ type: "context-usage", used: 42_000, size: 1_000_000 });
   session(ALPHA).emit({ type: "turn-completed" });
@@ -387,6 +386,28 @@ test("Compact now: the /compact runs on the chat's own provider, its divider rec
     { role: "user", body: "/compact" },
   ]);
   assert.deepEqual(saved.get(ALPHA).sessions[sessionId].contextUsage, { used: 42_000, size: 1_000_000 });
+});
+
+test("automatic compaction saves a divider between the reply before and after it", async (t) => {
+  const { host, manager, saved, session } = harness();
+  t.after(() => manager.closeAll());
+  const chat = await host.send(message(ALPHA, "keep working"));
+  await waitUntil(() => session(ALPHA));
+  session(ALPHA).emit({ type: "turn-started", turnId: "t1" });
+  session(ALPHA).emit({ type: "context-usage", used: 190_000, size: 200_000 });
+  session(ALPHA).emit({ type: "text-delta", messageId: "t1", text: "Before." });
+  session(ALPHA).emit({ type: "context-compacting" });
+  const divider = () => saved.get(ALPHA).messages.find((item) => item.context?.kind === "compaction");
+  await waitUntil(() => divider()?.context.status === "preparing");
+  session(ALPHA).emit({ type: "context-compacted", trigger: "auto", before: 190_000, after: 20_000 });
+  session(ALPHA).emit({ type: "text-delta", messageId: "t1", text: "After." });
+  session(ALPHA).emit({ type: "turn-completed" });
+  await waitUntil(() => divider()?.context.status === "done" && !host.runs[`${ALPHA}#${chat.sessionId}`]);
+  assert.deepEqual(
+    saved.get(ALPHA).messages.map((item) => item.body),
+    ["keep working", "Before.", "", "After."],
+  );
+  assert.deepEqual(divider().context, { kind: "compaction", status: "done", before: 190_000, after: 20_000, size: 200_000 });
 });
 
 test("Compact now is refused while a turn runs and on a Codex chat", async (t) => {

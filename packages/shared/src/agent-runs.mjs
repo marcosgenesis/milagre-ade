@@ -276,10 +276,12 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
     case "step-started":
       if (event.step.id.startsWith("compact-") && pendingCompaction(state, sessionId)) return { state, runs, changed: false };
       return { state, runs: applyRunEvent(runs, chatId, event), changed: false };
+    case "context-compacting":
+      return pendingCompaction(state, sessionId) ? { state, runs, changed: false } : addCompaction(state, runs, projectPath, chatId, "preparing");
     case "context-compacted": {
       const request = pendingCompaction(state, sessionId);
-      if (!request) return { state, runs, changed: false };
-      const before = request.context.before ?? event.before;
+      if (!request) return addCompaction(state, runs, projectPath, chatId, "done", event);
+      const before = request.role === "user" ? (request.context.before ?? event.before) : (event.before ?? request.context.before);
       const context = {
         ...request.context,
         status: "done",
@@ -300,7 +302,7 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
       if (unfinished) state = withContext(state, unfinished, { ...unfinished.context, status: "failed" });
       // The reply so far was saved when a steering message split it; there is nothing left to show.
       if (event.type === "turn-completed" && run.split && !run.text.trim() && !run.steps.length)
-        return { state, runs: remaining, changed: Boolean(run.contextUsage) };
+        return { state, runs: remaining, changed: Boolean(run.contextUsage) || Boolean(unfinished) };
       // A /compact turn says nothing: its divider is the whole reply.
       if (event.type === "turn-completed" && !run.text.trim() && !run.steps.length && isCompactionRequest(lastUserMessage(state, sessionId)))
         return { state, runs: remaining, changed: true };
@@ -325,10 +327,38 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
 const isCompactionRequest = (message) => message?.context?.kind === "compaction";
 const lastUserMessage = (state, sessionId) => state.messages.findLast((message) => message.session_id === sessionId && message.role === "user");
 
-/** The /compact the user sent that Claude has not reached the boundary of yet, if any. */
+/** The manual or automatic compaction that has not reached its boundary yet, if any. */
 function pendingCompaction(state, sessionId) {
   const request = state.messages.findLast((message) => message.session_id === sessionId && isCompactionRequest(message));
   return request?.context.status === "preparing" ? request : null;
+}
+
+/** Save the reply so far above the divider; the same turn continues below it. */
+function addCompaction(state, runs, projectPath, chatId, status, event = {}) {
+  const sessionId = sessionIdFromKey(chatId);
+  const usage = runs[chatId]?.contextUsage ?? state.sessions[sessionId].contextUsage;
+  const split = splitRunForSteer(state, runs, projectPath, chatId);
+  const before = event.before ?? usage?.used;
+  const message = {
+    id: split.state.next_id,
+    session_id: sessionId,
+    role: "assistant",
+    body: "",
+    model: runs[chatId]?.model ?? lastUserModel(state, sessionId),
+    context: {
+      kind: "compaction",
+      status,
+      ...(before === undefined ? {} : { before }),
+      ...(event.after === undefined ? {} : { after: event.after }),
+      ...(usage?.size > 0 ? { size: usage.size } : {}),
+    },
+  };
+  const run = split.runs[chatId];
+  return {
+    state: { ...split.state, next_id: message.id + 1, messages: [...split.state.messages, message] },
+    runs: run ? { ...split.runs, [chatId]: { ...run, split: true } } : split.runs,
+    changed: true,
+  };
 }
 
 function withContext(state, message, context) {

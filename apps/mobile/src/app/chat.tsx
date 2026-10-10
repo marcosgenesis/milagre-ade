@@ -47,7 +47,7 @@ import { showBrief } from "../handoff-brief-store";
 import { WorktreeLinkDivider } from "../worktree-link-divider";
 import { CompactionDivider } from "../compaction-divider";
 import { isHandoff } from "@milagre/shared/handoff";
-import { COMPACT_COMMAND, isCompaction } from "@milagre/shared/compaction";
+import { COMPACT_COMMAND, compactionText, isCompaction } from "@milagre/shared/compaction";
 import { isWorktreeLinked, worktreeLinkText } from "@milagre/shared/worktree-link";
 import { ThinkingIndicator } from "../running-logo";
 import { BottomFade, EdgeFade } from "../bottom-fade";
@@ -296,7 +296,9 @@ export default function ChatScreen() {
           ? `Go to ${handoffSides(messages[index].context, handoffModels).restored ? "context restored" : "context handoff"} ${index + 1} of ${messages.length}.`
           : isWorktreeLinked(messages[index])
             ? `Go to ${worktreeLinkText(messages[index].context)}, ${index + 1} of ${messages.length}.`
-            : `Go to ${messageSender(messages[index])} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
+            : isCompaction(messages[index])
+              ? `Go to ${compactionText(messages[index].context)}, ${index + 1} of ${messages.length}.`
+              : `Go to ${messageSender(messages[index])} message ${index + 1} of ${messages.length}. ${messages[index].body.slice(0, 88)}`,
       })),
     [messages, handoffModels],
   );

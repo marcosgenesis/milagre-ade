@@ -5,8 +5,8 @@ import type { CompactionContext } from "../model";
 import { SpinnerRing } from "./primitives/SpinnerRing";
 
 /**
- * A compaction the user asked for from the context card: a hairline with "Context compacted  897k → 42k" centred on
- * it, as the handoff divider is drawn. It spins while Claude compacts.
+ * A manual or automatic compaction: a hairline with "Context compacted  897k → 42k" centred on
+ * it, as the handoff divider is drawn. It spins while the agent compacts.
  */
 export function CompactionDivider({ context }: { context: CompactionContext }) {
   const label = compactionLabel(context);

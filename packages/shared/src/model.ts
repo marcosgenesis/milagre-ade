@@ -245,8 +245,9 @@ export type HandoffContext = {
 };
 
 /**
- * A compaction the user asked for from the context card, shown as a divider like a handoff. The message's body is the
- * `/compact` command Claude ran. `before` and `after` are the window's tokens around it; `size` is the window.
+ * A manual or automatic compaction, shown as a divider like a handoff. A manual request keeps `/compact` as its body;
+ * an automatic compaction is an assistant message with an empty body. `before` and `after` are the window's tokens
+ * around it; `size` is the window.
  */
 export type CompactionContext = {
   kind: "compaction";
@@ -537,7 +538,8 @@ export type AgentEvent =
   | { type: "subagents-waiting"; waiting: boolean }
   | { type: "tasks-updated"; tasks: AgentTask[] }
   | ({ type: "context-usage" } & ContextUsage)
-  /** Claude compacted the conversation: `before` and `after` are the window's tokens around it; `manual` when `/compact` asked for it. */
+  | { type: "context-compacting" }
+  /** The provider compacted the conversation: token counts when reported; `manual` when `/compact` asked for it. */
   | { type: "context-compacted"; trigger: "manual" | "auto"; before?: number; after?: number }
   | { type: "session-started"; nativeId: string }
   | { type: "session-reset" }

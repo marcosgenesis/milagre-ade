@@ -1,5 +1,4 @@
-// A compaction the user asks for from the context card: the Chat's message is Claude's `/compact` command, with a
-// context (kind "compaction") that shows it as a divider, like a handoff, and records the window around it.
+// Manual and automatic compactions share a divider, like a handoff, recording the context window around them.
 import { formatTokens } from "./tokens.mjs";
 
 /** What Claude is sent, and what the message keeps as its body. */

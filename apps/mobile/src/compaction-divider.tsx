@@ -5,7 +5,7 @@ import { compactionLabel, compactionText } from "@milagre/shared/compaction";
 import { Icon, SpinnerRing } from "./icons";
 import { fonts, useTheme } from "./theme";
 
-/** A compaction the user asked for from the context sheet, as on desktop: it spins while Claude compacts. */
+/** A manual or automatic compaction, as on desktop: it spins while the agent compacts. */
 export function CompactionDivider({ context }: { context: CompactionContext }) {
   const { colors } = useTheme();
   const label = compactionLabel(context);

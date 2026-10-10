@@ -193,6 +193,14 @@ async function browserChecks() {
     await evaluate(`window.setExtraMessages([${compaction("failed")}])`);
     await waitFor('document.querySelector("[data-compaction-divider]")?.dataset.status === "failed"');
     assert.equal(await evaluate('document.querySelector("[data-compaction-divider]").textContent'), "Compaction failed897k");
+    // Automatic compactions are assistant messages, rendered with the same divider.
+    await evaluate(`window.setExtraMessages([{ ...${compaction("preparing")}, role: "assistant", body: "" }])`);
+    await waitFor('document.querySelector("[data-compaction-divider]")?.dataset.status === "preparing"');
+    await screenshot("automatic-compaction-pending");
+    await evaluate(`window.setExtraMessages([{ ...${compaction("done", 42000)}, role: "assistant", body: "" }])`);
+    await waitFor('document.querySelector("[data-compaction-divider]")?.dataset.status === "done"');
+    assert.equal(await evaluate('document.querySelectorAll("[data-compaction-divider]").length'), 1);
+    await screenshot("automatic-compaction-done");
     await evaluate("window.setExtraMessages([])");
     await evaluate("window.setContext({ used: 366000, size: 1000000 })");
     assert.ok(await evaluate(`document.querySelector("${pill}").getBoundingClientRect().height <= 24`));

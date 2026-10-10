@@ -77,7 +77,7 @@ test("Codex: turn/completed maps each status", () => {
   assert.deepEqual(done("failed"), [{ type: "turn-failed", message: "Codex could not finish this turn." }]);
 });
 
-test("Codex: token usage is the context gauge, and compaction is a step", () => {
+test("Codex: token usage is the context gauge, and compaction has its own events", () => {
   const state = { ...codexState(), turnId: "t-1" };
   const usage = (last, window) => ({ threadId: "thread-1", turnId: "t-1", tokenUsage: { total: {}, last: { totalTokens: last }, modelContextWindow: window } });
   assert.deepEqual(mapCodexNotification("thread/tokenUsage/updated", usage(230_568, 258_400), state), [
@@ -85,15 +85,18 @@ test("Codex: token usage is the context gauge, and compaction is a step", () => 
   ]);
   assert.deepEqual(mapCodexNotification("thread/tokenUsage/updated", usage(10, null), state), []);
   const item = { type: "contextCompaction", id: "c-1" };
-  assert.deepEqual(mapCodexNotification("item/started", { threadId: "thread-1", turnId: "t-1", item }, state), [
-    { type: "step-started", step: { id: "c-1", kind: "other", title: "Compacting context" } },
-  ]);
+  assert.deepEqual(mapCodexNotification("item/started", { threadId: "thread-1", turnId: "t-1", item }, state), [{ type: "context-compacting" }]);
   assert.deepEqual(mapCodexNotification("item/completed", { threadId: "thread-1", turnId: "t-1", item }, state), [
-    { type: "step-completed", id: "c-1", status: "done", title: "Compacted context" },
+    { type: "context-compacted", trigger: "auto" },
+  ]);
+  assert.deepEqual(mapCodexNotification("item/completed", { threadId: "thread-1", turnId: "t-1", item }, state), [], "replayed completion is ignored");
+  assert.deepEqual(mapCodexNotification("item/started", { threadId: "thread-1", turnId: "t-1", item }, state), [], "late start cannot reopen it");
+  assert.deepEqual(mapCodexNotification("item/completed", { threadId: "thread-1", turnId: "t-1", item: { ...item, id: "c-2" } }, state), [
+    { type: "context-compacted", trigger: "auto" },
   ]);
 });
 
-test("Claude: usage fills the context gauge once a result names the window, and compaction is a step", () => {
+test("Claude: usage fills the context gauge once a result names the window, and compaction has its own events", () => {
   const state = claudeState();
   const assistant = {
     type: "assistant",
@@ -106,13 +109,10 @@ test("Claude: usage fills the context gauge once a result names the window, and 
     { type: "turn-completed" },
   ]);
   assert.deepEqual(mapClaudeMessage(assistant, state), [{ type: "context-usage", used: 96_000, size: 200_000 }]);
-  assert.deepEqual(mapClaudeMessage({ type: "system", subtype: "status", status: "compacting" }, state), [
-    { type: "step-started", step: { id: "compact-1", kind: "other", title: "Compacting context" } },
-  ]);
+  assert.deepEqual(mapClaudeMessage({ type: "system", subtype: "status", status: "compacting" }, state), [{ type: "context-compacting" }]);
   assert.deepEqual(
     mapClaudeMessage({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: 190_000, post_tokens: 20_000 } }, state),
     [
-      { type: "step-completed", id: "compact-1", status: "done", title: "Compacted context" },
       { type: "context-compacted", trigger: "auto", before: 190_000, after: 20_000 },
       { type: "context-usage", used: 20_000, size: 200_000 },
     ],
@@ -121,6 +121,15 @@ test("Claude: usage fills the context gauge once a result names the window, and 
   assert.deepEqual(mapClaudeMessage({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "manual", pre_tokens: 190_000 } }, state), [
     { type: "context-compacted", trigger: "manual", before: 190_000 },
   ]);
+});
+
+test("Claude child compaction never adds a divider to the parent Chat", () => {
+  const state = claudeState();
+  assert.deepEqual(mapClaudeMessage({ type: "system", subtype: "status", status: "compacting", parent_tool_use_id: "child" }, state), []);
+  assert.deepEqual(
+    mapClaudeMessage({ type: "system", subtype: "compact_boundary", parent_tool_use_id: "child", compact_metadata: { trigger: "auto" } }, state),
+    [],
+  );
 });
 
 test("Antigravity's CLI failures point at Milagre Settings, not a shell command", () => {

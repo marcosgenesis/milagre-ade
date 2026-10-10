@@ -142,13 +142,11 @@ function mapClaudeMessage(message, state) {
     events.push({ type: "session-started", nativeId: message.session_id });
   }
   // Claude Code compacts the conversation when the context window fills: a status, then a boundary.
-  if (message.type === "system" && message.subtype === "status" && message.status === "compacting" && !state.compacting) {
-    state.compactCount = (state.compactCount ?? 0) + 1;
-    state.compacting = `compact-${state.compactCount}`;
-    events.push({ type: "step-started", step: { id: state.compacting, kind: "other", title: "Compacting context" } });
+  if (message.parent_tool_use_id == null && message.type === "system" && message.subtype === "status" && message.status === "compacting" && !state.compacting) {
+    state.compacting = true;
+    events.push({ type: "context-compacting" });
   }
-  if (message.type === "system" && message.subtype === "compact_boundary") {
-    if (state.compacting) events.push({ type: "step-completed", id: state.compacting, status: "done", title: "Compacted context" });
+  if (message.parent_tool_use_id == null && message.type === "system" && message.subtype === "compact_boundary") {
     state.compacting = null;
     const { trigger, pre_tokens: before, post_tokens: after } = message.compact_metadata ?? {};
     events.push({
@@ -266,6 +264,15 @@ function mapCodexNotification(method, params, state) {
   if ((method === "item/started" || method === "item/completed") && params.item) {
     // An item from an earlier turn is not part of this reply.
     if (state.turnId && params.turnId && params.turnId !== state.turnId) return [];
+    if (params.item.type === "contextCompaction") {
+      state.compactions ??= new Map();
+      const id = String(params.item.id);
+      const status = method === "item/started" ? "preparing" : "done";
+      const previous = state.compactions.get(id);
+      if (previous === "done" || previous === status) return [];
+      state.compactions.set(id, status);
+      return status === "preparing" ? [{ type: "context-compacting" }] : [{ type: "context-compacted", trigger: "auto" }];
+    }
     if (params.item.type === "reasoning") return codexReasoning(method, params.item, state);
     const step = codexStep(params.item);
     if (!step) return [];

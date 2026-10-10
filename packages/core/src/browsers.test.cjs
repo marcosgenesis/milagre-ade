@@ -155,6 +155,24 @@ test("attach is explicit, per Chat, and refuses browsers another Chat started", 
   assert.equal(viewer.target.title, "Mine");
 });
 
+test("detach ends only this Chat's attachment and its viewers of that browser", async (t) => {
+  const f = fixture(t);
+  await f.service.attach({ chatId: "chat-b", browserId: OTHER });
+  await f.service.attach({ chatId: "chat-c", browserId: OTHER });
+  const mine = await f.service.open({ chatId: "chat-b", targetId: target(FOREIGN, OTHER) }, "owner-b");
+  const theirs = await f.service.open({ chatId: "chat-c", targetId: target(FOREIGN, OTHER) }, "owner-c");
+  await assert.rejects(f.service.detach({ chatId: "chat-a", browserId: BROWSER }), /not attached/i, "a browser the agent started is not an attachment");
+  await assert.rejects(f.service.detach({ chatId: "chat-b", browserId: BROWSER }), /not attached/i);
+  const after = await f.service.detach({ chatId: "chat-b", browserId: OTHER });
+  assert.deepEqual(after.targets, []);
+  assert.equal(after.others.length, 1, "the browser is offered for attach again");
+  await assert.rejects(f.service.status({ viewerId: mine.viewerId }, "owner-b"), /viewer/i, "this Chat's viewer is closed");
+  assert.equal((await f.service.status({ viewerId: theirs.viewerId }, "owner-c")).ready, true, "the other Chat's viewer keeps running");
+  assert.equal(f.channels[0].closed, false, "the shared capture stays while another viewer uses it");
+  assert.equal((await f.service.list({ chatId: "chat-c" })).targets.length, 1, "the other Chat's attachment stays");
+  await assert.rejects(f.service.detach({ chatId: "chat-b", browserId: OTHER }), /not attached/i, "detaching twice fails plainly");
+});
+
 test("lineage is recorded in the background and ends another Chat's earlier attachment", async (t) => {
   const f = fixture(t, { lineagePollMs: 10 });
   // The browser is not under any agent yet: Chat B attaches it.

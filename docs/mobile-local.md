@@ -34,7 +34,7 @@ For a configured TURN service, start the daemon with `MILAGRE_SIMULATOR_TURN_URL
 2. Select the **Browser** pill left of Simulators. A single page opens directly; with several, choose one by its title and URL.
 3. Tap or click the page, swipe or scroll it, and use **Back**, **Forward**, **Reload** and **Keyboard**. Holding still for a moment before moving drags instead of scrolling.
 
-The pill lists only pages of browsers this Chat's agent started. Another browser on the computer appears under **Other browsers on this computer** and joins the Chat only after **Attach**. Opening a page starts its capture; closing the viewer stops the capture and leaves the page and browser open. One viewer controls a page at a time; **Take control** moves control, but the agent can still act on the page. Frames travel over the existing phone connection, so no TURN service is needed. See [the design notes](research/remote-browser-control.md) for supported browsers and limits.
+The pill appears once this Chat has a page: one of a browser its agent started, or of a browser attached to the Chat by the agent (`browser_attach`) or by you. Another browser on the computer appears under **Other browsers on this computer** and joins the Chat only after **Attach**; **Detach** removes it again and leaves it running. Opening a page starts its capture; closing the viewer stops the capture and leaves the page and browser open. One viewer controls a page at a time; **Take control** moves control, but the agent can still act on the page. Frames travel over the existing phone connection, so no TURN service is needed. See [the design notes](research/remote-browser-control.md) for supported browsers and limits.
 
 ## Try the demo
 

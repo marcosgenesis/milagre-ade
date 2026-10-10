@@ -302,6 +302,21 @@ function createBrowsers(options = {}) {
       attachments.set(chatId, set);
       return view(world, chatId);
     },
+    /** Ends this Chat's attachment and its viewers of that browser. The browser, its pages and other Chats' attachments stay. */
+    async detach(request) {
+      if (closed) throw new Error("Browser service is closed.");
+      const chatId = requireChat(request);
+      if (!supported) throw new Error("Browser viewing is not supported on this computer.");
+      const browserId = typeof request.browserId === "string" && BROWSER.test(request.browserId) ? request.browserId : null;
+      const set = attachments.get(chatId);
+      if (!browserId || !set?.has(browserId)) throw new Error("This browser is not attached to this Chat. Refresh the list.");
+      set.delete(browserId);
+      if (!set.size) attachments.delete(chatId);
+      await serial(async () => {
+        for (const v of [...viewers.values()]) if (v.chatId === chatId && v.capture.key.startsWith(`${browserId}:`)) await remove(v);
+      });
+      return view(await snapshot(), chatId);
+    },
     async open(request, owner) {
       const ownership = ownerState(owner);
       return serial(async () => {
@@ -333,7 +348,7 @@ function createBrowsers(options = {}) {
         const id = identifier();
         ownership.count++;
         owners.set(owner, ownership);
-        viewers.set(id, { id, owner, ownerState: ownership, capture, sequence: -1, heartbeat: now(), rateAt: now(), inputTokens: 240, waiting: false });
+        viewers.set(id, { id, owner, chatId, ownerState: ownership, capture, sequence: -1, heartbeat: now(), rateAt: now(), inputTokens: 240, waiting: false });
         capture.viewers.add(id);
         return { viewerId: id, target: { ...target } };
       });

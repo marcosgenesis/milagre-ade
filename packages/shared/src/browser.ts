@@ -33,6 +33,7 @@ export type BrowserInput =
 export interface BrowserApi {
   list(request: { chatId: string }): Promise<BrowserList>;
   attach(request: { chatId: string; browserId: string }): Promise<BrowserList>;
+  detach(request: { chatId: string; browserId: string }): Promise<BrowserList>;
   open(request: { chatId: string; targetId: string }): Promise<BrowserOpen>;
   frame(request: { viewerId: string; after: number }): Promise<BrowserFrame | null>;
   status(request: { viewerId: string }): Promise<BrowserStatus>;
@@ -40,5 +41,5 @@ export interface BrowserApi {
   input(request: { viewerId: string; sequence: number; generation: number; event: BrowserInput }): Promise<{ accepted: boolean }>;
   close(request: { viewerId: string }): Promise<null>;
 }
-export type BrowserMethod = Exclude<keyof BrowserApi, "list" | "attach">;
+export type BrowserMethod = Exclude<keyof BrowserApi, "list" | "attach" | "detach">;
 export type BrowserRpcResponse = { channel: "milagre-browser"; id: number; result?: unknown; error?: string };

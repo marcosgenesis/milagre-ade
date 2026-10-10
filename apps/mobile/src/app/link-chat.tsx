@@ -52,7 +52,7 @@ export default function LinkChat() {
         <View style={{ minWidth: 64 }} />
       </View>
       <Text numberOfLines={2} style={[styles.text, { textAlign: "center", fontWeight: "500" }]}>
-        {linkSummary(source, target)}
+        {linkSummary(source, target, projects ? scope : "worktrees")}
       </Text>
       <View accessibilityRole="radiogroup" style={{ borderRadius: 12, borderCurve: "continuous", backgroundColor: colors.surface, padding: 4 }}>
         {scopes.map((item, index) => {

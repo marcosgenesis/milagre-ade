@@ -91,6 +91,7 @@ test("the picker lists every other Chat and disables the ones that can't be link
 
 test("the confirmation's copy names both Chats and reads Create Link and ask once there is text", () => {
   assert.equal(linkSummary(login, docs), "login-form ⇄ Docs");
+  assert.equal(linkSummary(login, api, "projects"), "web ⇄ api");
   assert.equal(projectsScopeSubtitle(login, api), "Every Worktree of web and api, new ones too");
   assert.equal(createLinkTitle("  "), "Create Link");
   assert.equal(createLinkTitle("Add the endpoint"), "Create Link and ask");

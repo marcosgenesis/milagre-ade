@@ -96,8 +96,12 @@ export function linkPickerItems(links: readonly CanvasLink[], source: LinkChat, 
     });
 }
 
-/** The confirmation's summary line, "login-form ⇄ api-auth", with a Chat's title when it has no branch. */
-export const linkSummary = (source: LinkChat, target: LinkChat) => `${source.branch || source.title} ⇄ ${target.branch || target.title}`;
+/**
+ * The confirmation's summary line, "login-form ⇄ api-auth", with a Chat's title when it has no branch. Linking the whole
+ * Projects names the Projects instead, "web ⇄ api", as desktop's popover does.
+ */
+export const linkSummary = (source: LinkChat, target: LinkChat, scope: LinkScope = "worktrees") =>
+  scope === "projects" ? `${source.projectName} ⇄ ${target.projectName}` : `${source.branch || source.title} ⇄ ${target.branch || target.title}`;
 export const projectsScopeSubtitle = (source: LinkChat, target: LinkChat) => `Every Worktree of ${source.projectName} and ${target.projectName}, new ones too`;
 export const createLinkTitle = (text: string) => (text.trim() ? "Create Link and ask" : "Create Link");
 

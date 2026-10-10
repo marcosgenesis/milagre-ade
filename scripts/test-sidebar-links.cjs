@@ -17,7 +17,7 @@ import { DESKTOP_CHAT_ROW_SHOW } from "@milagre/shared/chat-row";
 import "/src/styles.css";
 let links = [];
 const changed = [];
-window.calls = { added: [], removed: [], grants: [], asked: [] };
+window.calls = { added: [], removed: [], grants: [], asked: [], restored: [] };
 const web = {
   sessions: {
     7: { id: 7, worktree_id: 1, agent_name: "Claude", status: "Idle", summary: { count: 1, firstId: 7, lastId: 7, titleLine: "Web login form", lastAt: Date.now() } },
@@ -56,6 +56,12 @@ window.milagre = {
     return [...links];
   },
   grantDelegations: async (chatId, linkId) => { window.calls.grants.push([chatId, linkId]); },
+  restoreLink: async (link) => {
+    window.calls.restored.push(link.id);
+    links.push(link);
+    emit();
+    return [...links];
+  },
 };
 localStorage.removeItem("milagre.sidebarClosedScopes");
 updateSettings({ legacySidebar: false, chatRowShow: DESKTOP_CHAT_ROW_SHOW });
@@ -264,10 +270,11 @@ async function browserChecks() {
     await waitFor(`!document.querySelector('${rowSelector("/work/web", "7")} [data-chat-linked]')`);
     await clickSelector("[data-chat-toast-undo]");
     await waitFor(`!!document.querySelector('${rowSelector("/work/web", "7")} [data-chat-linked]')`);
-    assert.deepEqual((await calls()).added[2], [{ project_id: "p-api" }, { project_id: "p-web" }], "Undo links them again");
+    assert.deepEqual((await calls()).restored, ["l2"], "Undo restores the same Link, so its Always allow grant still matches");
+    assert.equal((await calls()).added.length, 2, "Undo makes no new Link");
 
     // Then "Link with…" picks a chat with the keyboard: the filter, Enter, and the popover for that chat.
-    await evaluate("window.milagre.removeLink('l3')");
+    await evaluate("window.milagre.removeLink('l2')");
     await openMenu("/work/api", "1");
     await evaluate(`${menuItem("Link with…")}.click()`);
     await waitFor('!!document.querySelector("[data-link-picker=link]")');
@@ -282,7 +289,7 @@ async function browserChecks() {
     assert.match(await text("[data-link-sides]"), /alpha.*charlie/);
     window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
     await waitFor('!document.querySelector("[data-link-popover]")');
-    assert.equal((await calls()).added.length, 3, "Escape creates nothing");
+    assert.equal((await calls()).added.length, 2, "Escape creates nothing");
 
     assert.deepEqual(errors, []);
     console.log("PASS: sidebar Links: scope choice, Always allow, Link and ask, row icons, hover card, Link with… and Remove Link with…");

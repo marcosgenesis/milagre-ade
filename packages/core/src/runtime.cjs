@@ -1535,6 +1535,10 @@ function createRuntime(options) {
     await linked.linkRemoved(id);
     return linksChanged();
   });
+  commands.handle("canvas:link-restore", async (_event, link) => {
+    await projectRegistry().restoreLink(link, await canvasActiveWorktrees());
+    return linksChanged();
+  });
   // The Links alone, for the sidebar's and the phone's chat rows, without every Project's state the canvas reads.
   commands.handle("canvas:links", async () => {
     await pruneLinks(await canvasActiveWorktrees());

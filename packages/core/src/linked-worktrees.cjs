@@ -164,7 +164,13 @@ function createLinkedWorktrees({
         const state = await project(side.projectPath);
         const worktree = Object.values(state.worktrees).find((item) => item.path === worktreePath);
         if (worktree?.sharedChat) throw new Error("Delegation into a shared Link Chat is not supported. Read its canonical transcript instead.");
-        return { link_id: side.link_id, projectPath: side.projectPath, projectName: side.projectName, branch: worktree?.name ?? path.basename(worktreePath) };
+        return {
+          link_id: side.link_id,
+          link_ids: side.link_ids ?? [side.link_id],
+          projectPath: side.projectPath,
+          projectName: side.projectName,
+          branch: worktree?.name ?? path.basename(worktreePath),
+        };
       },
       chat,
       async openChat(projectPath, worktreePath) {

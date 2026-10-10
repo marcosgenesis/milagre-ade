@@ -176,6 +176,7 @@ function makeBridge(invoke, listen, send) {
     getCanvas: () => invoke("canvas:snapshot"),
     addLink: (a, b) => invoke("canvas:link-add", a, b),
     removeLink: (id) => invoke("canvas:link-remove", id),
+    restoreLink: (link) => invoke("canvas:link-restore", link),
     getLinks: () => invoke("canvas:links"),
     onLinksChanged: (callback) => listen("canvas:links-changed", (payload) => callback(payload.links)),
     grantDelegations: (chatId, linkId) => invoke("linked:grant", chatId, linkId),

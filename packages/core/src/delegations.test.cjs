@@ -676,9 +676,26 @@ test("a grant set before the agent asks covers that Link in that Chat, as Always
   await delegations.grant("/api#1", "link-1");
   await delegations.grant("/api#1", "link-1");
   assert.deepEqual(saved.at(-1).grants, ["/api#1\0link-1"], "saved once");
-  assert.equal(await delegations.approval("/api#1", "link-1", { target: "web", message: "x" }), "allow");
+  assert.equal(await delegations.approval("/api#1", ["link-1"], { target: "web", message: "x" }), "allow");
   assert.equal(asked, 0, "no card for the granted Link");
-  assert.equal(await delegations.approval("/api#1", "link-2", { target: "web", message: "x" }), "deny", "another Link still asks");
-  assert.equal(await delegations.approval("/api#2", "link-1", { target: "web", message: "x" }), "deny", "another Chat still asks");
+  assert.equal(await delegations.approval("/api#1", ["link-2"], { target: "web", message: "x" }), "deny", "another Link still asks");
+  assert.equal(await delegations.approval("/api#2", ["link-1"], { target: "web", message: "x" }), "deny", "another Chat still asks");
   await assert.rejects(delegations.grant("", "link-1"), /Choose a Chat/);
+});
+
+test("a grant on any Link that reaches the destination covers it, when an older Link reaches it first", async () => {
+  // A1↔B1 was linked first; then the whole Projects were linked with Always allow. Routing names the older Link.
+  const { delegations, ports } = desk({
+    target: async () => ({ link_id: "older", link_ids: ["older", "projects"], projectPath: "/web", projectName: "web", branch: "main" }),
+  });
+  ports.permissionMode = () => "ask";
+  let asked = 0;
+  ports.approve = async () => {
+    asked++;
+    return "deny";
+  };
+  await delegations.grant("/api#1", "projects");
+  const result = await delegations.delegate("/api#1", { worktree: "/web", chat: "new", message: "Wire the form" });
+  assert.equal(asked, 0, "no card: the whole-Projects Link is always allowed");
+  assert.match(String(result), /./);
 });

@@ -221,7 +221,11 @@ export function SidebarLinksProvider({
       setLinks(await bridge.removeLink(link.id));
       if (offerUndo)
         showToast("Link removed", {
-          undo: () => void bridge.addLink(link.a, link.b).then(setLinks, (error) => showToast(`Could not link them again: ${ipcErrorMessage(error)}`)),
+          // The same Link comes back, id and all, so an Always allow grant on it holds again. A Mac before restore makes a new one.
+          undo: () =>
+            void (bridge.restoreLink ? bridge.restoreLink(link) : bridge.addLink(link.a, link.b)).then(setLinks, (error) =>
+              showToast(`Could not link them again: ${ipcErrorMessage(error)}`),
+            ),
         });
     } catch (error) {
       showToast(`Could not remove the Link: ${ipcErrorMessage(error)}`);

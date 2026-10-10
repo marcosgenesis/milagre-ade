@@ -436,6 +436,10 @@ test("canvas Links survive runtime restart and worktree:remove clears their endp
   const grants = JSON.parse(await fs.readFile(path.join(dataDir, "delegations.json"), "utf8")).grants;
   assert.deepEqual(grants, [`${project}#${anySession.id}\0${added[0].id}`]);
   await assert.rejects(first.invoke("linked:grant", [`${project}#${anySession.id}`, "gone"]), /no longer exists/);
+  // Undo of a removal restores the same Link, so its grant still matches it.
+  await first.invoke("canvas:link-remove", [added[0].id]);
+  assert.deepEqual(await first.invoke("canvas:link-restore", [added[0]]), added);
+  await assert.rejects(first.invoke("canvas:link-restore", [added[0]]), /already exists/);
   await first.invoke("chat:patch", [project, anySession.id, { title: "Saved" }]);
   await first.close();
   // Milagre records the base of a worktree it made; this one was added by git, so the test records it.

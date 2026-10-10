@@ -73,19 +73,19 @@ function Link({ href, children }: { href?: string; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const file = href ? localFileLink(href, root ?? undefined) : null;
   const scope = useScope();
-  
+
   if (!file)
     return (
       <a href={href} title={href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
         {children}
       </a>
     );
-  
+
   const name = file.path.split("/").pop() || file.path;
   const kind = mediaKind(file.path);
   const remote = isRemoteKey(scope);
   const supportedMedia = kind && (!remote || kind === "image");
-  
+
   return (
     <>
       <a

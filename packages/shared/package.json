@@ -33,7 +33,8 @@
     "src/agent-activity.ts",
     "src/advisor-result.ts",
     "src/themes/*.ts",
-    "src/themes/palettes/*.ts"
+    "src/themes/palettes/*.ts",
+    "src/genui-renderer.tsx"
   ],
   "type": "module",
   "exports": {
@@ -195,7 +196,8 @@
     "./agent-activity": "./src/agent-activity.ts",
     "./advisor-result": "./src/advisor-result.ts",
     "./themes": "./src/themes/index.ts",
-    "./chat-row": "./src/chat-row.ts"
+    "./chat-row": "./src/chat-row.ts",
+    "./genui-renderer": "./src/genui-renderer.tsx"
   },
   "scripts": {
     "test": "node --test src/*.test.ts src/*.test.mjs",
@@ -209,5 +211,8 @@
   },
   "devDependencies": {
     "typescript": "~6.0.3"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   }
 }

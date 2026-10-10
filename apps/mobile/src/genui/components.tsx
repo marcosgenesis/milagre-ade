@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Text, View } from "react-native";
-import { useIsStreaming, useTriggerAction } from "@openuidev/react-lang";
-import type { ComponentRenderProps } from "@openuidev/react-lang";
+import { useIsStreaming, useTriggerAction } from "@milagre/shared/genui-renderer";
+import type { ComponentRenderProps } from "@milagre/shared/genui-renderer";
 import type { GenuiComponentName, GenuiProps } from "@milagre/shared/genui";
 import { squareRows } from "@milagre/shared/genui";
 import { useTheme } from "../theme";
@@ -64,16 +64,19 @@ export const KeyValue: GenuiRenderer<"KeyValue"> = ({ props }) => {
 export const Table: GenuiRenderer<"Table"> = ({ props }) => {
   const { colors } = useTheme();
   const rows = squareRows(props.columns, props.rows);
-  const cellStyle = { paddingHorizontal: 10, paddingVertical: 6, minWidth: 80 } as const;
+  const widths = props.columns.map((column, index) =>
+    Math.min(240, Math.max(80, ...[column, ...rows.map((row) => row[index] ?? "")].map((cell) => cell.length * 8 + 20))),
+  );
+  const cellStyle = { paddingHorizontal: 10, paddingVertical: 6, flexGrow: 1 } as const;
   return (
     <View
       style={{ borderRadius: 12, borderCurve: "continuous", borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, overflow: "hidden" }}
     >
-      <PageScroll horizontal>
-        <View>
+      <PageScroll horizontal contentContainerStyle={{ padding: 0, paddingBottom: 0, flexGrow: 1 }}>
+        <View style={{ flexGrow: 1 }}>
           <View style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.line }}>
             {props.columns.map((column, index) => (
-              <Text key={index} style={[cellStyle, { color: colors.ink2, fontSize: 13, fontWeight: "500" }]}>
+              <Text key={index} style={[cellStyle, { width: widths[index], color: colors.ink2, fontSize: 13, fontWeight: "500" }]}>
                 {column}
               </Text>
             ))}
@@ -81,7 +84,7 @@ export const Table: GenuiRenderer<"Table"> = ({ props }) => {
           {rows.map((row, rowIndex) => (
             <View key={rowIndex} style={{ flexDirection: "row", borderBottomWidth: rowIndex < rows.length - 1 ? 1 : 0, borderBottomColor: colors.line }}>
               {row.map((cell, cellIndex) => (
-                <Text key={cellIndex} style={[cellStyle, { color: colors.ink, fontSize: 14 }]}>
+                <Text key={cellIndex} style={[cellStyle, { width: widths[cellIndex], color: colors.ink, fontSize: 14 }]}>
                   {cell}
                 </Text>
               ))}

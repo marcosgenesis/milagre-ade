@@ -1,4 +1,4 @@
-import { createLibrary, defineComponent } from "@openuidev/react-lang";
+import { createLibrary, defineComponent } from "@milagre/shared/genui-renderer";
 import { GENUI_ROOT, genuiDefinitions } from "@milagre/shared/genui";
 import { renderers } from "./components";
 

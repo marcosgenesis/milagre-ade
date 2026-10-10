@@ -1,6 +1,14 @@
 # Generative UI: agents answer with native tables, metrics, charts and buttons
 
-Date: 2026-10-10. Status: approved design, awaiting spec review.
+Date: 2026-10-10. Status: approved design, implemented.
+
+## Implementation correction
+
+Device verification found that `@openuidev/react-lang` 0.3.2's native export still mounts HTML `div` elements.
+Both apps instead use `packages/shared/src/genui-renderer.tsx`, a React adapter over `@openuidev/lang-core`.
+It mounts only the registered platform components, validates resolved props with the shared Zod schemas, enforces
+UTF-8 text and array caps, and dispatches only `@ToAssistant` steps. The DOM renderer dependency was removed.
+No native module or build changed. The platform components and fence/postback behavior below remain the contract.
 
 ## Goal
 

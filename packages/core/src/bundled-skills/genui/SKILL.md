@@ -54,3 +54,17 @@ later = Button("Later", Action([@ToAssistant("Not now")]), "secondary")
 ```
 
 A tapped button arrives as a user message with that text; answer it as you would any message.
+
+## More examples
+
+```openui
+root = Stack([title, description, note, progress, bars, trend])
+title = Heading("Checks this week")
+description = Text("Twelve checks passed today.", "muted")
+note = Callout("Two checks still need a review.", "warning", "Pending")
+progress = Progress("Verified", 0.85)
+bars = BarChart(["Mon", "Tue", "Wed"], [4, 7, 12], "Passing checks")
+trend = LineChart(["Mon", "Tue", "Wed"], [3, 2, 1], "Failing checks")
+```
+
+Keep each block within 64 KB of UTF-8 text. Over the row, column, point or text limit, the whole block shows as code.

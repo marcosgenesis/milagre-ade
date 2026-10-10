@@ -6209,7 +6209,7 @@ function genuiHost({ send = async () => true, streaming = false, withoutProvider
       react,
       "react/jsx-runtime": { jsx, jsxs: jsx },
       "react-native": { View: "View" },
-      "@openuidev/react-lang": { Renderer: "Renderer" },
+      "@milagre/shared/genui-renderer": { Renderer: "Renderer" },
       "@milagre/shared/genui": require("../packages/shared/src/genui.ts"),
       "./library": { genuiLibrary: "library" },
     },
@@ -6280,7 +6280,7 @@ test("the phone library binds a renderer to every component of the contract and 
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "react-native": { Text: "Text", View: "View" },
     "react-native-svg": { default: "Svg", Circle: "Circle", Polyline: "Polyline", Rect: "Rect", Text: "SvgText" },
-    "@openuidev/react-lang": {
+    "@milagre/shared/genui-renderer": {
       useTriggerAction:
         () =>
         (...args) =>
@@ -6300,7 +6300,7 @@ test("the phone library binds a renderer to every component of the contract and 
   assert.deepEqual(Object.keys(components.renderers), Object.keys(GENUI_COMPONENTS));
   const action = { steps: [{ type: "continue_conversation", message: "Go" }] };
   const button = components.renderers.Button({ props: { label: "Go", action }, renderNode: () => null });
-  button.props.onPress();
+  find(button, (node) => node.type === "Button").props.onPress();
   assert.deepEqual(triggered, [["Go", undefined, action]]);
   const table = components.renderers.Table({ props: { columns: ["a", "b"], rows: [["1"]] }, renderNode: () => null });
   assert.match(JSON.stringify(table), /"1"/);

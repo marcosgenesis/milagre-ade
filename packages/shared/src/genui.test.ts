@@ -98,3 +98,42 @@ test("the prompt names the button action by its tag instead of spelling out the 
   assert.ok(button.includes("ActionExpression"), button);
   assert.equal(button.includes("continue_conversation"), false, button);
 });
+
+test("the rendering parser evaluates actions, normalizes table cells, and enforces caps before rendering", async () => {
+  const { parseGenui } = await import("./genui.ts");
+  const result = parseGenui(
+    'root = Stack([table, go])\ntable = Table(["A", "B"], [[4], ["a", "b", "c"]])\ngo = Button("Go", Action([@ToAssistant("Go now")]))',
+  );
+  const children = result.root!.props.children as { props: Record<string, unknown> }[];
+  assert.deepEqual(children[0]!.props.rows, [
+    ["4", ""],
+    ["a", "b"],
+  ]);
+  assert.deepEqual(children[1]!.props.action, { steps: [{ type: "continue_conversation", message: "Go now", context: undefined }] });
+  for (const expr of [
+    `Table(["A"], ${JSON.stringify(Array.from({ length: 201 }, () => ["x"]))})`,
+    `Table(${JSON.stringify(Array.from({ length: 13 }, () => "x"))}, [])`,
+    `BarChart([], ${JSON.stringify(Array.from({ length: 101 }, () => 1))})`,
+  ])
+    assert.equal(parseGenui(`root = Stack([${expr}])`).root, null);
+});
+
+test("the text cap counts UTF-8 bytes and disabled action types produce no postback", async () => {
+  const { genuiTextOverLimit, genuiActionEvents } = await import("./genui.ts");
+  assert.equal(genuiTextOverLimit("é".repeat(32768)), false);
+  assert.equal(genuiTextOverLimit("é".repeat(32769)), true);
+  assert.equal(genuiTextOverLimit("😀".repeat(16385)), true);
+  assert.deepEqual(
+    genuiActionEvents("Go", {
+      steps: [
+        { type: "set", target: "x", valueAST: {} },
+        { type: "open_url", url: "https://example.com" },
+        { type: "run", statementId: "q" },
+      ],
+    }),
+    [],
+  );
+  assert.deepEqual(genuiActionEvents("Go", { steps: [{ type: "continue_conversation", message: "Go now" }] }), [
+    { type: "continue_conversation", params: {}, humanFriendlyMessage: "Go now" },
+  ]);
+});

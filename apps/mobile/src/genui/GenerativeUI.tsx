@@ -1,9 +1,9 @@
 import { Component, createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { View } from "react-native";
-import { Renderer } from "@openuidev/react-lang";
-import type { ActionEvent, ParseResult } from "@openuidev/react-lang";
-import { GENUI_ACTION_TYPE, genuiLimits } from "@milagre/shared/genui";
+import { Renderer } from "@milagre/shared/genui-renderer";
+import type { ActionEvent, ParseResult } from "@milagre/shared/genui-renderer";
+import { GENUI_ACTION_TYPE, genuiTextOverLimit } from "@milagre/shared/genui";
 import { genuiLibrary } from "./library";
 
 type Send = (text: string) => Promise<boolean | "busy">;
@@ -35,7 +35,7 @@ export function GenerativeUI({ code, fallback }: { code: string; fallback: React
   const [rootless, setRootless] = useState(false);
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
-  const onParseResult = useCallback((result: ParseResult | null) => setRootless(!result?.root), []);
+  const onParseResult = useCallback((result: ParseResult | null) => setRootless(!result?.root || !!result.meta.incomplete), []);
   const onAction = useCallback(
     async (event: ActionEvent) => {
       if (event.type !== GENUI_ACTION_TYPE || !send || sending.current || !event.humanFriendlyMessage) return;
@@ -52,7 +52,7 @@ export function GenerativeUI({ code, fallback }: { code: string; fallback: React
     },
     [send],
   );
-  if (code.length > genuiLimits.text) return <>{fallback}</>;
+  if (genuiTextOverLimit(code)) return <>{fallback}</>;
   if (rootless && !streaming) return <>{fallback}</>;
   return (
     <Boundary fallback={fallback}>

@@ -21,7 +21,7 @@ later = Button("Later", Action([@ToAssistant("Not now")]), "secondary")
 const broken = "```openui\nthis is not a program\n```";
 // A second finished block in the same reply, behind a fence word in another case, with a button of its own.
 const second =
-  '```OpenUI\nroot = Stack([title, go])\ntitle = Heading("Upper case fence")\ngo = Button("Second block", Action([@ToAssistant("Second block")]))\n```';
+  '```OpenUI\nroot = Stack([title, description, trend, go])\ntitle = Heading("Upper case fence")\ndescription = Text("Failures this week", "muted")\ntrend = LineChart(["Mon", "Tue", "Wed"], [3, 2, 1], "Failing checks")\ngo = Button("Second block", Action([@ToAssistant("Second block")]))\n```';
 // Over the cap (genuiLimits.text, 64 KB): a code block, never a block.
 const oversize = '```openui\nroot = Stack([title])\ntitle = Heading("' + "a".repeat(65537) + '")\n```';
 // An open fence that has no program in it yet.
@@ -131,12 +131,14 @@ async function browserChecks() {
     assert.equal(await evaluate(`${blocks}[0].querySelectorAll("[data-slot=genui-chart] rect").length`), 3);
     // The fence word is matched without regard to case, and a second block of the same reply is its own block.
     assert.match(await evaluate(`${blocks}[1].textContent`), /Upper case fence/);
+    assert.equal(await evaluate(`${blocks}[1].querySelectorAll("[data-slot=genui-chart] circle").length`), 3);
+    assert.match(await evaluate(`${blocks}[1].textContent`), /Failures this week/);
     // The broken block is a code block, with its text intact.
     assert.match(await evaluate(`[...${pres}].map((p) => p.textContent).join("|")`), /this is not a program/);
     // A block over the cap is a code block with all its text, not a block.
     assert.equal(await evaluate(`[...${pres}].some((p) => p.textContent.length > 65536)`), true);
     assert.equal(await evaluate(`[...${blocks}].some((block) => block.textContent.includes("aaaa"))`), false);
-    // react-lang's own dev widget is kept off the page (the flag has to be set before react-lang loads).
+    // Generated UI never mounts a developer widget.
     await delay(500);
     assert.equal(await evaluate('document.querySelector("[data-openui-devtools-auto-mount]")'), null);
     // Outside a chat nothing can receive a button's message: the block draws, its buttons are disabled.
@@ -209,7 +211,7 @@ async function main() {
   const server = await createServer({
     server: { host: "127.0.0.1", port: 0 },
     // The fixture is a virtual module Vite cannot pre-scan; without this the first (cold) load re-optimizes these and reloads the page.
-    optimizeDeps: { include: ["@openuidev/react-lang", "@openuidev/lang-core", "zod"] },
+    optimizeDeps: { include: ["@openuidev/lang-core", "zod"] },
     plugins: [
       {
         name: "genui-fixture",

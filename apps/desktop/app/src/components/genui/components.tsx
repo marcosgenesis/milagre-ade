@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { useIsStreaming, useTriggerAction } from "@openuidev/react-lang";
-import type { ComponentRenderProps } from "@openuidev/react-lang";
+import { useIsStreaming, useTriggerAction } from "@milagre/shared/genui-renderer";
+import type { ComponentRenderProps } from "@milagre/shared/genui-renderer";
 import { squareRows } from "@milagre/shared/genui";
 import type { GenuiComponentName, GenuiProps } from "@milagre/shared/genui";
 import { ScrollArea } from "../primitives/ScrollArea";
@@ -104,7 +104,7 @@ export const Button: GenuiRenderer<"Button"> = ({ props }) => {
       data-slot="genui-button"
       disabled={streaming}
       onClick={() => trigger(props.label, undefined, props.action as never)}
-      className={`inline-flex items-center rounded-control px-3 py-1.5 text-[13px] font-medium transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40 ${secondary ? "border border-line bg-surface text-ink" : "bg-ink text-surface"}`}
+      className={`inline-flex self-start items-center rounded-control px-3 py-1.5 text-[13px] font-medium transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-40 ${secondary ? "border border-line bg-surface text-ink" : "bg-ink text-surface"}`}
     >
       {props.label}
     </button>

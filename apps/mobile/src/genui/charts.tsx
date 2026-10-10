@@ -50,7 +50,7 @@ export function BarChart({ labels, values, title }: GenuiProps<"BarChart">) {
           fill={colors.accent}
         />
       ))}
-      <Labels labels={labels} slot={slot} color={colors.ink3} />
+      <Labels labels={labels.slice(0, values.length)} slot={slot} color={colors.ink3} />
     </Frame>
   );
 }
@@ -65,7 +65,7 @@ export function LineChart({ labels, values, title }: GenuiProps<"LineChart">) {
       {values.map((value, index) => (
         <Circle key={index} cx={PAD.left + slot * index + slot / 2} cy={y(value)} r={2.5} fill={colors.accent} />
       ))}
-      <Labels labels={labels} slot={slot} color={colors.ink3} />
+      <Labels labels={labels.slice(0, values.length)} slot={slot} color={colors.ink3} />
     </Frame>
   );
 }

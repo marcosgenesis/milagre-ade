@@ -1,10 +1,8 @@
-// oxlint-disable-next-line import/no-unassigned-import -- before every react-lang import: it reads the devtools flag as it loads
-import "./no-devtools";
 import { Component, createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Renderer } from "@openuidev/react-lang";
-import type { ActionEvent, ParseResult } from "@openuidev/react-lang";
-import { GENUI_ACTION_TYPE, genuiLimits } from "@milagre/shared/genui";
+import { Renderer } from "@milagre/shared/genui-renderer";
+import type { ActionEvent, ParseResult } from "@milagre/shared/genui-renderer";
+import { GENUI_ACTION_TYPE, genuiTextOverLimit } from "@milagre/shared/genui";
 import { genuiLibrary } from "./library";
 
 type Send = (text: string) => Promise<boolean>;
@@ -40,7 +38,7 @@ export function GenerativeUI({ code, fallback }: { code: string; fallback: React
   const [busy, setBusy] = useState(false);
   // A second tap while the first send is in flight must not send again; state alone is stale within the same tick.
   const sending = useRef(false);
-  const onParseResult = useCallback((result: ParseResult | null) => setRootless(!result?.root), []);
+  const onParseResult = useCallback((result: ParseResult | null) => setRootless(!result?.root || !!result.meta.incomplete), []);
   const onAction = useCallback(
     async (event: ActionEvent) => {
       if (event.type !== GENUI_ACTION_TYPE || !onSend || sending.current || !event.humanFriendlyMessage) return;
@@ -57,7 +55,7 @@ export function GenerativeUI({ code, fallback }: { code: string; fallback: React
     },
     [onSend],
   );
-  if (code.length > genuiLimits.text) return <>{fallback}</>;
+  if (genuiTextOverLimit(code)) return <>{fallback}</>;
   const empty = rootless && !streaming;
   return (
     <Boundary fallback={fallback}>

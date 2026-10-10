@@ -49,7 +49,7 @@ export function BarChart({ labels, values, title }: GenuiProps<"BarChart">) {
           </rect>
         );
       })}
-      <Labels labels={labels} slot={slot} />
+      <Labels labels={labels.slice(0, values.length)} slot={slot} />
     </Frame>
   );
 }
@@ -65,7 +65,7 @@ export function LineChart({ labels, values, title }: GenuiProps<"LineChart">) {
           <title>{`${labels[index] ?? ""}: ${value}`}</title>
         </circle>
       ))}
-      <Labels labels={labels} slot={slot} />
+      <Labels labels={labels.slice(0, values.length)} slot={slot} />
     </Frame>
   );
 }

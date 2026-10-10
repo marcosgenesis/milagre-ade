@@ -1,6 +1,4 @@
-// oxlint-disable-next-line import/no-unassigned-import -- must precede every react-lang import: it keeps react-lang from mounting its dev widget
-import "./no-devtools";
-import { createLibrary, defineComponent } from "@openuidev/react-lang";
+import { createLibrary, defineComponent } from "@milagre/shared/genui-renderer";
 import { GENUI_ROOT, genuiDefinitions } from "@milagre/shared/genui";
 import { renderers } from "./components";
 

@@ -1,3 +1,4 @@
+import { AiConsentDialog } from "./components/AiConsent";
 import { UpdateShell, useAppUpdates } from "./components/UpdateNotice";
 import { ComputerAllowPrompt } from "./components/ComputerAllowPrompt";
 import { LinkWorkspace } from "./components/LinkWorkspace";
@@ -2540,6 +2541,7 @@ export default function AppWithUpdates() {
       <App />
       {/* Beside the app, so it asks whatever screen is open, Settings and Links included. */}
       <ComputerAllowPrompt />
+      <AiConsentDialog />
     </UpdateShell>
   );
 }

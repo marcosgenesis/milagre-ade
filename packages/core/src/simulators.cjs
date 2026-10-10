@@ -127,6 +127,7 @@ function createSimulators(options = {}) {
       generation: device.generation,
       controlling: device.controller === v.id,
       ready: state.ready,
+      ...(state.inputBlocked ? { inputBlocked: true } : {}),
     };
   }
   async function remove(v) {
@@ -297,6 +298,18 @@ function createSimulators(options = {}) {
         }
         v.heartbeat = now();
         return { accepted: true };
+      });
+    },
+    repair(request, owner) {
+      return serial(async () => {
+        const v = await active(request, owner),
+          device = v.device;
+        if (device.controller !== v.id) throw new Error("Take control of the simulator before fixing its input.");
+        if (device.platform !== "ios") throw new Error("Input repair is available only on iOS simulators.");
+        await adapter.repairInput(device.id);
+        // backboardd restarted under the open channel; every viewer reopens on a fresh one.
+        for (const id of [...device.viewers]) await remove(viewers.get(id));
+        return null;
       });
     },
     closeViewer(request, owner) {

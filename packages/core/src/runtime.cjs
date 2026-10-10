@@ -167,7 +167,7 @@ function createRuntime(options) {
       if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
       return simulators[method](request);
     });
-  for (const method of ["open", "offer", "status", "control", "input", "close"]) {
+  for (const method of ["open", "offer", "status", "control", "input", "repair", "close"]) {
     commands.handle(`simulator:${method}`, (context, request) => {
       if (!context?.clientId) throw new Error("Simulator access requires an authenticated connection");
       return simulators[method === "close" ? "closeViewer" : method](request, context.clientId);

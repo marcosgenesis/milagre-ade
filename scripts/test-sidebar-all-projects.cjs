@@ -1,7 +1,7 @@
 // Browser check: by default (Experimental "Use legacy sidebar" off), the sidebar lists each recent Project and
 // Link with its chats, leaves out a hidden Project, shows and hides Projects from the chooser's checkboxes, marks exactly one open scope, shows each scope's ⋯ menu and New chat
 // label, pins and folds groups, opens another Project's chat and follows its live updates. Off, the project menu is
-// back on top. No agent calls.
+// back on top. The group order survives a restart (a page reload). No agent calls.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -20,11 +20,15 @@ const chat = (id, body) => ({
   messages: [{ id, session_id: id, role: "user", body }],
 });
 const listeners = [];
-let recent = [
-  { path: "/work/arketa", name: "arketa" },
-  { path: "/work/shop", name: "shop" },
-  { path: "/work/api", name: "api", hidden: true },
-];
+// The restart check sets the recent list's order in sessionStorage (it survives a reload) before it reloads the page.
+const restartRecent = JSON.parse(sessionStorage.getItem("restartRecent") ?? "null");
+let recent = restartRecent
+  ? restartRecent.map((path) => ({ path, name: path.split("/").at(-1), hidden: path === "/work/api" }))
+  : [
+      { path: "/work/arketa", name: "arketa" },
+      { path: "/work/shop", name: "shop" },
+      { path: "/work/api", name: "api", hidden: true },
+    ];
 window.milagre = {
   listRecentProjects: async () => recent,
   setProjectHidden: async (path, hidden) => {
@@ -56,6 +60,8 @@ window.milagre = {
 window.pushShop = (state) => listeners.forEach((callback) => callback({ path: "/work/shop", state }));
 window.showAll = (all) => updateSettings({ legacySidebar: !all });
 localStorage.removeItem("milagre.sidebarClosedScopes");
+// A restart keeps the saved group order; a first load starts clean.
+if (!restartRecent) localStorage.removeItem("milagre.sidebarScopeOrder");
 updateSettings({ legacySidebar: false, chatRowShow: DESKTOP_CHAT_ROW_SHOW });
 createRoot(document.getElementById("root")).render(
   <div style={{ display: "flex", height: "100vh", padding: "60px 12px 12px" }}>
@@ -96,7 +102,10 @@ async function browserChecks() {
     await delay(200);
   };
   // Other checks share this storage: leave the sidebar as they expect it.
-  const reset = () => evaluate(`window.showAll?.(false); localStorage.removeItem("milagre.sidebarClosedScopes")`).catch(() => {});
+  const reset = () =>
+    evaluate(
+      `window.showAll?.(false); localStorage.removeItem("milagre.sidebarClosedScopes"); localStorage.removeItem("milagre.sidebarScopeOrder"); sessionStorage.removeItem("restartRecent")`,
+    ).catch(() => {});
   const scopes = () => evaluate(`[...document.querySelectorAll("[data-sidebar-scope]")].map((node) => node.dataset.sidebarScope)`);
   // A folded group keeps its rows mounted (inert, zero height) so it can animate shut; they don't count as shown.
   const chats = (scope) =>
@@ -331,10 +340,44 @@ async function browserChecks() {
     );
     await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
     await waitFor(`!document.querySelector("[data-filters-panel]")`);
+    // The group order survives a restart: the page reloads (module state gone, storage kept) with the recent list in a new order.
+    const LINK = "milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+    const restart = async (recentPaths, expected, message) => {
+      await evaluate(`sessionStorage.setItem("restartRecent", ${JSON.stringify(JSON.stringify(recentPaths))})`);
+      await window.loadURL(process.argv[2]);
+      await waitFor(`document.querySelectorAll("[data-sidebar-scope]").length === ${expected.length}`);
+      await delay(150);
+      assert.deepEqual(await scopes(), expected, message);
+    };
+    const savedOrder = async () => JSON.parse(await evaluate(`localStorage.getItem("milagre.sidebarScopeOrder")`));
+    // Start from a known order: nothing saved, recent list arketa then shop.
+    await evaluate(`localStorage.removeItem("milagre.sidebarScopeOrder")`);
+    await restart(["/work/arketa", "/work/shop", "/work/api"], ["/work/arketa", "/work/shop", LINK], "With nothing saved, the groups follow the recent list");
+    assert.deepEqual(await savedOrder(), ["/work/arketa", "/work/shop"], "The order shown is saved");
+    await restart(
+      ["/work/shop", "/work/arketa", "/work/api"],
+      ["/work/arketa", "/work/shop", LINK],
+      "After a restart with shop most recent, the groups keep their saved order",
+    );
+    await screenshot("order-after-restart");
+    await restart(
+      ["/work/docs", "/work/shop", "/work/arketa", "/work/api"],
+      ["/work/docs", "/work/arketa", "/work/shop", LINK],
+      "A Project new since the last run goes on top, the rest keep their order",
+    );
+    assert.deepEqual(await savedOrder(), ["/work/docs", "/work/arketa", "/work/shop"]);
+    await restart(["/work/docs", "/work/arketa"], ["/work/docs", "/work/arketa", LINK], "A Project that is gone drops out");
+    assert.deepEqual(await savedOrder(), ["/work/docs", "/work/arketa"], "Its place is forgotten");
+    await restart(
+      ["/work/shop", "/work/docs", "/work/arketa"],
+      ["/work/shop", "/work/docs", "/work/arketa", LINK],
+      "Back again, it counts as new and goes on top",
+    );
+
     assert.deepEqual(errors, []);
     await reset();
     console.log(
-      "PASS: with the Experimental setting on, the sidebar lists each Project and Link with its chats, skips a hidden Project, chooses Projects with checkboxes, marks one open scope, offers New chat per scope and Remove only on other Projects, pins chats to one Pinned section on top, opens them, marks Link chats waiting on the user, follows live changes, and folds groups; off, the old project menu returns",
+      "PASS: with the Experimental setting on, the sidebar lists each Project and Link with its chats, skips a hidden Project, chooses Projects with checkboxes, marks one open scope, offers New chat per scope and Remove only on other Projects, pins chats to one Pinned section on top, opens them, marks Link chats waiting on the user, follows live changes, folds groups, and keeps the group order across restarts; off, the old project menu returns",
     );
     app.exit(0);
   } catch (error) {

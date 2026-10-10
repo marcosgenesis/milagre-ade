@@ -1,3 +1,5 @@
+import { isGenuiFence } from "@milagre/shared/genui";
+import { GenerativeUI, MarkdownStreamingContext } from "./genui/GenerativeUI";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, Linking, Pressable, Text, View, type ImageSourcePropType, type TextStyle } from "react-native";
 import { router } from "expo-router";
@@ -209,9 +211,9 @@ function blocks(nodes: Node[], images: ImageOptions, t: MarkdownTheme): React.Re
   return nodes.map(({ token, children }, index) => {
     const key = `${token.type}-${index}`;
     if (token.type === "inline") return <View key={key}>{inlineContent(token.children || [], t, body, false, images)}</View>;
-    if (token.type === "fence" || token.type === "code_block")
-      return (
-        <View key={key} style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: "continuous", overflow: "hidden" }}>
+    if (token.type === "fence" || token.type === "code_block") {
+      const plain = (
+        <View style={{ backgroundColor: colors.field, borderRadius: 12, borderCurve: "continuous", overflow: "hidden" }}>
           {token.info && <Text style={[styles.label, { paddingHorizontal: 12, paddingTop: 10 }]}>{token.info}</Text>}
           <PageScroll horizontal contentContainerStyle={{ padding: 12, paddingBottom: 12 }}>
             <Text selectable style={styles.code}>
@@ -220,6 +222,12 @@ function blocks(nodes: Node[], images: ImageOptions, t: MarkdownTheme): React.Re
           </PageScroll>
         </View>
       );
+      return (
+        <View key={key}>
+          {token.type === "fence" && isGenuiFence(token.info) ? <GenerativeUI code={token.content.replace(/\n$/, "")} fallback={plain} /> : plain}
+        </View>
+      );
+    }
     if (token.type === "heading_open")
       return (
         <View key={key}>
@@ -278,7 +286,7 @@ const Chunk = memo(function Chunk({ text, streaming, media, basePath }: { text: 
   const { colors } = useTheme();
   const styles = useStyles();
   const nodes = useMemo(() => tree(markdownTokens(text, streaming)), [text, streaming]);
-  return <>{blocks(nodes, { media, basePath }, { colors, styles, basePath })}</>;
+  return <MarkdownStreamingContext value={streaming}>{blocks(nodes, { media, basePath }, { colors, styles, basePath })}</MarkdownStreamingContext>;
 });
 export const Markdown = memo(function Markdown({ text, streaming = false, media, basePath }: { text: string; streaming?: boolean } & ImageOptions) {
   const chunks = useMemo(() => markdownChunks(text), [text]);

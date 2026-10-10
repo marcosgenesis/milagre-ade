@@ -536,6 +536,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
         chats: linkChats(),
         send: (message) => askChat(projectPath, chat, message),
         notify: showArchiveNotice,
+        onAsked: () => select(projectPath, chat.id),
       });
     else void removeLinkFromChat({ client, ends: linkedLabels(links.links, linkWorktree(source), endNames), notify: showArchiveNotice });
   }

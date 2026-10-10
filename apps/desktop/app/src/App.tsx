@@ -1717,7 +1717,7 @@ function App() {
   // so the message and the reply are in view.
   const askLinkedChat = useEvent(async (scopeKey: string, id: string, message: { body: string; prompt: string }) => {
     const sessionId = Number(id);
-    const state = statesRef.current[scopeKey] ?? (await window.milagre.readProject(scopeKey)).state;
+    const state = statesRef.current[scopeKey] ?? (await bridgeForKey(scopeKey).readProject(scopeKey)).state;
     const session = state.sessions[sessionId];
     if (!session || session.archived) throw new Error("That chat is no longer in its Project.");
     const fallback = resolveModel(models, defaultModelId, providerForId(defaultModelId));

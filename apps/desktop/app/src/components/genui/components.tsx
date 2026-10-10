@@ -51,9 +51,9 @@ export const Table: GenuiRenderer<"Table"> = ({ props }) => {
         </thead>
         <tbody>
           {rows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
+            <tr key={rowIndex} className="border-b border-line last:border-b-0">
               {row.map((cell, cellIndex) => (
-                <td key={cellIndex} className="border-b border-line px-3 py-1.5 text-ink last:border-b-0">
+                <td key={cellIndex} className="px-3 py-1.5 text-ink">
                   {cell}
                 </td>
               ))}

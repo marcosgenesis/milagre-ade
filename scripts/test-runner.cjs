@@ -11,6 +11,7 @@ const SKIP_DIRS = new Set(["node_modules", "dist", "release", ".expo", "ios", "a
  */
 const MANIFEST = {
   "test-artifacts.cjs": { seconds: 50 },
+  "test-genui.cjs": { seconds: 20 },
   "test-chat-attachments.cjs": { seconds: 20 },
   "test-archive-enter.cjs": { seconds: 15 },
   "test-chat-pins.cjs": { seconds: 15 },

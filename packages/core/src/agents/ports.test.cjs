@@ -119,6 +119,7 @@ test("Chats sharing a Worktree never acquire each other's orphaned ports", async
   ]);
   const signals = [];
   const watcher = new PortWatcher({
+    platform: "darwin",
     roots: () => roots,
     publish() {},
     kill: (...args) => signals.push(args),
@@ -147,6 +148,7 @@ test("the watcher publishes changes and stops once nothing runs", async () => {
   const published = [];
   const calls = [];
   const watcher = new PortWatcher({
+    platform: "darwin",
     roots: () => roots,
     publish: (ports) => published.push(ports),
     pollMs: 60_000,
@@ -176,6 +178,7 @@ test("stopping a port ends its command's group, and only a pid the chat shows", 
   const signals = [];
   let alive = true;
   const watcher = new PortWatcher({
+    platform: "darwin",
     roots: () => new Map([["/a#1", { pid: 100 }]]),
     publish: () => {},
     pollMs: 60_000,
@@ -201,6 +204,7 @@ test("stopping a port ends its command's group, and only a pid the chat shows", 
 test("a port that ignores SIGTERM gets SIGKILL", async () => {
   const signals = [];
   const watcher = new PortWatcher({
+    platform: "darwin",
     roots: () => new Map([["/a#1", { pid: 100 }]]),
     publish: () => {},
     pollMs: 60_000,
@@ -219,6 +223,7 @@ test("idle agent ports poll every 15 seconds and wake immediately for a new turn
   let running = false,
     calls = 0;
   const watcher = new PortWatcher({
+    platform: "darwin",
     roots: () => new Map([["/a#1", { pid: 100 }]]),
     isRunning: () => running,
     publish: () => {},
@@ -254,6 +259,7 @@ test("closing during a port poll does not publish or restart polling", async () 
   const result = new Promise((resolve) => (release = resolve));
   const published = [];
   const watcher = new PortWatcher({
+    platform: "darwin",
     roots: () => new Map([["/a#1", { pid: 100 }]]),
     publish: (p) => published.push(p),
     exec: async (command) => (command === "ps" ? result : LSOF),
@@ -272,6 +278,7 @@ test("lsof runs when a chat's pids change or every 10 seconds, ps on every poll"
   const calls = [];
   const published = [];
   const watcher = new PortWatcher({
+    platform: "darwin",
     roots: () => new Map([["/a#1", { pid: 100 }]]),
     publish: (ports) => published.push(ports),
     pollMs: 60_000,
@@ -306,6 +313,7 @@ test("a chat with no processes needs no lsof, and stopping a port reads the list
   let alive = true;
   const calls = [];
   const watcher = new PortWatcher({
+    platform: "darwin",
     roots: () => new Map([["/a#1", { pid: 100 }]]),
     publish: () => {},
     pollMs: 60_000,
@@ -328,6 +336,7 @@ test("a chat with no processes needs no lsof, and stopping a port reads the list
   watcher.close();
   const none = [];
   const idle = new PortWatcher({
+    platform: "darwin",
     roots: () => new Map([["/z#1", { pid: 100 }]]),
     publish: () => {},
     exec: async (command) => {
@@ -344,6 +353,7 @@ test("ports compare by value without serializing", async () => {
   const published = [];
   let reads = 0;
   const watcher = new PortWatcher({
+    platform: "darwin",
     roots: () => new Map([["/a#1", { pid: 100 }]]),
     publish: (ports) => published.push(ports),
     pollMs: 60_000,
@@ -356,4 +366,72 @@ test("ports compare by value without serializing", async () => {
   await watcher.poll();
   assert.equal(published.length, 2, "a port change is published");
   watcher.close();
+});
+
+test("a fresh poll waits for an overlapping poll before reading current listeners", async (t) => {
+  const started = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  let hold = false;
+  let reads = 0;
+  let listening = true;
+  const watcher = new PortWatcher({
+    platform: "win32",
+    pollMs: 60000,
+    roots: () => new Map([["chat", { pid: 10 }]]),
+    publish() {},
+    exec: async (command) => {
+      if (command === "ps") return "10 1 10 @100 agent.exe\n20 10 20 @200 server.exe";
+      reads++;
+      const result = listening ? "p20\ncserver\nn127.0.0.1:3000" : "";
+      if (hold) {
+        hold = false;
+        started.resolve();
+        await release.promise;
+      }
+      return result;
+    },
+  });
+  t.after(() => watcher.close());
+  await watcher.poll({ fresh: true });
+  hold = true;
+  const overlapping = watcher.poll({ fresh: true });
+  await started.promise;
+  listening = false;
+  const fresh = watcher.poll({ fresh: true });
+  release.resolve();
+  await Promise.all([overlapping, fresh]);
+  assert.deepEqual(watcher.snapshot(), {});
+  assert.equal(reads, 3, "the forced read must run after the older in-flight read");
+});
+
+test("Windows port stop reports a refused process identity without claiming success", async (t) => {
+  const watcher = new PortWatcher({
+    platform: "win32",
+    roots: () => new Map([["chat", { pid: 10 }]]),
+    publish() {},
+    exec: async (command) => (command === "ps" ? "10 1 10 @100 agent.exe\n20 10 20 @200 server.exe" : "p20\ncserver\nn127.0.0.1:3000"),
+    stopWindowsTree: async () => false,
+  });
+  t.after(() => watcher.close());
+  await watcher.poll();
+  assert.equal(await watcher.stopPort("chat", 20), false);
+  assert.equal(watcher.snapshot().chat[0].pid, 20);
+});
+
+test("Windows port stop preserves the Chat's Terminal shell", async (t) => {
+  let target;
+  const watcher = new PortWatcher({
+    platform: "win32",
+    roots: () => new Map([["chat", { shells: [10] }]]),
+    publish() {},
+    exec: async (command) => (command === "ps" ? "10 1 10 @100 pwsh.exe\n20 10 20 @200 cmd.exe\n30 20 30 @300 server.exe" : "p30\ncserver\nn127.0.0.1:3000"),
+    stopWindowsTree: async (pid) => {
+      target = pid;
+      return true;
+    },
+  });
+  t.after(() => watcher.close());
+  await watcher.poll();
+  assert.equal(await watcher.stopPort("chat", 30), true);
+  assert.equal(target, 20, "stop the command below the shell, leaving the Terminal usable");
 });

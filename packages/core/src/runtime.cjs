@@ -1650,6 +1650,7 @@ function createRuntime(options) {
 
   function close() {
     closing = true;
+    readPullRequest.close?.();
     closed ??= (async () => {
       await advisorDelivery.close();
       await advisors.close();

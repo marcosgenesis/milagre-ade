@@ -1,9 +1,10 @@
 import { keepOrder } from "@milagre/shared/stable-order";
 
 type Storage = { getItemAsync: (key: string) => Promise<string | null>; setItemAsync: (key: string, value: string) => Promise<void> };
-const key = "milagre.project-order.v1";
-// Computers whose order is kept; the one saved longest ago is forgotten first.
-const MAX_COMPUTERS = 12;
+const keyPrefix = "milagre.project-order.v1.";
+// expo-secure-store sets no limit of its own, but the docs note that some iOS releases refused values above about
+// 2048 bytes. One key per computer, each kept under this, so the list's size can't grow into a failing write.
+const MAX_BYTES = 1900;
 
 /** `projects` in the order `saved` had them: a gone one drops out and a new one goes on top, as on the Mac. */
 export function applyProjectOrder<T extends { path: string }>(saved: string[], projects: T[]): T[] {
@@ -14,17 +15,41 @@ export function applyProjectOrder<T extends { path: string }>(saved: string[], p
   ) as T[];
 }
 
-function parse(raw: string | null): Record<string, string[]> {
+function utf8Length(text: string): number {
+  let bytes = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0)!;
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
+
+/** SecureStore keys allow letters, digits, ".", "-" and "_": a computer's id (a URL) becomes a short hash. */
+function keyFor(hostId: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < hostId.length; i++) hash = Math.imul(hash ^ hostId.charCodeAt(i), 0x01000193) >>> 0;
+  return `${keyPrefix}${hash.toString(16)}`;
+}
+
+/** The leading paths of `order` whose saved form fits MAX_BYTES; the rest go back to "new, on top" next launch. */
+export function boundedOrder(hostId: string, order: string[]): string[] {
+  const kept: string[] = [];
+  let bytes = utf8Length(JSON.stringify({ h: hostId, o: [] }));
+  for (const path of order) {
+    bytes += utf8Length(JSON.stringify(path)) + 1;
+    if (bytes > MAX_BYTES) break;
+    kept.push(path);
+  }
+  return kept;
+}
+
+function parse(raw: string | null, hostId: string): string[] | null {
   try {
-    const value = JSON.parse(raw || "{}");
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).flatMap(([host, order]) =>
-        Array.isArray(order) ? [[host, order.filter((path): path is string => typeof path === "string")]] : [],
-      ),
-    );
+    const value = JSON.parse(raw || "null");
+    if (!value || value.h !== hostId || !Array.isArray(value.o)) return null;
+    return value.o.filter((path: unknown): path is string => typeof path === "string");
   } catch {
-    return {};
+    return null;
   }
 }
 
@@ -37,7 +62,7 @@ export function createProjectOrderStore(storage: Storage) {
     async apply<T extends { path: string }>(hostId: string, projects: T[]): Promise<T[]> {
       try {
         await pending;
-        const saved = parse(await storage.getItemAsync(key))[hostId];
+        const saved = parse(await storage.getItemAsync(keyFor(hostId)), hostId);
         return saved ? applyProjectOrder(saved, projects) : projects;
       } catch {
         return projects;
@@ -46,11 +71,9 @@ export function createProjectOrderStore(storage: Storage) {
     save(hostId: string, order: string[]) {
       pending = pending
         .then(async () => {
-          const all = parse(await storage.getItemAsync(key));
-          if (JSON.stringify(all[hostId]) === JSON.stringify(order)) return;
-          delete all[hostId];
-          all[hostId] = order;
-          await storage.setItemAsync(key, JSON.stringify(Object.fromEntries(Object.entries(all).slice(-MAX_COMPUTERS))));
+          const value = JSON.stringify({ h: hostId, o: boundedOrder(hostId, order) });
+          if (value === (await storage.getItemAsync(keyFor(hostId)))) return;
+          await storage.setItemAsync(keyFor(hostId), value);
         })
         .catch(() => {});
       return pending;

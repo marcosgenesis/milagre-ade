@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyProjectOrder, createProjectOrderStore } from "./project-order-store.ts";
+import { applyProjectOrder, boundedOrder, createProjectOrderStore } from "./project-order-store.ts";
 
 function storage() {
   const values = new Map<string, string>();
@@ -41,8 +41,10 @@ test("each computer keeps its own order across launches", async () => {
 
 test("a damaged or failing storage leaves the Mac's order", async () => {
   const disk = storage();
-  disk.values.set("milagre.project-order.v1", "{not json");
-  assert.deepEqual(paths(await createProjectOrderStore(disk).apply("h", list("a", "b"))), ["/code/a", "/code/b"]);
+  const store = createProjectOrderStore(disk);
+  await store.save("h", ["/code/b", "/code/a"]);
+  for (const key of disk.values.keys()) disk.values.set(key, "{not json");
+  assert.deepEqual(paths(await store.apply("h", list("a", "b"))), ["/code/a", "/code/b"]);
   const broken = createProjectOrderStore({
     getItemAsync: async () => {
       throw new Error("locked");
@@ -53,11 +55,32 @@ test("a damaged or failing storage leaves the Mac's order", async () => {
   await broken.save("h", ["/code/a"]);
 });
 
-test("the oldest computers are forgotten past twelve", async () => {
+test("an empty list is saved, so removed Projects added back start from the Mac's order", async () => {
+  const store = createProjectOrderStore(storage());
+  await store.save("h", ["/code/b", "/code/a"]);
+  await store.save("h", []);
+  assert.deepEqual(paths(await store.apply("h", list("a", "b"))), ["/code/a", "/code/b"]);
+});
+
+test("a saved value stays under the size SecureStore is safe with, however many Projects there are", async () => {
   const disk = storage();
   const store = createProjectOrderStore(disk);
-  for (let i = 0; i < 14; i++) await store.save(`host-${i}`, ["/code/a"]);
-  const saved = JSON.parse(disk.values.get("milagre.project-order.v1")!);
-  assert.equal(Object.keys(saved).length, 12);
-  assert.ok(!("host-0" in saved) && "host-13" in saved);
+  const many = Array.from({ length: 500 }, (_, i) => `/Users/someone/Code/a-long-project-folder-name-${i}`);
+  await store.save("https://mac", many);
+  const values = [...disk.values.values()];
+  assert.equal(values.length, 1);
+  assert.ok(new TextEncoder().encode(values[0]).length <= 1900);
+  const kept = JSON.parse(values[0]).o as string[];
+  assert.ok(kept.length > 10 && kept.length < many.length);
+  assert.deepEqual(kept, many.slice(0, kept.length), "the first Projects are the ones kept");
+  // The rest come back as new, on top, next launch.
+  const shown = paths(await store.apply("https://mac", many.map((path) => ({ path })).reverse()));
+  assert.deepEqual(shown.slice(-kept.length), kept);
+  assert.equal(boundedOrder("x", ["/é".repeat(2000)]).length, 0, "one huge path never exceeds the bound");
+});
+
+test("each key is safe for SecureStore", async () => {
+  const disk = storage();
+  await createProjectOrderStore(disk).save("relay://H".repeat(3) + "/x?y=1", ["/code/a"]);
+  assert.ok([...disk.values.keys()].every((key) => /^[A-Za-z0-9._-]+$/.test(key)));
 });

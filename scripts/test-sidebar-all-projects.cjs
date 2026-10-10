@@ -374,6 +374,20 @@ async function browserChecks() {
       "Back again, it counts as new and goes on top",
     );
 
+    // Another window reorders the groups (same storage). This window's unrelated re-render must not put its old order back,
+    // and it follows the other window's change when the storage event arrives.
+    const other = ["/work/arketa", "/work/docs", "/work/shop"];
+    await evaluate(`localStorage.setItem("milagre.sidebarScopeOrder", ${JSON.stringify(JSON.stringify(other))})`);
+    await click('[data-sidebar-scope="/work/docs"] [data-scope-toggle]');
+    await delay(200);
+    assert.deepEqual(await savedOrder(), other, "A re-render in a stale window leaves the other window's order in storage");
+    await evaluate(
+      `window.dispatchEvent(new StorageEvent("storage", { key: "milagre.sidebarScopeOrder", newValue: localStorage.getItem("milagre.sidebarScopeOrder") }))`,
+    );
+    await waitFor(`document.querySelector("[data-sidebar-scope]")?.dataset.sidebarScope === "/work/arketa"`);
+    assert.deepEqual(await scopes(), [...other, LINK], "This window adopts the other window's order");
+    assert.deepEqual(await savedOrder(), other);
+
     assert.deepEqual(errors, []);
     await reset();
     console.log(

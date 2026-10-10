@@ -629,6 +629,9 @@ test("the Projects order survives a relaunch, per computer", async () => {
   // Another computer has its own order.
   assert.deepEqual(paths(await launch("https://studio", [{ path: "C" }, { path: "B" }])), ["C", "B"]);
   assert.deepEqual(paths(await launch("https://mac", [{ path: "C" }, { path: "B" }, { path: "D" }])), ["D", "B", "C"]);
+  // Every Project removed: the empty list is saved too, so Projects added back later start from the Mac's order.
+  assert.deepEqual(paths(await launch("https://mac", [])), []);
+  assert.deepEqual(paths(await launch("https://mac", [{ path: "B" }, { path: "C" }, { path: "D" }])), ["B", "C", "D"]);
 });
 
 test("a poll from the previous Project cannot restore it after another Project opens", async () => {

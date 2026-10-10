@@ -172,10 +172,16 @@ function readClosedScopes(): string[] {
 
 // The Projects' group order in the all-Projects sidebar, so a restart or a new window keeps it (see stableOrder).
 const SCOPE_ORDER_KEY = "milagre.sidebarScopeOrder";
+// What this window last read from or wrote to storage. Another window may have saved a newer order since, so a window
+// writes only when its own order differs from this: a re-render with an unchanged order never puts an old one back.
+let syncedScopeOrder = "";
 function readScopeOrder(): string[] {
   try {
-    const saved = JSON.parse(window.localStorage.getItem(SCOPE_ORDER_KEY) ?? "[]");
-    return Array.isArray(saved) ? saved.filter((item) => typeof item === "string") : [];
+    const raw = window.localStorage.getItem(SCOPE_ORDER_KEY) ?? "[]";
+    const saved = JSON.parse(raw);
+    const order = Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string") : [];
+    syncedScopeOrder = JSON.stringify(order);
+    return order;
   } catch {
     return [];
   }
@@ -183,7 +189,9 @@ function readScopeOrder(): string[] {
 function writeScopeOrder(order: string[]) {
   try {
     const next = JSON.stringify(order);
-    if (window.localStorage.getItem(SCOPE_ORDER_KEY) !== next) window.localStorage.setItem(SCOPE_ORDER_KEY, next);
+    if (next === syncedScopeOrder) return;
+    syncedScopeOrder = next;
+    window.localStorage.setItem(SCOPE_ORDER_KEY, next);
   } catch {
     // Storage full or blocked: the order lasts for this session only.
   }
@@ -831,6 +839,17 @@ export default memo(function SidebarNav({
     const changed = () => setListsChanged((count) => count + 1);
     window.addEventListener(RECENT_PROJECTS_CHANGED, changed);
     return () => window.removeEventListener(RECENT_PROJECTS_CHANGED, changed);
+  }, []);
+  // Another window saved a new group order: follow it.
+  const [, setOrderSynced] = useState(0);
+  useEffect(() => {
+    const follow = (event: StorageEvent) => {
+      if (event.key !== SCOPE_ORDER_KEY) return;
+      scopeOrder.current = readScopeOrder();
+      setOrderSynced((count) => count + 1);
+    };
+    window.addEventListener("storage", follow);
+    return () => window.removeEventListener("storage", follow);
   }, []);
 
   // Every recent Project the user didn't hide, then every Link, like the phone's list. The open one is always there.

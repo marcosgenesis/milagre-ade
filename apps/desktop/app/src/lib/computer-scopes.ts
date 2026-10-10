@@ -14,9 +14,7 @@ export function computerScopes(computerId: string, recent: RecentProject[], link
     ...recent
       .filter((project) => !project.hidden)
       .map((project) => ({ key: project.path, name: project.name, initial: project.name.slice(0, 1).toUpperCase(), link: null, computerId })),
-    ...links
-      .filter((link) => !link.hidden)
-      .map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link, computerId })),
+    ...links.filter((link) => !link.hidden).map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link, computerId })),
   ];
 }
 

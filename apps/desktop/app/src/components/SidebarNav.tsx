@@ -1027,8 +1027,8 @@ export default memo(function SidebarNav({
         remote.setHidden(path, !show);
         const linkId = unqualifyKey(id);
         const bridge = bridgeForKey(path);
-        void bridge.listNamedLinks().then(links => {
-          const link = links.find(l => l.id === linkId);
+        void bridge.listNamedLinks().then((links) => {
+          const link = links.find((l) => l.id === linkId);
           if (link) {
             bridge.updateNamedLink({ id: link.id, name: link.name, projectIds: link.projectIds, hidden: !show }).catch(() => {});
           }

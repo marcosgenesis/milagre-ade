@@ -40,7 +40,9 @@ import {
   ShieldAlertIcon,
   SourceCodeIcon,
   Tick02Icon,
+  Unlink04Icon,
 } from "@hugeicons/core-free-icons";
+import type { LinkedEnd } from "./SidebarLinks";
 import GlideMenu from "@/components/primitives/GlideMenu";
 import Tooltip from "@/components/primitives/Tooltip";
 import { ShortcutKeys } from "@/components/primitives/ShortcutKeys";
@@ -155,7 +157,13 @@ export type ChatRowActions = {
   onLinkIssue?: (id: string, key: string, workspace?: string) => void;
   /** Removes the Worktree's stored Linear issue link. */
   onUnlinkIssue?: (id: string) => void;
+  /** "Link with…": the chat list that leads to the Link popover, at the menu's place. */
+  onLinkWith?: (id: string, anchor: { top: number; left: number }) => void;
+  /** "Remove Link with…": the chat's Links, at the menu's place. */
+  onRemoveLink?: (id: string, anchor: { top: number; left: number }) => void;
 };
+
+const NO_LINKS: LinkedEnd[] = [];
 
 /** What the confirm step offers when nothing is known about the worktree: only hide the chat. */
 const HIDE_ONLY: ArchivePlan = { milagreOwned: false, shared: false, status: null };
@@ -247,6 +255,7 @@ export const ChatRow = memo(function ChatRow({
   show = DESKTOP_CHAT_ROW_SHOW,
   dimOffline = false,
   dragging = false,
+  linked = NO_LINKS,
 }: {
   item: SidebarRecent;
   active: boolean;
@@ -261,6 +270,8 @@ export const ChatRow = memo(function ChatRow({
   dimOffline?: boolean;
   /** The row is being dragged to a new place. */
   dragging?: boolean;
+  /** The canvas Links that reach the chat's Worktree: a Link icon on the row, one line each in the hover card. */
+  linked?: LinkedEnd[];
 }) {
   const [archiving, setArchiving] = useState(false);
   const archivePending = useRef(false);
@@ -415,7 +426,25 @@ export const ChatRow = memo(function ChatRow({
                 item.unread ? "font-semibold text-ink" : active ? "font-medium text-ink" : "font-medium text-ink-2"
               }`}
             >
-              <ChatTitle label={item.label} />
+              {linked.length > 0 ? (
+                // The icon follows the title, like the presence glyphs Orca puts after a worktree's name.
+                <span className="flex min-w-0 items-center gap-1">
+                  <span className="min-w-0">
+                    <ChatTitle label={item.label} />
+                  </span>
+                  <span
+                    data-chat-linked
+                    role="img"
+                    aria-label={`Linked to ${linked.map((end) => end.label).join(", ")}`}
+                    title={`Linked to ${linked.map((end) => end.label).join(", ")}`}
+                    className="flex shrink-0 font-normal text-ink-3"
+                  >
+                    <HugeiconsIcon icon={Link04Icon} size={12} strokeWidth={2} color="currentColor" />
+                  </span>
+                </span>
+              ) : (
+                <ChatTitle label={item.label} />
+              )}
               {item.worktreeCount !== undefined && !factLine && (
                 <span className="block text-[11px] font-normal text-ink-3">{item.worktreeCount} Worktrees</span>
               )}
@@ -504,6 +533,7 @@ export const ChatRow = memo(function ChatRow({
             onClose={() => setMenu(null)}
             onRename={() => setRenaming(true)}
             onLink={() => setLinking(menu)}
+            linked={linked.length > 0}
             actions={{
               ...actions,
               onArchive: actions.onArchive
@@ -537,7 +567,7 @@ export const ChatRow = memo(function ChatRow({
       {card &&
         !menu &&
         createPortal(
-          <ChatHoverCard item={item} position={card} onPointerEnter={clearHover} onPointerLeave={hideCardSoon} onOpenLink={hideCard} />,
+          <ChatHoverCard item={item} linked={linked} position={card} onPointerEnter={clearHover} onPointerLeave={hideCardSoon} onOpenLink={hideCard} />,
           document.body,
         )}
     </>
@@ -664,12 +694,14 @@ function RenameField({ initial, onDone }: { initial: string; onDone: (title: str
  * ───────────────────────────────────────────────────────── */
 function ChatHoverCard({
   item,
+  linked,
   position,
   onPointerEnter,
   onPointerLeave,
   onOpenLink,
 }: {
   item: SidebarRecent;
+  linked: LinkedEnd[];
   position: { top: number; left: number; flip: boolean };
   onPointerEnter: () => void;
   onPointerLeave: () => void;
@@ -816,6 +848,21 @@ function ChatHoverCard({
             <span className="truncate">{folderName(details.path)}</span>
           </CardLine>
         )}
+        {linked.length > 0 && (
+          <div data-chat-card-links className="flex min-w-0 items-start gap-2">
+            <span className="flex h-[18px] w-4 shrink-0 items-center justify-center text-ink-3">
+              <HugeIcon icon={Link04Icon} size={14} />
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[11.5px] text-ink-3">Linked with</span>
+              {linked.map((end) => (
+                <span key={end.linkId} data-chat-card-link className="truncate leading-snug">
+                  {end.label}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -875,6 +922,7 @@ function ChatMenu({
   onClose,
   onRename,
   onLink,
+  linked,
   actions,
 }: {
   item: SidebarRecent;
@@ -884,6 +932,8 @@ function ChatMenu({
   onClose: () => void;
   onRename: () => void;
   onLink: () => void;
+  /** A canvas Link reaches the chat's Worktree, so "Remove Link with…" is offered. */
+  linked: boolean;
   actions: ChatRowActions;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1016,6 +1066,27 @@ function ChatMenu({
     item.pinned
       ? { key: "unpin", label: "Unpin", icon: PinOffIcon, onSelect: run(() => actions.onPin?.(item.id, null)), disabled: !actions.onPin }
       : { key: "pin", label: "Pin", icon: PinIcon, onSelect: run(() => actions.onPin?.(item.id)), disabled: !actions.onPin },
+    // Canvas Links between Worktrees, offered where the chat's Worktree can take one (this Mac, not a shared Link Chat).
+    ...(actions.onLinkWith && details.path
+      ? [
+          {
+            key: "link-with",
+            label: "Link with…",
+            icon: Link04Icon,
+            onSelect: run(() => actions.onLinkWith?.(item.id, { top: position.y, left: position.x })),
+          },
+        ]
+      : []),
+    ...(actions.onRemoveLink && linked
+      ? [
+          {
+            key: "remove-link",
+            label: "Remove Link with…",
+            icon: Unlink04Icon,
+            onSelect: run(() => actions.onRemoveLink?.(item.id, { top: position.y, left: position.x })),
+          },
+        ]
+      : []),
     "divider" as const,
     ...archiveItems,
   ].filter((entry) => entry === "divider" || !actions.remote || (entry.key !== "reveal" && entry.key !== "editor"));

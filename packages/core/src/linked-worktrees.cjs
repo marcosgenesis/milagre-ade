@@ -164,7 +164,13 @@ function createLinkedWorktrees({
         const state = await project(side.projectPath);
         const worktree = Object.values(state.worktrees).find((item) => item.path === worktreePath);
         if (worktree?.sharedChat) throw new Error("Delegation into a shared Link Chat is not supported. Read its canonical transcript instead.");
-        return { link_id: side.link_id, projectPath: side.projectPath, projectName: side.projectName, branch: worktree?.name ?? path.basename(worktreePath) };
+        return {
+          link_id: side.link_id,
+          link_ids: side.link_ids ?? [side.link_id],
+          projectPath: side.projectPath,
+          projectName: side.projectName,
+          branch: worktree?.name ?? path.basename(worktreePath),
+        };
       },
       chat,
       async openChat(projectPath, worktreePath) {
@@ -217,6 +223,13 @@ function createLinkedWorktrees({
     context: (chatId) => reads.summary(chatId).catch(() => ""),
     observe: (chatId, event) => delegations.observe(chatId, event),
     linkRemoved: (id) => delegations.linkRemoved(id),
+    /** "Always allow Delegations" from the sidebar's Link popover: the grant the approval card saves, set ahead. */
+    async grant(chatId, linkId) {
+      if (typeof chatId !== "string" || !chatId.includes("#")) throw new Error("Choose a Chat and a Link.");
+      if (!(await registry().snapshot()).links.some((link) => link.id === linkId)) throw new Error("That Link no longer exists.");
+      if (isLinkScopeKey(projectOfKey(chatId))) throw new Error("A shared Link Chat makes no Delegations.");
+      await delegations.grant(chatId, linkId);
+    },
     stop: (target) => delegations.stop(target),
     snapshot,
     close: () => mcp.close(),

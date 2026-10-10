@@ -1235,7 +1235,15 @@ function createRuntime(options) {
   }
   // Links whose Worktree endpoint went away are dropped, with what was waiting to travel along them.
   async function pruneLinks(active) {
-    for (const link of await projectRegistry().pruneLinks(active ?? (await canvasActiveWorktrees()))) await linked.linkRemoved(link.id);
+    const removed = await projectRegistry().pruneLinks(active ?? (await canvasActiveWorktrees()));
+    for (const link of removed) await linked.linkRemoved(link.id);
+    if (removed.length) await linksChanged();
+  }
+  // The sidebar's Link icons follow Links drawn or removed anywhere: the canvas, the sidebar, the phone.
+  async function linksChanged() {
+    const links = (await projectRegistry().snapshot()).links;
+    emit("canvas:links-changed", { links });
+    return links;
   }
   // A linked Project not open yet is opened here (ownership, reconciled Worktrees, interrupted turns), as the
   // canvas opens every Project it shows.
@@ -1531,13 +1539,23 @@ function createRuntime(options) {
   });
   commands.handle("canvas:link-add", async (_event, a, b) => {
     await projectRegistry().addLink(a, b, await canvasActiveWorktrees());
-    return (await projectRegistry().snapshot()).links;
+    return linksChanged();
   });
   commands.handle("canvas:link-remove", async (_event, id) => {
     await projectRegistry().removeLink(id);
     await linked.linkRemoved(id);
+    return linksChanged();
+  });
+  commands.handle("canvas:link-restore", async (_event, link) => {
+    await projectRegistry().restoreLink(link, await canvasActiveWorktrees());
+    return linksChanged();
+  });
+  // The Links alone, for the sidebar's and the phone's chat rows, without every Project's state the canvas reads.
+  commands.handle("canvas:links", async () => {
+    await pruneLinks(await canvasActiveWorktrees());
     return (await projectRegistry().snapshot()).links;
   });
+  commands.handle("linked:grant", (_event, chatId, linkId) => linked.grant(chatId, linkId));
   commands.handle("canvas:worktree-position", (_event, id, worktreePath, position) => projectRegistry().setWorktreePosition(id, worktreePath, position));
   commands.handle("canvas:open-project", async (_event, requested) => {
     if (!(await projectRegistry().list()).some((project) => project.path === requested)) throw new Error("Project is not in the registry.");

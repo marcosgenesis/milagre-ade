@@ -602,6 +602,19 @@ test("a confined phone links and unlinks an issue only in its own Project", asyn
   assert.equal((await f.rpc("worktree:unlink-issue", [{ projectPath: f.outside, worktreeId: 1 }])).status, 403);
 });
 
+test("phones link chats with canvas Links, but a confined demo phone sees and changes none", async () => {
+  const confine = createConfinement({ allowedRoot: os.tmpdir() });
+  for (const [method, args] of [
+    ["canvas:links", []],
+    ["canvas:link-add", [{ project_id: "a" }, { project_id: "b" }]],
+    ["canvas:link-remove", ["link-1"]],
+    ["linked:grant", ["/p#1", "link-1"]],
+  ]) {
+    assert.ok(METHODS.has(method), method);
+    await assert.rejects(confine.checkCall(method, args), { status: 403, message: REFUSED });
+  }
+});
+
 test("phones can't connect or disconnect Linear", () => {
   assert.equal(METHODS.has("linear:connect"), false);
   assert.equal(METHODS.has("linear:disconnect"), false);

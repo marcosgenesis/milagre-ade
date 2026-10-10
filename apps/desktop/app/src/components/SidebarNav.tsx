@@ -52,8 +52,8 @@ import { mergeScopes, useComputerScopes, withoutLocal } from "../lib/computer-sc
 import { LOCAL_COMPUTER, computerOfKey, unqualifyKey } from "@milagre/shared/chat-scopes";
 import { useDismiss } from "../lib/use-dismiss";
 import { dropIntent, pinOrderAt, type DropIntent, type DropZone } from "@/lib/chat-list";
-import type { ProjectLink } from "@/electron";
-import { ipcErrorMessage } from "@milagre/shared/result";
+import { linkBetween } from "@milagre/shared/chat-links";
+import { SidebarLinksProvider, useSidebarLinks, type LinkListHandle, type LinkScopeChats } from "./sidebar/SidebarLinks";
 import { updateSettings, useSettings } from "../lib/settings";
 import { RECENT_PROJECTS_CHANGED } from "../lib/project-list";
 import { cachedProjectCopy, scopeChats, useScopeStates } from "../lib/sidebar-scopes";
@@ -155,6 +155,8 @@ type SidebarNavProps = {
   askingKeys?: string;
   /** Opens a chat of another Project (its path) or Link (`milagre-link:` key) from the all-Projects sidebar. */
   onOpenScopeChat?: (scopeKey: string, id: string) => void;
+  /** "Link and ask A…": sends the message to that chat (its Project path and id) through the normal send path. */
+  onAskChat?: (scopeKey: string, id: string, message: { body: string; prompt: string }) => Promise<unknown>;
 };
 
 const NO_CHAT_ACTIONS: ChatRowActions = {};
@@ -754,6 +756,7 @@ export default memo(function SidebarNav({
   askingKeys = "",
   onOpenScopeChat,
   onNewChatInScope,
+  onAskChat,
 }: SidebarNavProps) {
   const { legacySidebar, chatOrder, chatRowShow } = useSettings();
   // Other computers (Settings › Experimental): their Projects join the list, and every row says its computer.
@@ -930,6 +933,9 @@ export default memo(function SidebarNav({
   };
   const openScope = useRef((key: string, id: string) => onOpenScopeChat?.(key, id));
   openScope.current = (key: string, id: string) => onOpenScopeChat?.(key, id);
+  // Canvas Links join this Mac's Projects: a Named Link's shared chats and another computer's take none.
+  const linkProjectIdOf = (key: string | undefined) =>
+    key && !key.startsWith("milagre-link:") && !isRemoteKey(key) ? (registeredProjects.find((project) => project.path === key)?.id ?? null) : null;
   const groups = showAll
     ? scopes.map((scope) => {
         const current = scope.key === currentKey;
@@ -943,7 +949,7 @@ export default memo(function SidebarNav({
               actions: chatActions,
               showHints,
               onPick: pickChat,
-              linkProjectId: !selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null,
+              linkProjectId: scope.link ? null : linkProjectIdOf(scope.key),
               computer: rowComputer(scope.key),
               show: chatRowShow,
             }
@@ -953,7 +959,7 @@ export default memo(function SidebarNav({
               actions: actionsFor(scope.key),
               showHints: false,
               onPick: pickerFor(scope.key),
-              linkProjectId: null,
+              linkProjectId: scope.link ? null : linkProjectIdOf(scope.key),
               computer: rowComputer(scope.key),
               show: chatRowShow,
             };
@@ -968,6 +974,15 @@ export default memo(function SidebarNav({
         };
       })
     : [];
+  // Every list whose chats can take a canvas Link: the Link icons, "Link with…" and drops across Projects read these.
+  const currentLinkId = selectedLink ? null : linkProjectIdOf(projectPath);
+  const linkScopes: LinkScopeChats[] = showAll
+    ? groups.flatMap(({ scope, list, pinned, rest }) =>
+        list.linkProjectId ? [{ scopeKey: scope.key, projectId: list.linkProjectId, projectName: scope.name, rows: [...pinned, ...rest] }] : [],
+      )
+    : currentLinkId && projectPath
+      ? [{ scopeKey: projectPath, projectId: currentLinkId, projectName: workspaceName, rows: recents }]
+      : [];
   const anyPinned = groups.some((group) => group.pinned.length > 0);
   // Each group's slot in the Pinned section, for its list's portal; one ref callback per key, so slots don't remount.
   const [pinSlots, setPinSlots] = useState<Record<string, HTMLElement | null>>({});
@@ -1300,125 +1315,129 @@ export default memo(function SidebarNav({
                 className={`${TOOL_BUTTON} size-8 shrink-0`}
               />
             </div>
-            {showAll ? (
-              <>
-                {/* Pinned chats of every Project and Link sit on top, like the single-project sidebar. Each group's list
+            <SidebarLinksProvider scopes={linkScopes} projects={registeredProjects} onAskChat={onAskChat}>
+              {showAll ? (
+                <>
+                  {/* Pinned chats of every Project and Link sit on top, like the single-project sidebar. Each group's list
                     renders its pinned rows into its slot here, so a drag moves a chat between Pinned and its group. */}
-                <div data-all-pinned={anyPinned || undefined} className={anyPinned ? "mb-2" : ""}>
-                  {anyPinned && <p className="sidebar-copy mx-2 mb-1 h-8 pl-2 text-[12.5px] font-medium leading-8 text-ink-3">Pinned</p>}
-                  {groups.map((group) => (
-                    <div key={group.scope.key} ref={pinSlotRef(group.scope.key)} data-pinned-scope={group.scope.key} />
-                  ))}
-                </div>
-                {groups.map(({ scope, current, state, rest, pinned, list, dimmed }, index) => {
-                  const open = !closedScopes.includes(scope.key);
-                  return (
-                    <section
-                      key={scope.key}
-                      data-sidebar-scope={scope.key}
-                      data-current={current || undefined}
-                      aria-label={scope.name}
-                      data-offline={dimmed || undefined}
-                      className={`mb-2 ${dimmed ? "opacity-50" : ""}`}
-                    >
-                      {scope.link && !scopes[index - 1]?.link && (
-                        <p className="mx-2 mt-1 mb-1 h-6 pl-2 text-[12.5px] font-medium leading-6 text-ink-3">Links</p>
-                      )}
-                      <ScopeHeader
-                        name={scope.name}
-                        icon={
-                          scope.link ? (
-                            <ProjectAvatarStack
-                              projects={scope.link.projectIds.map(
-                                (id) => registeredProjects.find((project) => project.id === id) ?? { path: "", name: "Project" },
-                              )}
-                            />
-                          ) : (
-                            <span className="flex size-5 items-center justify-center overflow-hidden rounded-[6px] bg-ink text-[10px] font-semibold text-surface">
-                              <WorkspaceIcon src={current && !selectedLink ? workspace.image : scopeImage(scope.key)} fallback={scope.initial} />
-                            </span>
-                          )
-                        }
-                        open={open}
-                        current={current}
-                        attention={!current && attentionPaths.includes(scope.key)}
-                        onToggle={() => toggleScope(scope.key)}
-                        onNewChat={
-                          current
-                            ? () => {
-                                if (activeTitle === undefined) setDemoActiveTitle(null);
-                                onNewChat?.();
-                              }
-                            : () => onNewChatInScope?.(scope.key)
-                        }
-                        menu={scopeMenu(scope, current)}
-                      />
-                      {/* Rows grow open and shut instead of appearing at once; closed ones leave the tab order. */}
-                      <div
-                        inert={!open}
-                        data-scope-body
-                        className="grid transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
-                        style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}
-                      >
-                        <div className="min-w-0 overflow-hidden">
-                          {rest.length > 0 || pinned.length > 0 ? (
-                            <ChatList
-                              recents={pinned.length ? [...pinned, ...rest] : rest}
-                              {...list}
-                              header={null}
-                              pinnedTarget={pinSlots[scope.key] ?? null}
-                              anyPinned={anyPinned}
-                            />
-                          ) : !state && !current && failedScopes.has(scope.key) ? (
-                            <p className="mx-2 flex h-8 items-center gap-1 pl-9 text-[13px] text-ink-3">
-                              Couldn't load chats.
-                              <button
-                                type="button"
-                                onClick={() => retryScope(scope.key)}
-                                className="cursor-pointer text-ink-2 underline-offset-2 hover:underline"
-                              >
-                                Retry
-                              </button>
-                            </p>
-                          ) : (
-                            <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state || current ? "No chats yet" : "Loading chats…"}</p>
-                          )}
-                        </div>
-                      </div>
-                    </section>
-                  );
-                })}
-              </>
-            ) : (
-              <ChatList
-                recents={recents}
-                isActive={(item) => (activeId !== undefined ? item.id === activeId : item.label === selectedTitle)}
-                collapsed={collapsed}
-                actions={chatActions}
-                showHints={showHints}
-                onPick={pickChat}
-                show={chatRowShow}
-                linkProjectId={!selectedLink && projectPath ? (registeredProjects.find((project) => project.path === projectPath)?.id ?? null) : null}
-                header={
-                  <div className={`sidebar-copy mx-2 mb-1 flex h-8 items-center justify-between pl-2 ${collapsed ? "hidden" : ""}`}>
-                    <span className="text-[12.5px] font-medium text-ink-3">Chats</span>
-                    <Tooltip label="New chat" shortcut="⌘N" align="end">
-                      <button
-                        type="button"
-                        aria-label="New chat"
-                        onClick={() => {
-                          if (activeTitle === undefined) setDemoActiveTitle(null);
-                          onNewChat?.();
-                        }}
-                        className={CHATS_HEADER_BUTTON}
-                      >
-                        <IconPlusMedium size={16} />
-                      </button>
-                    </Tooltip>
+                  <div data-all-pinned={anyPinned || undefined} className={anyPinned ? "mb-2" : ""}>
+                    {anyPinned && <p className="sidebar-copy mx-2 mb-1 h-8 pl-2 text-[12.5px] font-medium leading-8 text-ink-3">Pinned</p>}
+                    {groups.map((group) => (
+                      <div key={group.scope.key} ref={pinSlotRef(group.scope.key)} data-pinned-scope={group.scope.key} />
+                    ))}
                   </div>
-                }
-              />
-            )}
+                  {groups.map(({ scope, current, state, rest, pinned, list, dimmed }, index) => {
+                    const open = !closedScopes.includes(scope.key);
+                    return (
+                      <section
+                        key={scope.key}
+                        data-sidebar-scope={scope.key}
+                        data-current={current || undefined}
+                        aria-label={scope.name}
+                        data-offline={dimmed || undefined}
+                        className={`mb-2 ${dimmed ? "opacity-50" : ""}`}
+                      >
+                        {scope.link && !scopes[index - 1]?.link && (
+                          <p className="mx-2 mt-1 mb-1 h-6 pl-2 text-[12.5px] font-medium leading-6 text-ink-3">Links</p>
+                        )}
+                        <ScopeHeader
+                          name={scope.name}
+                          icon={
+                            scope.link ? (
+                              <ProjectAvatarStack
+                                projects={scope.link.projectIds.map(
+                                  (id) => registeredProjects.find((project) => project.id === id) ?? { path: "", name: "Project" },
+                                )}
+                              />
+                            ) : (
+                              <span className="flex size-5 items-center justify-center overflow-hidden rounded-[6px] bg-ink text-[10px] font-semibold text-surface">
+                                <WorkspaceIcon src={current && !selectedLink ? workspace.image : scopeImage(scope.key)} fallback={scope.initial} />
+                              </span>
+                            )
+                          }
+                          open={open}
+                          current={current}
+                          attention={!current && attentionPaths.includes(scope.key)}
+                          onToggle={() => toggleScope(scope.key)}
+                          onNewChat={
+                            current
+                              ? () => {
+                                  if (activeTitle === undefined) setDemoActiveTitle(null);
+                                  onNewChat?.();
+                                }
+                              : () => onNewChatInScope?.(scope.key)
+                          }
+                          menu={scopeMenu(scope, current)}
+                        />
+                        {/* Rows grow open and shut instead of appearing at once; closed ones leave the tab order. */}
+                        <div
+                          inert={!open}
+                          data-scope-body
+                          className="grid transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
+                          style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}
+                        >
+                          <div className="min-w-0 overflow-hidden">
+                            {rest.length > 0 || pinned.length > 0 ? (
+                              <ChatList
+                                recents={pinned.length ? [...pinned, ...rest] : rest}
+                                scopeKey={scope.key}
+                                {...list}
+                                header={null}
+                                pinnedTarget={pinSlots[scope.key] ?? null}
+                                anyPinned={anyPinned}
+                              />
+                            ) : !state && !current && failedScopes.has(scope.key) ? (
+                              <p className="mx-2 flex h-8 items-center gap-1 pl-9 text-[13px] text-ink-3">
+                                Couldn't load chats.
+                                <button
+                                  type="button"
+                                  onClick={() => retryScope(scope.key)}
+                                  className="cursor-pointer text-ink-2 underline-offset-2 hover:underline"
+                                >
+                                  Retry
+                                </button>
+                              </p>
+                            ) : (
+                              <p className="mx-2 h-8 pl-9 text-[13px] leading-8 text-ink-3">{state || current ? "No chats yet" : "Loading chats…"}</p>
+                            )}
+                          </div>
+                        </div>
+                      </section>
+                    );
+                  })}
+                </>
+              ) : (
+                <ChatList
+                  recents={recents}
+                  scopeKey={currentKey}
+                  isActive={(item) => (activeId !== undefined ? item.id === activeId : item.label === selectedTitle)}
+                  collapsed={collapsed}
+                  actions={chatActions}
+                  showHints={showHints}
+                  onPick={pickChat}
+                  show={chatRowShow}
+                  linkProjectId={selectedLink ? null : linkProjectIdOf(projectPath)}
+                  header={
+                    <div className={`sidebar-copy mx-2 mb-1 flex h-8 items-center justify-between pl-2 ${collapsed ? "hidden" : ""}`}>
+                      <span className="text-[12.5px] font-medium text-ink-3">Chats</span>
+                      <Tooltip label="New chat" shortcut="⌘N" align="end">
+                        <button
+                          type="button"
+                          aria-label="New chat"
+                          onClick={() => {
+                            if (activeTitle === undefined) setDemoActiveTitle(null);
+                            onNewChat?.();
+                          }}
+                          className={CHATS_HEADER_BUTTON}
+                        >
+                          <IconPlusMedium size={16} />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  }
+                />
+              )}
+            </SidebarLinksProvider>
           </ScrollArea>
 
           {usage && <div className={`mt-3 border-t border-line pt-1.5 ${collapsed ? "mx-auto w-8" : "mx-2 w-[calc(100%-16px)]"}`}>{usage}</div>}
@@ -1496,25 +1515,28 @@ export default memo(function SidebarNav({
  * Pinned chats on top in the user's order, the rest below in
  * the list's own order. A row dragged between two rows pins,
  * reorders or unpins it; dropped on the middle third of another
- * row, it offers a Link between the two chats' Worktrees. The
- * keyboard does the same: Space picks the focused row up, the
- * arrows move it, Space drops it and Escape cancels.
+ * row, it offers a Link between the two chats' Worktrees, in
+ * this Project's list or another's. The keyboard does the same
+ * within the list: Space picks the focused row up, the arrows
+ * move it, Space drops it and Escape cancels.
  * ───────────────────────────────────────────────────────── */
 
 /** A press that moves this far is a drag; less is still a click that opens the chat. */
 const DRAG_THRESHOLD = 4;
-const TOAST_MS = 6000;
 const DROP_HINTS = { "same-worktree": "Same worktree: a Link joins two different Worktrees", linked: "Already linked" };
 
-/** Where a dragged chat would land: next to or on a row, or (id null) in the empty Pinned section. */
-type DropTarget = { id: string | null; zone: DropZone };
+/**
+ * Where a dragged chat would land: next to or on a row, or (id null) in the empty Pinned section. `scope` is another
+ * Project's list, where a drop can only link.
+ */
+type DropTarget = { id: string | null; zone: DropZone; scope?: string };
 type ChatDrag = { id: string; target: DropTarget | null; keyboard: boolean };
-type LinkAsk = { source: SidebarRecent; target: SidebarRecent; top: number; left: number };
 
-const sameTarget = (a: DropTarget | null, b: DropTarget | null) => a?.id === b?.id && a?.zone === b?.zone;
+const sameTarget = (a: DropTarget | null, b: DropTarget | null) => a?.id === b?.id && a?.zone === b?.zone && a?.scope === b?.scope;
 
 function ChatList({
   recents,
+  scopeKey,
   isActive,
   collapsed,
   actions,
@@ -1531,12 +1553,14 @@ function ChatList({
   anyPinned = false,
 }: {
   recents: SidebarRecent[];
+  /** The Project path or Link key the chats belong to. */
+  scopeKey: string;
   isActive: (item: SidebarRecent) => boolean;
   collapsed: boolean;
   actions: ChatRowActions;
   showHints: boolean;
   onPick: (item: SidebarRecent) => void;
-  /** The open Project's id on the canvas; null when its chats can't be linked from here. */
+  /** The Project's id on the canvas; null when its chats can't be linked from here. */
   linkProjectId: string | null;
   computer?: RowComputer;
   show: ChatRowShow;
@@ -1557,41 +1581,53 @@ function ChatList({
   const listRef = useRef<HTMLDivElement>(null);
   const pinRef = useRef<HTMLDivElement>(null);
   const containers = () => [listRef.current, pinRef.current].filter((node): node is HTMLDivElement => !!node);
-  const rowElement = (id: string) => {
-    for (const container of containers()) {
+  const rowIn = (nodes: HTMLElement[], id: string) => {
+    for (const container of nodes) {
       const found = container.querySelector<HTMLElement>(`[data-chat-id="${CSS.escape(id)}"]`);
       if (found) return found;
     }
     return null;
   };
+  const rowElement = (id: string) => rowIn(containers(), id);
+  const sidebarLinks = useSidebarLinks();
+  const links = sidebarLinks.links;
   const [drag, setDrag] = useState<ChatDrag | null>(null);
   const dragRef = useRef<ChatDrag | null>(null);
-  const [links, setLinks] = useState<ProjectLink[]>([]);
   const [mark, setMark] = useState<{ top: number; height: number; inPins: boolean } | null>(null);
-  const [toast, setToast] = useState<{ text: string; left: number; undo?: () => void } | null>(null);
-  const [linkAsk, setLinkAsk] = useState<LinkAsk | null>(null);
+  // A target row in another Project's list, outlined over the page.
+  const [foreignMark, setForeignMark] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const refocus = useRef<string | null>(null);
   const canDrag = !collapsed && Boolean(actions.onPin);
   const pinned = recents.filter((item) => item.pinned);
   const rest = recents.filter((item) => !item.pinned);
   const byId = (id: string | null) => recents.find((item) => item.id === id);
+  const otherList = (scope: string | undefined) => (scope === undefined ? undefined : sidebarLinks.lists().find((handle) => handle.scopeKey === scope));
 
   // Window listeners and memoized row actions call through this, so they always see the latest render.
-  const live = useRef({ recents, actions, over, drop, finish, hit });
-  live.current = { recents, actions, over, drop, finish, hit };
+  const live = useRef({ recents, actions, over, drop, finish, hit, sidebarLinks });
+  live.current = { recents, actions, over, drop, finish, hit, sidebarLinks };
+
+  // Another Project's list finds this one's rows when a drag from there ends here.
+  useEffect(() => {
+    if (!linkProjectId) return;
+    const handle: LinkListHandle = { scopeKey, containers, byId: (id) => live.current.recents.find((item) => item.id === id) };
+    return sidebarLinks.register(handle);
+  }, [scopeKey, linkProjectId]);
 
   const showToast = (text: string, undo?: () => void) => {
     const aside = listRef.current?.closest("aside")?.getBoundingClientRect();
-    setToast({ text, undo, left: (aside?.right ?? 0) + 12 });
+    live.current.sidebarLinks.toast(text, { undo, left: (aside?.right ?? 0) + 12 });
   };
-  useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), TOAST_MS);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
 
-  // Pinning from the row menu and from a drag both land here, so either can be undone.
+  /** Beside the sidebar, level with the row the menu or the drop was on. */
+  const anchorAt = (top: number) => {
+    const aside = listRef.current?.closest("aside")?.getBoundingClientRect();
+    return { top: Math.max(8, top), left: (aside?.right ?? 0) + 8 };
+  };
+
+  // Pinning from the row menu and from a drag both land here, so either can be undone. The Link items open the
+  // shared "Link with…" and "Remove Link with…" lists.
   const rowActions = useMemo<ChatRowActions>(
     () => ({
       ...actions,
@@ -1607,28 +1643,52 @@ function ChatList({
           now.actions.onPin(id, next);
           if ((previous === null) !== (next === null)) showToast(next === null ? "Unpinned" : "Pinned", () => live.current.actions.onPin?.(id, previous));
         }),
+      ...(linkProjectId
+        ? {
+            onLinkWith: (id: string, anchor: { top: number; left: number }) => {
+              const item = live.current.recents.find((row) => row.id === id);
+              if (item) live.current.sidebarLinks.pick({ scopeKey, item }, anchor, "link");
+            },
+            onRemoveLink: (id: string, anchor: { top: number; left: number }) => {
+              const item = live.current.recents.find((row) => row.id === id);
+              if (item) live.current.sidebarLinks.pick({ scopeKey, item }, anchor, "remove");
+            },
+          }
+        : {}),
     }),
-    [actions],
+    [actions, linkProjectId, scopeKey],
   );
 
   const endpoint = (item: SidebarRecent) => ({ pinned: item.pinned, worktree: item.details?.path });
-  const linkBetween = (a: SidebarRecent, b: SidebarRecent) =>
-    links.find(
-      (link) =>
-        link.a.project_id === linkProjectId &&
-        link.b.project_id === linkProjectId &&
-        ((link.a.worktree_path === a.details?.path && link.b.worktree_path === b.details?.path) ||
-          (link.a.worktree_path === b.details?.path && link.b.worktree_path === a.details?.path)),
-    );
+  const linkedTo = (a: SidebarRecent, b: SidebarRecent, bProject: string | null) =>
+    !!linkProjectId &&
+    !!bProject &&
+    !!a.details?.path &&
+    !!b.details?.path &&
+    !!linkBetween(links, { project_id: linkProjectId, worktree_path: a.details.path }, { project_id: bProject, worktree_path: b.details.path });
+
+  /** The chat a target names, in this list or another Project's, with that list's Project id. */
+  function targetChat(target: DropTarget) {
+    if (target.scope === undefined) return { onto: target.id === null ? null : byId(target.id), projectId: linkProjectId };
+    const handle = otherList(target.scope);
+    return { onto: handle && target.id !== null ? handle.byId(target.id) : undefined, projectId: handle ? sidebarLinks.projectIdOf(handle.scopeKey) : null };
+  }
 
   function intentOf(current: ChatDrag): DropIntent {
     const source = byId(current.id);
     const target = current.target;
-    if (!source || !target || target.id === current.id) return "none";
-    const onto = target.id === null ? null : byId(target.id);
+    if (!source || !target || (target.id === current.id && target.scope === undefined)) return "none";
+    const { onto, projectId } = targetChat(target);
     if (onto === undefined || onto?.pending) return "none";
     if (target.zone === "on" && !(source.details?.path && onto?.details?.path)) return "none";
-    return dropIntent(endpoint(source), onto && endpoint(onto), target.zone, Boolean(onto && linkBetween(source, onto)));
+    // Two Projects' Worktrees are never the same one, whatever their paths say.
+    const sameProject = target.scope === undefined;
+    return dropIntent(
+      endpoint(source),
+      onto && (sameProject ? endpoint(onto) : { pinned: onto.pinned }),
+      target.zone,
+      Boolean(onto && linkedTo(source, onto, projectId)),
+    );
   }
 
   /** The pinned chats other than the dragged one, and the index the drop puts it at among them. */
@@ -1642,7 +1702,7 @@ function ChatList({
   function describe(current: ChatDrag) {
     const intent = intentOf(current);
     if (typeof intent === "object") return DROP_HINTS[intent.invalid];
-    if (intent === "link") return `On ${byId(current.target!.id)?.label}: create Link`;
+    if (intent === "link") return `On ${current.target && targetChat(current.target).onto?.label}: create Link`;
     if (intent === "pin" || intent === "reorder") {
       const { orders, index } = pinSlot(current);
       return `Pinned, position ${index + 1} of ${orders.length + 1}`;
@@ -1665,11 +1725,7 @@ function ChatList({
       window.getSelection()?.removeAllRanges();
     }
     // Read as the drag starts, so "Already linked" follows Links drawn on the canvas since.
-    if (linkProjectId)
-      void window.milagre?.getCanvas?.().then(
-        (snapshot) => setLinks(snapshot.links),
-        () => {},
-      );
+    if (linkProjectId) sidebarLinks.refresh();
     setAnnouncement(keyboard ? `Picked up ${byId(id)?.label}. Arrow keys move it, Space drops it, Escape cancels.` : "");
   }
 
@@ -1712,23 +1768,44 @@ function ChatList({
       const { orders, index } = pinSlot(current);
       rowActions.onPin?.(current.id, pinOrderAt(orders, index));
     } else if (intent === "unpin") rowActions.onPin?.(current.id, null);
-    else if (intent === "link") askLink(byId(current.id)!, byId(current.target!.id)!);
+    else if (intent === "link" && current.target) {
+      const source = byId(current.id)!;
+      const { onto } = targetChat(current.target);
+      const scope = current.target.scope ?? scopeKey;
+      const element = current.target.scope === undefined ? rowElement(onto!.id) : rowIn(otherList(scope)?.containers() ?? [], onto!.id);
+      sidebarLinks.ask({ scopeKey, item: source }, { scopeKey: scope, item: onto! }, anchorAt(element?.getBoundingClientRect().top ?? 8));
+    }
   }
 
   /** The row or empty Pinned section under the pointer; between two rows it keeps the last one. */
   function hit(x: number, y: number): DropTarget | null {
-    const within = containers().filter((node) => {
+    const inside = (node: HTMLElement) => {
       const box = node.getBoundingClientRect();
       return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
-    });
-    if (!within.length) return null;
+    };
+    const within = containers().filter(inside);
+    if (!within.length) return linkProjectId ? otherHit(x, y, inside) : null;
     const element = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-chat-id], [data-pin-zone]");
-    if (!element || !within.some((node) => node.contains(element))) return dragRef.current?.target ?? null;
+    if (!element || !within.some((node) => node.contains(element)))
+      return dragRef.current?.target?.scope === undefined ? (dragRef.current?.target ?? null) : null;
     if (element.hasAttribute("data-pin-zone")) return { id: null, zone: "before" };
     const rect = element.getBoundingClientRect();
     const at = (y - rect.top) / rect.height;
     const zone: DropZone = linkProjectId ? (at < 1 / 3 ? "before" : at > 2 / 3 ? "after" : "on") : at < 0.5 ? "before" : "after";
     return { id: element.dataset.chatId ?? null, zone };
+  }
+
+  /** A row of another Project's list under the pointer: anywhere on it links, since the drop can't move the chat there. */
+  function otherHit(x: number, y: number, inside: (node: HTMLElement) => boolean): DropTarget | null {
+    for (const handle of sidebarLinks.lists()) {
+      if (handle.scopeKey === scopeKey) continue;
+      const nodes = handle.containers().filter(inside);
+      if (!nodes.length) continue;
+      const element = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-chat-id]");
+      if (!element || !nodes.some((node) => node.contains(element))) return null;
+      return { id: element.dataset.chatId ?? null, zone: "on", scope: handle.scopeKey };
+    }
+    return null;
   }
 
   function startPointer(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1838,9 +1915,19 @@ function ChatList({
     if (event.key === " " && canDrag && (event.target as HTMLElement).matches("[data-row]")) event.preventDefault();
   };
 
-  // The line or highlight follows the target row, measured once the Pinned drop area has shown up.
+  // The line or highlight follows the target row, measured once the Pinned drop area has shown up. A row in another
+  // Project's list is outlined over the page instead.
   const targetId = drag?.target?.id;
+  const targetScope = drag?.target?.scope;
   useLayoutEffect(() => {
+    if (targetScope !== undefined) {
+      setMark(null);
+      const row = targetId ? rowIn(otherList(targetScope)?.containers() ?? [], targetId) : null;
+      const rect = row?.getBoundingClientRect();
+      setForeignMark(rect ? { top: rect.top, left: rect.left, width: rect.width, height: rect.height } : null);
+      return;
+    }
+    setForeignMark(null);
     const row = targetId ? rowElement(targetId) : null;
     const inPins = !!row && !!pinRef.current?.contains(row);
     const container = inPins ? pinRef.current : listRef.current;
@@ -1848,49 +1935,14 @@ function ChatList({
     const box = container.getBoundingClientRect(),
       rect = row.getBoundingClientRect();
     setMark({ top: rect.top - box.top, height: rect.height, inPins });
-  }, [targetId, recents]);
+  }, [targetId, targetScope, recents]);
 
   // A row moved by the keyboard comes back in its new place; focus goes back to it.
   useLayoutEffect(() => {
     const id = refocus.current;
     if (!id || containers().some((node) => node.contains(document.activeElement))) return;
-    focusRow(id);
-  }, [recents]);
-
-  function focusRow(id: string) {
     rowElement(id)?.querySelector<HTMLElement>("[data-row]")?.focus();
-  }
-
-  function askLink(source: SidebarRecent, target: SidebarRecent) {
-    const row = rowElement(target.id)?.getBoundingClientRect();
-    const aside = listRef.current?.closest("aside")?.getBoundingClientRect();
-    setLinkAsk({ source, target, top: Math.max(8, Math.min(row?.top ?? 8, window.innerHeight - 220)), left: (aside?.right ?? 0) + 8 });
-  }
-
-  // The same Link the canvas draws between two Worktrees; undo removes it again.
-  async function createLink(ask: LinkAsk) {
-    setLinkAsk(null);
-    focusRow(ask.source.id);
-    if (!linkProjectId || !ask.source.details?.path || !ask.target.details?.path) return;
-    const a = { project_id: linkProjectId, worktree_path: ask.source.details.path };
-    const b = { project_id: linkProjectId, worktree_path: ask.target.details.path };
-    try {
-      const next = await window.milagre.addLink(a, b);
-      setLinks(next);
-      const created = next.find(
-        (link) =>
-          (link.a.worktree_path === a.worktree_path && link.b.worktree_path === b.worktree_path) ||
-          (link.a.worktree_path === b.worktree_path && link.b.worktree_path === a.worktree_path),
-      );
-      showToast(
-        "Link created",
-        created &&
-          (() => void window.milagre.removeLink(created.id).then(setLinks, (error) => showToast(`Could not remove the Link: ${ipcErrorMessage(error)}`))),
-      );
-    } catch (error) {
-      showToast(`Could not create the Link: ${ipcErrorMessage(error)}`);
-    }
-  }
+  }, [recents]);
 
   const intent = drag ? intentOf(drag) : "none";
   const row = (item: SidebarRecent, index: number) => (
@@ -1906,27 +1958,34 @@ function ChatList({
       show={show}
       dimOffline={dimOffline || (Boolean(pinnedTarget) && Boolean(item.pinned))}
       dragging={drag?.id === item.id}
+      linked={linkProjectId ? sidebarLinks.endsFor(scopeKey, item) : undefined}
     />
   );
 
+  const target = (invalid: boolean, hint: string | null) => (
+    <>
+      {invalid && hint ? (
+        <span className="absolute left-0 top-full z-40 mt-1 rounded-[6px] bg-surface px-2 py-1 text-[11.5px] text-red shadow-overlay">{hint}</span>
+      ) : (
+        <HugeIcon icon={Link04Icon} size={14} />
+      )}
+    </>
+  );
+  const targetClass = (invalid: boolean) =>
+    `pointer-events-none z-30 flex items-center justify-end rounded-[8px] pr-2 ring-2 ${invalid ? "bg-red/5 ring-red/60" : "bg-accent/10 text-accent ring-accent"}`;
   const indicator = (inPins: boolean) =>
     mark?.inPins === inPins &&
     drag?.target?.id &&
+    drag.target.scope === undefined &&
     mark &&
     intent !== "none" &&
     (drag.target.zone === "on" ? (
       <div
         data-drop-target={typeof intent === "object" ? "invalid" : "link"}
-        className={`pointer-events-none absolute inset-x-2 z-30 flex items-center justify-end rounded-[8px] pr-2 ring-2 ${typeof intent === "object" ? "bg-red/5 ring-red/60" : "bg-accent/10 text-accent ring-accent"}`}
+        className={`absolute inset-x-2 ${targetClass(typeof intent === "object")}`}
         style={{ top: mark.top, height: mark.height }}
       >
-        {typeof intent === "object" ? (
-          <span className="absolute left-0 top-full z-40 mt-1 rounded-[6px] bg-surface px-2 py-1 text-[11.5px] text-red shadow-overlay">
-            {DROP_HINTS[intent.invalid]}
-          </span>
-        ) : (
-          <HugeIcon icon={Link04Icon} size={14} />
-        )}
+        {target(typeof intent === "object", typeof intent === "object" ? DROP_HINTS[intent.invalid] : null)}
       </div>
     ) : (
       <div
@@ -1935,10 +1994,25 @@ function ChatList({
         style={{ top: drag.target.zone === "before" ? mark.top : mark.top + mark.height }}
       />
     ));
+  const foreignIndicator =
+    foreignMark &&
+    drag?.target?.scope !== undefined &&
+    intent !== "none" &&
+    createPortal(
+      <div
+        data-drop-target={typeof intent === "object" ? "invalid" : "link"}
+        data-drop-scope={drag.target.scope}
+        className={`fixed ${targetClass(typeof intent === "object")}`}
+        style={{ top: foreignMark.top, left: foreignMark.left + 8, width: foreignMark.width - 16, height: foreignMark.height }}
+      >
+        {target(typeof intent === "object", typeof intent === "object" ? DROP_HINTS[intent.invalid] : null)}
+      </div>,
+      document.body,
+    );
   // In its slot of the all-Projects Pinned section, the Pinned heading belongs to the section; while a chat is dragged
   // and nothing is pinned anywhere, the slot shows it with the drop area.
   const pinnedRows = pinnedTarget ? (
-    <div ref={pinRef} data-chat-list-pins className="relative">
+    <div ref={pinRef} data-chat-list-pins data-chat-scope={scopeKey} className="relative">
       {drag && pinned.length === 0 && !anyPinned && !collapsed && (
         <div className="sidebar-copy mx-2 mb-1 flex h-8 items-center pl-2">
           <span className="text-[12.5px] font-medium text-ink-3">Pinned</span>
@@ -1962,7 +2036,7 @@ function ChatList({
   ) : null;
 
   return (
-    <div ref={listRef} data-chat-list className="relative" onPointerDown={startPointer} onKeyDown={keyDown} onKeyUp={keyUp}>
+    <div ref={listRef} data-chat-list data-chat-scope={scopeKey} className="relative" onPointerDown={startPointer} onKeyDown={keyDown} onKeyUp={keyUp}>
       {/* A portal still bubbles its React events here, so the pointer and keys of pinned rows reach this list. */}
       {pinnedTarget ? (
         createPortal(pinnedRows, pinnedTarget)
@@ -1993,91 +2067,11 @@ function ChatList({
       <div className="flex flex-col gap-px">{rest.map((item, index) => row(item, pinned.length + index))}</div>
 
       {indicator(false)}
+      {foreignIndicator}
 
       <div aria-live="assertive" className="sr-only">
         {announcement}
       </div>
-      {linkAsk && (
-        <LinkPopover
-          ask={linkAsk}
-          onConfirm={() => void createLink(linkAsk)}
-          onCancel={() => {
-            setLinkAsk(null);
-            focusRow(linkAsk.source.id);
-          }}
-        />
-      )}
-      {toast &&
-        createPortal(
-          <div
-            role="status"
-            data-chat-toast
-            className="fixed bottom-4 z-[80] flex items-center gap-3 rounded-[10px] bg-surface px-3 py-2 text-[13px] text-ink shadow-overlay"
-            style={{ left: toast.left, animation: "fade-up 200ms cubic-bezier(0.23,1,0.32,1) both" }}
-          >
-            <span>{toast.text}</span>
-            {toast.undo && (
-              <button
-                type="button"
-                data-chat-toast-undo
-                onClick={() => {
-                  setToast(null);
-                  toast.undo?.();
-                }}
-                className="font-medium text-accent-ink hover:underline"
-              >
-                Undo
-              </button>
-            )}
-          </div>,
-          document.body,
-        )}
     </div>
-  );
-}
-
-/** Asks before a dropped chat creates a Link; nothing is created until Create Link. */
-function LinkPopover({ ask, onConfirm, onCancel }: { ask: LinkAsk; onConfirm: () => void; onCancel: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    ref.current?.querySelector<HTMLElement>("[data-link-confirm]")?.focus();
-  }, []);
-  useDismiss(true, onCancel, (target) => !!ref.current?.contains(target));
-  const side = (item: SidebarRecent) => item.details?.branch ?? item.label;
-  return createPortal(
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="Create Link"
-      data-link-popover
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        onCancel();
-      }}
-      className="fixed z-[70] w-72 rounded-[12px] bg-surface p-3 shadow-overlay"
-      style={{ top: ask.top, left: ask.left, animation: "pop-in 160ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "top left" }}
-    >
-      <p className="text-[13.5px] font-semibold text-ink">Link these Worktrees?</p>
-      <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-2">
-        <span className="truncate">{side(ask.source)}</span>
-        <span className="shrink-0 text-ink-3">
-          <HugeIcon icon={Link04Icon} size={13} />
-        </span>
-        <span className="truncate">{side(ask.target)}</span>
-      </p>
-      <p className="mt-2 text-[12.5px] leading-snug text-ink-3">
-        Every Chat on either side can read the other side and make Delegations to it, so “{ask.source.label}” can ask “{ask.target.label}” for changes.
-      </p>
-      <div className="mt-3 flex justify-end gap-2">
-        <button type="button" onClick={onCancel} className="rounded-[8px] px-3 py-1.5 text-[13px] text-ink-2 hover:bg-hover-2">
-          Cancel
-        </button>
-        <button type="button" data-link-confirm onClick={onConfirm} className="rounded-[8px] bg-ink px-3 py-1.5 text-[13px] font-medium text-surface">
-          Create Link
-        </button>
-      </div>
-    </div>,
-    document.body,
   );
 }

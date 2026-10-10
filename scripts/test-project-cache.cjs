@@ -120,7 +120,7 @@ const stubs = {
   "./project-icon": "export const ProjectIcon = () => null; export const ProjectIcons = () => null;",
   "./project-search": "export const ProjectSearch = () => null;",
   "./chat-actions": "export const chatMenu = () => []; export const runChatAction = async () => {};",
-  "./confirm-store": "export const confirm = async () => true;",
+  "./confirm-store": "export const confirm = async () => true; export const confirmSheet = () => {};",
   "./attention": "export const AttentionDot = () => null; export const useAttention = () => [];",
   "./chat-row-store":
     "export const useChatRowShow = () => ({ computer: true, pullRequests: true, linearIssue: true, branch: true, diff: false, lastActivity: false }); export const saveChatRowShow = () => {}; export const useActivityClock = () => Date.now();",

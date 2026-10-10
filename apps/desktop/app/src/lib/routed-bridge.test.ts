@@ -62,7 +62,9 @@ const ALLOWED: Record<string, string[]> = {
     "onMainSyncStatus",
     "computers",
   ],
-  "components/SidebarNav.tsx": ["listRecentProjects", "listNamedLinks", "listProjects", "revealInFolder", "getCanvas", "addLink", "removeLink"],
+  "components/SidebarNav.tsx": ["listRecentProjects", "listNamedLinks", "listProjects", "revealInFolder"],
+  // Canvas Links are this Mac's own, like the canvas.
+  "components/sidebar/SidebarLinks.tsx": ["onLinksChanged"],
   "components/LinkWorkspace.tsx": ["syncNotifications", "revealInFolder"],
   "components/ComputerAllowPrompt.tsx": ["onDevicesPending", "listPendingDevices", "allowDevice", "denyDevice"],
   "components/UpdateNotice.tsx": ["onUpdateState", "getUpdateState", "installUpdate", "checkForUpdates"],

@@ -1,8 +1,10 @@
 import { useCallback, useRef, useState } from "react";
-import { Text } from "react-native";
+import { Text, View } from "react-native";
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useSession } from "../session";
 import { ArchiveProgress } from "../archive-progress";
+import { useLinks } from "../use-links";
+import { endNamer, linkedLabels } from "../chat-links";
 import { Button, ErrorNotice, Field, PageScroll, useStyles } from "../ui";
 
 export default function ChatDetails() {
@@ -16,6 +18,7 @@ export default function ChatDetails() {
   const [error, setError] = useState("");
   const focused = useRef<object | null>(null);
   const projectPath = session.snapshot?.project.path;
+  const links = useLinks(session.client);
   useFocusEffect(
     useCallback(() => {
       focused.current = { client: session.client, projectPath, id };
@@ -27,6 +30,17 @@ export default function ChatDetails() {
   if (!session.client || !session.snapshot || !chat) return <Redirect href="/" />;
   const { project, runs } = session.snapshot;
   const running = !!runs.runs[`${project.path}#${id}`];
+  // The Worktrees a Link joins to this Chat's, named as on the chat list's Link icon. A shared Link Chat has none.
+  const worktreePath = links.available && !project.link ? project.state.worktrees[chat.worktree_id]?.path : undefined;
+  const projectId = worktreePath ? links.projectIdOf(project.path) : undefined;
+  const linked = linkedLabels(
+    links.links,
+    projectId && worktreePath ? { project_id: projectId, worktree_path: worktreePath } : undefined,
+    endNamer(links.projects, (path, worktree) => {
+      const copy = path === project.path ? session.snapshot : session.cachedProject(path);
+      return Object.values(copy?.project.state.worktrees ?? {}).find((item) => item.path === worktree)?.name;
+    }),
+  );
   async function save(patch: { title?: string; archived?: boolean }) {
     const focus = focused.current;
     const current = () => focus !== null && focused.current === focus && session.isSelected();
@@ -51,6 +65,18 @@ export default function ChatDetails() {
       <Text style={styles.title}>Manage Chat</Text>
       <Field label="Chat name" value={title} onChangeText={setTitle} placeholder="Give this Chat a name" />
       <Button title="Save name" disabled={busy || !title.trim()} onPress={() => void save({ title: title.trim() })} />
+      {linked.length > 0 && (
+        <View style={{ gap: 6 }}>
+          <Text accessibilityRole="header" style={styles.label}>
+            Linked
+          </Text>
+          {linked.map(({ link, label }) => (
+            <Text key={link.id} style={styles.text}>
+              {label}
+            </Text>
+          ))}
+        </View>
+      )}
       <Text style={styles.muted}>
         {chat.archived ? "Restoring brings this Chat back to its Worktree list." : "Archiving hides this Chat from the active list. Its messages stay saved."}
       </Text>

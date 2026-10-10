@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { canLink, createLink, linkedWorktrees, pruneLinks } = require("./project-links.cjs");
+const { canLink, createLink, linkedWorktrees, pruneLinks, restoreLink } = require("./project-links.cjs");
 
 // The reached Worktrees without the Link that reaches each one.
 const visibleWorktrees = (...args) => linkedWorktrees(...args).map(({ project_id, worktree_path }) => ({ project_id, worktree_path }));
@@ -57,6 +57,18 @@ test("inactive Worktree endpoints are pruned but Project endpoints remain", () =
 test("each reached Worktree names the Link that reaches it", () => {
   const broad = createLink([], project("a"), project("b"), projects, active);
   const narrow = createLink([broad], worktree("a", "/a/one"), worktree("b", "/b/one"), projects, active);
-  assert.deepEqual(linkedWorktrees(worktree("a", "/a/one"), [broad, narrow], active), [{ project_id: "b", worktree_path: "/b/one", link_id: broad.id }]);
-  assert.deepEqual(linkedWorktrees(worktree("b", "/b/one"), [narrow], active), [{ project_id: "a", worktree_path: "/a/one", link_id: narrow.id }]);
+  assert.deepEqual(linkedWorktrees(worktree("a", "/a/one"), [broad, narrow], active), [
+    { project_id: "b", worktree_path: "/b/one", link_id: broad.id, link_ids: [broad.id, narrow.id] },
+  ]);
+  assert.deepEqual(linkedWorktrees(worktree("b", "/b/one"), [narrow], active), [
+    { project_id: "a", worktree_path: "/a/one", link_id: narrow.id, link_ids: [narrow.id] },
+  ]);
+});
+
+test("restoreLink brings a removed Link back with its id, and refuses one that can't come back", () => {
+  const link = createLink([], worktree("a", "/a/one"), project("b"), projects, active);
+  assert.deepEqual(restoreLink([], link, projects, active), link);
+  assert.throws(() => restoreLink([link], link, projects, active), /already exists/);
+  assert.throws(() => restoreLink([], { ...link, a: worktree("a", "/a/gone") }, projects, active), /cannot be linked/);
+  assert.throws(() => restoreLink([], { ...link, id: "" }, projects, active), /no longer valid/);
 });

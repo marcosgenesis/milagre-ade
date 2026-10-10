@@ -2,7 +2,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { resolveProject } = require("./project-identity.cjs");
-const { createLink, pruneLinks } = require("./project-links.cjs");
+const { createLink, pruneLinks, restoreLink } = require("./project-links.cjs");
 const { createProjectGroup, updateProjectGroup, validProjectGroup } = require("./project-groups.cjs");
 
 const DEFAULT_ROOTS = [path.join(os.homedir(), "Developer"), path.join(os.homedir(), ".milagre", "worktrees")];
@@ -187,6 +187,12 @@ function createProjectRegistry(file, { roots = DEFAULT_ROOTS, now = () => new Da
     addLink: (a, b, active) =>
       update(async (data) => {
         data.links.push(createLink(data.links, a, b, data.projects, active, now));
+        return data;
+      }),
+    /** Undo of a removal: the same Link, id and all, so what was saved against it (Always allow) holds again. */
+    restoreLink: (link, active) =>
+      update(async (data) => {
+        data.links.push(restoreLink(data.links, link, data.projects, active));
         return data;
       }),
     removeLink: (id) =>

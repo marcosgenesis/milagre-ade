@@ -13,10 +13,12 @@ import { UpdateShell } from "../update-sheet";
 import { SidePanelsHost, SidePanelsProvider } from "../side-panels";
 import { setConfirmPresenter } from "../confirm-store";
 import { setChoicePresenter } from "../choice-store";
+import { setLinkPresenter } from "../link-chat-store";
 
 // Confirmations open as a bottom sheet over whatever is showing, the side panels included.
 setConfirmPresenter(() => router.push("/confirm-sheet"));
 setChoicePresenter(() => router.push("/choice-sheet"));
+setLinkPresenter(() => router.push("/link-chat"));
 
 export default function Layout() {
   const { colors: palette, scheme } = useTheme();
@@ -79,6 +81,7 @@ export default function Layout() {
                       <Stack.Screen name="projects" options={{ title: "Projects" }} />
                       <Stack.Screen name="project-settings" options={{ title: "Project" }} />
                       <Stack.Screen name="link-projects" options={{ ...sheet, sheetAllowedDetents: [1] }} />
+                      <Stack.Screen name="link-chat" options={{ ...sheet, sheetAllowedDetents: [1] }} />
                       <Stack.Screen name="choose-projects" options={{ ...sheet, sheetAllowedDetents: [0.6, 1], sheetInitialDetentIndex: 0 }} />
                       <Stack.Screen name="chat" options={{ title: "Chat" }} />
                       <Stack.Screen name="context-sheet" options={{ ...sheet, sheetAllowedDetents: "fitToContents" }} />

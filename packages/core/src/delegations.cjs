@@ -84,7 +84,8 @@ function jsonFileStore(file) {
 class Delegations {
   /**
    * Ports, all supplied by the runtime:
-   *   target(fromChat, worktreePath) -> { link_id, projectPath, projectName, branch } | null, when the Chat can see that Worktree
+   *   target(fromChat, worktreePath) -> { link_id, link_ids, projectPath, projectName, branch } | null, when the Chat can see that
+   *     Worktree; link_ids are every Link that reaches it, link_id the one it routes along
    *   chat(chatKey) -> { label, worktreePath, archived } | null; openChat(projectPath, worktreePath) -> a new Chat's key
    *   status(chatKey) -> "idle" | "working" | "waiting"
    *   deliver(chatKey, { body, prompt, context }) -> { started }, once the message is saved; `started` resolves with
@@ -188,7 +189,8 @@ class Delegations {
       toLabel = info.label;
     }
     const from = await this.ports.chat(fromChat);
-    const decision = await this.approval(fromChat, target.link_id, { target: toLabel, message, negotiation });
+    const linkIds = [target.link_id, ...(target.link_ids ?? []).filter((id) => id !== target.link_id)];
+    const decision = await this.approval(fromChat, linkIds, { target: toLabel, message, negotiation });
     if (decision === "deny") throw new Error("The user denied this Delegation. Don't send it again unless they ask.");
     if (decision === "cancelled") throw new Error("The approval card closed before the user answered, so nothing was sent.");
     const toChat = chat === "new" ? await this.ports.openChat(target.projectPath, worktree) : chat;
@@ -276,9 +278,14 @@ class Delegations {
     return this.delivered.get(chatKey);
   }
 
-  async approval(fromChat, linkId, delegation) {
-    const grant = `${fromChat}\0${linkId}`;
-    if (this.ports.permissionMode(fromChat) !== "ask" || this.data.grants.includes(grant)) return "allow";
+  /**
+   * `linkIds`: every Link that reaches the destination, the routed one first. A grant on any of them covers it, so
+   * Always allow set on a newer, wider Link still holds where an older one is the route. The card's grant goes on the
+   * routed Link.
+   */
+  async approval(fromChat, linkIds, delegation) {
+    const grant = `${fromChat}\0${linkIds[0]}`;
+    if (this.ports.permissionMode(fromChat) !== "ask" || linkIds.some((id) => this.data.grants.includes(`${fromChat}\0${id}`))) return "allow";
     const decision = await this.ports.approve(fromChat, {
       requestId: this.id(),
       kind: "delegation",
@@ -292,6 +299,19 @@ class Delegations {
       await this.persist();
     }
     return decision === "allow-for-chat" ? "allow" : decision;
+  }
+
+  /**
+   * "Always allow for this Link in this chat", set before the agent asks: the sidebar's Link popover offers it for
+   * the Chat that was dropped. The same grant the approval card saves.
+   */
+  async grant(chatKey, linkId) {
+    await this.ready;
+    if (typeof chatKey !== "string" || typeof linkId !== "string" || !chatKey || !linkId) throw new Error("Choose a Chat and a Link.");
+    const grant = `${chatKey}\0${linkId}`;
+    if (this.data.grants.includes(grant)) return;
+    this.data.grants.push(grant);
+    await this.persist();
   }
 
   record(fields) {

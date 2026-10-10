@@ -36,7 +36,11 @@ import type { AgentSession, PullRequest } from "@milagre/shared/model";
 import type { LinearIssue } from "@milagre/shared/linear";
 import type { ChatSearchMatch, RegisteredProject } from "./client";
 import { isLinkScopeKey } from "@milagre/shared/chat-scopes";
-import { usePendingChats, useSession, type MobilePendingChat } from "./session";
+import { useComposer, usePendingChats, useSession, type MobilePendingChat } from "./session";
+import { useLinks } from "./use-links";
+import { endNamer, linkMenuSection, linkWorktree, linkedAccessibilityLabel, linkedLabels, type LinkChat } from "./chat-links";
+import { linkWithChat, removeLinkFromChat } from "./link-actions";
+import { afterSend, selectedModel, sendOptions, turnTarget } from "./turn-options";
 import { chatMark, type ChatMark } from "./indicators";
 import { ChatMarkIcon } from "./status-indicators";
 import { Icon } from "./icons";
@@ -49,7 +53,7 @@ import { confirm } from "./confirm-store";
 import { ArchivingOverlay, useArchiveActivity } from "./archive-progress";
 import { clearArchiveNotice, showArchiveNotice } from "./archive";
 import { AttentionDot, useAttention } from "./attention";
-import { projectOfKey } from "@milagre/shared/agent-runs";
+import { lastUserModel, projectOfKey } from "@milagre/shared/agent-runs";
 import { useChatPullRequests } from "./use-chat-pull-requests";
 import { ChatPullRequestChips } from "./chat-pull-request-chips";
 import { useLinear } from "./use-linear";
@@ -74,6 +78,8 @@ type Row = { key: string; path: string } & (
       prRefs?: string[];
       pullRequests?: PullRequest[];
       linearIssue?: LinearIssue;
+      /** How the list names each other end of the Links that reach the Chat's Worktree. */
+      linked?: string[];
     }
   | { kind: "message"; chat: AgentSession; title: string; snippet: string; highlight: [number, number] }
   | { kind: "notice"; message: string; failed?: boolean }
@@ -118,7 +124,9 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const { colors } = useTheme();
   const styles = useStyles();
   const session = useSession();
+  const composer = useComposer();
   const { pendingChats } = usePendingChats();
+  const links = useLinks(session.client);
   const insets = useSafeAreaInsets();
   const attention = useAttention();
   const { reloadProjects, previewProject, cachedProject } = session;
@@ -377,6 +385,18 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   const { active: linearActive } = useLinear(session.client);
   const linearPaths = useMemo(() => [...new Set(rows.flatMap((row) => (row.kind === "chat" && row.prPath ? [row.path] : [])))], [rows]);
   const linearIssues = useWorktreeLinearIssues(session.client, linearActive ? linearPaths : []);
+  // The copy of a Project this list reads: the open one's live snapshot, otherwise the session's last copy.
+  const copyOf = (projectPath: string) => (projectPath === currentPath && session.snapshot ? session.snapshot : cachedProject(projectPath));
+  // A Link's other end is named by its Project and, when this phone holds that Project, the Worktree's branch.
+  const endNames = endNamer(
+    links.projects,
+    (projectPath, worktreePath) => Object.values(copyOf(projectPath)?.project.state.worktrees ?? {}).find((worktree) => worktree.path === worktreePath)?.name,
+  );
+  // Only a local Project's Chat with its own Worktree joins Links; a shared Link Chat (prPath unset) never does.
+  const worktreeForLinks = (projectPath: string, worktreePath?: string) => {
+    const projectId = links.available && worktreePath ? links.projectIdOf(projectPath) : undefined;
+    return projectId && worktreePath ? { project_id: projectId, worktree_path: worktreePath } : undefined;
+  };
   const displayedRows = rows.map((row) => {
     if (row.kind !== "chat") return row;
     const status = row.prPath ? prStatus[row.prPath] : undefined;
@@ -384,6 +404,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
       ...row,
       pullRequests: chatPullRequests(row.prRefs || [], status?.found || {}, status?.branch),
       linearIssue: row.prPath ? linearIssues[row.prPath] : undefined,
+      linked: linkedLabels(links.links, worktreeForLinks(row.path, row.prPath), endNames).map((end) => end.label),
     };
   });
 
@@ -407,8 +428,12 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
   // behind the navigation leaves it for the project list as soon as the archive is confirmed; the archive then runs on
   // the Chat's row, and nothing navigates when it ends.
   async function act(projectPath: string, chat: AgentSession, action: string) {
-    const copy = projectPath === currentPath && session.snapshot ? session.snapshot : cachedProject(projectPath);
+    const copy = copyOf(projectPath);
     if (!copy || !session.client) return;
+    if (action === "link-with" || action === "link-remove") {
+      linkAction(projectPath, chat, action);
+      return;
+    }
     const archiveKey = `${projectPath}#${chat.id}`;
     if (archiveRequests.current.has(archiveKey)) return;
     if (action === "archive" && !chat.archived) archiveRequests.current.add(archiveKey);
@@ -440,6 +465,80 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
     } finally {
       archiveRequests.current.delete(archiveKey);
     }
+  }
+  /** A Chat as the Link picker names it, or undefined when it can't join a Link (no Worktree, not a local Project). */
+  function linkChatOf(projectPath: string, chat: AgentSession, messages?: Parameters<typeof chatTitle>[1]): LinkChat | undefined {
+    const copy = copyOf(projectPath);
+    const worktree = copy && !copy.project.link ? copy.project.state.worktrees[chat.worktree_id] : undefined;
+    const target = worktreeForLinks(projectPath, worktree?.path);
+    if (!copy || !worktree || !target) return undefined;
+    return {
+      projectPath: copy.project.path,
+      projectName: links.projectNameOf(target.project_id) || copy.project.name || projectPath.split("/").at(-1) || "Project",
+      projectId: target.project_id,
+      chatId: chat.id,
+      title: chatTitle(chat, messages ?? (copy.project.state.messages || []).filter((message) => message.session_id === chat.id)),
+      branch: worktree.name,
+      worktreePath: worktree.path,
+    };
+  }
+  // The Chats "Link with…" offers: those listed in every local Project this phone already holds, newest first, the
+  // open Project's first.
+  function linkChats() {
+    const paths = [...new Set([currentPath, ...listed.map((item) => item.path)].filter((path): path is string => !!path && !isLinkScopeKey(path)))];
+    return paths.flatMap((projectPath) => {
+      const copy = copyOf(projectPath);
+      if (!copy || copy.project.link) return [];
+      const byChat = new Map<number, typeof copy.project.state.messages>();
+      for (const message of copy.project.state.messages || []) {
+        const list = byChat.get(message.session_id) || [];
+        list.push(message);
+        byChat.set(message.session_id, list);
+      }
+      return Object.values(copy.project.state.sessions)
+        .filter(
+          (chat) => !chat.archived && (copy.runs.runs[`${copy.project.path}#${chat.id}`] || isListedChat(chat, chatSummary(chat, byChat.get(chat.id)).count)),
+        )
+        .sort((a, b) => b.id - a.id)
+        .flatMap((chat) => linkChatOf(projectPath, chat, byChat.get(chat.id) ?? []) ?? []);
+    });
+  }
+  // "Link and ask" sends to the source Chat as its composer would: its own provider and model, its permission mode.
+  async function askChat(projectPath: string, chat: AgentSession, message: { body: string; prompt: string }) {
+    const copy = copyOf(projectPath);
+    const client = session.client;
+    if (!copy || !client) throw new Error("Connection lost. Reconnect to your computer.");
+    const key = `${copy.project.path}#${chat.id}`;
+    const preferences = composer.preferences[key] || composer.defaults;
+    const turn = turnTarget(composer.preferences[key], chat.provider, composer.defaults);
+    const model = selectedModel(turn.provider, turn.model || (!turn.picked ? lastUserModel(copy.project.state, chat.id) : ""), session.models);
+    await client.call("chat:send", [
+      { projectPath: copy.project.path, sessionId: chat.id, worktreeId: chat.worktree_id, ...message, ...sendOptions(model, preferences) },
+    ]);
+    composer.setPreferences((current) => ({
+      ...current,
+      [key]: afterSend(current[key] || preferences, turn, chat.provider, model.id, !!copy.runs.runs[key]),
+    }));
+    session.expectActivity();
+    await (projectPath === currentPath ? session.refresh() : load(projectPath)).catch(() => {});
+  }
+  function linkAction(projectPath: string, chat: AgentSession, action: "link-with" | "link-remove") {
+    const client = session.client;
+    const source = linkChatOf(projectPath, chat);
+    if (!client || !source) return;
+    setError("");
+    clearArchiveNotice();
+    if (action === "link-with")
+      linkWithChat({
+        client,
+        links: links.links,
+        source,
+        chats: linkChats(),
+        send: (message) => askChat(projectPath, chat, message),
+        notify: showArchiveNotice,
+        onAsked: () => select(projectPath, chat.id),
+      });
+    else void removeLinkFromChat({ client, ends: linkedLabels(links.links, linkWorktree(source), endNames), notify: showArchiveNotice });
   }
   // Removing a Project takes it off the recent list, as desktop does; its folder and Chats stay on the Mac.
   async function projectAction(projectPath: string, name: string, action: string) {
@@ -647,6 +746,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
+              void links.refresh();
               void reloadProjects()
                 .then(() => Promise.all([...expanded].map(load)))
                 .catch((e) => setError(e.message))
@@ -767,10 +867,18 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
             </>
           );
           const branchLine = copy?.project.link ? `Shared Chat · ${copy.project.link.projects.length} Projects` : rowShow.branch ? item.worktree : "";
-          const secondLine = !!branchLine || !!diff || lastAt !== undefined || !!item.chat.pinned || !!labels[item.mark];
+          const linked = item.linked ?? [];
+          // A linked Chat shows the Link glyph beside its pin, as desktop's sidebar does.
+          const linkedIcon = linked.length ? (
+            <View accessible accessibilityLabel={linkedAccessibilityLabel(linked)}>
+              <Icon icon={Link04Icon} tone="ink3" size={12} />
+            </View>
+          ) : null;
+          const secondLine = !!branchLine || !!diff || lastAt !== undefined || !!item.chat.pinned || !!linkedIcon || !!labels[item.mark];
           const menu = chatMenu(
             item.chat,
             copy?.project.link ? { path: copy.project.state.worktrees[item.chat.worktree_id]?.path } : copy?.project.state.worktrees[item.chat.worktree_id],
+            linkMenuSection({ available: links.available, worktreePath: worktreeForLinks(item.path, item.prPath)?.worktree_path, linked: linked.length }),
           );
           // While it archives, the row stays put under the progress and takes no taps.
           const archiving = archives.chats.has(`${copy?.project.path ?? item.path}#${item.chat.id}`);
@@ -783,7 +891,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                 importantForAccessibility={archiving ? "no-hide-descendants" : "auto"}
               >
                 <PullDown
-                  label={`${title}${item.chat.pinned ? ", pinned" : ""}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}`}
+                  label={`${title}${item.chat.pinned ? ", pinned" : ""}, ${item.worktree}${labels[item.mark] ? `, ${labels[item.mark]}` : ""}${linked.length ? `, ${linkedAccessibilityLabel(linked)}` : ""}`}
                   title={title}
                   sections={item.pending || archiving ? [] : menu}
                   onSelect={(action) => {
@@ -806,6 +914,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                       {!hasChips && secondLine && (
                         <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
                           {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
+                          {linkedIcon}
                           {!copy?.project.link && !!branchLine && <Icon icon={GitBranchIcon} tone="ink3" size={12} />}
                           {!!branchLine && (
                             <Text numberOfLines={1} style={[s.detail, { flexShrink: 1 }]}>
@@ -824,6 +933,7 @@ function ProjectNavigationContent({ onNavigate, onClose, activeChatId }: Navigat
                 {hasChips && (
                   <ChatPullRequestChips pullRequests={pullRequests} linearIssue={linearIssue}>
                     {item.chat.pinned && <Icon icon={PinIcon} tone="ink3" size={12} />}
+                    {linkedIcon}
                     {facts}
                     {!!labels[item.mark] && (
                       <Text numberOfLines={1} style={[s.detail, { flexShrink: 1, color: tone === "accent" ? colors.accentInk : colors[tone] }]}>

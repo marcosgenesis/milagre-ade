@@ -215,6 +215,7 @@ async function browserChecks() {
       [
         ["/work/api", "false"],
         ["/work/arketa", "true"],
+        ["milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7", "true"],
         ["/work/shop", "true"],
       ],
       "Every Project by name, the hidden one unchecked",

@@ -10,7 +10,7 @@ export type GenuiRenderer<K extends GenuiComponentName> = (args: ComponentRender
 
 const GAP = { s: "gap-1", m: "gap-2", l: "gap-4" } as const;
 
-export const Stack: GenuiRenderer<"Stack"> = ({ props, renderNode }) => (
+const Stack: GenuiRenderer<"Stack"> = ({ props, renderNode }) => (
   <div data-slot="genui-stack" className={`flex ${props.direction === "row" ? "flex-row flex-wrap items-start" : "flex-col"} ${GAP[props.gap ?? "m"]}`}>
     {renderNode(props.children)}
   </div>
@@ -18,13 +18,13 @@ export const Stack: GenuiRenderer<"Stack"> = ({ props, renderNode }) => (
 
 const HEADING = { 1: "text-[15px] font-semibold", 2: "text-[14px] font-semibold", 3: "text-[13px] font-medium text-ink-2" } as const;
 
-export const Heading: GenuiRenderer<"Heading"> = ({ props }) => <div className={`${HEADING[props.level ?? 2]} text-ink`}>{props.text}</div>;
+const Heading: GenuiRenderer<"Heading"> = ({ props }) => <div className={`${HEADING[props.level ?? 2]} text-ink`}>{props.text}</div>;
 
 const TONE = { default: "text-ink", muted: "text-ink-2", strong: "font-medium text-ink" } as const;
 
-export const Text: GenuiRenderer<"Text"> = ({ props }) => <p className={`m-0 text-[13px] leading-[1.55] ${TONE[props.tone ?? "default"]}`}>{props.text}</p>;
+const Text: GenuiRenderer<"Text"> = ({ props }) => <p className={`m-0 text-[13px] leading-[1.55] ${TONE[props.tone ?? "default"]}`}>{props.text}</p>;
 
-export const KeyValue: GenuiRenderer<"KeyValue"> = ({ props }) => (
+const KeyValue: GenuiRenderer<"KeyValue"> = ({ props }) => (
   <dl data-slot="genui-keyvalue" className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13px]">
     {props.pairs.map(([key, value], index) => (
       <div key={index} className="contents">
@@ -35,7 +35,7 @@ export const KeyValue: GenuiRenderer<"KeyValue"> = ({ props }) => (
   </dl>
 );
 
-export const Table: GenuiRenderer<"Table"> = ({ props }) => {
+const Table: GenuiRenderer<"Table"> = ({ props }) => {
   const rows = squareRows(props.columns, props.rows);
   return (
     <ScrollArea data-slot="genui-table" className="my-1 max-w-full rounded-card border border-line bg-surface">
@@ -72,14 +72,14 @@ const CALLOUT = {
   danger: "border-red/30 bg-red-tint text-ink",
 } as const;
 
-export const Callout: GenuiRenderer<"Callout"> = ({ props }) => (
+const Callout: GenuiRenderer<"Callout"> = ({ props }) => (
   <div data-slot="genui-callout" data-tone={props.tone ?? "info"} className={`rounded-card border px-3 py-2 text-[13px] ${CALLOUT[props.tone ?? "info"]}`}>
     {props.title && <div className="mb-0.5 font-medium">{props.title}</div>}
     <div>{props.body}</div>
   </div>
 );
 
-export const Progress: GenuiRenderer<"Progress"> = ({ props }) => {
+const Progress: GenuiRenderer<"Progress"> = ({ props }) => {
   const value = Math.min(1, Math.max(0, Number.isFinite(props.value) ? props.value : 0));
   return (
     <div data-slot="genui-progress" className="text-[13px]">
@@ -94,7 +94,7 @@ export const Progress: GenuiRenderer<"Progress"> = ({ props }) => {
   );
 };
 
-export const Button: GenuiRenderer<"Button"> = ({ props }) => {
+const Button: GenuiRenderer<"Button"> = ({ props }) => {
   const trigger = useTriggerAction();
   const streaming = useIsStreaming();
   const secondary = props.variant === "secondary";

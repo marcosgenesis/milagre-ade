@@ -12,7 +12,7 @@ export type GenuiRenderer<K extends GenuiComponentName> = (args: ComponentRender
 
 const GAP = { s: 4, m: 8, l: 16 } as const;
 
-export const Stack: GenuiRenderer<"Stack"> = ({ props, renderNode }) => (
+const Stack: GenuiRenderer<"Stack"> = ({ props, renderNode }) => (
   <View
     style={{ flexDirection: props.direction === "row" ? "row" : "column", flexWrap: props.direction === "row" ? "wrap" : "nowrap", gap: GAP[props.gap ?? "m"] }}
   >
@@ -20,7 +20,7 @@ export const Stack: GenuiRenderer<"Stack"> = ({ props, renderNode }) => (
   </View>
 );
 
-export const Heading: GenuiRenderer<"Heading"> = ({ props }) => {
+const Heading: GenuiRenderer<"Heading"> = ({ props }) => {
   const { colors } = useTheme();
   const level = props.level ?? 2;
   return (
@@ -37,7 +37,7 @@ export const Heading: GenuiRenderer<"Heading"> = ({ props }) => {
   );
 };
 
-export const TextBlock: GenuiRenderer<"Text"> = ({ props }) => {
+const TextBlock: GenuiRenderer<"Text"> = ({ props }) => {
   const { colors } = useTheme();
   const tone = props.tone ?? "default";
   return (
@@ -47,7 +47,7 @@ export const TextBlock: GenuiRenderer<"Text"> = ({ props }) => {
   );
 };
 
-export const KeyValue: GenuiRenderer<"KeyValue"> = ({ props }) => {
+const KeyValue: GenuiRenderer<"KeyValue"> = ({ props }) => {
   const { colors } = useTheme();
   return (
     <View style={{ gap: 4 }}>
@@ -61,7 +61,7 @@ export const KeyValue: GenuiRenderer<"KeyValue"> = ({ props }) => {
   );
 };
 
-export const Table: GenuiRenderer<"Table"> = ({ props }) => {
+const Table: GenuiRenderer<"Table"> = ({ props }) => {
   const { colors } = useTheme();
   const rows = squareRows(props.columns, props.rows);
   const widths = props.columns.map((column, index) =>
@@ -96,7 +96,7 @@ export const Table: GenuiRenderer<"Table"> = ({ props }) => {
   );
 };
 
-export const Callout: GenuiRenderer<"Callout"> = ({ props }) => {
+const Callout: GenuiRenderer<"Callout"> = ({ props }) => {
   const { colors } = useTheme();
   const tone = props.tone ?? "info";
   const tint = { info: colors.accentTint, success: colors.greenTint, warning: colors.orangeTint, danger: colors.redTint }[tone];
@@ -120,7 +120,7 @@ export const Callout: GenuiRenderer<"Callout"> = ({ props }) => {
   );
 };
 
-export const Progress: GenuiRenderer<"Progress"> = ({ props }) => {
+const Progress: GenuiRenderer<"Progress"> = ({ props }) => {
   const { colors } = useTheme();
   const value = Math.min(1, Math.max(0, Number.isFinite(props.value) ? props.value : 0));
   return (
@@ -136,7 +136,7 @@ export const Progress: GenuiRenderer<"Progress"> = ({ props }) => {
   );
 };
 
-export const Button: GenuiRenderer<"Button"> = ({ props }) => {
+const Button: GenuiRenderer<"Button"> = ({ props }) => {
   const trigger = useTriggerAction();
   const streaming = useIsStreaming();
   return (

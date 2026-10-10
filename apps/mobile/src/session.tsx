@@ -6,7 +6,7 @@ import { createClient, type ClientHost, type Client, type OpenProject, type Rece
 import { relayRuntime } from "./relay-native";
 import { learnRoutes, lanRoutes } from "./routes-native";
 import { syncProject } from "./live";
-import { readPermission, savedHosts, savedNavigation, savePermission } from "./hosts-native";
+import { readPermission, savedHosts, savedNavigation, savedProjectOrder, savePermission } from "./hosts-native";
 import type { ChatLocation } from "./navigation-store";
 import type { SavedHost } from "./hosts-store";
 import type { AgentCliStatus, AgentModels, PermissionMode } from "@milagre/shared/model";
@@ -147,7 +147,7 @@ function useSessionState() {
     const previous = selection.current;
     try {
       await next.call("daemon:status");
-      const projects = await next.recentScopes();
+      const projects = await savedProjectOrder.apply(next.url, await next.recentScopes());
       if (current !== generation.current) return false;
       if (process.env.EXPO_PUBLIC_DEMO !== "1") {
         if (remember) {
@@ -191,7 +191,7 @@ function useSessionState() {
       await next.call("daemon:status");
       if (current !== generation.current) return false;
       if (process.env.EXPO_PUBLIC_DEMO !== "1") void learnRoutes(next, { token: host.token, relay: host.relay }).catch(() => {});
-      const projects = await next.recentScopes();
+      const projects = await savedProjectOrder.apply(next.url, await next.recentScopes());
       const state = await next.open(projectPath);
       const project = state.project;
       if (current !== generation.current) return false;
@@ -294,6 +294,14 @@ function useSessionState() {
     // Opening a Chat opens its Project, which moves it to the top of the host's recent list; rows keep their place.
     if (current === generation.current) setRecent((previous) => keepOrder(previous, projects, (item) => item.path));
   }, [client]);
+  // The order shown is this computer's saved order, so the next launch starts from it.
+  useEffect(() => {
+    if (process.env.EXPO_PUBLIC_DEMO === "1" || !client || !recent.length) return;
+    void savedProjectOrder.save(
+      client.url,
+      recent.map((item) => item.path),
+    );
+  }, [client, recent]);
   const projectPath = snapshot?.project.path;
   const refresh = useCallback(async () => {
     const current = selection.current;

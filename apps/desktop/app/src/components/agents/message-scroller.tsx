@@ -270,12 +270,7 @@ export function MessageScroller({
     programmaticScrollRef.current = true;
     viewport.scrollTo({ top: viewport.scrollHeight, behavior });
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
-    scrollTimerRef.current = window.setTimeout(
-      () => {
-        programmaticScrollRef.current = false;
-      },
-      behavior === "smooth" ? 320 : 0,
-    );
+    scrollTimerRef.current = undefined;
   }, []);
 
   const updateJumpToBottom = useCallback(() => {
@@ -290,8 +285,13 @@ export function MessageScroller({
     // The active item follows every scroll, including the ones that chase streamed output.
     scheduleActiveRailItem();
     updateJumpToBottom();
-    if (programmaticScrollRef.current) return;
     const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    // Long jumps and image layout changes can outlast a fixed animation timer.
+    // Keep following until the actual end is reached or user input interrupts the jump.
+    if (programmaticScrollRef.current) {
+      if (distance <= 1) programmaticScrollRef.current = false;
+      return;
+    }
     setFollowing(distance <= followThreshold);
   }, [followThreshold, scheduleActiveRailItem, setFollowing, updateJumpToBottom]);
 
@@ -322,21 +322,20 @@ export function MessageScroller({
     scrollToEnd(reduce || !smooth ? "auto" : "smooth");
   }, [autoScrollKey, followOutput, reduce, scrollToEnd, smooth]);
 
-  // While output streams the content grows every batch; a smooth scroll restarted that often lags behind it.
-  const followBehavior: ScrollBehavior = reduce || !smooth || busy ? "auto" : "smooth";
-
   useEffect(() => {
     const content = contentRef.current;
     const viewport = viewportRef.current;
     if (!content || !viewport || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (followOutput && followingRef.current) scrollToEnd(followBehavior);
+      // Images and skipped messages may change height several times. Correct the live edge
+      // immediately instead of repeatedly restarting a smooth jump to an outdated height.
+      if (followOutput && followingRef.current) scrollToEnd("instant");
       updateJumpToBottom();
     });
     observer.observe(content);
     observer.observe(viewport);
     return () => observer.disconnect();
-  }, [followBehavior, followOutput, scrollToEnd, updateJumpToBottom]);
+  }, [followOutput, scrollToEnd, updateJumpToBottom]);
 
   useEffect(() => {
     if (navigation !== "rail") {

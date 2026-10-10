@@ -9,10 +9,15 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { ChatComposer } from "/src/components/ChatComposer";
+import { MessageScroller } from "/src/components/agents/message-scroller";
 import { MODEL_CATALOG, capabilityFor } from "/src/model";
 import "/src/styles.css";
 const noop = () => {};
 function Fixture() {
+  const [imageChat, setImageChat] = useState(false);
+  const [imageHeight, setImageHeight] = useState(320);
+  window.showImageChat = setImageChat;
+  window.resizeLastImage = setImageHeight;
   const [count, setCount] = useState(50);
   const [sessionId, setSessionId] = useState(1);
   window.switchChat = (id, count) => flushSync(() => { setSessionId(id); setCount(count); });
@@ -35,6 +40,12 @@ function Fixture() {
     body: "PR aberta com sucesso: [#9 — fix: update app icon asset](https://github.com/example/project/pull/9). " + index
       + " The fix is in PR #289: https://github.com/the-ptf/milagre-ade/pull/289. Code: \`https://example.org\`.",
   }));
+  if (imageChat) return <MessageScroller className="h-full" contentClassName="p-4">
+    {Array.from({ length: 50 }, (_, index) => <article key={index} data-slot="message" data-from="assistant" data-streaming={index === 49 || undefined}>
+      <p>Generated image {index + 1}</p>
+      <img alt={"Generated image " + (index + 1)} style={{ width: 320 }} src={"data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="' + (index === 49 ? imageHeight : 320) + '"><rect width="100%" height="100%" fill="teal"/></svg>')} />
+    </article>)}
+  </MessageScroller>;
   return <div style={{ height: "100%", padding: 12 }}>
     {/* Exercise the fully expanded history, as when Find is open; paging has its own regression. */}
     <ChatComposer findOpen messages={[...messages, ...extra]}
@@ -183,6 +194,34 @@ async function browserChecks() {
       );
     }
     await waitFor('document.querySelectorAll("[data-slot=preview-rail-item]").length === 15');
+    await evaluate("window.showImageChat(true)");
+    await waitFor('document.querySelectorAll("article img").length === 50 && [...document.querySelectorAll("article img")].every(image => image.complete)');
+    await waitFor(`${distanceFromBottom} <= 1`);
+    await evaluate(readEarlier);
+    await waitFor(`!!(${jumpButton})`);
+    if (process.env.MILAGRE_SCREENSHOT_DIR)
+      await window.webContents
+        .capturePage()
+        .then((image) => require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-50-images-scrolled-up.png"), image.toPNG()));
+    await evaluate(`(${jumpButton}).click()`);
+    await delay(360);
+    await evaluate("window.resizeLastImage(1400)");
+    await waitFor('document.querySelector("article:last-child img").naturalHeight === 1400');
+    await delay(1200);
+    assert.ok(await evaluate(`${distanceFromBottom} <= 1`), "An image-heavy Chat reaches the actual bottom when images resize during a long jump");
+    if (process.env.MILAGRE_SCREENSHOT_DIR)
+      await window.webContents
+        .capturePage()
+        .then((image) => require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-50-images-at-bottom.png"), image.toPNG()));
+    await evaluate("window.resizeLastImage(2000)");
+    await waitFor(`${distanceFromBottom} <= 1 && document.querySelector("article:last-child img").naturalHeight === 2000`);
+    await evaluate(readEarlier);
+    await waitFor(`!!(${jumpButton})`);
+    await evaluate("window.resizeLastImage(2400)");
+    await delay(800);
+    assert.ok(await evaluate(`${distanceFromBottom} > 1000`), "Image loading preserves the position after scrolling up");
+    await evaluate("window.showImageChat(false)");
+    await waitFor('!!document.querySelector("[data-promptbar]")');
     const resolveButton = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Resolve conflicts')`;
     assert.equal(await evaluate(`!!(${resolveButton})`), false);
     await evaluate('window.setPrAction({ label: "Resolve conflicts", tone: "red" })');

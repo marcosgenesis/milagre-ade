@@ -1569,9 +1569,11 @@ function createRuntime(options) {
   // Every message of a Project or Link, in its order, for a reader that needs them all where a state may leave out an
   // unloaded Chat's (see message-store.cjs): the phone's bridge, for a phone app that doesn't read pages. `marks` gives
   // only { id, session_id, role, outcome, clientMessageId } of each, what a chat list reads, without reading them whole.
+  // `withState` answers { state, messages }, both from one read of the state, so they never disagree.
   commands.handle("chat:all-messages", async (_event, scope, options) => {
     await readScope(scope);
-    return options?.marks === true ? scopeStates.messageMarks(scope) : scopeStates.allMessages(scope);
+    const read = { withState: options?.withState === true };
+    return options?.marks === true ? scopeStates.messageMarks(scope, read) : scopeStates.allMessages(scope, read);
   });
   // A Chat a client pages through is loaded (see message-store.cjs): it is likely to get the next message too.
   commands.handle("chat:messages", async (_event, scope, chatId, options) => {

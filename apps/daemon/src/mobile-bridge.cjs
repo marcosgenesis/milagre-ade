@@ -419,13 +419,17 @@ async function startMobileBridge({
     }
     return { epoch: snapshotEpoch, version, snapshot: result };
   }
-  /** A Project or Link of readScope with every message, or only each message's marks (see forChatList). */
+  /**
+   * A Project or Link of readScope with every message, or only each message's marks (see forChatList). The state comes
+   * with the messages, from the same read on the host, so its Chats and messages always match; the held one gives
+   * only the rest (path, name, the Link).
+   */
   async function withMessages(owner, scope, { marks = false } = {}) {
-    const messages = await client.call("chat:all-messages", [owner, ...(marks ? [{ marks: true }] : [])]);
+    const read = await client.call("chat:all-messages", [owner, { marks, withState: true }]);
     // As the state was before the bridge held them lean: every message, no "read them by Chat" flag.
     const fill = (item) => {
-      const { messagesInChats: _lean, ...state } = item.state;
-      return { ...item, state: { ...state, messages } };
+      const { messagesInChats: _lean, ...state } = read.state;
+      return { ...item, state: { ...state, messages: read.messages } };
     };
     return scope.link ? { link: fill(scope.link) } : { project: fill(scope.project) };
   }

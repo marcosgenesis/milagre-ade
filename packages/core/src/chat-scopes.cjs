@@ -30,17 +30,17 @@ function createChatScopes({ projects, links, validateLink }) {
       const [store, id] = target(key);
       return store.load(id, chats);
     },
-    allMessages(key) {
+    allMessages(key, options) {
       const [store, id] = target(key);
-      return store.allMessages(id);
+      return store.allMessages(id, options);
     },
     chatMessages(key, chats) {
       const [store, id] = target(key);
       return store.chatMessages(id, chats);
     },
-    messageMarks(key) {
+    messageMarks(key, options) {
       const [store, id] = target(key);
-      return store.messageMarks(id);
+      return store.messageMarks(id, options);
     },
     messagesContaining(key, needles) {
       const [store, id] = target(key);

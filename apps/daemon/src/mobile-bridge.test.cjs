@@ -1398,3 +1398,97 @@ test("a phone reads a Chat the host unloaded: snapshots old and new, the chat li
   );
   assert.equal(loaded(), true, "reading its page did");
 });
+
+test("a phone snapshot's Chats and messages come from one state, even when a Chat goes while the bridge reads", async (t) => {
+  // A bridge whose host connection runs a change just before each read of every message: the Worktree of one Chat
+  // goes away in between, so a bridge that put fresh messages into the state it held would mix the two.
+  const clientModule = require("./client.cjs");
+  const realConnect = clientModule.connect;
+  let beforeRead = async () => {};
+  clientModule.connect = async (options) => {
+    const connection = await realConnect(options);
+    const call = connection.call.bind(connection);
+    connection.call = async (method, args) => {
+      if (method === "chat:all-messages") await beforeRead();
+      return call(method, args);
+    };
+    return connection;
+  };
+  const bridgePath = require.resolve("./mobile-bridge.cjs");
+  const kept = require.cache[bridgePath];
+  delete require.cache[bridgePath];
+  const { startMobileBridge: startRacingBridge } = require("./mobile-bridge.cjs");
+  require.cache[bridgePath] = kept;
+  clientModule.connect = realConnect;
+  t.after(() => {
+    clientModule.connect = realConnect;
+  });
+
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-mobile-race-")));
+  const dataDir = path.join(root, "profile");
+  const project = path.join(root, "project");
+  const side = path.join(root, "side");
+  await fs.mkdir(project);
+  const git = (...args) =>
+    execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-C", project, ...args], { stdio: "ignore" });
+  execFileSync("git", ["init", "-q", "-b", "main", project]);
+  git("commit", "-q", "--allow-empty", "-m", "start");
+  git("worktree", "add", "-q", "-b", "side", side);
+  const daemon = await startDaemon({
+    dataDir,
+    version: "test",
+    runtimeOptions: {
+      environmentReady: Promise.resolve(),
+      titleModels: {},
+      worktreeRoot: path.join(root, "worktrees"),
+      agentCli: Object.assign(async () => ({ command: null, problem: "Test has no provider" }), { invalidate() {} }),
+    },
+  });
+  const token = randomBytes(32).toString("hex");
+  const bridge = await startRacingBridge({ dataDir, port: 0, token });
+  const host = await connect({ dataDir });
+  t.after(async () => {
+    host.close();
+    await bridge.close();
+    await daemon.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const opened = await host.call("project:open", [project]);
+  const sideChat = Object.values(opened.state.sessions).find((session) => opened.state.worktrees[session.worktree_id]?.path === side);
+  const mainChat = Object.values(opened.state.sessions).find((session) => session !== sideChat);
+  await host.call("chat:git-note", [`${project}#${sideChat.id}`, "On the side"]);
+  await host.call("chat:git-note", [`${project}#${mainChat.id}`, "On main"]);
+  await host.call("daemon:flush");
+  const json = async (route) => (await (await fetch(bridge.url + route, { headers: { authorization: `Bearer ${token}` } })).json()).result;
+  const at = encodeURIComponent(project);
+  // The bridge holds the state now, with both Chats.
+  const before = await json(`/snapshot?projectPath=${at}`);
+  assert.ok(before.project.state.sessions[sideChat.id]);
+  const consistent = (state) => {
+    for (const message of state.messages) assert.ok(state.sessions[message.session_id], `message ${message.id} has its Chat`);
+    for (const [id, session] of Object.entries(state.sessions))
+      if (session.summary?.count)
+        assert.ok(
+          state.messages.some((message) => String(message.session_id) === id),
+          `Chat ${id} has its messages`,
+        );
+  };
+  let removed = false;
+  beforeRead = async () => {
+    if (removed) return;
+    removed = true;
+    git("worktree", "remove", "--force", side);
+    await host.call("project:open", [project]);
+  };
+  consistent((await json(`/snapshot?projectPath=${at}`)).project.state);
+  // The same for the chat list: the Worktree comes back with a Chat that has a message, and goes again mid-read.
+  git("worktree", "add", "-q", side, "side");
+  const reopened = await host.call("project:open", [project]);
+  const again = Object.values(reopened.state.sessions).find((session) => reopened.state.worktrees[session.worktree_id]?.path === side);
+  await host.call("chat:git-note", [`${project}#${again.id}`, "Back on the side"]);
+  await host.call("daemon:flush");
+  assert.ok((await json(`/snapshot?projectPath=${at}`)).project.state.sessions[again.id]);
+  removed = false;
+  consistent((await json(`/snapshot?projectPath=${at}&view=chats`)).project.state);
+  assert.equal(removed, true, "the Worktree went during the chat list's read");
+});

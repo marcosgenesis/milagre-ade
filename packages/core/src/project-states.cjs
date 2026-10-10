@@ -63,8 +63,12 @@ class ProjectStates {
     return result;
   }
   /** Every message, in the Project's order: unloaded Chats' read from chats.db for this call only. */
-  allMessages(projectPath) {
-    return this.readWith(projectPath, (state, directory) => (directory ? messageStore.allMessages(directory, state) : state.messages));
+  // `withState`: { state, messages }, both from the one state read, for a reader that puts them together.
+  allMessages(projectPath, { withState = false } = {}) {
+    return this.readWith(projectPath, (state, directory) => {
+      const messages = directory ? messageStore.allMessages(directory, state) : state.messages;
+      return withState ? { state, messages } : messages;
+    });
   }
   /** The messages of the Chats `chats` (ids), in the Project's order, without loading them. */
   chatMessages(projectPath, chats) {
@@ -75,12 +79,13 @@ class ProjectStates {
     });
   }
   /** { id, session_id, role, outcome, clientMessageId } of every message, in the Project's order, without loading any. */
-  messageMarks(projectPath) {
-    return this.readWith(projectPath, (state, directory) =>
-      directory
+  messageMarks(projectPath, { withState = false } = {}) {
+    return this.readWith(projectPath, (state, directory) => {
+      const messages = directory
         ? messageStore.messageMarks(directory, state)
-        : state.messages.map(({ id, session_id, role, outcome, clientMessageId }) => ({ id, session_id, role, outcome, clientMessageId })),
-    );
+        : state.messages.map(({ id, session_id, role, outcome, clientMessageId }) => ({ id, session_id, role, outcome, clientMessageId }));
+      return withState ? { state, messages } : messages;
+    });
   }
   /** The messages in memory and the unloaded ones whose saved JSON contains one of `needles`, without loading them. */
   messagesContaining(projectPath, needles) {

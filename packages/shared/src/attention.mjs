@@ -13,14 +13,17 @@ export function attentionNotice(event, context) {
   if (event.type !== "permission-request" && event.type !== "question-request") return null;
   const where = context.worktreeName && context.worktreeName !== context.projectName ? `${context.projectName} / ${context.worktreeName}` : context.projectName;
   const agent = context.provider ? providerName(context.provider) : "Agent";
-  const subtitle = context.chatTitle || undefined;
+
+  const title = context.chatTitle || where;
+  const subtitle = context.chatTitle ? where : undefined;
+
   if (event.type === "question-request") {
     const [first, ...rest] = event.questions;
     const more = rest.length ? ` (+${rest.length} more)` : "";
-    return { title: `${where} - ${agent} needs input`, subtitle, body: `${first?.question ?? "Asked a question"}${more}` };
+    return { title, subtitle, body: `${agent} needs input: ${first?.question ?? "Asked a question"}${more}` };
   }
   const command = event.command?.split("\n")[0].trim();
-  return { title: `${where} - ${agent} needs approval`, subtitle, body: command ? `Run: ${command}` : event.title };
+  return { title, subtitle, body: `${agent} needs approval: ${command ? `Run: ${command}` : event.title}` };
 }
 
 /** What a notice names about a chat: its project, worktree, title and agent. */

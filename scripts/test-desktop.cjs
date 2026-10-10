@@ -155,6 +155,32 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     } finally {
       shared.close();
     }
+    if (process.platform === "win32") {
+      const terminalClient = await require("@milagre/daemon/client").connect({ dataDir: profile });
+      let terminal;
+      try {
+        terminal = await terminalClient.call("terminal:open", [{ chatId: `${project}#2`, cols: 160, rows: 30 }]);
+        assert.equal(terminal.cwd, project);
+        await terminalClient.call("terminal:resize", [{ terminalId: terminal.id, cols: 180, rows: 35 }]);
+        // Build the marker at runtime so input echo alone cannot satisfy the assertion.
+        await terminalClient.call("terminal:input", [
+          { terminalId: terminal.id, data: "[Console]::WriteLine('milagre-pty-' + (40+2)); [Console]::WriteLine((Get-Location).Path)\r" },
+        ]);
+        let output = "",
+          offset = 0;
+        await waitFor(async () => {
+          const read = await terminalClient.call("terminal:read", [{ terminalId: terminal.id, after: offset }]);
+          output = read.reset ? read.data : output + read.data;
+          offset = read.offset;
+          return output.includes("milagre-pty-42") && output.includes(project);
+        }, "real Windows PTY output and Worktree directory");
+        assert.equal((await terminalClient.call("terminal:list", [{ chatId: `${project}#2` }])).terminals[0].cols, 180);
+        console.log(`PASS: ${expectTheme ? "installed" : "source"} Windows daemon runs the native PTY, accepts input and resize in the Chat's Worktree`);
+      } finally {
+        if (terminal) await terminalClient.call("terminal:close", [{ terminalId: terminal.id }]);
+        terminalClient.close();
+      }
+    }
     if (expectTheme)
       assert.equal(await evaluate('document.documentElement.classList.contains("dark")'), true, "Existing UI settings survive a restart/package change");
     await evaluate(

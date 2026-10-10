@@ -1117,3 +1117,28 @@ test("worktree:unlink-issue removes the stored key and never renames the branch 
   assert.equal(after.name, "eng-12-fix-login");
   assert.equal(branchOf(worktree.path), "eng-12-fix-login");
 });
+
+test("shutdown cancels optional PR reads before waiting for accepted commands", async (t) => {
+  const { project, make } = await fixture(t);
+  const started = Promise.withResolvers();
+  const pending = Promise.withResolvers();
+  let cancelled = false;
+  const readPullRequest = () => {
+    started.resolve();
+    return pending.promise;
+  };
+  readPullRequest.close = () => {
+    cancelled = true;
+    pending.resolve(null);
+  };
+  const runtime = make({ readPullRequest });
+  const read = runtime.invoke("worktree:pull-request", [project]);
+  await started.promise;
+  const close = runtime.close();
+  await new Promise((resolve) => setImmediate(resolve));
+  const observed = cancelled;
+  // Always release the simulated network read so a failed test can finish cleanup.
+  pending.resolve(null);
+  await Promise.all([read, close]);
+  assert.equal(observed, true);
+});

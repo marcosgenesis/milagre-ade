@@ -60,10 +60,12 @@ const batchOptions = (cwd) => ({ ...execOptions(cwd), timeout: 30_000, maxBuffer
  */
 function createPullRequestReader({ exec = execFileAsync, now = Date.now, ttlMs = BATCH_TTL } = {}) {
   const batches = new Map();
+  const controller = new AbortController();
+  const execute = (command, args, options) => exec(command, args, { ...options, signal: controller.signal });
   function batchFor(cwd, repo) {
     const hit = batches.get(repo);
     if (hit && now() - hit.at < ttlMs) return hit.read;
-    const read = exec("gh", ["pr", "list", "--state", "all", "--limit", String(BATCH_LIMIT), "--json", `${FIELDS},headRefName`], batchOptions(cwd)).then(
+    const read = execute("gh", ["pr", "list", "--state", "all", "--limit", String(BATCH_LIMIT), "--json", `${FIELDS},headRefName`], batchOptions(cwd)).then(
       ({ stdout }) => {
         const list = JSON.parse(stdout);
         if (!Array.isArray(list)) throw new Error("Unexpected gh output");
@@ -81,24 +83,33 @@ function createPullRequestReader({ exec = execFileAsync, now = Date.now, ttlMs =
     });
     return read;
   }
-  return async function readPullRequestBatched(cwd) {
+  async function readPullRequestBatched(cwd) {
+    if (controller.signal.aborted) return null;
     try {
-      const client = createGit({ execFile: callbackExec(exec) }).read;
+      const client = createGit({ execFile: callbackExec(execute) }).read;
       const { stdout: branchOutput } = await client.checked(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
       const branch = branchOutput.trim();
       if (!branch) return null;
       const repo = await client.commonDir(cwd).catch(() => null);
+      if (controller.signal.aborted) return null;
       const batch = repo ? await batchFor(cwd, repo).catch(() => null) : null;
       if (batch) {
         const pr = batch.byBranch.get(branch);
         if (pr) return toPullRequest(pr);
         if (!batch.truncated) return null;
       }
-      return await readBranchPullRequest(cwd, branch, exec);
+      if (controller.signal.aborted) return null;
+      return await readBranchPullRequest(cwd, branch, execute);
     } catch {
       return null;
     }
+  }
+  // These reads are optional UI metadata, not accepted mutations to drain on shutdown.
+  readPullRequestBatched.close = () => {
+    controller.abort();
+    batches.clear();
   };
+  return readPullRequestBatched;
 }
 
 /** The PRs a chat created or merged, by URL or number, looked up from its folder; null where one can't be read. */

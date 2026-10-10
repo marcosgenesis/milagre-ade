@@ -233,3 +233,17 @@ test("a native-gate job always reports for branch protection and only fails when
   assert.match(run, /success\|skipped\) exit 0/);
   assert.deepEqual(ci.jobs.release.needs, ["javascript", "native-gate"]);
 });
+
+test("Windows readiness packaging is opt-in, unsigned and cannot publish", () => {
+  const workflow = read("windows-readiness.yml");
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch", "pull_request"]);
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+  const job = workflow.jobs.windows;
+  assert.equal(job["runs-on"], "windows-latest");
+  assert.match(job.if, /preview:windows/);
+  const commands = runs(job).join("\n");
+  assert.match(commands, /npm run package:win/);
+  assert.match(commands, /test-windows-installation.ps1/);
+  assert.doesNotMatch(commands, /sysctl|--no-sandbox|release create|npm run release|eas |gpg |publish.yml/);
+  assert.match(require("../package.json").scripts["package:win"], /--publish never/);
+});

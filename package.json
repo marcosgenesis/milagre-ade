@@ -121,6 +121,7 @@
       "icon": "apps/desktop/app/public/logo-milagre-image.png"
     },
     "nsis": {
+      "include": "apps/desktop/build/installer.nsh",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": false,

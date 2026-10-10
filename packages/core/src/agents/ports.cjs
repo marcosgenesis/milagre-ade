@@ -185,7 +185,7 @@ class PortWatcher {
     this.windowsIdentities = new Map();
     this.ports = {};
     this.timer = null;
-    this.polling = false;
+    this.polling = null;
   }
 
   /** Every chat's ports now. */
@@ -219,21 +219,30 @@ class PortWatcher {
       await this.poll({ fresh: true });
       if (!this.ports[chatId]?.some((port) => port.pid === pid)) return false;
       const owned = this.groups.get(chatId);
-      const agentPid = this.roots().get(chatId)?.pid;
+      const root = this.roots().get(chatId);
+      const agentPid = root?.pid;
+      const shells = new Set(root?.shells ?? []);
       let target = this.processes.get(pid);
       if (!target || !owned?.has(pid) || target.startedAt !== this.windowsIdentities.get(pid)) return false;
       const seen = new Set([pid]);
       while (true) {
         const parent = this.processes.get(target.ppid);
-        if (!parent || parent.pid === agentPid || !owned.has(parent.pid) || seen.has(parent.pid) || parent.startedAt !== this.windowsIdentities.get(parent.pid))
+        if (
+          !parent ||
+          parent.pid === agentPid ||
+          shells.has(parent.pid) ||
+          !owned.has(parent.pid) ||
+          seen.has(parent.pid) ||
+          parent.startedAt !== this.windowsIdentities.get(parent.pid)
+        )
           break;
         seen.add(parent.pid);
         target = parent;
       }
       if (!target.startedAt) return false;
-      await this.stopWindowsTree(target.pid, undefined, { expectedStartTime: target.startedAt });
+      const stopped = await this.stopWindowsTree(target.pid, undefined, { expectedStartTime: target.startedAt });
       await this.poll({ fresh: true });
-      return true;
+      return stopped;
     }
     const pgid = this.processes.get(pid)?.pgid;
     // A Terminal's shell leads its own group: stopping a port there must leave the Terminal open.
@@ -257,35 +266,48 @@ class PortWatcher {
 
   /** `fresh` re-reads listeners even if the chats' pids are unchanged, e.g. after stopping one. */
   async poll({ fresh = false } = {}) {
-    if (this.closed || this.polling) return;
+    if (this.closed) return;
+    if (this.polling) {
+      // Scheduled Windows reads can outlast the interval. A forced read after
+      // Stop must run after that older snapshot, rather than silently skipping.
+      if (fresh) {
+        await this.polling;
+        return this.poll({ fresh: true });
+      }
+      return;
+    }
+    this.polling = this.readPorts(fresh);
+    try {
+      await this.polling;
+    } finally {
+      this.polling = null;
+    }
+  }
+
+  async readPorts(fresh) {
     clearTimeout(this.timer);
     this.timer = null;
-    this.polling = true;
-    try {
-      const roots = this.roots();
-      if (roots.size || this.groups.size) {
-        const processes = parsePs(await this.exec("ps", ["-axo", "pid=,ppid=,pgid=,comm="]));
-        if (this.platform === "win32") {
-          const stillRunning = this.roots();
-          for (const [chatId, root] of roots) if (stillRunning.get(chatId)?.pid !== root.pid) roots.delete(chatId);
-          const current = new Map(processes.map((row) => [row.pid, row.startedAt]));
-          for (const known of this.groups.values())
-            for (const pid of known) {
-              if (!current.get(pid) || current.get(pid) !== this.windowsIdentities.get(pid)) known.delete(pid);
-            }
-          this.windowsIdentities = current;
-        }
-        this.processes = new Map(processes.map((row) => [row.pid, row]));
-        const byChat = chatProcesses(processes, roots, this.groups);
-        const pids = [...new Set([...byChat.values()].flatMap((set) => [...set]))];
-        this.set(chatPorts(await this.listenersOf(pids, fresh), byChat));
-      } else this.set({});
-      if (!this.closed && (this.roots().size || this.groups.size)) {
-        this.timer = setTimeout(() => void this.poll(), this.isRunning() ? this.pollMs : this.idlePollMs);
-        this.timer.unref?.();
+    const roots = this.roots();
+    if (roots.size || this.groups.size) {
+      const processes = parsePs(await this.exec("ps", ["-axo", "pid=,ppid=,pgid=,comm="]));
+      if (this.platform === "win32") {
+        const stillRunning = this.roots();
+        for (const [chatId, root] of roots) if (stillRunning.get(chatId)?.pid !== root.pid) roots.delete(chatId);
+        const current = new Map(processes.map((row) => [row.pid, row.startedAt]));
+        for (const known of this.groups.values())
+          for (const pid of known) {
+            if (!current.get(pid) || current.get(pid) !== this.windowsIdentities.get(pid)) known.delete(pid);
+          }
+        this.windowsIdentities = current;
       }
-    } finally {
-      this.polling = false;
+      this.processes = new Map(processes.map((row) => [row.pid, row]));
+      const byChat = chatProcesses(processes, roots, this.groups);
+      const pids = [...new Set([...byChat.values()].flatMap((set) => [...set]))];
+      this.set(chatPorts(await this.listenersOf(pids, fresh), byChat));
+    } else this.set({});
+    if (!this.closed && (this.roots().size || this.groups.size)) {
+      this.timer = setTimeout(() => void this.poll(), this.isRunning() ? this.pollMs : this.idlePollMs);
+      this.timer.unref?.();
     }
   }
 

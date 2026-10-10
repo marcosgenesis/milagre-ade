@@ -392,3 +392,71 @@ test("readPullRequestState reports a CLOSED PR as known, and a failed lookup as 
   const none = async (command) => (command === "git" ? { stdout: "milagre/login\n" } : { stdout: "[]" });
   assert.deepEqual(await readPullRequestState("/project/worktree", none), { known: true, pr: null });
 });
+
+test("closing the batched reader cancels optional metadata without starting a fallback", async (t) => {
+  const { createPullRequestReader } = require("./pull-request.cjs");
+  const started = Promise.withResolvers();
+  const pending = Promise.withResolvers();
+  let reads = 0;
+  let aborted = false;
+  const reader = createPullRequestReader({
+    exec: async (command, _args, options) => {
+      if (command === "git") return { stdout: "main\n" };
+      reads++;
+      options.signal?.addEventListener(
+        "abort",
+        () => {
+          aborted = true;
+          pending.reject(new Error("cancelled"));
+        },
+        { once: true },
+      );
+      started.resolve();
+      return pending.promise;
+    },
+  });
+  // /project need not exist: commonDir's realpath failure selects the per-branch read.
+  t.after(() => pending.resolve({ stdout: "[]" }));
+  const read = reader("/project");
+  await started.promise;
+  reader.close?.();
+  assert.equal(aborted, true, "close must abort its outstanding child process");
+  assert.equal(await read, null);
+  assert.equal(await reader("/project"), null);
+  assert.equal(reads, 1);
+});
+
+test("closing the reader stops a real in-flight metadata process", async (t) => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { execFile, execFileSync } = require("node:child_process");
+  const { promisify } = require("node:util");
+  const exec = promisify(execFile);
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "milagre-pr-stop-"));
+  t.after(() => fs.rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  execFileSync("git", ["init", "-b", "main", folder], { stdio: "ignore" });
+  const started = Promise.withResolvers();
+  let child;
+  let exited;
+  const reader = createPullRequestReader({
+    exec: (command, args, options) => {
+      if (command !== "gh") return exec(command, args, options);
+      const read = exec(process.execPath, ["-e", "console.log('ready');setInterval(()=>{},1000)"], options);
+      child = read.child;
+      exited = new Promise((resolve) => child.once("exit", resolve));
+      child.stdout.once("data", () => started.resolve());
+      return read;
+    },
+  });
+  t.after(() => {
+    reader.close();
+    if (child?.exitCode === null) child.kill();
+  });
+  const reading = reader(folder);
+  await started.promise;
+  reader.close();
+  assert.equal(await reading, null);
+  await exited;
+  assert.ok(child.exitCode !== null || child.signalCode !== null, "the optional read releases its actual OS process");
+});

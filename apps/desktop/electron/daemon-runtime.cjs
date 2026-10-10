@@ -23,14 +23,22 @@ const STATE_PATCHES = "state-patches-v1";
 const CHAT_PAGES = "chat-pages-v1";
 // A host that can sends each subagent with only the end of its transcript; the panel reads a whole one (subagent-transcripts.ts).
 const SUBAGENT_TAILS = "subagent-tails-v1";
+// A host that can sends each archived subagent as a summary; the panel reads the rest when it opens one (subagent-transcripts.ts).
+const ARCHIVED_SUMMARIES = "archived-subagent-summaries-v1";
 /**
- * Asks a host that can for state patches, and for states without messages and with transcript tails when it can; an
- * older one keeps sending whole states.
+ * Asks a host that can for state patches, and for states without messages, with transcript tails and with archived
+ * subagents as summaries when it can; an older one keeps sending whole states.
  */
 async function takeStatePatches(connection, status) {
   const capabilities = status.capabilities ?? [];
   if (capabilities.includes(CHAT_PAGES))
-    await connection.call("daemon:state-patches", [{ messages: false, ...(capabilities.includes(SUBAGENT_TAILS) ? { transcripts: false } : {}) }]);
+    await connection.call("daemon:state-patches", [
+      {
+        messages: false,
+        ...(capabilities.includes(SUBAGENT_TAILS) ? { transcripts: false } : {}),
+        ...(capabilities.includes(SUBAGENT_TAILS) && capabilities.includes(ARCHIVED_SUMMARIES) ? { archivedSubagents: false } : {}),
+      },
+    ]);
   else if (status.capabilities?.includes(STATE_PATCHES)) await connection.call("daemon:state-patches");
 }
 

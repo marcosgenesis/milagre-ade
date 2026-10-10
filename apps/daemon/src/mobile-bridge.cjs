@@ -351,8 +351,9 @@ async function startMobileBridge({
   const expected = Buffer.from(`Bearer ${token}`);
   const client = await connect({ dataDir });
   // The bridge only needs to know a state changed, so it takes patches: the host then encodes no whole state for it. A
-  // phone shows the last few entries of a subagent's transcript, so the bridge takes only their tails.
-  await client.call("daemon:state-patches", [{ transcripts: false }]).catch(() => {});
+  // phone shows the last few entries of a subagent's transcript, so the bridge takes only their tails, and it never
+  // shows an archived subagent, so the bridge takes those as summaries.
+  await client.call("daemon:state-patches", [{ transcripts: false, archivedSubagents: false }]).catch(() => {});
   const validScope = (owner) => typeof owner === "string" && (isLinkScopeKey(owner) || path.isAbsolute(owner));
   // The Projects phones opened lately, kept current from the host's state patches (and subagent updates, which carry
   // none), so a phone's snapshot doesn't read and parse the whole state from the host each time. A missed patch drops

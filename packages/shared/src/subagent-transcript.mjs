@@ -25,6 +25,35 @@ export function sessionWithTranscriptTails(session) {
   return lean;
 }
 
+// Archived subagents as a client that reads them on demand holds them (#321). An archived subagent is hidden until the
+// user opens it from the Archived list, yet its prompt, latest activity, communications and transcript tail made up most
+// of a large Project's lean state. Such a client gets it as a summary: what its row shows (title, status, times,
+// provider), with an empty transcript and `detailsOnDemand`; opening it reads the whole subagent with chat:subagent.
+
+const summaries = new WeakMap();
+/** An archived `agent` as a summary, the same object for the same agent; any other agent as it is. */
+export function withArchivedSummary(agent) {
+  if (!agent?.archived) return agent;
+  let summary = summaries.get(agent);
+  if (!summary) {
+    const { prompt: _prompt, latestActivity: _activity, communications: _communications, transcript: _transcript, transcriptLength: _length, ...rest } = agent;
+    summaries.set(agent, (summary = { ...rest, transcript: [], detailsOnDemand: true }));
+  }
+  return summary;
+}
+
+const summarizedSessions = new WeakMap();
+/** `session` with each archived subagent as a summary; the same object for the same session. */
+export function sessionWithArchivedSummaries(session) {
+  if (!session?.subagents?.some((agent) => agent?.archived)) return session;
+  let lean = summarizedSessions.get(session);
+  if (!lean) summarizedSessions.set(session, (lean = { ...session, subagents: session.subagents.map(withArchivedSummary) }));
+  return lean;
+}
+
+/** Whether `agent` is an archived subagent's summary, whose details are read on demand. */
+export const isSubagentSummary = (agent) => agent?.detailsOnDemand === true;
+
 /** Whether `agent` carries only the tail of its transcript. */
 export const hasTranscriptTail = (agent) => typeof agent?.transcriptLength === "number";
 

@@ -467,6 +467,11 @@ export interface Subagent {
    * demand, see subagent-transcript.mjs); absent when it holds them all.
    */
   transcriptLength?: number;
+  /**
+   * Set on an archived subagent sent as a summary, without its prompt, latest activity, communications or transcript (a
+   * client that reads archived subagents on demand, see subagent-transcript.mjs); chat:subagent reads the rest.
+   */
+  detailsOnDemand?: true;
 }
 export type SubagentTranscriptEntry = { id: string; kind: "tool" | "message"; text: string };
 

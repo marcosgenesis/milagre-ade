@@ -244,7 +244,28 @@ test("a Project with 18 MB of messages opens in the desktop without them, a page
       next_id: 5000,
       projects: { 1: { id: 1, name: "project" } },
       worktrees: { 1: { id: 1, project_id: 1, path: project, name: "main" } },
-      sessions: { 2: { id: 2, worktree_id: 1, agent_name: "main", status: "Created", title: "Long chat" } },
+      sessions: {
+        2: {
+          id: 2,
+          worktree_id: 1,
+          agent_name: "main",
+          status: "Created",
+          title: "Long chat",
+          subagents: [
+            {
+              id: "old",
+              title: "Archived review",
+              status: "completed",
+              startedAt: 1,
+              updatedAt: 2,
+              archived: true,
+              prompt: "Check auth",
+              latestActivity: "Finished",
+              transcript: [{ id: "e1", kind: "message", text: "Done" }],
+            },
+          ],
+        },
+      },
       messages,
       tasks: {},
     }),
@@ -253,6 +274,9 @@ test("a Project with 18 MB of messages opens in the desktop without them, a page
   const opened = await desktop.openProject(project);
   assert.ok(Buffer.byteLength(JSON.stringify(opened)) < 64 * 1024);
   assert.equal(opened.state.sessions[2].summary.count, 900);
+  // Archived subagents come as summaries (archived-subagent-summaries-v1); the panel reads the rest when it opens one.
+  assert.equal(opened.state.sessions[2].subagents[0].detailsOnDemand, true);
+  assert.equal((await desktop.invoke("chat:subagent", [project, 2, "old"])).prompt, "Check auth");
   const page = await desktop.invoke("chat:messages", [project, 2, { turns: 10, limit: 20 }]);
   assert.deepEqual([page.messages.length, page.hasMore, page.messages.at(-1).id], [20, true, 909]);
   const held = await desktop.invoke("state:read", [project]);

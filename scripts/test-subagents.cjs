@@ -1018,8 +1018,56 @@ async function browserChecks() {
     await clickLabel("Close subagents");
     await evaluate("window.setChildren([])");
     await waitFor('!document.querySelector("[data-slot=subagent-track]")');
+    // A host that sends archived subagents as summaries (archived-subagent-summaries-v1): opening one from the Archived
+    // list reads its prompt, latest activity and transcript, and a newer summary reads them again.
+    await evaluate(`(() => {
+      const started = Date.now() - 90000;
+      const whole = (updatedAt, activity) => ({ id: "old", title: "Archived review", status: "completed", archived: true, startedAt: started, updatedAt, endedAt: updatedAt,
+        prompt: "Check the token refresh path", latestActivity: activity,
+        communications: [{ id: "c1", fromId: null, toId: "old", text: "Look at expiry too", at: started }],
+        transcript: [{ id: "t1", kind: "tool", text: "Ran \`npm test -- auth\`" }, { id: "t2", kind: "message", text: "Token refresh is covered." }] });
+      const summary = (updatedAt) => { const { prompt, latestActivity, communications, transcript, ...rest } = whole(updatedAt, ""); return { ...rest, transcript: [], detailsOnDemand: true }; };
+      window.summaryReads = [];
+      window.releaseSummaryRead = null;
+      window.summaryActivity = "Finished the review";
+      window.milagre = { ...window.milagre, readSubagent: (scope, chatId, agentId) => new Promise((resolve) => {
+        window.summaryReads.push([scope, chatId, agentId]);
+        const activity = window.summaryActivity;
+        window.releaseSummaryRead = () => resolve(whole(Date.now(), activity));
+      }) };
+      window.summaryOf = summary;
+      window.summaryAt = started + 60000;
+      window.setChildren([{ id: "live", title: "Live child", status: "running", startedAt: Date.now() - 5000, updatedAt: Date.now(), transcript: [] }, summary(window.summaryAt)]);
+    })()`);
+    await waitFor('!!document.querySelector("[data-slot=subagent-track] > button")');
+    await evaluate('document.querySelector("[data-slot=subagent-popover]") || document.querySelector("[data-slot=subagent-track] > button").click()');
+    await waitFor('!!document.querySelector("[data-subagent-archived-toggle]")');
+    await evaluate('document.querySelector("[data-subagent-archived-toggle]").click()');
+    await waitFor('[...document.querySelectorAll("[data-subagent-row]")].map(row => row.textContent.trim()).join() === "Archived review"');
+    await evaluate('document.querySelector("[data-subagent-open]").click()');
+    await waitFor('!!document.querySelector("[data-subagent-loading]")');
+    assert.equal(await evaluate('document.querySelector("[data-slot=subagent-transcript]").textContent.includes("No child output")'), false);
+    assert.deepEqual(await evaluate("window.summaryReads"), [["/fixture", 1, "old"]]);
+    await screenshot("archived-subagent-loading");
+    await evaluate("window.releaseSummaryRead()");
+    await waitFor('!document.querySelector("[data-subagent-loading]")');
+    for (const text of ["Check the token refresh path", "Finished the review", "Ran `npm test -- auth`", "Token refresh is covered."])
+      assert.ok(await evaluate(`document.querySelector("[data-slot=subagent-transcript]").textContent.includes(${JSON.stringify(text)})`), text);
+    await screenshot("archived-subagent-loaded");
+    // A newer summary (the archived child ran again) keeps what was read on screen while it reads again.
+    await evaluate(
+      `window.summaryActivity = "Reviewed again"; window.setChildren(items => items.map(item => item.id === "old" ? window.summaryOf(window.summaryAt + 1000) : item))`,
+    );
+    await waitFor("window.summaryReads.length === 2");
+    assert.ok(await evaluate('document.querySelector("[data-slot=subagent-transcript]").textContent.includes("Finished the review")'));
+    assert.equal(await evaluate('!!document.querySelector("[data-subagent-loading]")'), false);
+    await evaluate("window.releaseSummaryRead()");
+    await waitFor('document.querySelector("[data-slot=subagent-transcript]").textContent.includes("Reviewed again")');
+    await clickLabel("Close subagents");
+    await evaluate("window.setChildren([])");
+    await waitFor('!document.querySelector("[data-slot=subagent-track]")');
     console.log(
-      "PASS: embedded canvas, drag/pan/zoom, collision pushes, keyboard transcript, persistent layout, sequential arrivals, stable names, dead/sleeping/angry states, message/pointer gaze, reduced motion, compact layout, original subagent list/archive/transcript checks, and whole transcripts from a host that sends tails",
+      "PASS: embedded canvas, drag/pan/zoom, collision pushes, keyboard transcript, persistent layout, sequential arrivals, stable names, dead/sleeping/angry states, message/pointer gaze, reduced motion, compact layout, original subagent list/archive/transcript checks, whole transcripts from a host that sends tails, and archived subagents read on demand",
     );
     app.exit(0);
   } catch (error) {

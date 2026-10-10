@@ -296,7 +296,7 @@ function useSessionState() {
   }, [client]);
   // The order shown is this computer's saved order, so the next launch starts from it.
   useEffect(() => {
-    if (process.env.EXPO_PUBLIC_DEMO === "1" || !client || !recent.length) return;
+    if (!client || !recent.length || process.env.EXPO_PUBLIC_DEMO === "1") return;
     void savedProjectOrder.save(
       client.url,
       recent.map((item) => item.path),

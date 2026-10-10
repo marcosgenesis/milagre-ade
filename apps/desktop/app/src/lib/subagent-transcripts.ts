@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { projectOfKey, sessionIdFromKey } from "@milagre/shared/agent-runs";
 import { hasTranscriptTail, isSubagentSummary, mergeTranscript } from "@milagre/shared/subagent-transcript";
 import type { Subagent, SubagentTranscriptEntry } from "../model.ts";
@@ -9,16 +9,18 @@ import { bridgeForKey } from "./computer-bridge";
 //   current from the tails each update brings;
 // - an archived subagent's summary (archived-subagent-summaries-v1): the whole subagent (prompt, latest activity,
 //   communications and transcript), read when the panel opens it and again when the summary changes.
+// A read that fails (the computer is offline) is not kept: the panel says so, and opening the subagent again reads again.
 
 type Whole = { agent: Subagent; transcript: SubagentTranscriptEntry[] };
-/** The summary a read was for, and what it read (null when the read failed). */
-type Read = { agent: Subagent; details: Subagent | null };
+/** The summary a read was for, and what it read. */
+type Read = { agent: Subagent; details: Subagent };
 const KEPT = 16;
 // `${chatKey}|${agentId}` -> the agent last merged and its whole transcript, the last ones shown kept.
 const wholes = new Map<string, Whole>();
 // `${chatKey}|${agentId}` -> an archived subagent's summary and the whole subagent read for it.
 const reads = new Map<string, Read>();
-const loads = new Map<string, Promise<void>>();
+// Reads in flight; each settles to whether it succeeded.
+const loads = new Map<string, Promise<boolean>>();
 
 function remember<T>(cache: Map<string, T>, key: string, value: T) {
   cache.delete(key);
@@ -41,7 +43,7 @@ function known(key: string, agent: Subagent): SubagentTranscriptEntry[] | null {
   return merged;
 }
 
-function load(key: string, chatKey: string, latest: () => Subagent) {
+function load(key: string, chatKey: string, latest: () => Subagent): Promise<boolean> {
   let loading = loads.get(key);
   if (!loading) {
     const agent = latest();
@@ -52,16 +54,14 @@ function load(key: string, chatKey: string, latest: () => Subagent) {
           if (isSubagentSummary(agent)) {
             // Kept for the summary it was asked for: a newer summary reads again.
             remember(reads, key, { agent, details: read });
-            return;
+            return true;
           }
           // The update shown may be newer than the read: its tail goes on top when it fits, and the read stands when not.
           const shown = latest();
           remember(wholes, key, { agent: shown, transcript: mergeTranscript(read.transcript, shown) ?? read.transcript });
+          return true;
         },
-        () => {
-          if (isSubagentSummary(agent)) remember(reads, key, { agent, details: null });
-          else remember(wholes, key, { agent: latest(), transcript: latest().transcript });
-        },
+        () => false,
       )
       .finally(() => loads.delete(key));
     loads.set(key, loading);
@@ -81,18 +81,25 @@ export type SubagentDetails = {
 /** What the panel shows of subagent `agent` of Chat `chatKey`, reading what the host left out. */
 export function useSubagentDetails(chatKey: string | null | undefined, agent: Subagent): SubagentDetails {
   const [reloads, loaded] = useReducer((count: number) => count + 1, 0);
+  // The agent whose read failed while this panel was open: not read again until it changes or the panel opens again.
+  const [failedFor, setFailedFor] = useState<Subagent | null>(null);
   const latest = useRef(agent);
   latest.current = agent;
   const key = chatKey ? `${chatKey}|${agent.id}` : null;
   const summary = isSubagentSummary(agent);
   const transcript = key && !summary ? known(key, agent) : agent.transcript;
   const read = key && summary ? reads.get(key) : undefined;
-  const missing = Boolean(key && (summary ? read?.agent !== agent : !transcript));
+  const missing = Boolean(key && (summary ? read?.agent !== agent : !transcript) && failedFor !== agent);
   // Each finished read runs this again: a summary that changed while it was read is read again.
   useEffect(() => {
     if (!key || !missing) return;
     let current = true;
-    void load(key, chatKey!, () => latest.current).then(() => current && loaded());
+    const asked = agent;
+    void load(key, chatKey!, () => latest.current).then((ok) => {
+      if (!current) return;
+      if (!ok) setFailedFor(asked);
+      loaded();
+    });
     return () => {
       current = false;
     };
@@ -100,7 +107,7 @@ export function useSubagentDetails(chatKey: string | null | undefined, agent: Su
   if (!summary) return { agent, transcript: transcript ?? agent.transcript, status: "ready" };
   // A newer summary keeps showing what was read for the one before until its own read lands.
   const details = read?.details;
-  if (!details) return { agent, transcript: [], status: read && !missing ? "failed" : key ? "loading" : "failed" };
+  if (!details) return { agent, transcript: [], status: key && failedFor !== agent ? "loading" : "failed" };
   const { transcript: _transcript, detailsOnDemand: _summary, ...shown } = agent;
   return {
     agent: {

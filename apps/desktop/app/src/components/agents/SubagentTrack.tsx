@@ -97,7 +97,11 @@ export const SubagentTranscript = memo(function SubagentTranscript({
           Loading activity…
         </p>
       )}
-      {status === "failed" && <p className="py-6 text-[13px] text-ink-3">Couldn't load this subagent's activity.</p>}
+      {status === "failed" && (
+        <p data-subagent-failed className="py-6 text-[13px] text-ink-3">
+          Couldn't load this subagent's activity. Open it again to retry.
+        </p>
+      )}
       {status === "ready" && !transcript.length && <p className="py-6 text-[13px] text-ink-3">No child output received yet.</p>}
     </div>
   );

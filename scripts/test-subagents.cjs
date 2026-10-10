@@ -1063,6 +1063,24 @@ async function browserChecks() {
     assert.equal(await evaluate('!!document.querySelector("[data-subagent-loading]")'), false);
     await evaluate("window.releaseSummaryRead()");
     await waitFor('document.querySelector("[data-slot=subagent-transcript]").textContent.includes("Reviewed again")');
+    // A read that fails (the computer is offline) says so and isn't retried on its own; opening the subagent again reads
+    // again.
+    await evaluate(`window.summaryReads = []; window.milagre = { ...window.milagre, readSubagent: (scope, chatId, agentId) => {
+      window.summaryReads.push([scope, chatId, agentId]);
+      return window.summaryReads.length === 1 ? Promise.reject(new Error("offline")) : Promise.resolve({ ...window.summaryOf(1), id: "offline", prompt: "After reconnecting", transcript: [] });
+    } }; window.setChildren(items => [...items, { ...window.summaryOf(window.summaryAt), id: "offline", title: "Offline review" }])`);
+    await evaluate('[...document.querySelectorAll("[data-slot=subagent-popover] button")].find(button => button.textContent === "Back").click()');
+    await waitFor('[...document.querySelectorAll("[data-subagent-open]")].some(button => button.textContent.includes("Offline review"))');
+    await evaluate('[...document.querySelectorAll("[data-subagent-open]")].find(button => button.textContent.includes("Offline review")).click()');
+    await waitFor('!!document.querySelector("[data-subagent-failed]")');
+    await delay(300);
+    assert.equal(await evaluate("window.summaryReads.length"), 1, "a failed read isn't retried while the panel stays open");
+    await screenshot("archived-subagent-failed");
+    await evaluate('[...document.querySelectorAll("[data-slot=subagent-popover] button")].find(button => button.textContent === "Back").click()');
+    await waitFor('!!document.querySelector("[data-subagent-open]")');
+    await evaluate('[...document.querySelectorAll("[data-subagent-open]")].find(button => button.textContent.includes("Offline review")).click()');
+    await waitFor('document.querySelector("[data-slot=subagent-transcript]").textContent.includes("After reconnecting")');
+    assert.equal(await evaluate("window.summaryReads.length"), 2, "opening it again reads again");
     await clickLabel("Close subagents");
     await evaluate("window.setChildren([])");
     await waitFor('!document.querySelector("[data-slot=subagent-track]")');

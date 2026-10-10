@@ -233,6 +233,14 @@ test("a whole state has every message in the Project's order, the same object fo
   assert.deepEqual(ids(nextWhole.messages), [...ids(all), 100]);
   assert.ok(whole.messages.every((message, index) => nextWhole.messages[index] === message));
   await states.flush(projectPath);
+  // A message made in this run, unloaded while whole states are read (its object kept for them) and loaded back, is
+  // one clients already have, like any message read back from chats.db.
+  advance(2000);
+  await states.unloadIdle();
+  const back = await states.load(projectPath, [3]);
+  const made = back.messages.find((message) => message.id === 100);
+  assert.equal(made, nextWhole.messages.at(-1), "the same object, from the whole-state cache");
+  assert.equal(isFromDisk(made), true);
 });
 
 test("reads across Chats see unloaded ones: every message, a search's bodies, a lookup by id or operation", async (t) => {

@@ -150,7 +150,11 @@ function unloadChats(directory, state, chats) {
     else messages.push(message);
   }
   for (const [chat, list] of evicted) {
-    for (const row of list) saved.delete(row.message.id);
+    for (const row of list) {
+      saved.delete(row.message.id);
+      // Saved as it is: when it comes back, a client already has it (see the daemon's messageChanges).
+      fromDisk.add(row.message);
+    }
     // A client that takes whole states read lately keeps getting these same objects (see wholeState).
     if (keepRest) store.rest.set(chat, list);
   }

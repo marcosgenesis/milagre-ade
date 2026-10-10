@@ -1,4 +1,5 @@
 const { summarizeChat, sameSummary } = require("@milagre/shared/chat-summary");
+const { unloadedChats } = require("./message-store.cjs");
 
 // Keeps each Chat's summary (session.summary) current with its messages, in the change that touches them, so the chat
 // lists, titles and handoff recovery read the summary instead of walking every message of every Chat (#300).
@@ -31,8 +32,15 @@ function withChatSummaries(next, previous, clock = Date.now) {
   const now = byChat(next.messages);
   const before = previous && Array.isArray(previous.messages) && previous.messages !== next.messages ? byChat(previous.messages) : null;
   const messagesKept = previous && previous.messages === next.messages;
+  // An unloaded Chat's messages aren't in the state (see message-store.cjs), and can't have changed: it keeps its summary.
+  const unloaded = unloadedChats(next);
   let sessions;
   for (const [id, session] of Object.entries(next.sessions)) {
+    if (unloaded.has(Number(id))) {
+      const kept = previous?.sessions?.[id]?.summary;
+      if (!session.summary && kept) (sessions ??= { ...next.sessions })[id] = { ...session, summary: kept };
+      continue;
+    }
     const list = now.get(String(id)) ?? EMPTY;
     if (session.summary && (messagesKept || (before && sameList(list, before.get(String(id)) ?? EMPTY)))) continue;
     const summary = summarizeChat(list);

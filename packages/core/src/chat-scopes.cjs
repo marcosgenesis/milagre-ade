@@ -25,6 +25,35 @@ function createChatScopes({ projects, links, validateLink }) {
       const [store, id] = target(key);
       return store.update(id, change, options);
     },
+    // Messages of Chats that may be unloaded (see message-store.cjs): ProjectStates' readers, by scope key.
+    load(key, chats) {
+      const [store, id] = target(key);
+      return store.load(id, chats);
+    },
+    allMessages(key) {
+      const [store, id] = target(key);
+      return store.allMessages(id);
+    },
+    chatMessages(key, chats) {
+      const [store, id] = target(key);
+      return store.chatMessages(id, chats);
+    },
+    messageMarks(key) {
+      const [store, id] = target(key);
+      return store.messageMarks(id);
+    },
+    messagesContaining(key, needles) {
+      const [store, id] = target(key);
+      return store.messagesContaining(id, needles);
+    },
+    searchableMessages(key, chats) {
+      const [store, id] = target(key);
+      return store.searchableMessages(id, chats);
+    },
+    findMessage(key, field, value) {
+      const [store, id] = target(key);
+      return store.findMessage(id, field, value);
+    },
     flush(key) {
       if (key === undefined) return Promise.all([projects.flush(), links.flush()]);
       const [store, id] = target(key);

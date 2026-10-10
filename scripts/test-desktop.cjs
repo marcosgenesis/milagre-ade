@@ -253,6 +253,11 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
       await fs.writeFile(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "host-restarted.png"), Buffer.from(shot.data, "base64"));
     }
     console.log("PASS: a host that crashed is started again, the window says so, and the draft stays");
+    assert.equal(
+      await evaluate('JSON.parse(localStorage.getItem("milagre-settings")).theme'),
+      "dark",
+      "The fixture keeps the saved theme before normal desktop quit",
+    );
     console.log(
       `PASS: ${expectTheme ? "packaged" : "source"} desktop opens existing Chats, provider IDs, Project settings, bundled skills and saved UI preferences`,
     );
@@ -263,7 +268,8 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     if (connection) {
       try {
         const state = await connection.call("Runtime.evaluate", {
-          expression: "JSON.stringify({url:location.href,body:document.body?.textContent,bridge:typeof window.milagre})",
+          expression:
+            "JSON.stringify({url:location.href,body:document.body?.textContent,bridge:typeof window.milagre,classes:document.documentElement.className,settings:localStorage.getItem('milagre-settings')})",
           returnByValue: true,
         });
         console.error("Desktop page at failure:", state.result.value);
@@ -283,10 +289,20 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
     }
     throw error;
   } finally {
-    connection?.close();
-    child.kill("SIGTERM");
+    // On Windows SIGTERM forcibly terminates Electron and bypasses its normal
+    // quit/storage flush. Exercise the application's existing quit path instead.
     const timeout = setTimeout(() => child.kill("SIGKILL"), 10000);
-    await exited;
+    let quitError;
+    if (connection) {
+      try {
+        await connection.call("Runtime.evaluate", { expression: "void window.milagre.retryQuit()" });
+      } catch (error) {
+        quitError = error;
+        child.kill("SIGTERM");
+      }
+    } else child.kill("SIGTERM");
+    connection?.close();
+    const [exitCode, exitSignal] = await exited;
     clearTimeout(timeout);
     // Desktop quit leaves the shared host available. This fixture alone owns
     // the temporary profile, so explicitly stop it before deleting test data.
@@ -311,6 +327,12 @@ async function checkApp({ executable, args, profile, project, expectTheme, expec
       // oxlint-disable-next-line no-unsafe-finally -- the cleanup error is rethrown only when the body did not fail, so it never masks the original error
       if (!failure) throw cleanupError;
       console.error("Fixture cleanup failed:", cleanupError);
+    }
+    if (!failure) {
+      // oxlint-disable-next-line no-unsafe-finally -- report teardown failures only after a successful body
+      if (quitError) throw quitError;
+      assert.equal(exitCode, 0, "The desktop must finish its normal quit without forced termination");
+      assert.equal(exitSignal, null, "Normal desktop quit must not require a termination signal");
     }
   }
 }

@@ -102,9 +102,9 @@ export function contextSummary({ used, size }: { used: number; size: number }) {
   };
 }
 
-/** From here the ring turns to the accent colour: compacting keeps the agent sharp, and the CLI itself waits until near full. */
+/** From here the ring turns to the accent colour and suggests a pause for compaction. */
 export const CONTEXT_WARN_PERCENT = 75;
-/** From here the ring turns red: the CLI is about to compact on its own, mid-task. */
+/** From here the ring turns red to indicate the window is nearly full. */
 export const CONTEXT_CRITICAL_PERCENT = 90;
 
 /** How the ring is drawn for a percent used: the colour step it has reached. */
@@ -120,12 +120,8 @@ export function contextTone(percent: number): "normal" | "warning" | "critical" 
  */
 export function contextAdvice(percent: number, canCompact: boolean): string {
   const tone = contextTone(percent);
-  if (!canCompact)
-    return tone === "normal"
-      ? "The agent compacts the conversation when it gets close to full."
-      : "Claude Code compacts the conversation by itself at about 95%.";
-  if (tone === "critical")
-    return "Claude Code compacts by itself at about 95%, in the middle of whatever it is doing. Compacting now, at a point you choose, keeps more.";
-  if (tone === "warning") return "Replies get slower and the agent recalls less from here. Compacting now keeps it sharp; Claude Code waits until about 95%.";
+  if (!canCompact) return "The agent compacts the conversation when it gets close to full.";
+  if (tone === "critical") return "Context is nearly full. Compact at a pause in your work to make room for the next steps.";
+  if (tone === "warning") return "Context is getting full. Consider compacting after finishing the current step.";
   return "Claude Code compacts the conversation when it gets close to full. You can also compact at a good moment, such as after a PR merges.";
 }

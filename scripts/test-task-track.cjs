@@ -140,7 +140,7 @@ async function browserChecks() {
     await waitFor('!!document.querySelector("[data-context-card]")');
     assert.match(
       await evaluate('document.querySelector("[data-context-card]").textContent'),
-      /200k left\. Replies get slower and the agent recalls less from here\. Compacting now keeps it sharp; Claude Code waits until about 95%\./,
+      /200k left\. Context is getting full\. Consider compacting after finishing the current step\./,
     );
     await delay(220);
     await screenshot("context-card-warning");
@@ -156,7 +156,7 @@ async function browserChecks() {
     await waitFor('document.querySelector("[data-compact-now]") && !document.querySelector("[data-compact-now]").disabled');
     assert.match(
       await evaluate('document.querySelector("[data-context-card]").textContent'),
-      /103k left\. Claude Code compacts by itself at about 95%, in the middle of whatever it is doing\. Compacting now, at a point you choose, keeps more\.Compact now$/,
+      /103k left\. Context is nearly full\. Compact at a pause in your work to make room for the next steps\.Compact now$/,
     );
     await delay(220);
     await screenshot("context-card-critical");

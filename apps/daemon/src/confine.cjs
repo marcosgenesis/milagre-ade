@@ -45,6 +45,7 @@ const PATHS = Object.freeze({
   "simulator:status": denySimulator,
   "simulator:control": denySimulator,
   "simulator:input": denySimulator,
+  "simulator:repair": denySimulator,
   "simulator:close": denySimulator,
   // Browsers on the host can hold the owner's signed-in sessions. A demo Project never reaches them.
   "browser:list": denied,

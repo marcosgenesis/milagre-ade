@@ -13,7 +13,7 @@ async function waitFor(check) {
   }
 }
 
-async function fixture(t, mode = "normal", execFile = async () => ({ stdout: "" })) {
+async function fixture(t, mode = "normal", execFile = async () => ({ stdout: "" }), extra = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "milagre-simulator-test-"));
   const log = path.join(dir, "log.jsonl"),
     address = path.join(dir, "address.json");
@@ -66,6 +66,8 @@ server.listen(0, '127.0.0.1', () => {
     execFile,
     admissionTimeoutMs: 1000,
     startupTimeoutMs: 10000,
+    idleMs: 0,
+    ...extra,
   });
   t.after(async () => {
     await helper.stop();
@@ -150,6 +152,27 @@ test("helper crash is isolated and a new connect starts a fresh child", async (t
   assert.notEqual(JSON.parse(await readFile(f.address, "utf8")).pid, pid);
 });
 
+test("helper outlives its last viewer for the idle window, so reopening reuses it", async (t) => {
+  const f = await fixture(t, "normal", undefined, { idleMs: 300 });
+  await (await f.helper.connect(DEVICE)).close();
+  const { pid } = JSON.parse(await readFile(f.address, "utf8"));
+  process.kill(pid, 0);
+  const second = await f.helper.connect(DEVICE);
+  await waitFor(() => second.status().ready);
+  assert.equal(JSON.parse(await readFile(f.address, "utf8")).pid, pid);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  process.kill(pid, 0);
+  await second.close();
+  await waitFor(() => {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+});
+
 test("discovery filters running iOS devices and never spawns the helper", async (t) => {
   let calls = 0;
   const helper = createSimulatorHelper({
@@ -179,20 +202,43 @@ test("discovery filters running iOS devices and never spawns the helper", async 
   assert.equal(calls, 1);
 });
 
-test("Device Hub's input flag is cleared and backboardd restarted before connecting, only while set", async (t) => {
+test("Device Hub's input flag is reported, never repaired on connect, and repair runs only on request", async (t) => {
   for (const shadowed of [true, false]) {
     const calls = [];
     const f = await fixture(t, "normal", async (file, args) => {
       calls.push([file, ...args].join(" "));
       return { stdout: args.includes("-g") ? `com.apple.coredevice.dtuhidd.active ${shadowed ? 1 : 0}\n` : "" };
     });
-    await (await f.helper.connect(DEVICE)).close();
+    const channel = await f.helper.connect(DEVICE);
+    await waitFor(() => channel.status().ready);
+    assert.equal(channel.status().inputBlocked, shadowed || undefined);
     const spawn = `/usr/bin/xcrun simctl spawn ${DEVICE}`;
-    assert.deepEqual(calls, [
-      `${spawn} notifyutil -g com.apple.coredevice.dtuhidd.active`,
-      ...(shadowed ? [`${spawn} notifyutil -s com.apple.coredevice.dtuhidd.active 0`, `${spawn} launchctl kickstart -k system/com.apple.backboardd`] : []),
+    assert.deepEqual(calls, [`${spawn} notifyutil -g com.apple.coredevice.dtuhidd.active`]);
+    await f.helper.repairInput(DEVICE);
+    assert.deepEqual(calls.slice(1), [
+      `${spawn} notifyutil -s com.apple.coredevice.dtuhidd.active 0`,
+      `${spawn} launchctl kickstart -k system/com.apple.backboardd`,
     ]);
+    await channel.close();
   }
+});
+
+test("the input flag is read again while a viewer stays open", async (t) => {
+  let shadowed = false;
+  const f = await fixture(
+    t,
+    "normal",
+    async (_file, args) => ({ stdout: `com.apple.coredevice.dtuhidd.active ${shadowed && args.includes("-g") ? 1 : 0}\n` }),
+    {
+      inputCheckMs: 20,
+    },
+  );
+  const channel = await f.helper.connect(DEVICE);
+  await waitFor(() => channel.status().ready);
+  assert.equal(channel.status().inputBlocked, undefined);
+  shadowed = true;
+  await waitFor(() => channel.status().inputBlocked === true);
+  await channel.close();
 });
 
 test("admission alone allows open so offer can start capture, but input waits for config", async (t) => {
@@ -256,7 +302,7 @@ test("fleet discovers only ready emulators and tolerates unavailable Xcode", asy
 
 test("closing one Android device ends its capture while another remains connected", async (t) => {
   const f = await fixture(t, "android");
-  const adapter = createSimulatorAdapter({ helperPath: f.helperPath });
+  const adapter = createSimulatorAdapter({ helperPath: f.helperPath, idleMs: 0 });
   t.after(() => adapter.stop());
   const first = await adapter.connect("emulator-5554");
   const a = JSON.parse(await readFile(f.address, "utf8"));

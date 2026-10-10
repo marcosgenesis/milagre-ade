@@ -118,7 +118,7 @@ export function createSimulatorBridge(call, respond) {
         if (!disposed) respond({ channel: "milagre-simulator", id, ...value });
       };
       try {
-        if (!["open", "offer", "status", "control", "input", "close"].includes(method)) throw new Error("Unknown simulator command.");
+        if (!["open", "offer", "status", "control", "input", "repair", "close"].includes(method)) throw new Error("Unknown simulator command.");
         if (!args || typeof args !== "object") throw new Error("Invalid simulator request.");
         if (method === "open") {
           if ([...openings.values()].some((value) => !value.cancelled) || viewers.size) throw new Error("Close the current viewer before opening another.");
@@ -187,6 +187,9 @@ function receiver(config, geometryFor, pointFor, inputQueue) {
   const control = document.getElementById("control"),
     home = document.getElementById("home"),
     rotate = document.getElementById("rotate");
+  const blocked = document.getElementById("blocked"),
+    blockedText = document.getElementById("blocked-text"),
+    repair = document.getElementById("repair");
   let nextId = 0,
     epoch = 0,
     viewerId = null,
@@ -202,7 +205,9 @@ function receiver(config, geometryFor, pointFor, inputQueue) {
     frames = false,
     active = false,
     stopped = false,
-    claiming = false;
+    claiming = false,
+    repairing = false,
+    confirmRepair = null;
   const pending = new Map(),
     pointers = new Map();
   const post = (data) => {
@@ -214,7 +219,7 @@ function receiver(config, geometryFor, pointFor, inputQueue) {
     new Promise((resolve, reject) => {
       const id = ++nextId;
       // Helper startup and the host's bounded 20-second offer may run slowly on a busy Mac.
-      const timeout = method === "open" || method === "offer" ? 25000 : 12000;
+      const timeout = method === "open" || method === "offer" || method === "repair" ? 25000 : 12000;
       const timer = setTimeout(() => {
         pending.delete(id);
         if (method === "open") post({ channel: "milagre-simulator", id, event: "cancel" });
@@ -247,8 +252,18 @@ function receiver(config, geometryFor, pointFor, inputQueue) {
     video.style.transform = "translate(-50%,-50%) rotate(" + g.rotation + "deg)";
   };
   new ResizeObserver(layout).observe(stage);
+  const resetRepair = () => {
+    clearTimeout(confirmRepair);
+    confirmRepair = null;
+    blockedText.textContent = "Xcode Device Hub is blocking touches.";
+    repair.textContent = "Fix";
+    repair.disabled = repairing;
+  };
   const render = () => {
     const ready = active && frames && status?.ready;
+    const touchesBlocked = !!(ready && status.controlling && status.inputBlocked);
+    if (!touchesBlocked && confirmRepair) resetRepair();
+    blocked.hidden = !touchesBlocked;
     back.disabled = home.disabled = rotate.disabled = !(ready && status.controlling);
     control.disabled = !ready || claiming;
     control.hidden = !!status?.controlling;
@@ -258,7 +273,9 @@ function receiver(config, geometryFor, pointFor, inputQueue) {
         : !status?.ready
           ? "Preparing simulator input..."
           : status.controlling
-            ? "You control this simulator"
+            ? status.inputBlocked
+              ? "Xcode Device Hub is blocking touches."
+              : "You control this simulator"
             : "View only. Another viewer may control it.";
     if (ready) {
       clearTimeout(deadline);
@@ -362,6 +379,33 @@ function receiver(config, geometryFor, pointFor, inputQueue) {
   };
   control.onclick = () => {
     void claim(true);
+  };
+  // Restarting the simulator's input closes its apps, so the first tap only says so.
+  repair.onclick = async () => {
+    if (repairing || !viewerId) return;
+    if (!confirmRepair) {
+      blockedText.textContent = "Fixing restarts the simulator's home screen and closes its apps.";
+      repair.textContent = "Restart";
+      confirmRepair = setTimeout(resetRepair, 6000);
+      return;
+    }
+    const currentEpoch = epoch;
+    repairing = true;
+    resetRepair();
+    repair.textContent = "Restarting...";
+    // The host drops this viewer while it repairs, so no poll or input may use it in the meantime.
+    clearInterval(heartbeat);
+    heartbeat = null;
+    clearInput();
+    try {
+      await rpc("repair", { viewerId });
+      if (currentEpoch === epoch) void start();
+    } catch (error) {
+      if (currentEpoch === epoch) fail(error);
+    } finally {
+      repairing = false;
+      resetRepair();
+    }
   };
   back.onclick = () => queue?.push({ kind: "button", button: "back" });
   home.onclick = () => queue?.push({ kind: "button", button: "home" });
@@ -529,15 +573,22 @@ function receiver(config, geometryFor, pointFor, inputQueue) {
       if (currentEpoch === epoch) fail(error);
     }
   };
+  // Video pauses while hidden and reconnects on its own when shown again, unless it had already failed.
+  let resumeOnShow = false;
   retry.onclick = () => {
+    resumeOnShow = false;
     void start();
   };
   window.simulatorDispose = stop;
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      resumeOnShow ||= !stopped;
       stop();
       message.textContent = "Viewer paused while hidden.";
       retry.hidden = false;
+    } else if (resumeOnShow) {
+      resumeOnShow = false;
+      void start();
     }
   });
   window.addEventListener("pagehide", stop);
@@ -556,6 +607,6 @@ export function buildSimulatorReceiverScript() {
 export function createSimulatorReceiverHtml(config) {
   const escaped = JSON.stringify(config).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
-:root{--surface:#ffffff;--ink:#1f2124;--ink2:#62656b;--line:#ecedef;--hover:#f4f5f6;--accent:#0285ff}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{font:12px -apple-system,BlinkMacSystemFont,sans-serif;background:var(--surface);color:var(--ink);display:flex;flex-direction:column;color-scheme:inherit}#stage{position:relative;min-height:0;flex:1;background:#101113;touch-action:none;user-select:none;overflow:hidden}video{position:absolute;left:50%;top:50%;object-fit:fill;pointer-events:none}footer{padding:6px 12px;flex-shrink:0;border-top:1px solid var(--line)}#failure{position:absolute;left:16px;right:16px;top:50%;transform:translateY(-50%);margin:0;padding:16px;border-radius:10px;background:var(--surface);color:var(--ink);text-align:center;line-height:1.5}#failure[hidden]{display:none}#message{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}nav{display:flex;gap:8px;align-items:center;justify-content:center}button{display:grid;place-items:center;width:44px;height:44px;padding:0;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--ink2);cursor:pointer}button:hover:not(:disabled){background:var(--hover);color:var(--ink)}button:disabled{opacity:.3;cursor:default}button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}button[hidden]{display:none}button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
-</style></head><body><div id="config" hidden data-config="${escaped}"></div><div id="stage" aria-label="Simulator touch screen"><video id="video" autoplay muted playsinline></video><p id="failure" role="alert" hidden></p></div><footer><p id="message" role="status" aria-live="polite">Connecting...</p><nav aria-label="Simulator controls"><button id="back" aria-label="Back" title="Back" hidden disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5-7 7 7 7"/></svg></button><button id="home" aria-label="Home" title="Home" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg></button><button id="rotate" aria-label="Rotate" title="Rotate" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="5" width="9" height="14" rx="2" transform="rotate(30 12.5 12)"/><path d="M3 10a9 9 0 0 1 14-7M3 5v5h5m13 4a9 9 0 0 1-14 7m14-2v-5h-5"/></svg></button><button id="control" aria-label="Take control" title="Take control" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 13V6a2 2 0 0 1 4 0v6-2a2 2 0 0 1 4 0v2a2 2 0 0 1 4 0v4c0 4-3 6-6 6h-1c-2 0-3-1-4-2l-5-6a2 2 0 0 1 3-2l1 1Z"/></svg></button><button id="retry" aria-label="Retry" title="Retry" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5m5 0a8 8 0 1 0-2 6"/></svg></button></nav></footer><script>${SIMULATOR_RECEIVER_SCRIPT}</script></body></html>`;
+:root{--surface:#ffffff;--ink:#1f2124;--ink2:#62656b;--line:#ecedef;--hover:#f4f5f6;--accent:#0285ff}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{font:12px -apple-system,BlinkMacSystemFont,sans-serif;background:var(--surface);color:var(--ink);display:flex;flex-direction:column;color-scheme:inherit}#stage{position:relative;min-height:0;flex:1;background:#101113;touch-action:none;user-select:none;overflow:hidden}video{position:absolute;left:50%;top:50%;object-fit:fill;pointer-events:none}footer{padding:6px 12px;flex-shrink:0;border-top:1px solid var(--line)}#failure{position:absolute;left:16px;right:16px;top:50%;transform:translateY(-50%);margin:0;padding:16px;border-radius:10px;background:var(--surface);color:var(--ink);text-align:center;line-height:1.5}#failure[hidden]{display:none}#message{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}nav{display:flex;gap:8px;align-items:center;justify-content:center}button{display:grid;place-items:center;width:44px;height:44px;padding:0;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--ink2);cursor:pointer}button:hover:not(:disabled){background:var(--hover);color:var(--ink)}button:disabled{opacity:.3;cursor:default}button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}button[hidden]{display:none}#blocked{display:flex;gap:8px;align-items:center;justify-content:center;padding:2px 0 6px;color:var(--ink2);line-height:1.4;text-align:center}#blocked[hidden]{display:none}#blocked button{flex-shrink:0;width:auto;height:28px;padding:0 10px;border-color:var(--line);color:var(--ink)}button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+</style></head><body><div id="config" hidden data-config="${escaped}"></div><div id="stage" aria-label="Simulator touch screen"><video id="video" autoplay muted playsinline></video><p id="failure" role="alert" hidden></p></div><footer><p id="message" role="status" aria-live="polite">Connecting...</p><div id="blocked" hidden><span id="blocked-text">Xcode Device Hub is blocking touches.</span><button id="repair" type="button">Fix</button></div><nav aria-label="Simulator controls"><button id="back" aria-label="Back" title="Back" hidden disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5-7 7 7 7"/></svg></button><button id="home" aria-label="Home" title="Home" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg></button><button id="rotate" aria-label="Rotate" title="Rotate" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="5" width="9" height="14" rx="2" transform="rotate(30 12.5 12)"/><path d="M3 10a9 9 0 0 1 14-7M3 5v5h5m13 4a9 9 0 0 1-14 7m14-2v-5h-5"/></svg></button><button id="control" aria-label="Take control" title="Take control" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 13V6a2 2 0 0 1 4 0v6-2a2 2 0 0 1 4 0v2a2 2 0 0 1 4 0v4c0 4-3 6-6 6h-1c-2 0-3-1-4-2l-5-6a2 2 0 0 1 3-2l1 1Z"/></svg></button><button id="retry" aria-label="Retry" title="Retry" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5m5 0a8 8 0 1 0-2 6"/></svg></button></nav></footer><script>${SIMULATOR_RECEIVER_SCRIPT}</script></body></html>`;
 }

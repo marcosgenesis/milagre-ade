@@ -9,7 +9,8 @@ function fixture(t, options = {}) {
   const events = [],
     channels = [],
     offers = [],
-    closed = [];
+    closed = [],
+    repaired = [];
   const adapter = {
     async list() {
       return [DEVICE];
@@ -38,6 +39,9 @@ function fixture(t, options = {}) {
     async closeViewer(deviceId, sessionId) {
       closed.push({ deviceId, sessionId });
     },
+    async repairInput(deviceId) {
+      repaired.push(deviceId);
+    },
     async stop() {
       this.stopped = true;
     },
@@ -51,6 +55,7 @@ function fixture(t, options = {}) {
     channels,
     offers,
     closed,
+    repaired,
     advance: (ms) => {
       time += ms;
     },
@@ -334,4 +339,24 @@ test("Back cannot accidentally press Home on an iOS device", async (t) => {
     v = await controller(f);
   await assert.rejects(input(f, v, { kind: "button", button: "back" }), /Android/);
   assert.equal(f.events.length, 0);
+});
+
+test("Device Hub's input flag reaches the viewer, and only its controller can repair it", async (t) => {
+  const f = fixture(t),
+    v = await controller(f),
+    other = await f.service.open({ deviceId: DEVICE.id }, "owner-b");
+  assert.equal(v.inputBlocked, undefined);
+  f.channels[0].state = { ...f.channels[0].state, inputBlocked: true };
+  assert.equal((await f.service.status({ viewerId: v.viewerId }, v.owner)).inputBlocked, true);
+  assert.equal((await f.service.status({ viewerId: other.viewerId }, "owner-b")).generation, v.generation);
+  await assert.rejects(f.service.repair({ viewerId: other.viewerId }, "owner-b"), /control/i);
+  await assert.rejects(f.service.repair({ viewerId: v.viewerId }, "owner-b"), /owner/i);
+  assert.deepEqual(f.repaired, []);
+  assert.equal(await f.service.repair({ viewerId: v.viewerId }, v.owner), null);
+  assert.deepEqual(f.repaired, [DEVICE.id]);
+  // Every viewer of the device reopens on a fresh input channel.
+  assert.equal(f.channels[0].closed, true);
+  await assert.rejects(f.service.status({ viewerId: other.viewerId }, "owner-b"), /Reopen/);
+  await f.service.open({ deviceId: DEVICE.id }, v.owner);
+  assert.equal(f.channels.length, 2);
 });

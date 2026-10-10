@@ -17,6 +17,7 @@ export interface SimulatorStatus {
   generation: number;
   controlling: boolean;
   ready: boolean;
+  inputBlocked?: boolean;
 }
 export type SimulatorInput =
   | { kind: "touch"; phase: "begin" | "move" | "end"; points: { x: number; y: number }[] }
@@ -34,6 +35,7 @@ export interface SimulatorAdapter {
   connect(deviceId: string): Promise<SimulatorChannel>;
   offer(deviceId: string, sessionId: string, sdp: string): Promise<{ type: "answer"; sdp: string }>;
   closeViewer(deviceId: string, sessionId: string): Promise<void>;
+  repairInput(deviceId: string): Promise<void>;
   stop(): Promise<void>;
 }
 export interface SimulatorOptions {
@@ -53,6 +55,7 @@ export interface Simulators {
   status(request: { viewerId: string }, owner: string): Promise<SimulatorStatus>;
   control(request: { viewerId: string; takeOver: boolean }, owner: string): Promise<SimulatorStatus>;
   input(request: { viewerId: string; sequence: number; generation: number; event: SimulatorInput }, owner: string): Promise<{ accepted: boolean }>;
+  repair(request: { viewerId: string }, owner: string): Promise<null>;
   closeViewer(request: { viewerId: string }, owner: string): Promise<null>;
   disconnect(owner: string): Promise<void>;
   close(): Promise<void>;

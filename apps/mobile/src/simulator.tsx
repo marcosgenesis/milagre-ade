@@ -103,18 +103,32 @@ export function SimulatorSheet({ hostId, chatId }: { hostId?: string; chatId?: s
   const selected = attaching
     ? null
     : ((chosen && list?.devices.find((d) => d.id === chosen.id)) ?? (!choosing && list?.devices.length === 1 ? list.devices[0] : null));
-  const [paused, setPaused] = useState(AppState.currentState !== "active");
+  const [paused, setPaused] = useState(AppState.currentState === "background");
   const [revision, setRevision] = useState(0);
+  const pausedRef = useRef(paused);
+  const pause = useCallback(() => {
+    pausedRef.current = true;
+    setPaused(true);
+  }, []);
+  const resume = useCallback(() => {
+    if (!pausedRef.current) return;
+    pausedRef.current = false;
+    setRevision((value) => value + 1);
+    setPaused(false);
+  }, []);
   useFocusEffect(
     useCallback(() => {
+      if (AppState.currentState === "active") resume();
+      // Notification Center, Control Center and screenshots only make the app inactive; video keeps playing.
       const subscription = AppState.addEventListener("change", (state) => {
-        if (state !== "active") setPaused(true);
+        if (state === "background") pause();
+        else if (state === "active") resume();
       });
       return () => {
         subscription.remove();
-        setPaused(true);
+        pause();
       };
-    }, []),
+    }, [pause, resume]),
   );
   const mutate = async (method: "attach" | "detach", device: SimulatorDevice) => {
     if (!source || !chatId || busy) return;
@@ -188,13 +202,7 @@ export function SimulatorSheet({ hostId, chatId }: { hostId?: string; chatId?: s
         ) : paused ? (
           <View style={{ padding: 20, gap: 16 }}>
             <Text style={styles.muted}>Viewer paused while the app was hidden.</Text>
-            <PillButton
-              title="Retry"
-              onPress={() => {
-                setRevision((value) => value + 1);
-                setPaused(false);
-              }}
-            />
+            <PillButton title="Retry" onPress={resume} />
           </View>
         ) : selected ? (
           <SimulatorWebView key={`${selected.id}:${revision}`} client={source} deviceId={selected.id} chatId={chatId!} />
@@ -299,7 +307,7 @@ function SimulatorWebView({ client, deviceId, chatId }: { client: Client; device
         if (!cancelled) setError(failure instanceof Error ? failure.message : "Could not prepare the simulator viewer.");
       });
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state !== "active") {
+      if (state === "background") {
         view.current?.injectJavaScript("window.simulatorDispose?.();true;");
         currentBridge.dispose();
       }

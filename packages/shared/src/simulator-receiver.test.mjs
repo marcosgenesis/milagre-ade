@@ -208,7 +208,7 @@ function browserHarness(call, { playVideo = true } = {}) {
     intervals = new Map(),
     peers = [];
   let serial = 0;
-  for (const id of ["config", "stage", "video", "failure", "message", "retry", "control", "home", "rotate", "back"])
+  for (const id of ["config", "stage", "video", "failure", "message", "retry", "control", "home", "rotate", "back", "blocked", "blocked-text", "repair"])
     elements[id] = {
       style: {},
       clientWidth: 600,
@@ -343,6 +343,93 @@ test("bundled receiver releases pointer cancellation and closes video/control on
   h.elements.stage.onpointerdown(pointer(2));
   await h.flush();
   assert.equal(calls.filter(([method]) => method === "input").length, 3);
+});
+test("bundled receiver reconnects by itself when shown again, but not after a failure", async () => {
+  const calls = [];
+  const h = browserHarness(fakeHost(calls));
+  await h.flush();
+  h.document.hidden = true;
+  h.listeners.visibilitychange();
+  await h.flush();
+  assert.equal(h.elements.message.textContent, "Viewer paused while hidden.");
+  h.document.hidden = false;
+  h.listeners.visibilitychange();
+  await h.flush();
+  assert.equal(calls.filter(([method]) => method === "open").length, 2);
+  assert.equal(h.peers[1].closed, undefined);
+  assert.equal(h.elements.message.textContent, "You control this simulator");
+  h.peers[1].connectionState = "failed";
+  h.peers[1].onconnectionstatechange();
+  await h.flush();
+  assert.match(h.elements.message.textContent, /could not reach/);
+  const opens = calls.filter(([method]) => method === "open").length;
+  h.document.hidden = true;
+  h.listeners.visibilitychange();
+  h.document.hidden = false;
+  h.listeners.visibilitychange();
+  await h.flush();
+  assert.equal(calls.filter(([method]) => method === "open").length, opens);
+});
+test("bundled receiver repairs Device Hub's blocked touches only after a second, confirming tap", async () => {
+  const calls = [];
+  let blocked = true;
+  const host = fakeHost(calls);
+  const h = browserHarness(async (method, args) => {
+    const result = await host(method, args);
+    return (method === "status" || method === "control") && blocked ? { ...result, inputBlocked: true } : result;
+  });
+  await h.flush();
+  assert.equal(h.elements.blocked.hidden, false);
+  assert.match(h.elements.message.textContent, /Device Hub/);
+  h.elements.repair.onclick();
+  await h.flush();
+  assert.equal(calls.filter(([method]) => method === "repair").length, 0, "the first tap only warns");
+  assert.match(h.elements["blocked-text"].textContent, /closes its apps/);
+  h.timeout(6000);
+  assert.doesNotMatch(h.elements["blocked-text"].textContent, /closes its apps/, "an unconfirmed warning goes away");
+  h.elements.repair.onclick();
+  blocked = false;
+  h.elements.repair.onclick();
+  await h.flush();
+  await h.flush();
+  assert.deepEqual(
+    calls.filter(([method]) => method === "repair").map(([, args]) => args),
+    [{ viewerId: "viewer" }],
+  );
+  assert.equal(calls.filter(([method]) => method === "open").length, 2, "the viewer reopens on a fresh input channel");
+  assert.equal(h.elements.blocked.hidden, true);
+  assert.equal(h.elements.message.textContent, "You control this simulator");
+});
+test("a status poll during repair does not strand the viewer on the removed capability", async () => {
+  const calls = [];
+  let release;
+  const host = fakeHost(calls);
+  let repairing = false,
+    repaired = false;
+  const h = browserHarness(async (method, args) => {
+    if (method === "repair") {
+      repairing = repaired = true;
+      calls.push([method, args]);
+      await new Promise((resolve) => (release = resolve));
+      return null;
+    }
+    // The host drops every viewer of the device while it repairs.
+    if (repairing && method === "status") throw new Error("Unknown simulator viewer or owner. Reopen the viewer.");
+    const result = await host(method, args);
+    return (method === "status" || method === "control") && !repaired ? { ...result, inputBlocked: true } : result;
+  });
+  await h.flush();
+  h.elements.repair.onclick();
+  h.elements.repair.onclick();
+  await h.flush();
+  for (const poll of h.intervals.values()) await poll();
+  await h.flush();
+  repairing = false;
+  release();
+  await h.flush();
+  await h.flush();
+  assert.equal(h.elements.failure.hidden, true, h.elements.failure.textContent);
+  assert.equal(h.elements.message.textContent, "You control this simulator");
 });
 test("bundled receiver shows a bounded negotiation failure when no video frames arrive", async () => {
   const calls = [];

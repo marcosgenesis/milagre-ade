@@ -1,6 +1,15 @@
 export type SimulatorDevice = { id: string; name: string; platform: "ios" | "android"; version: string };
 export type SimulatorOrientation = "portrait" | "portrait-upside-down" | "landscape-left" | "landscape-right";
-export type SimulatorStatus = { width: number; height: number; orientation: SimulatorOrientation; generation: number; controlling: boolean; ready: boolean };
+export type SimulatorStatus = {
+  width: number;
+  height: number;
+  orientation: SimulatorOrientation;
+  generation: number;
+  controlling: boolean;
+  ready: boolean;
+  /** Xcode Device Hub shadows touches until the simulator's input restarts. */
+  inputBlocked?: boolean;
+};
 export type SimulatorInput =
   | { kind: "touch"; phase: "begin" | "move" | "end"; points: { x: number; y: number }[] }
   | { kind: "button"; button: "home" | "back" }
@@ -24,6 +33,8 @@ export interface SimulatorApi {
   status(request: { viewerId: string }): Promise<SimulatorStatus>;
   control(request: { viewerId: string; takeOver: boolean }): Promise<SimulatorStatus>;
   input(request: { viewerId: string; sequence: number; generation: number; event: SimulatorInput }): Promise<{ accepted: boolean }>;
+  /** Restarts the simulator's input, closing its running apps. Every viewer of the device reopens. */
+  repair(request: { viewerId: string }): Promise<null>;
   close(request: { viewerId: string }): Promise<null>;
 }
 export type SimulatorMethod = Exclude<keyof SimulatorApi, "list" | "attach" | "detach">;

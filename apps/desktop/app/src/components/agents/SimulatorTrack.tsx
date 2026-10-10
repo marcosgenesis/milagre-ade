@@ -79,9 +79,9 @@ export function SimulatorTrack({ chatId }: { chatId: string }) {
         if (!disposed) setLoading(false);
       }
     };
+    // The receiver pauses its own video while hidden and reconnects when shown, so the panel stays open.
     const visibility = () => {
-      if (document.hidden) close();
-      else void refresh();
+      if (!document.hidden) void refresh();
     };
     void refresh();
     const timer = setInterval(refresh, 5000);

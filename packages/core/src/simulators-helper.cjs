@@ -52,6 +52,8 @@ function createSimulatorHelper(options = {}) {
   const spawn = options.spawn ?? spawnProcess;
   const execFile = options.execFile ?? promisify(execFileCallback);
   const iceServers = options.iceServers ?? configuredIceServers(process.env);
+  // A viewer that closes and reopens (phone backgrounded, Retry) reuses the warm helper instead of a cold start.
+  const idleMs = options.idleMs ?? 60000;
   let current = null,
     starting = null,
     stopped = false,
@@ -61,6 +63,7 @@ function createSimulatorHelper(options = {}) {
 
   async function terminate(instance) {
     if (!instance || instance.terminated) return instance?.exitPromise;
+    clearTimeout(instance.idle);
     instance.terminated = true;
     instance.abort.abort();
     for (const channel of instance.channels) channel.fail("Simulator helper stopped. Reopen the viewer.");
@@ -83,7 +86,10 @@ function createSimulatorHelper(options = {}) {
   }
   async function ensure() {
     if (stopped) throw new Error("Simulator helper is closed.");
-    if (current?.base && !current.exited && !current.terminated) return current;
+    if (current?.base && !current.exited && !current.terminated) {
+      clearTimeout(current.idle);
+      return current;
+    }
     if (starting) return starting;
     starting = (async () => {
       let helperPath;
@@ -190,17 +196,17 @@ function createSimulatorHelper(options = {}) {
       starting = null;
     }
   }
-  // Once Xcode 27's Device Hub attaches to a simulator it sets this flag and the guest drops legacy HID touches
-  // (EvanBacon/serve-sim#153). serve-sim's repair-input: clear the flag, then restart backboardd so it starts at
-  // zero. The restart also restarts SpringBoard and closes running apps, so it runs only while the flag is set.
-  async function repairInput(deviceId) {
-    const flag = "com.apple.coredevice.dtuhidd.active";
-    const spawnIn = (...args) => execFile("/usr/bin/xcrun", ["simctl", "spawn", deviceId, ...args], { timeout: 10000, encoding: "utf8" });
+  // Once Xcode 27's Device Hub attaches to a simulator it sets this flag and the guest drops legacy HID touches.
+  // Clearing it means restarting backboardd, which also restarts SpringBoard and closes running apps, so viewers
+  // only report the flag and the user chooses when to repair.
+  const INPUT_FLAG = "com.apple.coredevice.dtuhidd.active";
+  const spawnIn = (deviceId, ...args) => execFile("/usr/bin/xcrun", ["simctl", "spawn", deviceId, ...args], { timeout: 10000, encoding: "utf8" });
+  async function inputBlocked(deviceId) {
     try {
-      if ((await spawnIn("notifyutil", "-g", flag)).stdout.trim() !== `${flag} 1`) return;
-      await spawnIn("notifyutil", "-s", flag, "0");
-      await spawnIn("launchctl", "kickstart", "-k", "system/com.apple.backboardd");
-    } catch {} // Older runtimes do not publish the flag; input then works as before.
+      return (await spawnIn(deviceId, "notifyutil", "-g", INPUT_FLAG)).stdout.trim() === `${INPUT_FLAG} 1`;
+    } catch {
+      return false; // Older runtimes do not publish the flag; input then works as before.
+    }
   }
   async function request(instance, deviceId, route, body) {
     if (!validDevice.test(deviceId)) throw new Error("Invalid simulator device.");
@@ -268,7 +274,6 @@ function createSimulatorHelper(options = {}) {
     },
     async connect(deviceId) {
       if (!validDevice.test(deviceId)) throw new Error("Invalid simulator device.");
-      if (!android) await repairInput(deviceId);
       const instance = await ensure();
       const socket = new WebSocket(`${instance.base.replace("http:", "ws:")}${prefix}/ws?device=${encodeURIComponent(deviceId)}${android ? "&video=0" : ""}`, [
         `${android ? "serve-emu" : "serve-sim"}.token.${instance.token}`,
@@ -279,7 +284,9 @@ function createSimulatorHelper(options = {}) {
         admissionResolved = false,
         localClosed = false;
       let pollTimer = null,
-        polling = false;
+        polling = false,
+        blocked = false,
+        inputTimer = null;
       let rejectAdmission, resolveAdmission;
       const admission = new Promise((resolve, reject) => {
         resolveAdmission = resolve;
@@ -297,7 +304,7 @@ function createSimulatorHelper(options = {}) {
       const channel = {
         fail,
         status() {
-          return { ...state };
+          return blocked ? { ...state, inputBlocked: true } : { ...state };
         },
         send(event) {
           if (!state.ready) throw new Error("Simulator input is not ready.");
@@ -321,10 +328,19 @@ function createSimulatorHelper(options = {}) {
           if (localClosed) return;
           localClosed = true;
           clearInterval(pollTimer);
+          clearInterval(inputTimer);
           state = { ...state, ready: false };
           instance.channels.delete(channel);
           if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close(1000);
-          if (!instance.channels.size) await terminate(instance);
+          if (instance.channels.size) return;
+          if (idleMs <= 0) await terminate(instance);
+          else {
+            clearTimeout(instance.idle);
+            instance.idle = setTimeout(() => {
+              if (!instance.channels.size) void terminate(instance);
+            }, idleMs);
+            instance.idle.unref();
+          }
         },
       };
       instance.channels.add(channel);
@@ -417,6 +433,16 @@ function createSimulatorHelper(options = {}) {
       const timer = setTimeout(() => fail("Simulator input admission timed out. Reopen the viewer."), options.admissionTimeoutMs ?? 12000);
       try {
         await admission;
+        if (!android) {
+          // Device Hub can attach while a viewer is open, so the flag is read again while the channel lives.
+          const checkInput = async () => {
+            const value = await inputBlocked(deviceId);
+            if (!localClosed) blocked = value;
+          };
+          await checkInput();
+          inputTimer = setInterval(() => void checkInput(), options.inputCheckMs ?? 10000);
+          inputTimer.unref();
+        }
         return channel;
       } catch (error) {
         await channel.close();
@@ -429,6 +455,15 @@ function createSimulatorHelper(options = {}) {
       const instance = current;
       if (!instance?.base) throw new Error("Simulator helper is unavailable. Reopen the viewer.");
       return request(instance, deviceId, "webrtc/offer", { type: "offer", sdp, sessionId, codec: "h264", ...(!android ? { iceServers } : {}) });
+    },
+    async repairInput(deviceId) {
+      if (android || !UUID.test(deviceId)) throw new Error("Input repair is available only on iOS simulators.");
+      try {
+        await spawnIn(deviceId, "notifyutil", "-s", INPUT_FLAG, "0");
+        await spawnIn(deviceId, "launchctl", "kickstart", "-k", "system/com.apple.backboardd");
+      } catch {
+        throw new Error("Could not restart simulator input. Check that the simulator is running.");
+      }
     },
     async closeViewer(deviceId, sessionId) {
       const instance = current;
@@ -500,6 +535,9 @@ function createSimulatorAdapter(options = {}) {
     },
     async closeViewer(id, ...args) {
       return backend(id).closeViewer(id, ...args);
+    },
+    async repairInput(id) {
+      return backend(id).repairInput(id);
     },
     async stop() {
       await Promise.all([ios.stop(), ...[...androidHelpers.values()].map((helper) => helper.stop())]);

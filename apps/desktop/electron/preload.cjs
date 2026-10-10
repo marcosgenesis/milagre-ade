@@ -59,6 +59,7 @@ function makeBridge(invoke, listen, send) {
       status: (request) => invoke("simulator:status", request),
       control: (request) => invoke("simulator:control", request),
       input: (request) => invoke("simulator:input", request),
+      repair: (request) => invoke("simulator:repair", request),
       close: (request) => invoke("simulator:close", request),
     },
     browsers: {

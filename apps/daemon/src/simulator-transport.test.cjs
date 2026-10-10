@@ -96,7 +96,7 @@ test("paired mobile reaches the same simulator service; unauthenticated and conf
   assert.equal(typeof f.opens[0].owner, "string");
   assert.equal((await paired("simulator:list", [], false)).status, 401);
   const confined = await f.bridge(true);
-  for (const method of ["list", "attach", "detach", "open", "offer", "status", "control", "input", "close"]) {
+  for (const method of ["list", "attach", "detach", "open", "offer", "status", "control", "input", "repair", "close"]) {
     assert.equal((await confined(`simulator:${method}`, [{ viewerId: "private-viewer" }])).status, 403, method);
   }
 });

@@ -56,6 +56,7 @@ const METHODS = new Set([
   "simulator:status",
   "simulator:control",
   "simulator:input",
+  "simulator:repair",
   "simulator:close",
   "browser:list",
   "browser:attach",

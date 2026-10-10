@@ -9,9 +9,9 @@ const question = (text: string) => ({ id: text, header: "", question: text, opti
 test("a question names the project, worktree and agent, and shows what it asks", () => {
   const event: AgentEvent = { type: "question-request", requestId: "q1", questions: [question("Which table layout?"), question("Keep the old view?")] };
   assert.deepEqual(attentionNotice(event, context), {
-    title: "rd-events / new-events-structure - Claude needs input",
-    subtitle: "Split the events table",
-    body: "Which table layout? (+1 more)",
+    title: "Split the events table",
+    subtitle: "rd-events / new-events-structure",
+    body: "Claude needs input: Which table layout? (+1 more)",
   });
 });
 
@@ -26,17 +26,17 @@ test("an approval shows the command's first line, or the request's title", () =>
     allowForChat: true,
   };
   assert.deepEqual(attentionNotice(command, { ...context, provider: "codex" }), {
-    title: "rd-events / new-events-structure - Codex needs approval",
-    subtitle: "Split the events table",
-    body: "Run: npm test",
+    title: "Split the events table",
+    subtitle: "rd-events / new-events-structure",
+    body: "Codex needs approval: Run: npm test",
   });
   const edit: AgentEvent = { type: "permission-request", requestId: "p2", kind: "edit", tool: "Edit", title: "Edit App.tsx?", allowForChat: false };
-  assert.equal(attentionNotice(edit, context)?.body, "Edit App.tsx?");
+  assert.equal(attentionNotice(edit, context)?.body, "Claude needs approval: Edit App.tsx?");
 });
 
 test("a chat on the project's own checkout is named by the project alone", () => {
   const event: AgentEvent = { type: "question-request", requestId: "q1", questions: [question("Ship it?")] };
-  assert.equal(attentionNotice(event, { projectName: "shop", worktreeName: "shop" })?.title, "shop - Agent needs input");
+  assert.equal(attentionNotice(event, { projectName: "shop", worktreeName: "shop" })?.title, "shop");
 });
 
 test("other events need no notification", () => {

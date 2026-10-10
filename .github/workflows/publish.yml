@@ -279,6 +279,7 @@ jobs:
           path: release
       - name: Publish the release
         run: |
+          # Missing files drop out of the globs below: only a stable release builds the Linux repository bundle.
           shopt -s nullglob
           platforms=macos
           linux=(release/*.AppImage)
@@ -291,7 +292,7 @@ jobs:
           elif [ "$WINDOWS" = true ]; then echo "::warning::The Windows build failed; this beta ships without Windows."; fi
           echo "Publishing $RELEASE_TAG ($CHANNEL) for $platforms"
           node scripts/finalize-update-feeds.cjs --tag "$RELEASE_TAG" --platform "$platforms" --check
-          assets=(release/*.dmg release/*.zip release/*.AppImage release/*.deb release/*.rpm release/*.exe release/*.blockmap release/*.yml release/milagre-linux-repository.tar.gz)
+          assets=(release/*.dmg release/*.zip release/*.AppImage release/*.deb release/*.rpm release/*.exe release/*.blockmap release/*.yml release/milagre-linux-repository*.tar.gz)
           if [ "$CHANNEL" = stable ]; then
             npm run package:managers -- --tag "$RELEASE_TAG" --platform "$platforms"
             assets+=(release/package-managers/SHA256SUMS release/package-managers/homebrew/milagre.rb release/package-managers/winget/Milagre.Milagre.yaml)

@@ -66,7 +66,7 @@ async function fixture(t, { runtimeOptions = {}, bridgeOptions = {} } = {}) {
   const request = (route, options = {}) => fetch(bridge.url + route, { ...options, headers: { authorization: `Bearer ${token}`, ...options.headers } });
   const rpc = (method, args = []) =>
     request("/rpc", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ v: 1, method, args }) });
-  return { dataDir, project, bridge, request, rpc, token };
+  return { dataDir, project, bridge, request, rpc, token, daemon };
 }
 
 test("Live Activity answers reach the real question handler and persist one answer", async (t) => {
@@ -1313,4 +1313,85 @@ test("an app that reads Chats as pages gets snapshots without messages, a Chat's
   // Without the header, the snapshot is whole, as an older app expects.
   const whole = (await (await request("/snapshot?projectPath=" + encodeURIComponent(project))).json()).result;
   assert.equal(whole.project.state.messages.length, 2);
+});
+
+// Lazy message memory (#321): the bridge holds no messages, and the host can unload a Chat's; the phone sees no change.
+test("a phone reads a Chat the host unloaded: snapshots old and new, the chat list, pages, search, one message, PR refs", async (t) => {
+  const { savedRows } = require("@milagre/core/message-store");
+  const { daemon, dataDir, project, request, rpc } = await fixture(t, { runtimeOptions: { lazyMessages: { idleMs: 0, sweepMs: 0 } } });
+  const url = "https://github.com/example/project/pull/7";
+  await fs.mkdir(path.join(project, ".milagre"));
+  await fs.writeFile(
+    path.join(project, ".milagre/coordination.json"),
+    JSON.stringify({
+      next_id: 20,
+      projects: { 1: { id: 1, name: "project" } },
+      worktrees: { 1: { id: 1, project_id: 1, path: project, name: "main" } },
+      sessions: { 2: { id: 2, worktree_id: 1, agent_name: "main", status: "Created", provider: "codex", title: "Notes" } },
+      messages: [
+        { id: 10, session_id: 2, role: "user", body: "Open a PR", context: null, clientMessageId: "client-10" },
+        {
+          id: 11,
+          session_id: 2,
+          role: "assistant",
+          body: "Opened it, needle",
+          context: null,
+          outcome: "completed",
+          steps: [{ id: "s1", kind: "shell", title: "Ran `gh pr create`", status: "done", detail: `$ gh pr create --fill\n${url}` }],
+        },
+      ],
+      tasks: {},
+    }),
+  );
+  assert.equal((await rpc("project:open", [project])).status, 200);
+  const client = await connect({ dataDir });
+  t.after(() => client.close());
+  // Nothing leaves memory before chats.db holds it: the first save moves the messages out of coordination.json.
+  const loaded = () => [...savedRows(project).values()].some((row) => row.chat === 2);
+  await daemon.unloadIdle();
+  assert.equal(savedRows(project), null, "no rows saved yet, so nothing was unloaded");
+  await client.call("chat:patch", [project, 2, { title: "Notes again" }]);
+  await client.call("daemon:flush");
+  assert.equal(loaded(), true);
+  await daemon.unloadIdle();
+  assert.equal(loaded(), false, "the Chat left the host's memory");
+  const json = async (route, headers = {}) => (await (await request(route, { headers })).json()).result;
+  const at = encodeURIComponent(project);
+
+  // An older app's snapshot has every message, as it had them, and no "read by Chat" flag.
+  const older = await json(`/snapshot?projectPath=${at}`);
+  assert.deepEqual(
+    older.project.state.messages.map((message) => [message.id, message.body]),
+    [
+      [10, "Open a PR"],
+      [11, "Opened it, needle"],
+    ],
+  );
+  assert.equal(older.project.state.messagesInChats, undefined);
+  assert.deepEqual(older.project.pullRequestRefs, { 2: [url] });
+  // The chat list: each Chat's boundary messages and send identities, without bodies.
+  const list = await json(`/snapshot?projectPath=${at}&view=chats`);
+  assert.deepEqual(
+    list.project.state.messages.map(({ id, role, body, clientMessageId }) => [id, role, body, clientMessageId]),
+    [
+      [10, "user", "", "client-10"],
+      [11, "assistant", "", undefined],
+    ],
+  );
+  assert.deepEqual(list.project.pullRequestRefs, { 2: [url] });
+  // An app that reads pages: no messages in the snapshot, the PR refs from the Chat's summary.
+  const paged = await json(`/snapshot?projectPath=${at}`, { "x-milagre-chat-pages": "1" });
+  assert.deepEqual(paged.project.state.messages, []);
+  assert.deepEqual(paged.project.pullRequestRefs, { 2: [url] });
+  const found = await json(`/search?projectPath=${at}&q=needle`);
+  assert.deepEqual(found[0].message, { id: 11, session_id: 2 });
+  const one = await json(`/message?projectPath=${at}&id=11`);
+  assert.equal(one.steps[0].detail, `$ gh pr create --fill\n${url}`);
+  assert.equal(loaded(), false, "none of that loaded it");
+  const page = await json(`/chat-messages?projectPath=${at}&chatId=2&turns=5`);
+  assert.deepEqual(
+    page.messages.map((message) => message.id),
+    [10, 11],
+  );
+  assert.equal(loaded(), true, "reading its page did");
 });

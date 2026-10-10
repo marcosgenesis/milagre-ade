@@ -29,7 +29,8 @@ const SWEEP_MIN_AGE_MS = 60_000;
 const swept = new Set();
 
 // `durable` syncs the bytes and the rename to disk before returning. Only the migration of a linked worktree's old
-// chats asks for it, since it renames that file next; routine saves only rename.
+// chats asks for it, since it renames that file next; routine saves only rename. Resolves to what the save wrote: the
+// message rows written and removed, whether it wrote a sidecar, and the size of coordination.json.
 async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_AGE_MS, durable = false } = {}) {
   const tracker = { known: settled.get(projectPath), next: new Map(), wrote: false };
   // The state in memory is compacted already (see compactProjectDetails); this catches one that wasn't.
@@ -43,6 +44,7 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
   const keep = new Set([...unloaded].filter((chat) => Object.hasOwn(persisted.sessions ?? {}, String(chat))));
   const drop = new Set([...unloaded].filter((chat) => !keep.has(chat)));
   let rows;
+  const written = { written: 0, removed: 0, renumbered: false };
   if (Array.isArray(persisted.messages)) {
     // The first save after the move keeps the old file once, beside it, in case anything needs it back.
     if (!savedRows(projectPath))
@@ -51,6 +53,7 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
       durable,
       keep,
       drop,
+      stats: written,
       // In the same step as the commit, so a Chat loaded meanwhile is known to the next save.
       commit: (saved, { renumbered }) => {
         setSavedRows(projectPath, saved);
@@ -95,6 +98,12 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
     for (const name of unloadedDetailRefs(projectPath, state)) kept.add(name);
     await sweepDetailContent(projectPath, kept, { minAgeMs: sweepMinAgeMs });
   }
+  return {
+    rowsWritten: written.written,
+    rowsRemoved: written.removed,
+    sidecarsWritten: tracker.wrote || details.wrote,
+    stateBytes: Buffer.byteLength(contents),
+  };
 }
 /**
  * The saved state, with its messages read from chats.db, subagent transcripts read back and long step details (from

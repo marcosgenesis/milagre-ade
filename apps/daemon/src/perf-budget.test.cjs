@@ -16,7 +16,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { execFileSync } = require("node:child_process");
 const store = require("@milagre/core/project-store");
-const { startDaemon, formOf, subagentAsTaken } = require("./server.cjs");
+const { startDaemon, formOf, agentEventAsTaken, eventFrame } = require("./server.cjs");
 const { connect } = require("./client.cjs");
 const { largeProject } = require("./large-project-fixture.cjs");
 
@@ -24,12 +24,13 @@ const { largeProject } = require("./large-project-fixture.cjs");
 const DESKTOP = { messages: false, transcripts: false, archivedSubagents: false };
 
 const BUDGET = {
-  // The fixture's lean state on open: 2,845,987 bytes before archived subagents went as summaries, 359,007 after.
+  // The fixture's lean state on open, on read and nested in a reply: 2,845,987 bytes before archived subagents went as
+  // summaries, 359,007 after.
   leanStateBytes: 395_000,
-  // A running subagent's update: median 27,866 bytes, largest 73,010.
+  // A running subagent's update, the whole event frame: median 28,077 bytes, largest 73,221.
   updateMedianBytes: 30_500,
   updateLargestBytes: 80_000,
-  // An archived one's goes as a summary: 241 bytes at most.
+  // An archived one's goes as a summary: a 452-byte frame at most.
   archivedUpdateLargestBytes: 1_000,
   // A save after one changed message writes that message's row and nothing else to chats.db, no sidecar, and a
   // coordination.json of 1,651,800 bytes (Chats, and subagents with their last entry; 1.4 MB on the real Project). Before
@@ -77,6 +78,7 @@ test("a lean desktop opens the large Project within its budget", async (t) => {
   });
   let openBytes;
   let readBytes;
+  let nestedBytes;
   const desktop = await connect({ dataDir });
   try {
     await desktop.call("daemon:state-patches", [DESKTOP]);
@@ -84,13 +86,16 @@ test("a lean desktop opens the large Project within its budget", async (t) => {
     assert.equal(Object.keys(opened.state.sessions).length, 79);
     openBytes = bytes(opened.state);
     readBytes = bytes((await desktop.call("state:read", [project])).state);
+    // worktree:create and the Linear link and unlink reply with the Project nested: `project: { path, name, state }`.
+    nestedBytes = bytes((await desktop.call("worktree:unlink-issue", [{ projectPath: project, worktreeId: 1 }])).project.state);
   } finally {
     desktop.close();
     await daemon.close();
   }
-  t.diagnostic(`lean state on open: ${openBytes} bytes (budget ${BUDGET.leanStateBytes}); on read: ${readBytes}`);
+  t.diagnostic(`lean state on open: ${openBytes} bytes (budget ${BUDGET.leanStateBytes}); on read: ${readBytes}; nested in a reply: ${nestedBytes}`);
   assert.ok(openBytes <= BUDGET.leanStateBytes, `opening sent ${openBytes} bytes of state, over the budget of ${BUDGET.leanStateBytes}`);
   assert.ok(readBytes <= BUDGET.leanStateBytes, `state:read sent ${readBytes} bytes of state, over the budget of ${BUDGET.leanStateBytes}`);
+  assert.ok(nestedBytes <= BUDGET.leanStateBytes, `worktree:unlink-issue sent ${nestedBytes} bytes of state, over the budget of ${BUDGET.leanStateBytes}`);
 });
 
 test("a subagent update to a lean desktop stays within its budget", async (t) => {
@@ -98,9 +103,14 @@ test("a subagent update to a lean desktop stays within its budget", async (t) =>
   const state = await store.readProjectState(project);
   const agents = Object.values(state.sessions).flatMap((session) => session.subagents ?? []);
   const form = formOf(DESKTOP);
-  // Every subagent as an update of a running child on the track would send it, and as an archived one's would.
-  const running = agents.map(({ archived: _archived, ...agent }) => bytes(subagentAsTaken({ ...agent, status: "running" }, form)));
-  const archived = agents.map((agent) => bytes(subagentAsTaken({ ...agent, archived: true }, form)));
+  // The whole event frame the desktop reads for every subagent, as an update of a running child on the track, and as
+  // an archived one's.
+  const frame = (agent) => {
+    const payload = { chatId: `${project}#2`, event: { type: "subagent-update", agent } };
+    return eventFrame("agent:event", agentEventAsTaken("agent:event", payload, form) ?? payload, 1, Infinity).bytes;
+  };
+  const running = agents.map(({ archived: _archived, ...agent }) => frame({ ...agent, status: "running" }));
+  const archived = agents.map((agent) => frame({ ...agent, archived: true }));
   t.diagnostic(`update median ${median(running)} bytes, largest ${Math.max(...running)}; archived largest ${Math.max(...archived)}`);
   assert.ok(median(running) <= BUDGET.updateMedianBytes, `the median update is ${median(running)} bytes, over ${BUDGET.updateMedianBytes}`);
   assert.ok(Math.max(...running) <= BUDGET.updateLargestBytes, `the largest update is ${Math.max(...running)} bytes, over ${BUDGET.updateLargestBytes}`);

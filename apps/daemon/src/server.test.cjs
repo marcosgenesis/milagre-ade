@@ -1047,6 +1047,10 @@ test("a client that reads archived subagents on demand gets each as a summary, i
   // A subagent on the track goes as before.
   assert.deepEqual(kept, live);
   assert.equal((await desktop.call("state:read", [project])).state.sessions[2].subagents[0].detailsOnDemand, true);
+  // Replies that carry their Project nested (worktree:create, the Linear link and unlink) take the same form.
+  const unlinked = await desktop.call("worktree:unlink-issue", [{ projectPath: project, worktreeId: 1 }]);
+  assert.equal(unlinked.project.state.sessions[2].subagents[0].detailsOnDemand, true);
+  assert.deepEqual([unlinked.project.state.messages, unlinked.project.state.messagesInChats], [[], true]);
   // A client that only takes tails still gets the archived subagent's details.
   const tailed = (await tails.call("state:read", [project])).state.sessions[2].subagents[0];
   assert.equal(tailed.latestActivity, "Reading auth.ts");

@@ -190,6 +190,9 @@ function leanResult(result, form = WHOLE) {
   if (!result || typeof result !== "object" || Array.isArray(result) || isWhole(form)) return result;
   let lean = result;
   if (result.state && typeof result.state === "object") lean = { ...lean, state: leanState(result.state, form) };
+  // worktree:create and the Linear link/unlink replies carry their Project as `project: { path, name, state }`.
+  if (result.project?.state && typeof result.project.state === "object")
+    lean = { ...lean, project: { ...result.project, state: leanState(result.project.state, form) } };
   for (const key of ["projects", "links"])
     if (Array.isArray(result[key]))
       lean = { ...lean, [key]: result[key].map((item) => (item?.state ? { ...item, state: leanState(item.state, form) } : item)) };
@@ -765,4 +768,4 @@ async function startDaemon({
   }
   return { socketPath, close, acceptConnection };
 }
-module.exports = { startDaemon, createResultPages, formOf, subagentAsTaken };
+module.exports = { startDaemon, createResultPages, formOf, agentEventAsTaken, eventFrame };

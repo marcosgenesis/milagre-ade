@@ -25,7 +25,10 @@ function membership(groups, projects, request, previous) {
     throw new Error("Open each member Project in Milagre first.");
   if (groups.some((group) => group !== previous && group.projectIds.length === ids.length && ids.every((id) => group.projectIds.includes(id))))
     throw new Error("A Link with these Projects already exists.");
-  return { name, projectIds: [...ids] };
+  const hidden = typeof request?.hidden === "boolean" ? request.hidden : previous?.hidden;
+  const result = { name, projectIds: [...ids], hidden: hidden === true };
+  if (!result.hidden) delete result.hidden;
+  return result;
 }
 
 function createProjectGroup(groups, projects, request, now = () => new Date()) {
@@ -36,7 +39,10 @@ function createProjectGroup(groups, projects, request, now = () => new Date()) {
 function updateProjectGroup(groups, projects, request) {
   const previous = groups.find((group) => group.id === request?.id);
   if (!previous) throw new Error("Link no longer exists");
-  return { ...previous, ...membership(groups, projects, request, previous) };
+  const member = membership(groups, projects, request, previous);
+  const updated = { ...previous, ...member };
+  if (!member.hidden) delete updated.hidden;
+  return updated;
 }
 
 module.exports = { validProjectGroup, createProjectGroup, updateProjectGroup };

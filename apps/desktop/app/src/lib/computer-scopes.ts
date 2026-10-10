@@ -14,7 +14,9 @@ export function computerScopes(computerId: string, recent: RecentProject[], link
     ...recent
       .filter((project) => !project.hidden)
       .map((project) => ({ key: project.path, name: project.name, initial: project.name.slice(0, 1).toUpperCase(), link: null, computerId })),
-    ...links.map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link, computerId })),
+    ...links
+      .filter((link) => !link.hidden)
+      .map((link) => ({ key: `milagre-link:${link.id}`, name: link.name, initial: "", link, computerId })),
   ];
 }
 
@@ -83,12 +85,23 @@ export function useComputerScopes(computers: ComputerView[]): {
     (key: string, hidden: boolean) =>
       setByComputer((previous) =>
         Object.fromEntries(
-          Object.entries(previous).map(([id, lists]) => [
-            id,
-            lists.recent.some((project) => project.path === key)
-              ? { ...lists, recent: lists.recent.map((project) => (project.path === key ? { ...project, hidden } : project)) }
-              : lists,
-          ]),
+          Object.entries(previous).map(([id, lists]) => {
+            if (key.startsWith("milagre-link:")) {
+              const linkId = key.slice("milagre-link:".length);
+              return [
+                id,
+                lists.links.some((link) => link.id === linkId)
+                  ? { ...lists, links: lists.links.map((link) => (link.id === linkId ? { ...link, hidden } : link)) }
+                  : lists,
+              ];
+            }
+            return [
+              id,
+              lists.recent.some((project) => project.path === key)
+                ? { ...lists, recent: lists.recent.map((project) => (project.path === key ? { ...project, hidden } : project)) }
+                : lists,
+            ];
+          }),
         ),
       ),
     [],
@@ -97,7 +110,10 @@ export function useComputerScopes(computers: ComputerView[]): {
     const listed = computers.filter((computer) => byComputer[computer.id]).map((computer) => [computer.id, byComputer[computer.id]!] as const);
     return {
       scopes: listed.flatMap(([id, lists]) => computerScopes(id, lists.recent, lists.links)),
-      projects: listed.flatMap(([id, lists]) => lists.recent.map((project) => ({ ...project, computerId: id }))),
+      projects: listed.flatMap(([id, lists]) => [
+        ...lists.recent.map((project) => ({ ...project, computerId: id })),
+        ...lists.links.map((link) => ({ path: `milagre-link:${link.id}`, name: link.name, openedAt: link.createdAt, hidden: link.hidden, computerId: id })),
+      ]),
       setHidden,
     };
   }, [byComputer, computers, setHidden]);

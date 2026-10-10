@@ -26,6 +26,7 @@
     "src/terminal.ts",
     "src/message-navigation.ts",
     "src/artifact.ts",
+    "src/genui.ts",
     "src/file-link.ts",
     "src/message-search.mjs",
     "src/message-search.d.mts",
@@ -166,6 +167,7 @@
     "./skill-catalog": "./src/skill-catalog.ts",
     "./simulator": "./src/simulator.ts",
     "./artifact": "./src/artifact.ts",
+    "./genui": "./src/genui.ts",
     "./file-link": "./src/file-link.ts",
     "./simulator-receiver": {
       "types": "./src/simulator-receiver.d.mts",
@@ -200,8 +202,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@openuidev/lang-core": "^0.3.2",
     "refractor": "^5.0.0",
-    "tweetnacl": "1.0.3"
+    "tweetnacl": "1.0.3",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "typescript": "~6.0.3"

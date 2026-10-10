@@ -1,0 +1,148 @@
+import { z } from "zod";
+import { tagSchemaId } from "@openuidev/lang-core";
+
+/** The fence info string that marks a block of OpenUI Lang in a reply. */
+export const GENUI_FENCE = "openui";
+
+/** Whether a fence's info string names a generative UI block: its first word is `openui`, in any case. */
+export const isGenuiFence = (info: string | undefined): boolean => (info ?? "").trim().split(/\s+/)[0]?.toLowerCase() === GENUI_FENCE;
+
+/** Caps a block renders under; above any of them the block shows as code. */
+export const genuiLimits = { rows: 200, columns: 12, points: 100, text: 64 * 1024 } as const;
+
+/** The root component the agent assigns to `root`. */
+export const GENUI_ROOT = "Stack";
+
+/** The action type a button posts back to the chat (`@ToAssistant`); every other type is ignored. */
+export const GENUI_ACTION_TYPE = "continue_conversation";
+
+// An `Action([...])` evaluates to a plan of steps; the two object forms are the language's legacy action values.
+const action = z.union([
+  z.object({ steps: z.array(z.any()) }),
+  z.object({ type: z.literal("continue_conversation"), context: z.string().optional() }),
+  z.object({ type: z.string(), params: z.record(z.string(), z.any()).optional() }),
+]);
+tagSchemaId(action, "ActionExpression");
+
+const cell = z.string().max(2000);
+const label = z.string().max(200);
+
+/**
+ * The components an agent can use, in the order the skill lists them. Prop order is positional order in OpenUI Lang:
+ * `Table(columns, rows)`. Descriptions are read by the model, so they say what each prop means.
+ */
+export const GENUI_COMPONENTS = {
+  Stack: {
+    description: "Lays out children vertically (default) or in a row. The root of every block.",
+    props: z.object({
+      children: z.array(z.any()).describe("Child components"),
+      direction: z.enum(["column", "row"]).optional().describe('"column" (default) or "row"'),
+      gap: z.enum(["s", "m", "l"]).optional().describe("Space between children, default m"),
+    }),
+  },
+  Heading: {
+    description: "A short section title, one line, above the content it introduces.",
+    props: z.object({
+      text: label.describe("Title text"),
+      level: z
+        .union([z.literal(1), z.literal(2), z.literal(3)])
+        .optional()
+        .describe("1 largest, 3 smallest; default 2"),
+    }),
+  },
+  Text: {
+    description: "A paragraph of plain text, no markdown.",
+    props: z.object({
+      text: z.string().max(4000).describe("The text"),
+      tone: z.enum(["default", "muted", "strong"]).optional().describe("muted for secondary text, strong for emphasis"),
+    }),
+  },
+  KeyValue: {
+    description: "Labels and values in two columns: metrics, counts, dates.",
+    props: z.object({
+      pairs: z
+        .array(z.tuple([label, cell]))
+        .max(genuiLimits.rows)
+        .describe('[["label", "value"], ...]'),
+    }),
+  },
+  Table: {
+    description: "A table of string cells. Use for lists of results with several attributes each.",
+    props: z.object({
+      columns: z.array(label).min(1).max(genuiLimits.columns).describe("Column headers"),
+      rows: z.array(z.array(cell).max(genuiLimits.columns)).max(genuiLimits.rows).describe("Rows of cells, one string per column"),
+    }),
+  },
+  Callout: {
+    description: "A highlighted note: a warning, a success, an error or a tip.",
+    props: z.object({
+      body: z.string().max(4000).describe("The note"),
+      tone: z.enum(["info", "success", "warning", "danger"]).optional().describe("info (default), success, warning or danger"),
+      title: label.optional().describe("Optional short title"),
+    }),
+  },
+  Progress: {
+    description: "A labelled progress bar.",
+    props: z.object({
+      label: label.describe("What is progressing"),
+      value: z.number().describe("0 to 1"),
+    }),
+  },
+  BarChart: {
+    description: "Vertical bars, one series.",
+    props: z.object({
+      labels: z.array(label).max(genuiLimits.points).describe("One label per bar"),
+      values: z.array(z.number()).max(genuiLimits.points).describe("One number per bar"),
+      title: label.optional().describe("Optional chart title"),
+    }),
+  },
+  LineChart: {
+    description: "A line over ordered points, one series.",
+    props: z.object({
+      labels: z.array(label).max(genuiLimits.points).describe("One label per point"),
+      values: z.array(z.number()).max(genuiLimits.points).describe("One number per point"),
+      title: label.optional().describe("Optional chart title"),
+    }),
+  },
+  Button: {
+    description: 'A button that sends a message to the assistant when tapped: Button("Approve", Action([@ToAssistant("Approve the plan")])).',
+    props: z.object({
+      label: label.describe("Button text"),
+      action: action.describe('Action([@ToAssistant("message")]); only @ToAssistant steps act'),
+      variant: z.enum(["primary", "secondary"]).optional().describe("primary (default) or secondary"),
+    }),
+  },
+} as const;
+
+export type GenuiComponentName = keyof typeof GENUI_COMPONENTS;
+export type GenuiProps<K extends GenuiComponentName> = z.infer<(typeof GENUI_COMPONENTS)[K]["props"]>;
+
+/** One `defineComponent` config per component, in contract order, bound to a platform's renderers. */
+export function genuiDefinitions<C>(renderers: Record<GenuiComponentName, C>) {
+  return (Object.keys(GENUI_COMPONENTS) as GenuiComponentName[]).map((name) => ({
+    name,
+    description: GENUI_COMPONENTS[name].description,
+    props: GENUI_COMPONENTS[name].props,
+    component: renderers[name],
+  }));
+}
+
+/** Every row gets exactly one string per column: longer rows are cut, shorter ones padded, non-strings printed. */
+export function squareRows(columns: readonly string[], rows: readonly (readonly unknown[])[]): string[][] {
+  return rows.map((row) => columns.map((_, index) => (row[index] === undefined || row[index] === null ? "" : String(row[index]))));
+}
+
+export const CHART_WIDTH = 320;
+export const CHART_HEIGHT = 140;
+export const CHART_PAD = { top: 8, right: 8, bottom: 22, left: 8 } as const;
+
+/** Where each value sits on a CHART_WIDTH by CHART_HEIGHT canvas; a flat series sits on the baseline. */
+export function chartGeometry(values: readonly number[], width = CHART_WIDTH, height = CHART_HEIGHT) {
+  const max = Math.max(0, ...values);
+  const min = Math.min(0, ...values);
+  const span = max - min || 1;
+  const inner = { width: width - CHART_PAD.left - CHART_PAD.right, height: height - CHART_PAD.top - CHART_PAD.bottom };
+  const slot = values.length ? inner.width / values.length : inner.width;
+  const y = (value: number) => CHART_PAD.top + inner.height - ((value - min) / span) * inner.height;
+  return { slot, y, zero: y(0), inner };
+}

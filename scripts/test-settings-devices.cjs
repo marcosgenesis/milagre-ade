@@ -1,13 +1,17 @@
 // Run with npm test -- --only test-settings-devices. Exercises Settings › Devices in the real App against a real daemon (its
 // own temporary data directory and socket, port chosen by the OS): see the devices list fail soft on a host without it,
 // turn device access on, see the QR code and the relay status, copy the link, see a phone and a computer pair and the
-// Computers list appear, remove the phone, reset access, turn it off, then on again behind a Cloudflare tunnel. The rest of the window's API is mocked, like the
+// Computers list appear, see a new phone marked New until seen, remove the phone, see a phone that paired while the owner
+// was away announced once and marked New, reset access, turn it off, then on again behind a Cloudflare tunnel. The rest of the window's API is mocked, like the
 // other checks. Set MILAGRE_SCREENSHOT_DIR to save screenshots.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
+
+/** The New mark on a phone's row in Settings › Devices, as an expression to evaluate in the window. */
+const newMark = (key) => `document.querySelector('[data-device-row="phone"][data-device-key="${key}"] [data-device-new]')?.textContent`;
 
 const fixture = `
 import React from "react";
@@ -34,6 +38,7 @@ window.milagre = new Proxy({
   openPhonePairing: () => ipcRenderer.invoke("phone:open-pairing"),
   listDevices: () => ipcRenderer.invoke("devices:list"),
   removeDevice: (key) => ipcRenderer.invoke("devices:remove", key),
+  acknowledgeDevices: (keys) => ipcRenderer.invoke("devices:acknowledge", keys),
   onPhoneStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("phone:status", listener);
@@ -130,7 +135,7 @@ async function browserChecks() {
     // A host from before devices:list: the access controls still work, and the lists say they couldn't be read.
     await waitFor(`!!${toggle} && document.body.textContent.includes('Allow devices to connect')`);
     await waitFor(`document.querySelector('[data-devices-error]')?.textContent.startsWith("Couldn't read paired devices")`);
-    ipcMain.handle("devices:list", (_event, ...args) => host.call("devices:list", args));
+    for (const method of ["devices:list", "devices:acknowledge"]) ipcMain.handle(method, (_event, ...args) => host.call(method, args));
     console.log("PASS: without devices:list the section still shows its access controls");
 
     // Off: the toggle, its status, and nothing else to pair with.
@@ -194,8 +199,14 @@ async function browserChecks() {
     assert.equal(await evaluate(`document.querySelector('[data-device-row="phone"] [data-device-line]').textContent`), "Last seen just now");
     assert.equal(await evaluate(computersShown), false, "Computers stays hidden with no computer");
     assert.deepEqual(paired, [{ pairedPhones: 1, kind: "phone" }]);
+    // A phone that just paired is New; the host hears it was shown, and the mark stays while the section is open.
+    await waitFor(`${newMark(phoneKey)} === 'New'`);
+    for (let n = 0; n < 200 && (await host.call("devices:list"))[0].isNew; n++) await delay(25);
+    assert.equal((await host.call("devices:list"))[0].isNew, false, "acknowledged once shown");
     await hostDevices().add(computerKey, { kind: "computer", name: "studio" });
     await waitFor(`${computersShown} && document.querySelector('[data-device-row="computer"]')?.textContent.includes('studio')`);
+    assert.equal(await evaluate(`${newMark(phoneKey)} ?? null`), "New", "still New after the list is read again");
+    assert.equal(await evaluate(`!!document.querySelector('[data-device-row="computer"] [data-device-new]')`), false, "a computer was allowed here: never New");
     await evaluate(`document.querySelector('[data-device-row="phone"]').scrollIntoView({ block: 'center' })`);
     await screenshot("devices-lists");
     console.log("PASS: phones and computers list by name as they pair; Computers shows only once there is one");
@@ -216,6 +227,35 @@ async function browserChecks() {
       [computerKey],
     );
     console.log("PASS: Remove asks first and removes the phone on the host");
+
+    // A phone pairs while the owner isn't looking (here: another section; in life, Milagre closed). The host keeps its
+    // "New phone paired" notice for the first window to take, once, and the next visit marks it New.
+    const awayKey = "q".repeat(43);
+    await click("About");
+    await waitFor(`!document.querySelector('[data-device-row]')`);
+    await hostDevices().add(awayKey, { kind: "phone", name: "Pixel 9" });
+    const notices = await Promise.all([host.call("devices:take-notices"), host.call("devices:take-notices")]);
+    // The removed phone is gone with its notice; the computer was allowed here and has none.
+    assert.deepEqual(
+      notices.flatMap((reply) => reply.devices).map((device) => device.name),
+      ["Pixel 9"],
+      "announced once, whoever asks",
+    );
+    // The window that took it shows it, then confirms.
+    assert.equal(await host.call("devices:confirm-notices", [notices.find((reply) => reply.claim).claim]), 1);
+    assert.deepEqual(await host.call("devices:take-notices"), { claim: null, devices: [] });
+    await click("Devices");
+    await waitFor(`${newMark(awayKey)} === 'New'`);
+    await evaluate(`document.querySelector('[data-device-row="phone"]').scrollIntoView({ block: 'center' })`);
+    await screenshot("device-new");
+    // Seen: leaving and coming back shows it without the mark.
+    await click("About");
+    await waitFor(`!document.querySelector('[data-device-row]')`);
+    await click("Devices");
+    await waitFor(`document.querySelector('[data-device-row="phone"]')?.textContent.includes('Pixel 9')`);
+    assert.equal(await evaluate(`${newMark(awayKey)} ?? null`), null);
+    await screenshot("device-seen");
+    console.log("PASS: a phone that paired while the owner was away is announced once and marked New until seen");
 
     // Reset asks first, and cancelling changes nothing.
     await click("Reset access");

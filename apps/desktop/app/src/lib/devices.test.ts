@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PairedDevice } from "../electron";
-import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from "./devices.ts";
+import { deviceName, deviceSeenLine, devicesByKind, newDeviceKeys, removeDeviceQuestion } from "./devices.ts";
 
 const device = (over: Partial<PairedDevice> = {}): PairedDevice => ({ key: "k", kind: "phone", name: null, pairedAt: 0, lastSeen: null, route: null, ...over });
 const MINUTE = 60_000;
@@ -19,6 +19,10 @@ test("the line under a device says how it is connected now, or when it was last 
   assert.equal(deviceSeenLine(device({ lastSeen: now - 5 * MINUTE }), now), "Last seen 5 min ago");
   assert.equal(deviceSeenLine(device({ lastSeen: now - 10_000 }), now), "Last seen just now");
   assert.equal(deviceSeenLine(device(), now), "Not seen yet");
+});
+
+test("only the devices the host marks New count as new; a host from before the mark has none", () => {
+  assert.deepEqual(newDeviceKeys([device({ key: "a", isNew: true }), device({ key: "b", isNew: false }), device({ key: "c" })]), ["a"]);
 });
 
 test("removing asks by name and says it can pair again", () => {

@@ -7,6 +7,9 @@ const MAX_DEVICES = 32;
 const KINDS = new Set(["phone", "computer"]);
 // lastSeen changes at every hello; the file follows at most this often. A new name is written at once.
 const SEEN_WRITE_MS = 60_000;
+// A window that took a pairing notice confirms it once shown. Past this with no confirm (its reply was lost, or it went
+// quiet), the notice is offered again.
+const CLAIM_MS = 60_000;
 const time = (value) => (Number.isFinite(value) ? value : null);
 
 function readDevice(value) {
@@ -17,8 +20,13 @@ function readDevice(value) {
     name: typeof value.name === "string" && value.name ? value.name : null,
     pairedAt: time(value.pairedAt),
     lastSeen: time(value.lastSeen),
+    // Missing in files from before these: nothing to announce or mark.
+    isNew: value.isNew === true,
+    announced: value.announced !== false,
   };
 }
+// What callers see: `announced` stays inside the store.
+const shown = ({ announced: _announced, ...device }) => ({ ...device });
 
 /**
  * The phones and computers paired to this Mac, oldest first, in `<dataDir>/devices.json` ({ devices, removed }, 0600).
@@ -26,6 +34,14 @@ function readDevice(value) {
  * was removed in. Reset clears both. When devices.json is missing, the bare key list from before devices had names
  * (relay-phones.json) moves in as nameless phones and is deleted. Writes land in call order, so a clear is never
  * overwritten by an add that started before it. Any method may run before load(): the first one reads the file.
+ *
+ * A phone pairs without its owner at this Mac, so it arrives `isNew` (Settings › Devices marks it New until the owner
+ * looks: `acknowledge`) and not yet `announced` (the "New phone paired" notice waits for a desktop to take it:
+ * `takeNotices`, then `confirmNotices` once it showed them). Both survive restarts, so a phone that pairs while no
+ * desktop is open is still told about. A computer pairs only after its owner's Allow in this Mac's window, so it is
+ * neither. A taken notice is only claimed, in memory: no other window gets it while the claim holds, and it is offered
+ * again if the claim is released (its connection closed), times out (CLAIM_MS) or dies with the daemon. Only the
+ * confirm writes it as announced, so a reply lost on the way to the window never loses the notice.
  */
 function createDevices(dataDir, { now = Date.now } = {}) {
   const file = path.join(dataDir, "devices.json");
@@ -35,6 +51,9 @@ function createDevices(dataDir, { now = Date.now } = {}) {
   let loaded = null;
   let writtenAt = -Infinity;
   let writes = Promise.resolve();
+  // Notices handed to a window and not confirmed yet: key -> { id, at }. Never written: a restart offers them again.
+  const claims = new Map();
+  let nextClaim = 0;
   const write = () => {
     const value = {
       devices: devices.map((device) => ({ ...device })),
@@ -58,7 +77,7 @@ function createDevices(dataDir, { now = Date.now } = {}) {
     return phones
       .filter((key) => typeof key === "string")
       .slice(-MAX_DEVICES)
-      .map((key) => ({ key, kind: "phone", name: null, pairedAt: null, lastSeen: null }));
+      .map((key) => ({ key, kind: "phone", name: null, pairedAt: null, lastSeen: null, isNew: false, announced: true }));
   }
 
   // Built in locals and swapped in at the end, so the store never reads as empty while the file is being read.
@@ -99,7 +118,7 @@ function createDevices(dataDir, { now = Date.now } = {}) {
     },
     isKnown: (key) => devices.some((device) => device.key === key),
     count: () => devices.length,
-    list: () => devices.map((device) => ({ ...device })),
+    list: () => devices.map(shown),
     removedAt: (key) => removed.get(key) ?? null,
     /** The kind a device paired as ("phone" or "computer"), or null when it isn't paired. */
     kindOf: (key) => find(key)?.kind ?? null,
@@ -108,9 +127,12 @@ function createDevices(dataDir, { now = Date.now } = {}) {
       await ready();
       const at = now();
       const previous = find(key);
-      const device = { key, kind, name: name ?? previous?.name ?? null, pairedAt: previous?.pairedAt ?? at, lastSeen: at };
+      const phone = kind === "phone";
+      const device = { key, kind, name: name ?? previous?.name ?? null, pairedAt: previous?.pairedAt ?? at, lastSeen: at, isNew: phone, announced: !phone };
       devices = [...devices.filter((item) => item.key !== key), device].slice(-MAX_DEVICES);
       removed.delete(key);
+      // A pairing again is a new notice, whatever an earlier one of this key held.
+      claims.delete(key);
       writtenAt = at;
       await write();
     },
@@ -127,6 +149,62 @@ function createDevices(dataDir, { now = Date.now } = {}) {
       writtenAt = at;
       await write();
     },
+    /**
+     * The devices whose pairing no desktop has announced yet and no window holds, oldest first, claimed under `claim`
+     * (null when there are none). However many windows or connections ask, each gets a pairing no other one holds.
+     */
+    async takeNotices() {
+      await ready();
+      // Chosen and claimed in one step, with no wait in between, so two callers never get the same device.
+      const at = now();
+      const due = devices.filter((device) => !device.announced && !(claims.has(device.key) && at - claims.get(device.key).at < CLAIM_MS));
+      if (!due.length) return { claim: null, devices: [] };
+      const claim = `n${++nextClaim}`;
+      for (const device of due) claims.set(device.key, { id: claim, at });
+      return { claim, devices: due.map(shown) };
+    },
+    /**
+     * The window showed what it took under `claim`: they are announced, on disk. Returns how many. A claim that was
+     * released or taken over by a newer one confirms nothing. A failed write keeps them pending on disk and in memory,
+     * and the claim holds until it times out, so they are offered again then rather than lost.
+     */
+    async confirmNotices(claim) {
+      await ready();
+      const confirmed = devices.filter((device) => claims.get(device.key)?.id === claim && !device.announced);
+      if (!confirmed.length) return 0;
+      for (const device of confirmed) device.announced = true;
+      try {
+        await write();
+      } catch (error) {
+        for (const device of confirmed) device.announced = false;
+        throw error;
+      }
+      for (const device of confirmed) if (claims.get(device.key)?.id === claim) claims.delete(device.key);
+      return confirmed.length;
+    },
+    /** The window that took `claim` is gone without confirming: what it held is offered again at once. */
+    releaseNotices(claim) {
+      // Deleting the entry being visited is safe while iterating a Map.
+      for (const [key, held] of claims) if (held.id === claim) claims.delete(key);
+    },
+    /**
+     * The owner saw these devices in Settings › Devices: they are no longer New. Returns how many were. A failed write
+     * leaves them New in memory too, so the next acknowledge writes them.
+     */
+    async acknowledge(keys) {
+      await ready();
+      const seenKeys = new Set(keys);
+      const changed = devices.filter((device) => device.isNew && seenKeys.has(device.key));
+      if (!changed.length) return 0;
+      for (const device of changed) device.isNew = false;
+      try {
+        await write();
+      } catch (error) {
+        for (const device of changed) device.isNew = true;
+        throw error;
+      }
+      return changed.length;
+    },
     /** Forgets a device; false when it wasn't paired. */
     async remove(key) {
       await ready();
@@ -142,9 +220,10 @@ function createDevices(dataDir, { now = Date.now } = {}) {
       await ready();
       devices = [];
       removed = new Map();
+      claims.clear();
       await write();
     },
   };
 }
 
-module.exports = { createDevices, MAX_DEVICES };
+module.exports = { createDevices, MAX_DEVICES, CLAIM_MS };

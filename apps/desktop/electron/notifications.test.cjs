@@ -180,6 +180,31 @@ test("a computer's first pairing says another Mac can now drive this one, and it
   assert.equal(shown[1].options.title, "New phone paired");
 });
 
+test("phones that paired while Milagre was closed are named and announced as such, and the click opens Settings › Devices", () => {
+  const { notifier, shown, opened } = setup({ focused: true });
+  assert.equal(notifier.notifyPhonesPaired([]), false, "nothing paired, nothing shown");
+  assert.equal(notifier.notifyPhonesPaired([{ name: "Victor's iPhone" }], { away: true }), true);
+  assert.deepEqual(shown[0].options, {
+    title: "New phone paired",
+    subtitle: "",
+    body: "Victor's iPhone paired with this Mac while Milagre was closed. If it wasn't you, remove it in Settings → Devices.",
+  });
+  shown[0].emit("click");
+  assert.deepEqual(opened, ["settings:phone"]);
+  notifier.notifyPhonesPaired([{ name: null }, { name: "Pixel" }], { away: true });
+  assert.equal(shown[0].closed, true, "one pairing notice at a time");
+  assert.deepEqual(shown[1].options, {
+    title: "2 new phones paired",
+    subtitle: "",
+    body: "2 phones paired with this Mac while Milagre was closed. If one wasn't you, remove it in Settings → Devices.",
+  });
+  // While Milagre is open: named when the phone sent a name, as before otherwise.
+  notifier.notifyPhonesPaired([{ name: "Victor's iPhone" }]);
+  assert.equal(shown[2].options.body, "Victor's iPhone can now reach your agents on this Mac. If it wasn't you, remove it in Settings → Devices.");
+  notifier.notifyPhonesPaired([{ name: null }]);
+  assert.equal(shown[3].options.body, "A phone can now reach your agents on this Mac. If it wasn't you, remove it in Settings → Devices.");
+});
+
 test("a computer waiting for Allow is announced once while Milagre is in the background, and its click opens the window", () => {
   const { notifier, shown, opened, state } = setup();
   const studio = { key: "s".repeat(43), name: "studio", at: 1 };

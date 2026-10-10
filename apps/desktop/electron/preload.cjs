@@ -230,6 +230,7 @@ function makeBridge(invoke, listen, send) {
     openPhonePairing: () => invoke("phone:open-pairing"),
     listDevices: () => invoke("devices:list"),
     removeDevice: (key) => invoke("devices:remove", key),
+    acknowledgeDevices: (keys) => invoke("devices:acknowledge", keys),
     listPendingDevices: () => invoke("devices:pending"),
     allowDevice: (key) => invoke("devices:allow", key),
     denyDevice: (key) => invoke("devices:deny", key),

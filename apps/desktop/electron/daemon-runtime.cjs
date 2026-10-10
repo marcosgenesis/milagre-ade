@@ -66,6 +66,9 @@ async function connectDesktopRuntime(options) {
     throw error;
   }
   const methods = [...status.methods];
+  // The commands of the host connected now. `methods` only grows (each one has an IPC handler), so it says nothing
+  // about whether a host reconnected to, maybe an older one, still has a command.
+  let hostMethods = [...status.methods];
   let hostOutdated = !status.capabilities?.includes(RESULT_PAGES);
   let closed = false;
   let restarting = false;
@@ -86,6 +89,7 @@ async function connectDesktopRuntime(options) {
   const connectedState = () => (hostOutdated ? { connected: true, hostOutdated: true, message: OUTDATED_HOST } : { connected: true });
   function adopt(next) {
     for (const method of next.methods ?? []) if (!methods.includes(method)) methods.push(method);
+    hostMethods = [...(next.methods ?? [])];
     hostOutdated = !next.capabilities?.includes(RESULT_PAGES);
   }
 
@@ -347,6 +351,8 @@ async function connectDesktopRuntime(options) {
   return {
     /** The host's commands; restartHost can add the newer host's. */
     methods,
+    /** The commands of the host connected now, which a reconnect replaces (an older host has fewer). */
+    hostMethods: () => [...hostMethods],
     environmentReady: Promise.resolve(),
     invoke,
     openProject: (projectPath) => invoke("project:open", [projectPath, { takeNotice: true }]),

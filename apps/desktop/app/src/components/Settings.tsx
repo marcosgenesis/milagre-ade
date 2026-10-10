@@ -51,7 +51,7 @@ import type { ChatOrder } from "../lib/chat-list";
 import { useEditors } from "../lib/editors";
 import { bridgeFor, bridgeForKey } from "../lib/computer-bridge";
 import { cloudflarePhonesNote, pairingWindow, phoneLanLine, phoneQrSrc, phoneStatusLine } from "../lib/phone";
-import { deviceName, deviceSeenLine, devicesByKind, removeDeviceQuestion } from "../lib/devices";
+import { deviceName, deviceSeenLine, devicesByKind, newDeviceKeys, removeDeviceQuestion } from "../lib/devices";
 import { GlideGroup, RailButton } from "./SidebarNav";
 import { Select } from "./primitives/Select";
 import { ModeControl, ThemePicker } from "./settings/ThemePicker";
@@ -704,26 +704,30 @@ function usePhoneStatus() {
 /**
  * The paired devices. A pairing, a removal or a reset arrives as a phone status, which reads the list again; a device
  * connecting or leaving doesn't, so it is also read every 15 seconds while the section is open.
+ * `fresh`: phones that paired since the owner last looked (a phone may pair while Milagre is closed). They stay marked
+ * New while the section is open; the host hears at once that they were shown, so the next visit doesn't mark them.
  */
 function usePairedDevices() {
   const [list, setList] = useState<PairedDevice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  // A list the caller already has (a removal's answer): shown at once, and an earlier read error no longer applies.
-  const replace = useCallback((devices: PairedDevice[]) => {
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set());
+  const show = useCallback((devices: PairedDevice[]) => {
     setList(devices);
     setError(null);
     setNow(Date.now());
+    const keys = newDeviceKeys(devices);
+    if (!keys.length) return;
+    setFresh((current) => (keys.every((key) => current.has(key)) ? current : new Set([...current, ...keys])));
+    // Only the keys shown here: a phone that pairs after this read stays New until it is shown too.
+    void window.milagre.acknowledgeDevices(keys).catch(() => {});
   }, []);
   useEffect(() => {
     let live = true;
     const read = () => {
       window.milagre.listDevices().then(
         (devices) => {
-          if (!live) return;
-          setList(devices);
-          setError(null);
-          setNow(Date.now());
+          if (live) show(devices);
         },
         (failure) => {
           if (live) setError(`Couldn't read paired devices: ${ipcErrorMessage(failure)}`);
@@ -738,8 +742,9 @@ function usePairedDevices() {
       off();
       window.clearInterval(timer);
     };
-  }, []);
-  return { list, replace, error, now };
+  }, [show]);
+  // `replace`: a list the caller already has (a removal's answer), shown at once; an earlier read error no longer applies.
+  return { list, replace: show, error, now, fresh };
 }
 
 const SECONDARY_BUTTON =
@@ -750,6 +755,7 @@ const DANGER_BUTTON =
 function DeviceGroup({
   title,
   devices,
+  fresh,
   now,
   busy,
   empty,
@@ -759,6 +765,8 @@ function DeviceGroup({
 }: {
   title: string;
   devices: PairedDevice[];
+  /** Keys marked New. */
+  fresh: ReadonlySet<string>;
   now: number;
   busy: boolean;
   empty?: string;
@@ -784,7 +792,7 @@ function DeviceGroup({
       {devices.map((device) => {
         const asking = confirming === device.key;
         return (
-          <div key={device.key} data-device-row={device.kind} className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+          <div key={device.key} data-device-row={device.kind} data-device-key={device.key} className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <span className="relative flex size-7 shrink-0 items-center justify-center rounded-[8px] bg-hover text-ink-2">
               <Icon icon={device.kind === "computer" ? LaptopIcon : SmartphoneIcon} size={15} />
               <span
@@ -793,7 +801,18 @@ function DeviceGroup({
               />
             </span>
             <div className="grid min-w-0 flex-1 gap-0.5">
-              <span className="truncate text-[13.5px] font-medium text-ink">{deviceName(device)}</span>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-[13.5px] font-medium text-ink">{deviceName(device)}</span>
+                {fresh.has(device.key) && (
+                  <span
+                    data-device-new
+                    title="Paired since you last looked"
+                    className="shrink-0 rounded-full bg-accent-tint px-1.5 py-px text-[10.5px] font-semibold text-accent-ink"
+                  >
+                    New
+                  </span>
+                )}
+              </span>
               <span data-device-line className="text-[12px] text-ink-3">
                 {asking ? removeDeviceQuestion(device) : deviceSeenLine(device, now)}
               </span>
@@ -997,10 +1016,11 @@ function DevicesSettings() {
           </div>
         </Group>
       )}
-      {computers.length > 0 && <DeviceGroup title="Computers" devices={computers} now={paired.now} busy={busy} onRemove={removeDevice} />}
+      {computers.length > 0 && <DeviceGroup title="Computers" devices={computers} fresh={paired.fresh} now={paired.now} busy={busy} onRemove={removeDevice} />}
       <DeviceGroup
         title="Phones"
         devices={phones}
+        fresh={paired.fresh}
         now={paired.now}
         busy={busy}
         empty={paired.list === null ? undefined : "No phones yet"}

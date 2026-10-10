@@ -1,7 +1,8 @@
 // Performance budgets on a large Project (#321): what #300 won back stays won. The Project is made up at test time
 // (large-project-fixture.cjs), shaped like the big one #300 measured, so its sizes are the same on every machine and are
-// held to byte budgets with a little headroom. A save's time depends on the machine and on what else runs beside it,
-// so it is held to a share of encoding the whole state, measured in the same moments, and to a loose ceiling.
+// held to byte budgets with a little headroom. A save's time depends on the machine and on what else runs beside it (a
+// CI runner's disk is several times slower than a laptop's), so a save is held to what it writes, which is the same
+// everywhere, and its time only to a loose ceiling.
 //
 // On the real Project these were, when this check was added: a save 6 to 7 ms, a lean desktop's state on open 2.63 MB
 // before archived subagents went as summaries (0.32 MB after), a subagent update 26 KB (median). What this fixture gives
@@ -30,12 +31,13 @@ const BUDGET = {
   updateLargestBytes: 80_000,
   // An archived one's goes as a summary: 241 bytes at most.
   archivedUpdateLargestBytes: 1_000,
-  // A save of one changed message: about 30% of encoding the whole state on an idle laptop (3.5 ms against 12 ms),
-  // 45% with six of these checks at once. A save that encodes the whole state again, as before chats.db (#301), takes
-  // more than all of it, so that is the limit.
-  saveShareOfEncode: 1,
-  // 3 to 7 ms on a laptop; only a save gone badly wrong (or a machine far too busy) takes this long.
-  saveMedianMs: 250,
+  // A save after one changed message writes that message's row and nothing else to chats.db, no sidecar, and a
+  // coordination.json of 1,651,800 bytes (Chats, and subagents with their last entry; 1.4 MB on the real Project). Before
+  // chats.db (#301), every save also wrote every message into that file.
+  saveRowsWritten: 1,
+  saveStateBytes: 1_800_000,
+  // 3 to 7 ms on a laptop, tens of ms on a busy CI runner; only a save gone badly wrong takes this long.
+  saveMedianMs: 1_000,
 };
 
 const median = (values) => values.toSorted((a, b) => a - b)[values.length >> 1];
@@ -108,7 +110,7 @@ test("a subagent update to a lean desktop stays within its budget", async (t) =>
   );
 });
 
-test("a save of the large Project after one change stays a small share of encoding it whole", async (t) => {
+test("a save of the large Project after one change writes only that change", async (t) => {
   const { project } = await tempProject(t);
   let state = await store.readProjectState(project);
   state = await store.compactProjectState(project, state, null);
@@ -116,7 +118,6 @@ test("a save of the large Project after one change stays a small share of encodi
   await store.saveProjectState(project, state, { sweepMinAgeMs: 1e12 });
   await store.saveProjectState(project, state, { sweepMinAgeMs: 1e12 });
   // A streaming turn: the last message of one Chat replaced, as each delta of a reply does.
-  const shares = [];
   const saves = [];
   for (let run = 0; run < 15; run++) {
     const last = state.messages.at(-1);
@@ -125,18 +126,17 @@ test("a save of the large Project after one change stays a small share of encodi
       { ...state, messages: [...state.messages.slice(0, -1), { ...last, body: `${last.body} more` }] },
       state,
     );
-    let started = performance.now();
-    JSON.stringify(next);
-    const encodeMs = performance.now() - started;
-    started = performance.now();
-    await store.saveProjectState(project, next, { sweepMinAgeMs: 1e12 });
-    const saveMs = performance.now() - started;
-    saves.push(saveMs);
-    shares.push(saveMs / encodeMs);
+    const started = performance.now();
+    const wrote = await store.saveProjectState(project, next, { sweepMinAgeMs: 1e12 });
+    saves.push(performance.now() - started);
+    if (run === 0) t.diagnostic(`a save wrote ${JSON.stringify(wrote)}`);
+    assert.ok(wrote.rowsWritten <= BUDGET.saveRowsWritten, `a save wrote ${wrote.rowsWritten} message rows for one changed message`);
+    assert.equal(wrote.rowsRemoved, 0);
+    assert.equal(wrote.sidecarsWritten, false, "a save wrote a sidecar though no transcript or tool output changed");
+    assert.ok(wrote.stateBytes <= BUDGET.saveStateBytes, `a save wrote ${wrote.stateBytes} bytes of coordination.json, over ${BUDGET.saveStateBytes}`);
     state = next;
   }
-  t.diagnostic(`save median ${median(saves).toFixed(1)} ms, ${(median(shares) * 100).toFixed(0)}% of encoding the whole state`);
-  assert.ok(median(shares) <= BUDGET.saveShareOfEncode, `a save took ${(median(shares) * 100).toFixed(0)}% of encoding the whole state`);
+  t.diagnostic(`save median ${median(saves).toFixed(1)} ms`);
   assert.ok(median(saves) <= BUDGET.saveMedianMs, `a save took ${median(saves).toFixed(1)} ms (median)`);
   // The saved Project reads back as it was.
   assert.equal((await store.readProjectState(project)).messages.at(-1).body, state.messages.at(-1).body);

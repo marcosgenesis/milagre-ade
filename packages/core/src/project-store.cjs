@@ -28,7 +28,8 @@ const SWEEP_MIN_AGE_MS = 60_000;
 const swept = new Set();
 
 // `durable` syncs the bytes and the rename to disk before returning. Only the migration of a linked worktree's old
-// chats asks for it, since it renames that file next; routine saves only rename.
+// chats asks for it, since it renames that file next; routine saves only rename. Resolves to what the save wrote: the
+// message rows written and removed, whether it wrote a sidecar, and the size of coordination.json.
 async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_AGE_MS, durable = false } = {}) {
   const tracker = { known: settled.get(projectPath), next: new Map(), wrote: false };
   // The state in memory is compacted already (see compactProjectDetails); this catches one that wasn't.
@@ -37,11 +38,12 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
   const persisted = await compactSubagents(projectPath, compacted, tracker);
   // Messages go to chats.db first; coordination.json then points at it. A state from before keeps its array until then.
   let rows;
+  const written = { written: 0, removed: 0 };
   if (Array.isArray(persisted.messages)) {
     // The first save after the move keeps the old file once, beside it, in case anything needs it back.
     if (!savedMessages.has(projectPath))
       await fs.copyFile(stateFile(projectPath), `${stateFile(projectPath)}.before-chats-db`, fs.constants.COPYFILE_EXCL).catch(() => {});
-    rows = await writeMessages(projectPath, persisted.messages, savedMessages.get(projectPath), { durable });
+    rows = await writeMessages(projectPath, persisted.messages, savedMessages.get(projectPath), { durable, stats: written });
   }
   const contents = JSON.stringify(rows ? { ...persisted, messages: MESSAGES_MARKER } : persisted);
   const directory = path.dirname(stateFile(projectPath));
@@ -77,6 +79,12 @@ async function saveProjectState(projectPath, state, { sweepMinAgeMs = SWEEP_MIN_
     await sweepSubagentContent(projectPath, referencedSidecars(persisted), { minAgeMs: sweepMinAgeMs });
     await sweepDetailContent(projectPath, referencedDetails(persisted), { minAgeMs: sweepMinAgeMs });
   }
+  return {
+    rowsWritten: written.written,
+    rowsRemoved: written.removed,
+    sidecarsWritten: tracker.wrote || details.wrote,
+    stateBytes: Buffer.byteLength(contents),
+  };
 }
 /**
  * The saved state, with its messages read from chats.db, subagent transcripts read back and long step details (from

@@ -98,12 +98,14 @@ function createMobilePush({ dataDir, send, context, now = Date.now, onError = ()
     const eventId = randomUUID();
     const task = (async () => {
       const metadata = await context(chatId);
+      const where =
+        metadata.worktreeName && metadata.worktreeName !== metadata.projectName ? `${metadata.projectName} / ${metadata.worktreeName}` : metadata.projectName;
       const notice = requestId
         ? attentionNotice(event, metadata)
         : {
-            title: `${metadata.projectName}${metadata.worktreeName && metadata.worktreeName !== metadata.projectName ? ` / ${metadata.worktreeName}` : ""} - ${event.type === "turn-failed" ? "Turn failed" : "Turn completed"}`,
-            subtitle: metadata.chatTitle,
-            body: event.type === "turn-failed" ? event.message : run.preview || "Turn completed.",
+            title: metadata.chatTitle || where,
+            subtitle: metadata.chatTitle ? where : undefined,
+            body: event.type === "turn-failed" ? `Turn failed: ${event.message}` : run.preview ? `Turn completed: ${run.preview}` : "Turn completed.",
           };
       const validEvent = () => epoch === version && chats.get(chatId) === run && (requestId ? !run.ended && run.requests.has(requestId) : run.ended);
       if (!notice || !validEvent()) return;

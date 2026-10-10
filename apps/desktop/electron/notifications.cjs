@@ -161,9 +161,12 @@ class AttentionNotifier {
   showCompletion(chatId, title, subtitle, result) {
     if (this.isAppFocused() && this.activeChatId === chatId) return false;
     const notification = this.createNotification({
-      title: `${capped(title, MAX_TITLE) || "Milagre"} - ${result.failed ? "Turn failed" : "Turn completed"}`,
-      subtitle: capped(subtitle, MAX_TITLE),
-      body: capped(result.body, MAX_BODY),
+      title: capped(subtitle || title || "Milagre", MAX_TITLE),
+      subtitle: subtitle ? capped(title, MAX_TITLE) : "",
+      body: capped(
+        result.failed ? `Turn failed: ${result.body}` : result.body !== "Turn completed." ? `Turn completed: ${result.body}` : result.body,
+        MAX_BODY,
+      ),
     });
     this.completionNotifications.get(chatId)?.close();
     this.completionNotifications.set(chatId, notification);

@@ -101,7 +101,9 @@ test("completion alerts use observed output, show once, and open the originating
   notifier.observe("/shop#2", { type: "text-delta", text: "Tests passed." });
   notifier.observe("/shop#2", { type: "turn-completed" });
   assert.equal(notifier.notifyCompletion({ chatId: "/shop#2", title: "shop", subtitle: "Fix login" }), true);
-  assert.equal(shown[0].options.body, "Tests passed.");
+  assert.equal(shown[0].options.title, "Fix login");
+  assert.equal(shown[0].options.subtitle, "shop");
+  assert.equal(shown[0].options.body, "Turn completed: Tests passed.");
   assert.equal(notifier.notifyCompletion({ chatId: "/shop#2" }), false);
   shown[0].emit("click");
   assert.deepEqual(opened, ["/shop#2"]);
@@ -124,8 +126,8 @@ test("another chat can notify while focused, with failure details and no stale p
   notifier.sync({ projectPath: "/shop", activeChatId: "/shop#2", unread: [], notifyOnCompletion: true });
   notifier.observe("/shop#3", { type: "turn-failed", message: "Connection lost" });
   assert.equal(notifier.notifyCompletion({ chatId: "/shop#3", title: "shop" }), true);
-  assert.equal(shown[0].options.body, "Connection lost");
-  assert.match(shown[0].options.title, /failed/);
+  assert.equal(shown[0].options.body, "Turn failed: Connection lost");
+  assert.equal(shown[0].options.title, "shop");
   notifier.observe("/shop#3", { type: "turn-started" });
   notifier.observe("/shop#3", { type: "turn-completed" });
   notifier.notifyCompletion({ chatId: "/shop#3" });
@@ -268,7 +270,7 @@ test("a turn that ends while a background subagent runs is held; the turn its re
   notifier.observe("/shop#2", { type: "turn-completed" });
   assert.equal(notifier.notifyCompletion({ chatId: "/shop#2", title: "shop", subtitle: "Fix login" }), true);
   assert.equal(shown.length, 1);
-  assert.equal(shown[0].options.body, "Review done: all good.");
+  assert.equal(shown[0].options.body, "Turn completed: Review done: all good.");
 });
 test("a held completion shows once its last background subagent ends with no turn to take the result; failures and foreground subagents never hold", () => {
   const { notifier, shown } = setup();
@@ -283,9 +285,9 @@ test("a held completion shows once its last background subagent ends with no tur
   assert.equal(shown.length, 0);
   notifier.observe("/shop#2", backgroundAgent("b", "failed"));
   assert.equal(shown.length, 1);
-  assert.equal(shown[0].options.title, "shop - Turn completed");
-  assert.equal(shown[0].options.subtitle, "Fix login");
-  assert.equal(shown[0].options.body, "Dispatched two reviewers.");
+  assert.equal(shown[0].options.title, "Fix login");
+  assert.equal(shown[0].options.subtitle, "shop");
+  assert.equal(shown[0].options.body, "Turn completed: Dispatched two reviewers.");
   notifier.observe("/shop#3", { type: "turn-started", turnId: "t3" });
   notifier.observe("/shop#3", backgroundAgent("c", "running"));
   notifier.observe("/shop#3", { type: "turn-failed", message: "Connection lost" });

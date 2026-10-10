@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canLinkProjects, endpointCovers, findLink, linkAskMessage, linkBetween, linkedEnds, linkEndpoints } from "./chat-links.mjs";
+import {
+  canLinkProjects,
+  endpointCovers,
+  findLink,
+  LINK_PROBLEM_LABEL,
+  linkAskMessage,
+  linkBetween,
+  linkedEndLabel,
+  linkedEnds,
+  linkEndpoints,
+  linkProblem,
+} from "./chat-links.mjs";
 
 const alpha = { project_id: "p1", worktree_path: "/p1/alpha" };
 const bravo = { project_id: "p1", worktree_path: "/p1/bravo" };
@@ -49,6 +60,17 @@ test("findLink finds the exact Link made between two endpoints", () => {
   assert.equal(findLink(links, bravo, alpha)?.id, "w");
   assert.equal(findLink(links, { project_id: "p3" }, { project_id: "p2" })?.id, "p");
   assert.equal(findLink(links, { project_id: "p1" }, { project_id: "p2" }), undefined);
+});
+
+test("linkProblem and linkedEndLabel say why a Chat can't be picked and name the other end", () => {
+  assert.equal(linkProblem(links, alpha, { ...alpha }), "same-worktree");
+  assert.equal(linkProblem(links, alpha, bravo), "linked");
+  assert.equal(linkProblem(links, alpha, web), null);
+  assert.equal(LINK_PROBLEM_LABEL.linked, "Already linked");
+  assert.equal(linkedEndLabel(web, { project: "web", branch: "login-form" }), "web / login-form");
+  assert.equal(linkedEndLabel(web, { project: "web" }), "web / web", "the folder name without a branch");
+  assert.equal(linkedEndLabel({ project_id: "p2" }, { project: "web" }), "All of web");
+  assert.equal(linkedEndLabel({ project_id: "p9" }), "All of Unavailable Project");
 });
 
 test("linkAskMessage names the destination in the body and gives the agent its Chat ref and Worktree", () => {

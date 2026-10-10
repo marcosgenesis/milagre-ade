@@ -12,6 +12,10 @@ export function linkedEnds<L extends CanvasLink>(links: readonly L[], worktree: 
 export function canLinkProjects(a: { project_id: string } | undefined, b: { project_id: string } | undefined): boolean;
 export function linkEndpoints(a: LinkWorktree, b: LinkWorktree, scope?: LinkScope): [LinkEnd, LinkEnd];
 export function findLink<L extends CanvasLink>(links: readonly L[], a: LinkEnd, b: LinkEnd): L | undefined;
+export type LinkProblem = "same-worktree" | "linked";
+export function linkProblem(links: readonly CanvasLink[], source: LinkWorktree, target: LinkWorktree): LinkProblem | null;
+export const LINK_PROBLEM_LABEL: Readonly<Record<LinkProblem, string>>;
+export function linkedEndLabel(end: LinkEnd, names?: { project?: string; branch?: string }): string;
 export function linkAskMessage(
   text: string,
   target: { label: string; chatRef: string; worktreePath: string; projectName?: string; branch?: string },

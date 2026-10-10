@@ -50,6 +50,29 @@ export function findLink(links, a, b) {
   return links.find((link) => (same(link.a, a) && same(link.b, b)) || (same(link.a, b) && same(link.b, a)));
 }
 
+/** Why a Chat can't be linked to another: both in one Worktree, or a Link already joins their Worktrees. */
+export function linkProblem(links, source, target) {
+  if (source.project_id === target.project_id && source.worktree_path === target.worktree_path) return "same-worktree";
+  return linkBetween(links, source, target) ? "linked" : null;
+}
+
+/** The short reason a list shows beside a Chat that can't be picked. */
+export const LINK_PROBLEM_LABEL = { "same-worktree": "Same worktree", linked: "Already linked" };
+
+/** How a list names the other end of a Link: "web / login-form", or "All of web" for a whole Project. */
+export function linkedEndLabel(end, { project, branch } = {}) {
+  const name = project || "Unavailable Project";
+  if (end.worktree_path === undefined) return `All of ${name}`;
+  return `${name} / ${
+    branch ||
+    end.worktree_path
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() ||
+    end.worktree_path
+  }`;
+}
+
 /**
  * "Link and ask A…": what goes to Chat A as a plain user message. The body is what the user typed plus the
  * destination, as the Chat shows it; the prompt adds the Chat ref and Worktree the agent's Link tools take. The agent

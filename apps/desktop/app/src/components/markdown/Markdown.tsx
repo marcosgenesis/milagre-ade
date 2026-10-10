@@ -1,4 +1,4 @@
-import { Children, isValidElement, memo, useState } from "react";
+import { Children, isValidElement, memo, useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -11,6 +11,10 @@ import { lazyView } from "../../lib/lazy-view";
 import { closeOpenMarkdown } from "../../lib/streaming-markdown";
 import { CodeBlock } from "./CodeBlock";
 import { splitStreamingBlocks } from "./streaming-blocks";
+import { mediaKind, mediaUrl } from "../../lib/media";
+import { isRemoteKey, useScope } from "../../lib/computer-bridge";
+import { remoteImageDataUrl } from "../../lib/remote-media";
+import { MediaLightbox } from "../motion/LazyMediaLightbox";
 
 const AttachmentPreview = lazyView(() => import("../AttachmentPreview").then((module) => module.AttachmentPreview));
 
@@ -37,19 +41,51 @@ function InlineCode({ children }: { children?: ReactNode }) {
 
 const LINK_CLASS = "text-accent-ink underline decoration-accent-ink/40 underline-offset-2 hover:decoration-accent-ink";
 
+function MediaLinkLightbox({ path, name, kind, close }: { path: string; name: string; kind: "image" | "video"; close: () => void }) {
+  const scope = useScope();
+  const remote = isRemoteKey(scope);
+  const [src, setSrc] = useState<string | null>(remote ? null : mediaUrl(path));
+
+  useEffect(() => {
+    // Only remote images are loaded via data URLs; videos are too large.
+    if (remote && scope && kind === "image") {
+      let live = true;
+      remoteImageDataUrl(scope, path)
+        .then((url) => live && setSrc(url))
+        .catch(() => {
+          if (live) close();
+        });
+      return () => {
+        live = false;
+      };
+    }
+  }, [remote, scope, path, kind, close]);
+
+  if (!src) return null;
+
+  return <MediaLightbox items={[{ id: path, name, src, kind, file: remote ? src : path }]} start={0} close={close} thumbFor={() => null} />;
+}
+
 // A link to a file on the chat's computer (an absolute path, a file:// URL or a path relative to the chat's folder)
 // opens it in the file viewer; a browser would get nothing. Web and mail links leave the app as before.
 function Link({ href, children }: { href?: string; children?: ReactNode }) {
   const root = useFilesRoot();
   const [open, setOpen] = useState(false);
   const file = href ? localFileLink(href, root ?? undefined) : null;
+  const scope = useScope();
+  
   if (!file)
     return (
       <a href={href} title={href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
         {children}
       </a>
     );
+  
   const name = file.path.split("/").pop() || file.path;
+  const kind = mediaKind(file.path);
+  const remote = isRemoteKey(scope);
+  const supportedMedia = kind && (!remote || kind === "image");
+  
   return (
     <>
       <a
@@ -59,12 +95,16 @@ function Link({ href, children }: { href?: string; children?: ReactNode }) {
           event.preventDefault();
           setOpen(true);
         }}
-        onMouseEnter={AttachmentPreview.preload}
+        onMouseEnter={supportedMedia ? undefined : AttachmentPreview.preload}
         className={`${LINK_CLASS} cursor-pointer`}
       >
         {children}
       </a>
-      {open && <AttachmentPreview path={file.path} name={name} close={() => setOpen(false)} />}
+      {open && supportedMedia ? (
+        <MediaLinkLightbox path={file.path} name={name} kind={kind} close={() => setOpen(false)} />
+      ) : open ? (
+        <AttachmentPreview path={file.path} name={name} close={() => setOpen(false)} />
+      ) : null}
     </>
   );
 }
@@ -83,11 +123,7 @@ const components: Components = {
   // Remote images in a reply would load without asking; show them as links instead.
   img({ src, alt }) {
     const href = typeof src === "string" ? src : undefined;
-    return (
-      <a href={href} title={href} target="_blank" rel="noreferrer" className="text-accent-ink underline decoration-accent-ink/40 underline-offset-2">
-        {alt || href || "image"}
-      </a>
-    );
+    return <Link href={href}>{alt || href || "image"}</Link>;
   },
   table({ children }) {
     return (

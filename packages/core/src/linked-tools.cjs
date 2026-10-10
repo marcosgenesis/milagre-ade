@@ -15,16 +15,20 @@ const MAX_OUTPUT = 40_000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MESSAGES = 30;
 
+// Whether a Chat has messages, from its summary when it has one: an unloaded Chat's aren't in the state.
+const hasMessages = (state, session) => (session.summary?.count ?? 0) > 0 || state.messages.some((message) => message.session_id === session.id);
+
 const cap = (text) => (text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n… truncated` : text);
 
 function lastReply(state, sessionId) {
-  return state.messages.findLast((message) => message.session_id === sessionId && message.role === "assistant" && !isNote(message) && message.body?.trim())
-    ?.body;
+  return (state.messages ?? state).findLast(
+    (message) => message.session_id === sessionId && message.role === "assistant" && !isNote(message) && message.body?.trim(),
+  )?.body;
 }
 
 /** What a Chat's agent replied after a Delegation's message (Milagre's own notes left out), or undefined. */
 function delegationReply(state, sessionId, delegationId) {
-  const messages = state.messages.filter((message) => message.session_id === sessionId);
+  const messages = (state.messages ?? state).filter((message) => message.session_id === sessionId);
   const start = messages.findIndex((message) => message.context?.kind === "delegation" && message.context.delegationId === delegationId);
   if (start === -1) return undefined;
   return (
@@ -61,10 +65,16 @@ async function insideWorktree(worktree, relative) {
 /**
  * Read access to the Worktrees a Chat can see, and nothing else. `view` supplies:
  *   sides(chatId) -> [{ project_id, worktree_path, link_id, projectPath, projectName }]
- *   state(projectPath) -> the Project's state; runs() -> streaming runs by chat key
+ *   state(projectPath) -> the Project's state, which can leave out unloaded Chats' messages (see message-store.cjs)
+ *   messages(projectPath, chatIds) -> those Chats' messages, whole; bodies(projectPath, chatIds) -> their ids, roles
+ *   and bodies; runs() -> streaming runs by chat key
  *   open(side) -> lines about the open Delegations and Negotiations with that side; receiveOnly(chatKey) -> boolean
  */
 function createLinkedReads(view) {
+  // A view without the message ports reads them from its states, which then hold every message.
+  const messagesOf =
+    view.messages ?? (async (projectPath, chatIds) => (await view.state(projectPath)).messages.filter((message) => chatIds.includes(message.session_id)));
+  const bodiesOf = view.bodies ?? messagesOf;
   async function side(chatId, worktreePath) {
     const found = (await view.sides(chatId)).find((item) => item.worktree_path === worktreePath);
     if (!found) throw new Error("That Worktree isn't linked to this Chat. Use linked_overview to see the ones that are.");
@@ -77,22 +87,28 @@ function createLinkedReads(view) {
       (await view.sides(chatId)).map(async (item) => {
         const state = await view.state(item.projectPath);
         const worktree = Object.values(state.worktrees).find((entry) => entry.path === item.worktree_path);
-        const ordinary = Object.values(state.sessions)
-          .filter((session) => session.worktree_id === worktree?.id && state.messages.some((message) => message.session_id === session.id))
-          .map((session) => {
-            const ref = `${item.projectPath}#${session.id}`;
-            const messages = state.messages.filter((message) => message.session_id === session.id);
-            return {
-              ref,
-              title: chatTitle(session, messages),
-              provider: session.provider ? providerName(session.provider) : undefined,
-              status: runStatus(runs[ref]),
-              archived: session.archived,
-              activity: runs[ref] ? Number.MAX_SAFE_INTEGER : (messages.at(-1)?.id ?? 0),
-              lastReply: lastReply(state, session.id),
-              receiveOnly: view.receiveOnly(ref),
-            };
-          });
+        const listed = Object.values(state.sessions).filter((session) => session.worktree_id === worktree?.id && hasMessages(state, session));
+        // Ids, roles and bodies are all a summary reads, so an unloaded Chat isn't read whole.
+        const all = listed.length
+          ? await bodiesOf(
+              item.projectPath,
+              listed.map((session) => session.id),
+            )
+          : [];
+        const ordinary = listed.map((session) => {
+          const ref = `${item.projectPath}#${session.id}`;
+          const messages = all.filter((message) => message.session_id === session.id);
+          return {
+            ref,
+            title: chatTitle(session, messages),
+            provider: session.provider ? providerName(session.provider) : undefined,
+            status: runStatus(runs[ref]),
+            archived: session.archived,
+            activity: runs[ref] ? Number.MAX_SAFE_INTEGER : (messages.at(-1)?.id ?? 0),
+            lastReply: lastReply(messages, session.id),
+            receiveOnly: view.receiveOnly(ref),
+          };
+        });
         let chats = ordinary;
         if (worktree?.sharedChat) {
           const owner = scopeKey({ kind: "link", linkId: worktree.sharedChat.linkId });
@@ -100,7 +116,7 @@ function createLinkedReads(view) {
           const session = shared.sessions[worktree.sharedChat.sessionId];
           if (session?.worktrees.some((member) => member.worktreePath === item.worktree_path)) {
             const ref = `${owner}#${session.id}`,
-              messages = shared.messages.filter((message) => message.session_id === session.id);
+              messages = await bodiesOf(owner, [session.id]);
             chats = [
               {
                 ref,
@@ -109,7 +125,7 @@ function createLinkedReads(view) {
                 status: runStatus(runs[ref]),
                 archived: session.archived,
                 activity: runs[ref] ? Number.MAX_SAFE_INTEGER : (messages.at(-1)?.id ?? 0),
-                lastReply: lastReply(shared, session.id),
+                lastReply: lastReply(messages, session.id),
                 receiveOnly: true,
               },
             ];
@@ -156,7 +172,7 @@ function createLinkedReads(view) {
       if (!session || !sides.some((item) => item.worktree_path === worktree?.path)) throw new Error("That Chat isn't in a linked Worktree.");
     }
     const session = state.sessions[sessionId];
-    const messages = state.messages.filter((message) => message.session_id === sessionId);
+    const messages = await messagesOf(projectPath, [sessionId]);
     const end = Math.min(messages.length, range.end ?? messages.length);
     const start = Math.max(1, range.start ?? end - DEFAULT_MESSAGES + 1);
     const parts = [

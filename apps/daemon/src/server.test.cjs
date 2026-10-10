@@ -84,7 +84,7 @@ async function waitFor(read) {
   }
   throw new Error("Timed out waiting for daemon state");
 }
-async function fixture(t, { createSession, ...options } = {}) {
+async function fixture(t, { createSession, lazyMessages, ...options } = {}) {
   const fixtureOptions = { createSession };
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-daemon-")));
   const dataDir = path.join(directory, "profile");
@@ -100,6 +100,7 @@ async function fixture(t, { createSession, ...options } = {}) {
       cwd: project,
       environmentReady: Promise.resolve(),
       titleModels: {},
+      ...(lazyMessages === undefined ? {} : { lazyMessages }),
       agentCli: Object.assign(async () => ({ command: "/fake/codex" }), { invalidate() {} }),
       createSession(provider, options) {
         if (fixtureOptions.createSession) return fixtureOptions.createSession(provider, options);
@@ -1129,4 +1130,95 @@ test("a client that reads messages by Chat gets states without them, and each ch
   const applied = applyStatePatch(held.state, added.payload.patch);
   assert.equal(applied.sessions[session.id].summary.count, 2);
   assert.deepEqual((await desktop.call("chat:search", [project, "second note"]))[0].message.session_id, session.id);
+});
+
+// Lazy message memory (#321): the host unloads an idle Chat's messages and chats.db is their only copy until needed.
+test("a Chat the host unloaded reads back whole, and no client hears its messages removed or added again", async (t) => {
+  const { savedRows } = require("@milagre/core/message-store");
+  const { daemon, project, client } = await fixture(t, { lazyMessages: { idleMs: 0, sweepMs: 0 } });
+  const lean = await client();
+  const leanEvents = [];
+  lean.on("event", (event) => leanEvents.push(event));
+  await lean.call("daemon:state-patches", [{ messages: false }]);
+  // An older desktop takes whole states in every event; another takes whole states as patches.
+  const older = await client();
+  const olderEvents = [];
+  older.on("event", (event) => olderEvents.push(event));
+  const patcher = await client();
+  const patcherEvents = [];
+  patcher.on("event", (event) => patcherEvents.push(event));
+  await patcher.call("daemon:state-patches", [{}]);
+
+  const opened = await lean.call("project:open", [project]);
+  const session = Object.values(opened.state.sessions)[0];
+  const chat = `${project}#${session.id}`;
+  await lean.call("chat:git-note", [chat, "First note"]);
+  await lean.call("chat:git-note", [chat, "A needle in here"]);
+  await lean.call("daemon:flush");
+  const bodies = (messages) => messages.filter((message) => message.session_id === session.id).map((message) => message.body);
+  const ids = () => [...(savedRows(project)?.values() ?? [])].filter((row) => row.chat === session.id).map((row) => row.message.id);
+  assert.equal(ids().length, 2);
+  await daemon.unloadIdle();
+  assert.deepEqual(ids(), [], "the Chat left memory");
+
+  // Every reader still sees it whole.
+  assert.deepEqual(bodies((await older.call("state:read", [project])).state.messages), ["First note", "A needle in here"]);
+  assert.deepEqual(bodies((await older.call("project:snapshot", [project])).state.messages), ["First note", "A needle in here"]);
+  let held = await patcher.call("state:read", [project]);
+  assert.deepEqual(bodies(held.state.messages), ["First note", "A needle in here"]);
+  assert.equal((await lean.call("state:read", [project])).state.sessions[session.id].summary.count, 2, "its summary stays");
+  const [match] = await lean.call("chat:search", [project, "needle"]);
+  assert.equal(match.message.session_id, session.id);
+  assert.equal((await lean.call("chat:message", [project, match.message.id])).body, "A needle in here");
+  assert.deepEqual(ids(), [], "searching and reading one message load nothing");
+  const page = await lean.call("chat:messages", [project, session.id, { turns: 5 }]);
+  assert.deepEqual(
+    page.messages.map((message) => message.body),
+    ["First note", "A needle in here"],
+  );
+  assert.equal(ids().length, 2, "reading its page loads it");
+
+  // A message into the Chat once it left memory again: clients hear only that message.
+  await daemon.unloadIdle();
+  assert.deepEqual(ids(), []);
+  const follow = (events, from) => events.filter((event) => event.channel === "project:state").slice(from);
+  const leanFrom = follow(leanEvents, 0).length;
+  const olderFrom = follow(olderEvents, 0).length;
+  await lean.call("chat:git-note", [chat, "Third note"]);
+  const added = await waitFor(() => follow(leanEvents, leanFrom).find((event) => event.payload.messages?.changed.length));
+  assert.deepEqual(
+    added.payload.messages.changed.map(({ message }) => message.body),
+    ["Third note"],
+  );
+  assert.deepEqual(added.payload.messages.removed, []);
+  const whole = await waitFor(() =>
+    follow(olderEvents, olderFrom).find((event) => event.payload.state && bodies(event.payload.state.messages).includes("Third note")),
+  );
+  assert.deepEqual(bodies(whole.payload.state.messages), ["First note", "A needle in here", "Third note"]);
+
+  // It leaves memory again, and a change elsewhere follows: nobody hears its messages removed.
+  await lean.call("daemon:flush");
+  await daemon.unloadIdle();
+  assert.deepEqual(ids(), []);
+  const leanBefore = follow(leanEvents, 0).length;
+  const olderBefore = follow(olderEvents, 0).length;
+  await lean.call("chat:patch", [project, session.id, { title: "Renamed" }]);
+  const renamed = await waitFor(() => follow(leanEvents, leanBefore).find((event) => JSON.stringify(event.payload.patch ?? {}).includes("Renamed")));
+  assert.deepEqual(renamed.payload.messages, { changed: [], removed: [] });
+  const olderRenamed = await waitFor(() => follow(olderEvents, olderBefore).find((event) => event.payload.state?.sessions[session.id].title === "Renamed"));
+  assert.deepEqual(bodies(olderRenamed.payload.state.messages), ["First note", "A needle in here", "Third note"]);
+
+  // The patching whole-state client ends where a fresh read does.
+  for (const event of patcherEvents.filter((item) => item.channel === "project:state" && item.payload.path === project)) {
+    if (event.payload.version <= held.version) continue;
+    if (event.payload.resync || event.payload.base !== held.version) held = await patcher.call("state:read", [project]);
+    else held = { ...held, version: event.payload.version, state: applyStatePatch(held.state, event.payload.patch) };
+  }
+  const fresh = await patcher.call("state:read", [project]);
+  assert.deepEqual(held.state, fresh.state);
+  assert.deepEqual(bodies(fresh.state.messages), ["First note", "A needle in here", "Third note"]);
+
+  // And on disk: everything, in order.
+  await lean.call("daemon:flush");
+  assert.deepEqual(bodies((await readSavedState(project)).messages), ["First note", "A needle in here", "Third note"]);
 });

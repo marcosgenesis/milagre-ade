@@ -67,15 +67,14 @@ function withNativeSessions(session, current, parked) {
   return { ...rest, ...(current ? { native_session_id: current } : {}), ...(Object.keys(parked).length ? { native_sessions: parked } : {}) };
 }
 
+// Whether a Chat has messages, from its summary when it has one: an unloaded Chat's aren't in the state (message-store.cjs).
+const hasMessages = (state, session) => (session.summary?.count ?? 0) > 0 || state.messages.some((message) => message.session_id === session.id);
+
 // A new chat in a worktree takes its chat that has no messages yet, if there is one (not a handover still
 // waiting for its brief or holding it as a draft); otherwise one is made. Resolves the state with it.
 function starterChat(latest, worktree) {
   const existing = Object.values(latest.sessions).find(
-    (item) =>
-      item.worktree_id === worktree.id &&
-      !item.handoverPending &&
-      item.handoverDraft === undefined &&
-      !latest.messages.some((message) => message.session_id === item.id),
+    (item) => item.worktree_id === worktree.id && !item.handoverPending && item.handoverDraft === undefined && !hasMessages(latest, item),
   );
   if (existing) return { state: latest, session: existing };
   const session = { id: latest.next_id, worktree_id: worktree.id, agent_name: worktree.name, status: "Created" };
@@ -132,6 +131,11 @@ class ChatHost {
     this.quitting = false;
   }
 
+  /** Whether a chat's turn runs, prepares or has work waiting on it: its messages stay in memory (see ProjectStates). */
+  isBusy(chatId) {
+    return Boolean(this.runs[chatId]) || this.preparing.has(chatId) || this.notes.has(chatId) || this.subagentRecoveries.has(chatId);
+  }
+
   /** The turns streaming now, in every project, and the number of the last event they hold. */
   snapshot() {
     return { runs: this.runs, seq: this.seq };
@@ -147,14 +151,18 @@ class ChatHost {
   /** A worktree's chat with no messages yet, made when it has none: where a message Milagre sends opens a new chat. Resolves with its id. */
   async emptyChat(projectPath, worktreeId) {
     let sessionId;
-    const { state, changed } = await this.states.update(projectPath, (latest) => {
-      const worktree = latest.worktrees[worktreeId];
-      if (!worktree) throw new Error("That worktree is no longer in the project.");
-      if (worktree.sharedChat) throw new Error("This Worktree belongs to a shared Link Chat. Open its Link instead.");
-      const result = starterChat(latest, worktree);
-      sessionId = result.session.id;
-      return result.state;
-    });
+    const { state, changed } = await this.states.update(
+      projectPath,
+      (latest) => {
+        const worktree = latest.worktrees[worktreeId];
+        if (!worktree) throw new Error("That worktree is no longer in the project.");
+        if (worktree.sharedChat) throw new Error("This Worktree belongs to a shared Link Chat. Open its Link instead.");
+        const result = starterChat(latest, worktree);
+        sessionId = result.session.id;
+        return result.state;
+      },
+      { chats: [] },
+    );
     if (changed) this.broadcast(projectPath, state);
     return sessionId;
   }
@@ -181,29 +189,33 @@ class ChatHost {
       if (!unknown.length) return;
       const events = await this.readSubagents({ cwd, agents: unknown, projectPath, provider: session.provider, nativeSessionId: session.native_session_id });
       if (!events.length) return;
-      const { state, changed } = await this.states.update(projectPath, (latest) => {
-        const current = latest.sessions[sessionId];
-        if (
-          this.quitting ||
-          this.runs[chatId] ||
-          !current ||
-          current.archived ||
-          current.provider !== session.provider ||
-          current.native_session_id !== session.native_session_id ||
-          current.worktree_id !== session.worktree_id ||
-          (current.workspacePath ?? latest.worktrees?.[current.worktree_id]?.path) !== cwd
-        )
-          return latest;
-        let next = latest;
-        for (const event of events) {
-          if (event.type !== "subagent-update" || !["completed", "failed", "cancelled"].includes(event.agent?.status)) continue;
-          const previous = unknown.find((agent) => agent.id === event.agent.id);
-          // A new live event or an archive while history loads takes precedence over this snapshot.
-          if (!previous || current.subagents?.find((agent) => agent.id === previous.id) !== previous) continue;
-          next = applyAgentEvent(next, this.runs, projectPath, chatId, event).state;
-        }
-        return next;
-      });
+      const { state, changed } = await this.states.update(
+        projectPath,
+        (latest) => {
+          const current = latest.sessions[sessionId];
+          if (
+            this.quitting ||
+            this.runs[chatId] ||
+            !current ||
+            current.archived ||
+            current.provider !== session.provider ||
+            current.native_session_id !== session.native_session_id ||
+            current.worktree_id !== session.worktree_id ||
+            (current.workspacePath ?? latest.worktrees?.[current.worktree_id]?.path) !== cwd
+          )
+            return latest;
+          let next = latest;
+          for (const event of events) {
+            if (event.type !== "subagent-update" || !["completed", "failed", "cancelled"].includes(event.agent?.status)) continue;
+            const previous = unknown.find((agent) => agent.id === event.agent.id);
+            // A new live event or an archive while history loads takes precedence over this snapshot.
+            if (!previous || current.subagents?.find((agent) => agent.id === previous.id) !== previous) continue;
+            next = applyAgentEvent(next, this.runs, projectPath, chatId, event).state;
+          }
+          return next;
+        },
+        { chats: [sessionId] },
+      );
       if (changed) this.broadcast(projectPath, state);
     })().finally(() => this.subagentRecoveries.delete(chatId));
     this.subagentRecoveries.set(chatId, pending);
@@ -235,7 +247,7 @@ class ChatHost {
           added = recorded.messages.filter((message) => !previousIds.has(message.id) && message.role === "assistant");
           return recorded;
         },
-        { persist: event.type !== "subagent-update" },
+        { persist: event.type !== "subagent-update", chats: [sessionId] },
       )
       .then(
         async ({ state, changed }) => {
@@ -265,11 +277,15 @@ class ChatHost {
       const captured = await this.images.capture(projectPath, state, message);
       if (captured === message) continue;
       const saved = await this.states
-        .update(projectPath, (latest) => {
-          const current = latest.messages.find((item) => item.id === message.id);
-          if (current !== message) return latest;
-          return { ...latest, messages: latest.messages.map((item) => (item === message ? captured : item)) };
-        })
+        .update(
+          projectPath,
+          (latest) => {
+            const current = latest.messages.find((item) => item.id === message.id);
+            if (current !== message) return latest;
+            return { ...latest, messages: latest.messages.map((item) => (item === message ? captured : item)) };
+          },
+          { chats: [message.session_id] },
+        )
         .catch(() => null);
       if (saved?.changed) this.broadcast(projectPath, saved.state);
     }
@@ -286,16 +302,20 @@ class ChatHost {
     let messageId = null;
     let seq;
     let added = [];
-    const { state, changed } = await this.states.update(projectPath, (latest) => {
-      const request = this.runs[chatId]?.questions.find((item) => item.requestId === requestId);
-      const result = recordAnswers(latest, this.runs, projectPath, chatId, body, answeredQuestions(request, answers));
-      if (result.messageId === null) return latest;
-      added = result.state.messages.slice(latest.messages.length).filter((message) => message.role === "assistant");
-      this.runs = result.runs;
-      messageId = result.messageId;
-      seq = ++this.seq;
-      return result.state;
-    });
+    const { state, changed } = await this.states.update(
+      projectPath,
+      (latest) => {
+        const request = this.runs[chatId]?.questions.find((item) => item.requestId === requestId);
+        const result = recordAnswers(latest, this.runs, projectPath, chatId, body, answeredQuestions(request, answers));
+        if (result.messageId === null) return latest;
+        added = result.state.messages.slice(latest.messages.length).filter((message) => message.role === "assistant");
+        this.runs = result.runs;
+        messageId = result.messageId;
+        seq = ++this.seq;
+        return result.state;
+      },
+      { chats: [sessionIdFromKey(chatId)] },
+    );
     if (!changed || messageId === null) return null;
     // No disk await between the current mutation and publication.
     this.publish(chatId, { type: "answers-sent" }, state, seq);
@@ -307,10 +327,13 @@ class ChatHost {
   /** Removes a message again, such as answers that never reached the agent. */
   async takeBack(chatId, messageId) {
     const projectPath = projectOfKey(chatId);
-    const { state, changed } = await this.states.update(projectPath, (latest) =>
-      latest.messages.some((message) => message.id === messageId)
-        ? { ...latest, messages: latest.messages.filter((message) => message.id !== messageId) }
-        : latest,
+    const { state, changed } = await this.states.update(
+      projectPath,
+      (latest) =>
+        latest.messages.some((message) => message.id === messageId)
+          ? { ...latest, messages: latest.messages.filter((message) => message.id !== messageId) }
+          : latest,
+      { chats: [sessionIdFromKey(chatId)] },
     );
     if (changed) this.broadcast(projectPath, state);
   }
@@ -319,7 +342,9 @@ class ChatHost {
   async addNote(chatId, { body, context }) {
     this.notes.set(chatId, [...(this.notes.get(chatId) ?? []), { body, context }]);
     if (this.runs[chatId]) return;
-    const { state, changed } = await this.states.update(projectOfKey(chatId), (latest) => (this.runs[chatId] ? latest : this.withNotes(latest, chatId)));
+    const { state, changed } = await this.states.update(projectOfKey(chatId), (latest) => (this.runs[chatId] ? latest : this.withNotes(latest, chatId)), {
+      chats: [sessionIdFromKey(chatId)],
+    });
     if (changed) this.broadcast(projectOfKey(chatId), state);
   }
 
@@ -366,84 +391,94 @@ class ChatHost {
     let pendingId;
     let originalSession;
     let stagedSession;
-    await this.states.update(projectPath, (latest) => {
-      if (request.canStart && !request.canStart()) throw new Error("Advisor delivery is deferred.");
-      let session = request.sessionId == null ? undefined : latest.sessions[request.sessionId];
-      if (request.sessionId != null && !session) throw new Error("That chat is no longer in the project.");
-      // A chat runs in its own worktree; a new one goes to the worktree asked for.
-      const worktree = session?.workspacePath ? { path: session.workspacePath } : latest.worktrees[session?.worktree_id ?? request.worktreeId];
-      if (!worktree) throw new Error("That worktree is no longer in the project.");
-      if (worktree.sharedChat) throw new Error("This Worktree belongs to a shared Link Chat. Open its Link instead.");
-      const started = session ? { state: latest, session } : starterChat(latest, worktree);
-      session = started.session;
-      const firstMessage = !latest.messages.some((message) => message.session_id === session.id);
-      // A handed-over chat's first message carries its brief; the body is only what the user typed.
-      brief = firstMessage ? session.handoverDraft : undefined;
-      const chatId = chatKey(projectPath, session.id);
-      const withSession = started.state;
-      // A message that steers a running turn, or one whose handoff is still preparing, never hands off.
-      waitFor = this.preparing.get(chatId) ?? null;
-      const steering = Boolean(this.runs[chatId]) || Boolean(waitFor);
-      handoff = steering ? null : handoffKind(withSession, session.id, provider);
-      if (steering) {
-        runProvider = session.provider ?? provider;
-        runModel = this.runs[chatId]?.model || lastUserModel(withSession, session.id) || model;
-      }
-      // Persist the input before splitting or starting its run. Tokens keep flowing
-      // while this save is pending; rejected input never changes a live run.
-      const next = withSession;
-      originalSession = session;
-      // `context` marks a message no person typed, such as a Delegation from another Chat.
-      if (handoff) dividerId = next.next_id;
-      const message = {
-        id: handoff ? next.next_id + 1 : next.next_id,
-        session_id: session.id,
-        body,
-        images: storedImages,
-        ...(files.length ? { files } : {}),
-        ...(brief !== undefined ? { handoverBrief: brief } : {}),
-        context: request.context ?? null,
-        ...(request.operationId ? { operationId: request.operationId } : {}),
-        role: "user",
-        model: runModel,
-      };
-      pendingId = message.id;
-      if (typeof request.clientMessageId === "string") message.clientMessageId = request.clientMessageId;
-      // Switching providers parks the old native session and resumes the one parked for the new provider, if any.
-      stagedSession = {
-        ...withoutDraft(session),
-        provider: runProvider,
-        ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}),
-      };
-      if (handoff === "switch") {
-        handoffFrom = lastTurnProvider(withSession, session.id);
-        catchUp = catchUpStart(withSession, session.id, provider);
-        stagedSession = applySwitch(stagedSession, handoffFrom, provider);
-      } else if (handoff) {
-        handoffFrom = provider;
-      }
-      target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: stagedSession.native_session_id };
-      const fromModel = lastUserModel(withSession, session.id);
-      const divider = handoff && {
-        id: dividerId,
-        session_id: session.id,
-        body: "",
-        role: "assistant",
-        context: { kind: "handoff", from: { provider: handoffFrom, ...(fromModel ? { model: fromModel } : {}) }, to: { provider, model }, status: "preparing" },
-      };
-      if (handoff) {
-        let settle;
-        const done = new Promise((resolve) => (settle = resolve));
-        preparation = { controller: new AbortController(), done, settle, dividerId, catchUp, from: handoffFrom, to: provider, sessionId: session.id };
-        this.preparing.set(chatId, preparation);
-      }
-      return {
-        ...next,
-        next_id: message.id + 1,
-        sessions: { ...next.sessions, [session.id]: stagedSession },
-        messages: [...next.messages, ...(divider ? [divider] : []), message],
-      };
-    });
+    await this.states.update(
+      projectPath,
+      (latest) => {
+        if (request.canStart && !request.canStart()) throw new Error("Advisor delivery is deferred.");
+        let session = request.sessionId == null ? undefined : latest.sessions[request.sessionId];
+        if (request.sessionId != null && !session) throw new Error("That chat is no longer in the project.");
+        // A chat runs in its own worktree; a new one goes to the worktree asked for.
+        const worktree = session?.workspacePath ? { path: session.workspacePath } : latest.worktrees[session?.worktree_id ?? request.worktreeId];
+        if (!worktree) throw new Error("That worktree is no longer in the project.");
+        if (worktree.sharedChat) throw new Error("This Worktree belongs to a shared Link Chat. Open its Link instead.");
+        const started = session ? { state: latest, session } : starterChat(latest, worktree);
+        session = started.session;
+        const firstMessage = !latest.messages.some((message) => message.session_id === session.id);
+        // A handed-over chat's first message carries its brief; the body is only what the user typed.
+        brief = firstMessage ? session.handoverDraft : undefined;
+        const chatId = chatKey(projectPath, session.id);
+        const withSession = started.state;
+        // A message that steers a running turn, or one whose handoff is still preparing, never hands off.
+        waitFor = this.preparing.get(chatId) ?? null;
+        const steering = Boolean(this.runs[chatId]) || Boolean(waitFor);
+        handoff = steering ? null : handoffKind(withSession, session.id, provider);
+        if (steering) {
+          runProvider = session.provider ?? provider;
+          runModel = this.runs[chatId]?.model || lastUserModel(withSession, session.id) || model;
+        }
+        // Persist the input before splitting or starting its run. Tokens keep flowing
+        // while this save is pending; rejected input never changes a live run.
+        const next = withSession;
+        originalSession = session;
+        // `context` marks a message no person typed, such as a Delegation from another Chat.
+        if (handoff) dividerId = next.next_id;
+        const message = {
+          id: handoff ? next.next_id + 1 : next.next_id,
+          session_id: session.id,
+          body,
+          images: storedImages,
+          ...(files.length ? { files } : {}),
+          ...(brief !== undefined ? { handoverBrief: brief } : {}),
+          context: request.context ?? null,
+          ...(request.operationId ? { operationId: request.operationId } : {}),
+          role: "user",
+          model: runModel,
+        };
+        pendingId = message.id;
+        if (typeof request.clientMessageId === "string") message.clientMessageId = request.clientMessageId;
+        // Switching providers parks the old native session and resumes the one parked for the new provider, if any.
+        stagedSession = {
+          ...withoutDraft(session),
+          provider: runProvider,
+          ...(firstMessage && body?.trim() && !session.title && !session.generatedTitle ? { titlePending: true } : {}),
+        };
+        if (handoff === "switch") {
+          handoffFrom = lastTurnProvider(withSession, session.id);
+          catchUp = catchUpStart(withSession, session.id, provider);
+          stagedSession = applySwitch(stagedSession, handoffFrom, provider);
+        } else if (handoff) {
+          handoffFrom = provider;
+        }
+        target = { chatId, sessionId: session.id, cwd: worktree.path, resumeId: stagedSession.native_session_id };
+        const fromModel = lastUserModel(withSession, session.id);
+        const divider = handoff && {
+          id: dividerId,
+          session_id: session.id,
+          body: "",
+          role: "assistant",
+          context: {
+            kind: "handoff",
+            from: { provider: handoffFrom, ...(fromModel ? { model: fromModel } : {}) },
+            to: { provider, model },
+            status: "preparing",
+          },
+        };
+        if (handoff) {
+          let settle;
+          const done = new Promise((resolve) => (settle = resolve));
+          preparation = { controller: new AbortController(), done, settle, dividerId, catchUp, from: handoffFrom, to: provider, sessionId: session.id };
+          this.preparing.set(chatId, preparation);
+        }
+        return {
+          ...next,
+          next_id: message.id + 1,
+          sessions: { ...next.sessions, [session.id]: stagedSession },
+          messages: [...next.messages, ...(divider ? [divider] : []), message],
+        };
+        // A new Chat goes to the Worktree's empty one, which has no messages to load.
+      },
+      { chats: request.sessionId == null ? [] : [request.sessionId] },
+    );
     try {
       await this.states.flush(projectPath);
     } catch (error) {
@@ -451,35 +486,43 @@ class ChatHost {
         this.release(target.chatId, preparation);
         preparation.settle(null);
       }
-      const { state } = await this.states.update(projectPath, (latest) => {
-        const session = { ...latest.sessions[target.sessionId] };
-        for (const field of ["provider", "titlePending", "handoverDraft", "resumeTurn", "native_session_id", "native_sessions"]) {
-          if (session[field] !== stagedSession[field]) continue;
-          if (Object.hasOwn(originalSession, field)) session[field] = originalSession[field];
-          else delete session[field];
-        }
-        return {
-          ...latest,
-          sessions: { ...latest.sessions, [target.sessionId]: session },
-          messages: latest.messages.filter((message) => message.id !== pendingId && message.id !== dividerId),
-        };
-      });
+      const { state } = await this.states.update(
+        projectPath,
+        (latest) => {
+          const session = { ...latest.sessions[target.sessionId] };
+          for (const field of ["provider", "titlePending", "handoverDraft", "resumeTurn", "native_session_id", "native_sessions"]) {
+            if (session[field] !== stagedSession[field]) continue;
+            if (Object.hasOwn(originalSession, field)) session[field] = originalSession[field];
+            else delete session[field];
+          }
+          return {
+            ...latest,
+            sessions: { ...latest.sessions, [target.sessionId]: session },
+            messages: latest.messages.filter((message) => message.id !== pendingId && message.id !== dividerId),
+          };
+        },
+        { chats: [target.sessionId] },
+      );
       this.broadcast(projectPath, state);
       throw error;
     }
     let seq;
     let added = [];
     const { state } = await this.states
-      .update(projectPath, (latest) => {
-        const message = latest.messages.find((item) => item.id === pendingId);
-        const divider = latest.messages.find((item) => item.id === dividerId);
-        const withoutPending = { ...latest, messages: latest.messages.filter((item) => item.id !== pendingId && item.id !== dividerId) };
-        const sent = applyAgentEvent(withoutPending, this.runs, projectPath, target.chatId, { type: "message-sent", model: runModel });
-        added = sent.state.messages.slice(withoutPending.messages.length).filter((message) => message.role === "assistant");
-        this.runs = sent.runs;
-        seq = ++this.seq;
-        return { ...sent.state, messages: [...sent.state.messages, ...(divider ? [divider] : []), message] };
-      })
+      .update(
+        projectPath,
+        (latest) => {
+          const message = latest.messages.find((item) => item.id === pendingId);
+          const divider = latest.messages.find((item) => item.id === dividerId);
+          const withoutPending = { ...latest, messages: latest.messages.filter((item) => item.id !== pendingId && item.id !== dividerId) };
+          const sent = applyAgentEvent(withoutPending, this.runs, projectPath, target.chatId, { type: "message-sent", model: runModel });
+          added = sent.state.messages.slice(withoutPending.messages.length).filter((message) => message.role === "assistant");
+          this.runs = sent.runs;
+          seq = ++this.seq;
+          return { ...sent.state, messages: [...sent.state.messages, ...(divider ? [divider] : []), message] };
+        },
+        { chats: [target.sessionId] },
+      )
       .catch((error) => {
         // The handoff never prepares: nothing may wait on it.
         if (preparation) {
@@ -567,7 +610,7 @@ class ChatHost {
         }),
       ]);
       if (handoffBrief === null || controller.signal.aborted) return null;
-      await this.updateDivider(projectPath, dividerId, { status: "done", brief: handoffBrief, transcriptPath });
+      await this.updateDivider(projectPath, dividerId, { status: "done", brief: handoffBrief, transcriptPath }, target.sessionId);
       // An abort that landed while the divider was being marked done still cancels the handoff.
       if (controller.signal.aborted) {
         await this.abandonHandoff(projectPath, preparation, { aborted: true }).catch(() => {});
@@ -596,11 +639,15 @@ class ChatHost {
    * already marked done, for an abort that landed while that update was in flight.
    */
   async abandonHandoff(projectPath, { dividerId, sessionId, from, to }, { aborted = false } = {}) {
-    const { state, changed } = await this.states.update(projectPath, (latest) => {
-      const divider = latest.messages.find((item) => item.id === dividerId);
-      if (!isHandoff(divider) || !(divider.context.status === "preparing" || (aborted && divider.context.status === "done"))) return latest;
-      return failHandoff(latest, divider, sessionId, from, to);
-    });
+    const { state, changed } = await this.states.update(
+      projectPath,
+      (latest) => {
+        const divider = latest.messages.find((item) => item.id === dividerId);
+        if (!isHandoff(divider) || !(divider.context.status === "preparing" || (aborted && divider.context.status === "done"))) return latest;
+        return failHandoff(latest, divider, sessionId, from, to);
+      },
+      { chats: [sessionId] },
+    );
     if (changed) this.broadcast(projectPath, state);
     // The turn stored for the chat still names the target provider: put it back, so a Delegation delivered next doesn't redo the switch.
     const chatId = chatKey(projectPath, sessionId);
@@ -611,14 +658,18 @@ class ChatHost {
     }
   }
 
-  /** Merges `patch` into a handoff divider's context and tells the windows. */
-  async updateDivider(projectPath, dividerId, patch) {
-    const { state, changed } = await this.states.update(projectPath, (latest) => {
-      const divider = latest.messages.find((item) => item.id === dividerId);
-      // Only a divider still preparing changes: a cancelled one stays failed.
-      if (!isHandoff(divider) || divider.context.status !== "preparing") return latest;
-      return { ...latest, messages: latest.messages.map((item) => (item === divider ? { ...item, context: { ...item.context, ...patch } } : item)) };
-    });
+  /** Merges `patch` into a handoff divider's context (in Chat `sessionId`, when known) and tells the windows. */
+  async updateDivider(projectPath, dividerId, patch, sessionId) {
+    const { state, changed } = await this.states.update(
+      projectPath,
+      (latest) => {
+        const divider = latest.messages.find((item) => item.id === dividerId);
+        // Only a divider still preparing changes: a cancelled one stays failed.
+        if (!isHandoff(divider) || divider.context.status !== "preparing") return latest;
+        return { ...latest, messages: latest.messages.map((item) => (item === divider ? { ...item, context: { ...item.context, ...patch } } : item)) };
+      },
+      { chats: sessionId == null ? undefined : [sessionId] },
+    );
     if (changed) this.broadcast(projectPath, state);
   }
 
@@ -666,15 +717,19 @@ class ChatHost {
     await Promise.all(
       [...byProject].map(([projectPath, chats]) =>
         this.states
-          .update(projectPath, (latest) => {
-            let sessions = latest.sessions;
-            for (const [sessionId, { prompt, ...turn }] of chats) {
-              const session = sessions[sessionId];
-              if (!session) continue;
-              sessions = { ...sessions, [sessionId]: { ...session, resumeTurn: { ...turn, stoppedAt, ...(session.native_session_id ? {} : { prompt }) } } };
-            }
-            return sessions === latest.sessions ? latest : { ...latest, sessions };
-          })
+          .update(
+            projectPath,
+            (latest) => {
+              let sessions = latest.sessions;
+              for (const [sessionId, { prompt, ...turn }] of chats) {
+                const session = sessions[sessionId];
+                if (!session) continue;
+                sessions = { ...sessions, [sessionId]: { ...session, resumeTurn: { ...turn, stoppedAt, ...(session.native_session_id ? {} : { prompt }) } } };
+              }
+              return sessions === latest.sessions ? latest : { ...latest, sessions };
+            },
+            { chats: [] },
+          )
           .catch((error) => console.warn(`Milagre couldn't save the running chats of ${projectPath}:`, error.message)),
       ),
     );
@@ -697,13 +752,17 @@ class ChatHost {
     await this.states.executionContext?.(projectPath, sessionId);
     let turn = null;
     // Taken from the latest state, so a chat resumes once.
-    const { state, changed } = await this.states.update(projectPath, (latest) => {
-      const current = latest.sessions[sessionId];
-      if (!current?.resumeTurn) return latest;
-      const { resumeTurn, ...rest } = current;
-      turn = resumeTurn;
-      return { ...latest, sessions: { ...latest.sessions, [sessionId]: rest } };
-    });
+    const { state, changed } = await this.states.update(
+      projectPath,
+      (latest) => {
+        const current = latest.sessions[sessionId];
+        if (!current?.resumeTurn) return latest;
+        const { resumeTurn, ...rest } = current;
+        turn = resumeTurn;
+        return { ...latest, sessions: { ...latest.sessions, [sessionId]: rest } };
+      },
+      { chats: [] },
+    );
     if (!turn) return false;
     if (changed) this.broadcast(projectPath, state);
     const { prompt, stoppedAt: _stoppedAt, ...options } = turn;
@@ -712,29 +771,36 @@ class ChatHost {
   }
 
   /** On open: a divider still preparing was cut off by a quit and is failed; a legacy handover still pending is settled. */
-  async recoverHandoffs(projectPath, _state) {
-    const { state, changed } = await this.states.update(projectPath, (latest) => {
-      let sessions = latest.sessions;
-      for (const session of Object.values(latest.sessions)) {
-        if (!session.handoverPending) continue;
-        const { handoverPending: _pending, ...rest } = session;
-        sessions = { ...sessions, [session.id]: rest };
-      }
-      let next = { ...latest, sessions };
-      for (const item of latest.messages) {
-        if (isHandoff(item) && item.context.status === "preparing" && !this.preparing.has(chatKey(projectPath, item.session_id))) {
-          next = failHandoff(
-            next,
-            next.messages.find((message) => message.id === item.id),
-            item.session_id,
-            item.context.from.provider,
-            item.context.to.provider,
-          );
+  async recoverHandoffs(projectPath, known) {
+    // Only Chats whose summary has a divider preparing (or that have no summary) need their messages.
+    const sessions = Object.values((known ?? (await this.states.get(projectPath))).sessions ?? {});
+    const chats = sessions.filter((session) => !session.summary || session.summary.openHandoff !== undefined).map((session) => session.id);
+    const { state, changed } = await this.states.update(
+      projectPath,
+      (latest) => {
+        let sessions = latest.sessions;
+        for (const session of Object.values(latest.sessions)) {
+          if (!session.handoverPending) continue;
+          const { handoverPending: _pending, ...rest } = session;
+          sessions = { ...sessions, [session.id]: rest };
         }
-      }
-      const touched = next.sessions !== latest.sessions || next.messages.some((item, index) => item !== latest.messages[index]);
-      return touched ? next : latest;
-    });
+        let next = { ...latest, sessions };
+        for (const item of latest.messages) {
+          if (isHandoff(item) && item.context.status === "preparing" && !this.preparing.has(chatKey(projectPath, item.session_id))) {
+            next = failHandoff(
+              next,
+              next.messages.find((message) => message.id === item.id),
+              item.session_id,
+              item.context.from.provider,
+              item.context.to.provider,
+            );
+          }
+        }
+        const touched = next.sessions !== latest.sessions || next.messages.some((item, index) => item !== latest.messages[index]);
+        return touched ? next : latest;
+      },
+      { chats },
+    );
     if (changed) this.broadcast(projectPath, state);
   }
 }

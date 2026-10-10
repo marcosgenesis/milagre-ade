@@ -4,7 +4,8 @@ const { validLinkId } = require("@milagre/shared/chat-scopes");
 const { ProjectStates } = require("./project-states.cjs");
 const { readProjectState, saveProjectState, compactProjectState } = require("./project-store.cjs");
 
-function createLinkStore({ dataDir }) {
+/** `active(id, chatId)` says whether a shared Chat's turn is busy, so its messages stay in memory (see ProjectStates). */
+function createLinkStore({ dataDir, active = () => true, lazyMessages = {} }) {
   const root = path.join(dataDir, "links");
   const directory = (id) => {
     if (!validLinkId(id)) throw new Error("Invalid Link ID");
@@ -21,20 +22,29 @@ function createLinkStore({ dataDir }) {
     },
     save: (id, state) => saveProjectState(directory(id), state, { durable: true }),
     compact: (id, next, previous) => compactProjectState(directory(id), next, previous),
+    messages: { directory, active, ...lazyMessages },
   });
+  const checked =
+    (read) =>
+    (id, ...rest) => {
+      directory(id);
+      return read(id, ...rest);
+    };
   return {
     directory,
     cached: (id) => states.states.get(id),
     has: (id) => states.has(id),
     ids: () => states.projects(),
-    get: (id) => {
-      directory(id);
-      return states.get(id);
-    },
-    update: (id, change, options) => {
-      directory(id);
-      return states.update(id, change, options);
-    },
+    get: checked((id) => states.get(id)),
+    update: checked((id, change, options) => states.update(id, change, options)),
+    load: checked((id, chats) => states.load(id, chats)),
+    allMessages: checked((id, options) => states.allMessages(id, options)),
+    chatMessages: checked((id, chats) => states.chatMessages(id, chats)),
+    messageMarks: checked((id, options) => states.messageMarks(id, options)),
+    messagesContaining: checked((id, needles) => states.messagesContaining(id, needles)),
+    searchableMessages: checked((id, chats) => states.searchableMessages(id, chats)),
+    findMessage: checked((id, field, value) => states.findMessage(id, field, value)),
+    unloadIdle: () => states.unloadIdle(),
     flush: (id) => states.flush(id),
     close: () => states.close(),
     async ownedWorktrees() {

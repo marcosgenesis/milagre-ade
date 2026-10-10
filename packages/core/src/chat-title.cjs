@@ -67,26 +67,32 @@ class ChatTitles {
     const state = await this.states.get(projectPath);
     const session = state.sessions[sessionId];
     if (!session?.titlePending) return;
-    const first = state.messages.find((message) => message.session_id === sessionId && message.role !== "assistant");
+    // The Chat may be unloaded (see message-store.cjs): its messages are read without loading it.
+    const messages = this.states.chatMessages ? await this.states.chatMessages(projectPath, [sessionId]) : state.messages;
+    const first = messages.find((message) => message.session_id === sessionId && message.role !== "assistant");
     const title =
       session.title || session.generatedTitle || !first?.body.trim()
         ? null
         : await this.generate({ prompt: first.body, provider: session.provider, projectPath }).catch(() => null);
-    await this.update(projectPath, (latest) => {
-      const current = latest.sessions[sessionId];
-      if (!current?.titlePending) return latest;
-      const { titlePending, ...rest } = current;
-      return {
-        ...latest,
-        sessions: {
-          ...latest.sessions,
-          [sessionId]: {
-            ...rest,
-            ...(title && !current.title && !current.generatedTitle ? { generatedTitle: title } : {}),
+    await this.update(
+      projectPath,
+      (latest) => {
+        const current = latest.sessions[sessionId];
+        if (!current?.titlePending) return latest;
+        const { titlePending, ...rest } = current;
+        return {
+          ...latest,
+          sessions: {
+            ...latest.sessions,
+            [sessionId]: {
+              ...rest,
+              ...(title && !current.title && !current.generatedTitle ? { generatedTitle: title } : {}),
+            },
           },
-        },
-      };
-    });
+        };
+      },
+      { chats: [] },
+    );
   }
 }
 

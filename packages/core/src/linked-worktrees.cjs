@@ -14,13 +14,20 @@ const ACTIVE_TTL_MS = 3000;
 /**
  * What a Chat gets from its Links (spec 003): the summary at the start of each turn, the linked tools for
  * either provider, and the Delegations they make. The runtime supplies its parts:
- *   registry() -> the Project registry; project(path) -> the Project's state, loading the Project if needed
+ *   registry() -> the Project registry; project(path) -> the Project's state, loading the Project if needed (it can
+ *   leave out unloaded Chats' messages: see message-store.cjs); messages(path, chatIds) -> those Chats' messages, whole,
+ *   or every message without chatIds; bodies(path, chatIds) -> their ids, roles and bodies
  *   chats -> the ChatHost; agents -> the SessionManager; emit(channel, payload) -> the windows
  */
 function createLinkedWorktrees({
   dataDir,
   registry,
   project,
+  messages = async (projectPath, chatIds) => {
+    const all = (await project(projectPath)).messages;
+    return chatIds ? all.filter((message) => chatIds.includes(message.session_id)) : all;
+  },
+  bodies = messages,
   chats,
   agents,
   emit,
@@ -81,6 +88,8 @@ function createLinkedWorktrees({
   const reads = createLinkedReads({
     sides,
     state: project,
+    messages,
+    bodies,
     runs: () => chats.runs,
     receiveOnly: (key) => receiveOnly.has(key),
     open: (side) => delegations.openBetween(side.sourceWorktree, side.worktree_path),
@@ -119,9 +128,11 @@ function createLinkedWorktrees({
   // Resolves once the message is saved, with `started`: what took it (see Delegations' deliver port).
   async function deliver(key, { body, prompt, context }) {
     const projectPath = projectOfKey(key);
-    const state = await project(projectPath);
+    let state = await project(projectPath);
     const session = state.sessions[sessionIdFromKey(key)];
     if (!session) throw new Error("that Chat is no longer in its Project");
+    // The Project's last used model is read across every Chat, unloaded ones too, when the Chat has no turn this run.
+    if (!chats.turnSettings(key)) state = { ...state, messages: await messages(projectPath) };
     const { started } = await chats.send({
       body,
       prompt,
@@ -154,7 +165,13 @@ function createLinkedWorktrees({
         const state = await project(side.projectPath);
         const worktree = Object.values(state.worktrees).find((item) => item.path === worktreePath);
         if (worktree?.sharedChat) throw new Error("Delegation into a shared Link Chat is not supported. Read its canonical transcript instead.");
-        return { link_id: side.link_id, projectPath: side.projectPath, projectName: side.projectName, branch: worktree?.name ?? path.basename(worktreePath) };
+        return {
+          link_id: side.link_id,
+          link_ids: side.link_ids ?? [side.link_id],
+          projectPath: side.projectPath,
+          projectName: side.projectName,
+          branch: worktree?.name ?? path.basename(worktreePath),
+        };
       },
       chat,
       async openChat(projectPath, worktreePath) {
@@ -166,7 +183,7 @@ function createLinkedWorktrees({
       status: (key) => runStatus(chats.runs[key]),
       deliver,
       note: (key, note) => chats.addNote(key, note),
-      reply: async (key, delegationId) => delegationReply(await project(projectOfKey(key)), sessionIdFromKey(key), delegationId),
+      reply: async (key, delegationId) => delegationReply(await messages(projectOfKey(key), [sessionIdFromKey(key)]), sessionIdFromKey(key), delegationId),
       permissionMode: (key) => agents.permissionMode(key),
       approve: (key, request) => agents.askApproval(key, request),
       changed: () => emit("linked:changed", snapshot()),
@@ -200,7 +217,8 @@ function createLinkedWorktrees({
         );
         for (const session of Object.values(state.sessions)) {
           if (session.worktree_id !== worktree.id || session.archived) continue;
-          if (!(session.summary?.count ?? state.messages.some((message) => message.session_id === session.id))) continue;
+          // An unloaded Chat's messages aren't in the state: its summary counts them.
+          if (!((session.summary?.count ?? 0) > 0 || state.messages.some((message) => message.session_id === session.id))) continue;
           const key = chatKey(source.path, session.id);
           const summary = await reads.summary(key).catch(() => "");
           const context = {
@@ -250,6 +268,13 @@ function createLinkedWorktrees({
     observe: (chatId, event) => delegations.observe(chatId, event),
     linkAdded,
     linkRemoved: (id) => delegations.linkRemoved(id),
+    /** "Always allow Delegations" from the sidebar's Link popover: the grant the approval card saves, set ahead. */
+    async grant(chatId, linkId) {
+      if (typeof chatId !== "string" || !chatId.includes("#")) throw new Error("Choose a Chat and a Link.");
+      if (!(await registry().snapshot()).links.some((link) => link.id === linkId)) throw new Error("That Link no longer exists.");
+      if (isLinkScopeKey(projectOfKey(chatId))) throw new Error("A shared Link Chat makes no Delegations.");
+      await delegations.grant(chatId, linkId);
+    },
     stop: (target) => delegations.stop(target),
     snapshot,
     close: () => mcp.close(),

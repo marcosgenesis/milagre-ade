@@ -42,7 +42,7 @@ export default function ChoiceSheet() {
   if (!entry) return null;
   const search = query.trim().toLowerCase();
   const load = entry.load;
-  const items = switching ? [] : allItems.filter((item) => item.title.toLowerCase().includes(search));
+  const items = switching ? [] : allItems.filter((item) => `${item.title}\n${item.keywords ?? ""}`.toLowerCase().includes(search));
   const tabs = entry.tabs && entry.tabs.length > 1 ? entry.tabs : null;
   // A pull reads the shown tab from Linear again; a tab reads what the Mac kept, with no rows meanwhile.
   async function reload(next: string | undefined, fresh: boolean) {

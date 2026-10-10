@@ -77,6 +77,11 @@ const METHODS = new Set([
   "artifact:add-comments",
   "artifact:comments",
   "project:registry",
+  // Canvas Links from the chat menu's "Link with…" / "Remove Link with…", and the grant its "Always allow Delegations" sets.
+  "canvas:links",
+  "canvas:link-add",
+  "canvas:link-remove",
+  "linked:grant",
   "link:list",
   "link:create",
   "link:update",
@@ -145,9 +150,17 @@ function projectPullRequestRefs(project) {
     list.push(message);
     messages.set(message.session_id, list);
   }
-  // A Chat's summary has its refs; only a Chat without one (an older state) is read message by message.
+  // A Chat's summary has its refs; only a Chat without one (an older state) is read message by message. The bridge holds
+  // states without messages (the host can leave a Chat's out of memory), so the summaries are where the refs come from.
+  const sessions = project.state.sessions ?? {};
+  const ids = new Set([...Object.keys(sessions), ...[...messages.keys()].map(String)]);
   const refs = Object.fromEntries(
-    [...messages].map(([id, list]) => [id, project.state.sessions?.[id]?.summary?.pullRequests ?? pullRequestRefs(list)]).filter(([, refs]) => refs.length),
+    [...ids]
+      .map((id) => [
+        id,
+        sessions[id]?.summary ? (sessions[id].summary.pullRequests ?? []) : pullRequestRefs(messages.get(Number(id)) ?? messages.get(id) ?? []),
+      ])
+      .filter(([, refs]) => refs.length),
   );
   // The same objects as last time where nothing changed, so a phone's patch carries only the Chats whose refs did.
   const stable = reconcileState(lastPullRequestRefs.get(project.path), refs);
@@ -213,7 +226,8 @@ function withoutMessages(slim) {
 }
 /** A Project cut down to one new worktree and its Chats, without messages: what a phone needs from worktree:create. */
 function forNewWorktree(project, worktreeId) {
-  const state = project.state;
+  // The bridge takes states without messages; the phone gets this one as it did, with none and no flag saying so.
+  const { messagesInChats: _lean, ...state } = project.state;
   const worktree = state.worktrees?.[worktreeId];
   const sessions = Object.fromEntries(Object.entries(state.sessions ?? {}).filter(([, session]) => session.worktree_id === worktreeId));
   return { ...project, state: { ...state, worktrees: worktree ? { [worktreeId]: worktree } : {}, sessions, messages: [] } };
@@ -352,8 +366,10 @@ async function startMobileBridge({
   const client = await connect({ dataDir });
   // The bridge only needs to know a state changed, so it takes patches: the host then encodes no whole state for it. A
   // phone shows the last few entries of a subagent's transcript, so the bridge takes only their tails, and it never
-  // shows an archived subagent, so the bridge takes those as summaries.
-  await client.call("daemon:state-patches", [{ transcripts: false, archivedSubagents: false }]).catch(() => {});
+  // shows an archived subagent, so the bridge takes those as summaries. It takes states without messages, so it holds
+  // none: a phone reads them as pages (/chat-messages), and the few routes that need them all read them from the host
+  // when asked (chat:all-messages), unloaded Chats' included (see message-store.cjs).
+  await client.call("daemon:state-patches", [{ transcripts: false, archivedSubagents: false, messages: false }]).catch(() => {});
   const validScope = (owner) => typeof owner === "string" && (isLinkScopeKey(owner) || path.isAbsolute(owner));
   // The Projects phones opened lately, kept current from the host's state patches (and subagent updates, which carry
   // none), so a phone's snapshot doesn't read and parse the whole state from the host each time. A missed patch drops
@@ -363,7 +379,8 @@ async function startMobileBridge({
   async function heldProject(owner) {
     let held = heldProjects.get(owner);
     if (!held) {
-      const { state, version, epoch, ...rest } = await client.call("state:read", [owner]);
+      // With the rest of the snapshot: phones key a Project by its path and show its name.
+      const { state, version, epoch, ...rest } = await client.call("state:read", [owner, { rest: true }]);
       held = { epoch, version, project: { ...rest, state } };
       heldProjects.set(owner, held);
       if (heldProjects.size > HELD_PROJECTS) heldProjects.delete(heldProjects.keys().next().value);
@@ -406,6 +423,20 @@ async function startMobileBridge({
         return { epoch: snapshotEpoch, version, base: Number(held), patch };
     }
     return { epoch: snapshotEpoch, version, snapshot: result };
+  }
+  /**
+   * A Project or Link of readScope with every message, or only each message's marks (see forChatList). The state comes
+   * with the messages, from the same read on the host, so its Chats and messages always match; the held one gives
+   * only the rest (path, name, the Link).
+   */
+  async function withMessages(owner, scope, { marks = false } = {}) {
+    const read = await client.call("chat:all-messages", [owner, { marks, withState: true }]);
+    // As the state was before the bridge held them lean: every message, no "read them by Chat" flag.
+    const fill = (item) => {
+      const { messagesInChats: _lean, ...state } = read.state;
+      return { ...item, state: { ...state, messages: read.messages } };
+    };
+    return scope.link ? { link: fill(scope.link) } : { project: fill(scope.project) };
   }
   async function readScope(owner) {
     await confine?.check(owner);
@@ -456,6 +487,7 @@ async function startMobileBridge({
       // A snapshot carries the runs too, so "project" covers "runs".
       const types = [];
       if (entry.kinds.has("accounts")) types.push("accounts");
+      if (entry.kinds.has("links")) types.push("links");
       if (entry.kinds.has("project")) types.push("project");
       else if (entry.kinds.has("runs")) types.push("runs");
       entry.kinds.clear();
@@ -502,6 +534,9 @@ async function startMobileBridge({
     followState(channel, payload);
     for (const entry of live) {
       if (channel === "accounts:changed" && !confine) signal(entry, "accounts", 0);
+      // A Link made or removed anywhere (canvas, sidebar, another phone): the phone reads canvas:links again. A confined
+      // phone is refused canvas:links, so it isn't told.
+      if (channel === "canvas:links-changed" && !confine) signal(entry, "links", 0);
       if (
         (channel === "project:state" && payload?.path === entry.projectPath) ||
         (channel === "link:state" && isLinkScopeKey(entry.projectPath) && payload?.linkId === scopeFromKey(entry.projectPath).linkId)
@@ -588,14 +623,17 @@ async function startMobileBridge({
         }
         if (req.method === "GET" && target.pathname === "/snapshot") {
           const projectPath = target.searchParams.get("projectPath");
-          const [scope, runs] = await Promise.all([readScope(projectPath), client.call("chat:runs")]);
-          const slim = scope.link ? { link: forPhone(scope.link) } : { project: forPhone(scope.project) };
-          if (!scope.link && target.searchParams.get("view") === "chats") {
-            reply(200, { result: forChatList(scope.project, projectRuns(runs, projectPath)) }, { etag: true });
+          const [held, runs] = await Promise.all([readScope(projectPath), client.call("chat:runs")]);
+          if (!held.link && target.searchParams.get("view") === "chats") {
+            const { project } = await withMessages(projectPath, held, { marks: true });
+            reply(200, { result: forChatList(project, projectRuns(runs, projectPath)) }, { etag: true });
             return;
           }
-          // An app that reads each Chat's messages as pages (/chat-messages) gets the snapshot without them.
+          // An app that reads each Chat's messages as pages (/chat-messages) gets the snapshot without them; an older one
+          // gets every message, read from the host.
           const pages = req.headers["x-milagre-chat-pages"] === "1";
+          const scope = pages ? held : await withMessages(projectPath, held);
+          const slim = scope.link ? { link: forPhone(scope.link) } : { project: forPhone(scope.project) };
           const result = { ...(pages ? withoutMessages(slim) : slim), runs: runsForPhone(projectRuns(runs, projectPath)) };
           // An app that says what it holds gets the snapshot numbered, and as a patch on that one when it can.
           const since = req.headers["x-milagre-snapshot-since"];

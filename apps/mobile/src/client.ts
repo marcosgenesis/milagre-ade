@@ -4,7 +4,7 @@ import { applyStatePatch } from "@milagre/shared/state-patch";
 import type { StatePatch } from "@milagre/shared/state-patch";
 import { phoneSnapshot } from "./chat-scope.ts";
 import type { AgentRuns } from "@milagre/shared/agent-runs";
-import { openLive, type Live, type LiveOptions } from "./live.ts";
+import { isLiveSignal, openLive, type Live, type LiveOptions } from "./live.ts";
 import type { RelayTransport } from "./relay-transport.ts";
 import { localEndpoint, relayAddress, validAccess, validRelay, type Access, type RelayLink } from "@milagre/shared/pairing-link";
 
@@ -107,7 +107,7 @@ function relayLive(path: string, { onSignal, onStatus }: LiveOptions, through: P
           } catch {
             return;
           }
-          if (type === "runs" || type === "project" || type === "accounts") onSignal(type);
+          if (isLiveSignal(type)) onSignal(type);
         },
         onStatus,
       );

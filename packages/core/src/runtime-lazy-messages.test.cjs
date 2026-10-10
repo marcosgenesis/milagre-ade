@@ -1,0 +1,184 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const { execFileSync } = require("node:child_process");
+const { createRuntime } = require("./runtime.cjs");
+const { readProjectState } = require("./project-store.cjs");
+const { savedRows } = require("./message-store.cjs");
+
+// Lazy message memory (#321) through the whole runtime: a Chat that left memory takes turns, handoffs, subagent
+// updates, archive and restarts as if it never had.
+
+async function fixture(t) {
+  const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "milagre-lazy-runtime-")));
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+  execFileSync("git", ["init", "-b", "main", project], { stdio: "ignore" });
+  const dataDir = path.join(dir, "profile");
+  const sessions = [];
+  const runtimes = [];
+  t.after(async () => {
+    try {
+      for (const runtime of runtimes) await runtime.close();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+  const make = () => {
+    const runtime = createRuntime({
+      dataDir,
+      cwd: project,
+      version: "9.8.7",
+      environmentReady: Promise.resolve(),
+      titleModels: {},
+      lazyMessages: { idleMs: 0, sweepMs: 0 },
+      // No CLI runs: a handoff's brief fails, after its transcript is written.
+      agentCli: async () => ({ command: "/milagre-test/missing-cli" }),
+      createSession(provider, options) {
+        let turn = 0;
+        const session = {
+          provider,
+          options,
+          turnActive: false,
+          closed: false,
+          startTurn: async () => {
+            turn++;
+            options.emit({ type: "turn-started", turnId: `t${turn}` });
+            options.emit({ type: "session-started", nativeId: `${provider}-native` });
+            options.emit({ type: "text-delta", messageId: `m${turn}`, text: `Reply ${turn} from ${provider}` });
+            options.emit({ type: "turn-completed" });
+            return { turnId: `t${turn}` };
+          },
+          interrupt: async () => {},
+          close: async () => {},
+        };
+        sessions.push(session);
+        return session;
+      },
+    });
+    runtimes.push(runtime);
+    return runtime;
+  };
+  return { project, dataDir, sessions, make };
+}
+
+const until = async (check) => {
+  for (let i = 0; i < 300; i++) {
+    const value = await check();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out");
+};
+
+async function openChat(t) {
+  const context = await fixture(t);
+  const runtime = context.make();
+  const opened = await runtime.openProject(context.project);
+  const chat = Object.values(opened.state.sessions)[0];
+  const chatMessages = async () => (await runtime.invoke("chat:all-messages", [context.project])).filter((message) => message.session_id === chat.id);
+  const send = async (body, provider = "claude") => {
+    const before = (await chatMessages()).filter((message) => message.outcome).length;
+    await runtime.invoke("chat:send", [{ projectPath: context.project, sessionId: chat.id, body, provider, model: `${provider}-model` }]);
+    await until(async () => (await chatMessages()).filter((message) => message.outcome).length > before);
+  };
+  const inMemory = () => [...(savedRows(context.project)?.values() ?? [])].some((row) => row.chat === chat.id);
+  const unload = async () => {
+    await runtime.flush();
+    await runtime.unloadIdle();
+    assert.equal(inMemory(), false, "the Chat left memory");
+  };
+  return { ...context, runtime, chat, chatMessages, send, inMemory, unload };
+}
+
+const shape = (messages) => messages.map((message) => [message.role, message.body]);
+
+test("a turn in a Chat that left memory goes into the whole Chat, in order, and is saved whole", async (t) => {
+  const { project, chat, chatMessages, send, unload, inMemory, runtime } = await openChat(t);
+  await send("first");
+  await unload();
+  await send("second");
+  assert.equal(inMemory(), true, "the send loaded it");
+  const expected = [
+    ["user", "first"],
+    ["assistant", "Reply 1 from claude"],
+    ["user", "second"],
+    ["assistant", "Reply 2 from claude"],
+  ];
+  assert.deepEqual(shape(await chatMessages()), expected);
+  const state = (await runtime.invoke("project:snapshot", [project])).state;
+  assert.equal(state.sessions[chat.id].summary.count, 4);
+  await runtime.flush();
+  assert.deepEqual(shape((await readProjectState(project)).messages), expected);
+});
+
+test("a handoff in a Chat that left memory writes its transcript and brief from the whole Chat, then continues", async (t) => {
+  const { chat, chatMessages, send, unload, runtime, project } = await openChat(t);
+  await send("Earlier question");
+  await unload();
+  await runtime.invoke("chat:send", [{ projectPath: project, sessionId: chat.id, body: "switch", provider: "codex", model: "codex-model" }]);
+  // No CLI writes a summary here, so the brief is the fallback one, made from the Chat's own messages.
+  await until(async () => (await chatMessages()).some((message) => message.body === "Reply 1 from codex"));
+  const messages = await chatMessages();
+  const divider = messages.find((message) => message.context?.kind === "handoff");
+  assert.equal(divider.context.status, "done");
+  assert.match(divider.context.brief, /Last request:\nEarlier question/);
+  const transcript = await fs.readFile(divider.context.transcriptPath, "utf8");
+  assert.ok(transcript.includes("Earlier question") && transcript.includes("Reply 1 from claude"), "the transcript holds the turns from before");
+  assert.deepEqual(shape(messages), [
+    ["user", "Earlier question"],
+    ["assistant", "Reply 1 from claude"],
+    ["assistant", ""],
+    ["user", "switch"],
+    ["assistant", "Reply 1 from codex"],
+  ]);
+});
+
+test("a subagent update for a Chat that left memory lands in it, and its messages stay", async (t) => {
+  const { project, chat, chatMessages, send, unload, inMemory, sessions, runtime } = await openChat(t);
+  await send("Start a helper");
+  await unload();
+  const agent = { id: "helper-1", title: "Helper", status: "running", startedAt: 1, updatedAt: 2, transcript: [{ id: "x", kind: "message", text: "Working" }] };
+  sessions[0].options.emit({ type: "subagent-update", agent });
+  const state = await until(async () => {
+    const latest = (await runtime.invoke("project:snapshot", [project])).state;
+    return latest.sessions[chat.id].subagents?.some((item) => item.id === "helper-1") && latest;
+  });
+  assert.equal(state.sessions[chat.id].summary.count, 2);
+  assert.equal(inMemory(), true);
+  assert.deepEqual(shape(await chatMessages()), [
+    ["user", "Start a helper"],
+    ["assistant", "Reply 1 from claude"],
+  ]);
+});
+
+test("archiving and restoring a Chat that left memory keeps every message, and a restart reads them all", async (t) => {
+  const { project, chat, chatMessages, send, unload, runtime, make } = await openChat(t);
+  await send("Keep me");
+  await unload();
+  await runtime.invoke("chat:patch", [project, chat.id, { archived: true }]);
+  await runtime.flush();
+  assert.deepEqual(shape(await chatMessages()), [
+    ["user", "Keep me"],
+    ["assistant", "Reply 1 from claude"],
+  ]);
+  // Archived Chats are left out of a search, as before.
+  assert.deepEqual(await runtime.invoke("chat:search", [project, "keep"]), []);
+  await runtime.invoke("chat:patch", [project, chat.id, { archived: false }]);
+  assert.equal((await runtime.invoke("chat:search", [project, "keep"]))[0].message.session_id, chat.id);
+  const page = await runtime.invoke("chat:messages", [project, chat.id, { turns: 5 }]);
+  assert.deepEqual(shape(page.messages), [
+    ["user", "Keep me"],
+    ["assistant", "Reply 1 from claude"],
+  ]);
+  await runtime.unloadIdle();
+  await runtime.close();
+  const again = make();
+  const reopened = await again.openProject(project);
+  assert.deepEqual(shape(reopened.state.messages.filter((message) => message.session_id === chat.id)), [
+    ["user", "Keep me"],
+    ["assistant", "Reply 1 from claude"],
+  ]);
+});

@@ -109,7 +109,7 @@ class DiffRefresher {
     );
     if (this.closed) return;
     // Applied to the latest state: turns may have finished while git ran.
-    await this.update(projectPath, (latest) => withDiffStats(latest, Object.fromEntries(stats)));
+    await this.update(projectPath, (latest) => withDiffStats(latest, Object.fromEntries(stats)), { chats: [] });
   }
 }
 

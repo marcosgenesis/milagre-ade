@@ -5,7 +5,7 @@ import { Archive02Icon, Cancel01Icon, ViewIcon } from "@hugeicons/core-free-icon
 import { advisorAction, subagentRoleLabel, subagentActivityLabel } from "@milagre/shared/agent-activity";
 import type { ModelProvider, Subagent } from "../../model";
 import { subagentActive, subagentFinished } from "../../lib/subagents";
-import { useSubagentTranscript } from "../../lib/subagent-transcripts";
+import { useSubagentDetails } from "../../lib/subagent-transcripts";
 import { Markdown } from "../markdown/Markdown";
 import { ProviderLogo } from "../ProviderLogo";
 import { SpinnerRing } from "../primitives/SpinnerRing";
@@ -45,11 +45,14 @@ function AdvisorControls({ agent, onStop, onRetry }: { agent: Subagent; onStop?:
 }
 export const SubagentTranscript = memo(function SubagentTranscript({
   chatKey,
-  agent,
+  agent: sent,
   onStop,
   onRetry,
 }: {
-  /** The Chat the subagent belongs to, to read its whole transcript when the host sends only the end of it. */
+  /**
+   * The Chat the subagent belongs to, to read what the host leaves out: the start of its transcript, or all but the
+   * summary of an archived one.
+   */
   chatKey?: string | null;
   agent: Subagent;
   onStop?: (id: string) => void;
@@ -57,8 +60,8 @@ export const SubagentTranscript = memo(function SubagentTranscript({
 }) {
   // oxlint-disable-next-line react/purity -- Date.now() only seeds the initial clock state; an effect keeps it current
   const [now, setNow] = useState(Date.now());
+  const { agent, transcript, status } = useSubagentDetails(chatKey, sent);
   const running = subagentActive(agent);
-  const transcript = useSubagentTranscript(chatKey, agent);
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -89,7 +92,17 @@ export const SubagentTranscript = memo(function SubagentTranscript({
           )}
         </div>
       ))}
-      {!transcript.length && <p className="py-6 text-[13px] text-ink-3">No child output received yet.</p>}
+      {status === "loading" && (
+        <p data-subagent-loading className="py-6 text-[13px] text-ink-3">
+          Loading activity…
+        </p>
+      )}
+      {status === "failed" && (
+        <p data-subagent-failed className="py-6 text-[13px] text-ink-3">
+          Couldn't load this subagent's activity. Open it again to retry.
+        </p>
+      )}
+      {status === "ready" && !transcript.length && <p className="py-6 text-[13px] text-ink-3">No child output received yet.</p>}
     </div>
   );
 });

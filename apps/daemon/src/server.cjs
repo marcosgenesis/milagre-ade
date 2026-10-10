@@ -1,6 +1,6 @@
 const { isLinkScopeKey, scopeFromKey, scopeKey } = require("@milagre/shared/chat-scopes");
 const { diffState } = require("@milagre/shared/state-patch");
-const { sessionWithTranscriptTails, withTranscriptTail } = require("@milagre/shared/subagent-transcript");
+const { sessionWithArchivedSummaries, sessionWithTranscriptTails, withArchivedSummary, withTranscriptTail } = require("@milagre/shared/subagent-transcript");
 const { preparePrivateDirectory } = require("@milagre/core/private-files");
 const { prepareToken, validToken, authenticationProof, authenticationNonce, validNonce } = require("./local-auth.cjs");
 const net = require("node:net");
@@ -53,6 +53,9 @@ const CHAT_PAGES = "chat-pages-v1";
 // chat:subagent and daemon:state-patches({ transcripts: false }): a client can take each subagent with only the last
 // entries of its transcript, in states and in subagent updates, and read a whole one when it shows it.
 const SUBAGENT_TAILS = "subagent-tails-v1";
+// daemon:state-patches({ archivedSubagents: false }): a client can take each archived subagent as a summary, in states
+// and in subagent updates, and read the rest with chat:subagent when it opens one.
+const ARCHIVED_SUMMARIES = "archived-subagent-summaries-v1";
 const STATE_METHODS = Object.freeze(["state:read"]);
 
 const PAGES_TTL_MS = 30000;
@@ -139,27 +142,46 @@ function createResultPages(maxFrameBytes, { ttlMs = PAGES_TTL_MS, budgetChars = 
 }
 
 // How a client takes states (daemon:state-patches): without messages (`messages: false`) when it reads them by Chat,
-// and with each subagent's transcript cut to its tail (`transcripts: false`) when it reads those on demand.
-const WHOLE = Object.freeze({ messages: true, transcripts: true });
-const formOf = (options) => ({ messages: options?.messages !== false, transcripts: options?.transcripts !== false });
-const formKey = (form) => `${form.messages ? "m" : "-"}${form.transcripts ? "t" : "-"}`;
+// with each subagent's transcript cut to its tail (`transcripts: false`) when it reads those on demand, and with each
+// archived subagent as a summary (`archivedSubagents: false`) when it reads those on demand.
+const WHOLE = Object.freeze({ messages: true, transcripts: true, archived: true });
+const formOf = (options) => ({
+  messages: options?.messages !== false,
+  transcripts: options?.transcripts !== false,
+  archived: options?.archivedSubagents !== false,
+});
+const formKey = (form) => `${form.messages ? "m" : "-"}${form.transcripts ? "t" : "-"}${form.archived ? "a" : "-"}`;
+const wholeSubagents = (form) => form.transcripts && form.archived;
+const isWhole = (form) => form.messages && wholeSubagents(form);
 const NO_MESSAGES = Object.freeze([]);
 // Per form, the state as a client of that form gets it: the same object for the same state, so a patch between two of
 // them is found by identity like one between two whole states.
 const leanStates = new Map();
-const tailedSessions = new WeakMap();
-function withTranscriptTails(sessions) {
-  if (!sessions || typeof sessions !== "object") return sessions;
-  let tailed = tailedSessions.get(sessions);
-  if (!tailed) {
-    const entries = Object.entries(sessions).map(([id, session]) => [id, sessionWithTranscriptTails(session)]);
-    tailed = entries.some(([id, session]) => session !== sessions[id]) ? Object.fromEntries(entries) : sessions;
-    tailedSessions.set(sessions, tailed);
+const leanSessionsByForm = new Map();
+/** One subagent as a client of `form` gets it. */
+function subagentAsTaken(agent, form) {
+  const summarized = form.archived ? agent : withArchivedSummary(agent);
+  return form.transcripts ? summarized : withTranscriptTail(summarized);
+}
+/** A Project's sessions as a client of `form` gets them; the same object for the same sessions. */
+function leanSessions(sessions, form) {
+  if (!sessions || typeof sessions !== "object" || wholeSubagents(form)) return sessions;
+  const key = formKey(form);
+  let cache = leanSessionsByForm.get(key);
+  if (!cache) leanSessionsByForm.set(key, (cache = new WeakMap()));
+  let lean = cache.get(sessions);
+  if (!lean) {
+    const entries = Object.entries(sessions).map(([id, session]) => {
+      const summarized = form.archived ? session : sessionWithArchivedSummaries(session);
+      return [id, form.transcripts ? summarized : sessionWithTranscriptTails(summarized)];
+    });
+    lean = entries.some(([id, session]) => session !== sessions[id]) ? Object.fromEntries(entries) : sessions;
+    cache.set(sessions, lean);
   }
-  return tailed;
+  return lean;
 }
 function leanState(state, form = WHOLE) {
-  if (!state || typeof state !== "object" || (form.messages && form.transcripts)) return state;
+  if (!state || typeof state !== "object" || isWhole(form)) return state;
   const key = formKey(form);
   let cache = leanStates.get(key);
   if (!cache) leanStates.set(key, (cache = new WeakMap()));
@@ -168,26 +190,33 @@ function leanState(state, form = WHOLE) {
     lean = { ...state };
     // One empty array, so no patch ever touches it.
     if (!form.messages) Object.assign(lean, { messages: NO_MESSAGES, messagesInChats: true });
-    if (!form.transcripts) lean.sessions = withTranscriptTails(state.sessions);
+    if (!wholeSubagents(form)) lean.sessions = leanSessions(state.sessions, form);
     cache.set(state, lean);
   }
   return lean;
 }
 /** A reply as a client of `form` gets it: every state in it as leanState gives it. */
 function leanResult(result, form = WHOLE) {
-  if (!result || typeof result !== "object" || Array.isArray(result) || (form.messages && form.transcripts)) return result;
+  if (!result || typeof result !== "object" || Array.isArray(result) || isWhole(form)) return result;
   let lean = result;
   if (result.state && typeof result.state === "object") lean = { ...lean, state: leanState(result.state, form) };
+  // worktree:create and the Linear link/unlink replies carry their Project as `project: { path, name, state }`.
+  if (result.project?.state && typeof result.project.state === "object")
+    lean = { ...lean, project: { ...result.project, state: leanState(result.project.state, form) } };
   for (const key of ["projects", "links"])
     if (Array.isArray(result[key]))
       lean = { ...lean, [key]: result[key].map((item) => (item?.state ? { ...item, state: leanState(item.state, form) } : item)) };
   return lean;
 }
-/** A subagent update as a client that takes transcript tails gets it; null for any other event. */
-function tailedAgentEvent(channel, payload) {
+/**
+ * A subagent update as a client of `form` gets it (its transcript's tail, or an archived subagent's summary); null when
+ * that is the event as it is, or for any other event. The host publishes the subagent as its state holds it, `archived`
+ * included (chat-host.cjs).
+ */
+function agentEventAsTaken(channel, payload, form) {
   const agent = channel === "agent:event" && payload?.event?.type === "subagent-update" ? payload.event.agent : undefined;
-  const tailed = agent && withTranscriptTail(agent);
-  return tailed && tailed !== agent ? { ...payload, event: { ...payload.event, agent: tailed } } : null;
+  const taken = agent && subagentAsTaken(agent, form);
+  return taken && taken !== agent ? { ...payload, event: { ...payload.event, agent: taken } } : null;
 }
 /** The messages `next` has that `previous` didn't (new or changed), each after the message before it in its Chat, and the ids it no longer has. */
 function messageChanges(previous = [], next = []) {
@@ -280,7 +309,7 @@ async function startDaemon({
   let eventSeq = 0;
   // Connections that take state patches, and per scope the last state sent and its number. The numbers start again with
   // each host (epoch), so a client that reconnects to a new one reads its states again.
-  // Connection -> the form it takes states in ({ messages, transcripts }, see leanState).
+  // Connection -> the form it takes states in ({ messages, transcripts, archived }, see leanState).
   const patchClients = new Map();
   const epoch = randomUUID();
   const sentStates = new Map();
@@ -323,8 +352,15 @@ async function startDaemon({
     if (!clients.size) return;
     // An event that still doesn't fit is skipped, never the connection. Each form is encoded once, when a client takes it.
     let whole;
-    let tailedFrame;
-    const tailed = tailedAgentEvent(channel, payload);
+    const agentFrames = new Map();
+    const agentFrame = (form) => {
+      const key = formKey(form);
+      if (!agentFrames.has(key)) {
+        const taken = agentEventAsTaken(channel, payload, form);
+        agentFrames.set(key, taken && eventFrame(channel, taken, seq, inlineLimit));
+      }
+      return agentFrames.get(key);
+    };
     for (const [key, connection] of clients) {
       // A paired desktop hears nothing on a channel it may not call: phone:status carries the pairing link and its token.
       if (connection.policy?.denies(channel)) continue;
@@ -333,9 +369,7 @@ async function startDaemon({
         const frame =
           patched && taker
             ? patched.form(taker)
-            : taker && !taker.transcripts && tailed
-              ? (tailedFrame ??= eventFrame(channel, tailed, seq, inlineLimit))
-              : (whole ??= eventFrame(channel, payload, seq, inlineLimit));
+            : (taker && !wholeSubagents(taker) && agentFrame(taker)) || (whole ??= eventFrame(channel, payload, seq, inlineLimit));
         connection.send(null, frame.json, frame.bytes);
       } catch (error) {
         onError(new Error(`Milagre couldn't send a ${channel} event: ${error.message}`));
@@ -547,6 +581,7 @@ async function startDaemon({
               STATE_PATCHES,
               CHAT_PAGES,
               SUBAGENT_TAILS,
+              ARCHIVED_SUMMARIES,
               DESKTOP_PEER,
               REMOTE_FILES,
             ],
@@ -757,4 +792,4 @@ async function startDaemon({
   }
   return { socketPath, close, acceptConnection };
 }
-module.exports = { startDaemon, createResultPages };
+module.exports = { startDaemon, createResultPages, formOf, agentEventAsTaken, eventFrame };

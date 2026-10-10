@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { applyAgentEvent } from "./agent-runs.mjs";
-import { TRANSCRIPT_TAIL, mergeTranscript, sessionWithTranscriptTails, withTranscriptTail } from "./subagent-transcript.mjs";
+import {
+  TRANSCRIPT_TAIL,
+  isSubagentSummary,
+  mergeTranscript,
+  sessionWithArchivedSummaries,
+  sessionWithTranscriptTails,
+  withArchivedSummary,
+  withTranscriptTail,
+} from "./subagent-transcript.mjs";
 import type { CoordinatorState, Subagent, SubagentTranscriptEntry } from "./model.ts";
 
 const entries = (from: number, to: number): SubagentTranscriptEntry[] =>
@@ -87,4 +95,62 @@ test("a client that holds tails keeps each update's as it comes", () => {
   }).state;
   assert.deepEqual(host.sessions[1].subagents?.[0].transcript, entries(1, 41));
   assert.equal("transcriptLength" in host.sessions[1].subagents![0], false);
+});
+
+test("an archived subagent goes as a summary of what its row shows, the same object each time", () => {
+  const archived = agent(entries(1, 40), {
+    archived: true,
+    status: "completed",
+    endedAt: 9,
+    provider: "codex",
+    prompt: "Check the auth flow",
+    latestActivity: "Finished",
+    communications: [{ id: "c1", fromId: null, toId: "child", text: "Look at the tests too", at: 5 }],
+  });
+  const summary = withArchivedSummary(archived);
+  assert.deepEqual(summary, {
+    id: "child",
+    title: "Review",
+    status: "completed",
+    startedAt: 1,
+    updatedAt: 2,
+    endedAt: 9,
+    provider: "codex",
+    archived: true,
+    transcript: [],
+    detailsOnDemand: true,
+  });
+  assert.equal(isSubagentSummary(summary), true);
+  assert.equal(withArchivedSummary(archived), summary);
+  // A summary's transcript is already shorter than any tail.
+  assert.equal(withTranscriptTail(summary), summary);
+  // A subagent on the track goes as it is.
+  const live = agent(entries(1, 3));
+  assert.equal(withArchivedSummary(live), live);
+  assert.equal(isSubagentSummary(live), false);
+  const session = { subagents: [live] };
+  assert.equal(sessionWithArchivedSummaries(session), session);
+  const mixed = { subagents: [live, archived] };
+  assert.deepEqual(sessionWithArchivedSummaries(mixed).subagents, [live, summary]);
+  assert.equal(sessionWithArchivedSummaries(mixed), sessionWithArchivedSummaries(mixed));
+});
+
+test("a client that holds summaries keeps each update's, and an update that carries the subagent is no summary", () => {
+  const archived = agent(entries(1, 40), { archived: true, prompt: "Task", latestActivity: "Reading" });
+  let current = state([withArchivedSummary(archived)]);
+  const next = withArchivedSummary({ ...archived, updatedAt: 3, latestActivity: "Writing" });
+  current = applyAgentEvent(current, {}, "/project", "/project#1", { type: "subagent-update", agent: next }).state;
+  const held = current.sessions[1].subagents![0];
+  assert.equal(held.updatedAt, 3);
+  assert.equal(isSubagentSummary(held), true);
+  assert.deepEqual(held.transcript, []);
+  assert.equal(held.latestActivity, undefined);
+  // An update that carries the subagent (a host that sends tails) replaces the summary with it.
+  const tail = withTranscriptTail(agent(entries(1, 41), { archived: true, updatedAt: 4, latestActivity: "Done" }));
+  current = applyAgentEvent(current, {}, "/project", "/project#1", { type: "subagent-update", agent: tail }).state;
+  const replaced = current.sessions[1].subagents![0];
+  assert.equal(isSubagentSummary(replaced), false);
+  assert.equal("detailsOnDemand" in replaced, false);
+  assert.equal(replaced.latestActivity, "Done");
+  assert.equal(replaced.transcriptLength, 41);
 });

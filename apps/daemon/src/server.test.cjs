@@ -977,6 +977,122 @@ test("a client that reads transcripts on demand gets each subagent with the end 
   assert.deepEqual(mergeTranscript(read.transcript, update), (await desktop.call("chat:subagent", [project, 2, "child"])).transcript);
 });
 
+test("a client that reads archived subagents on demand gets each as a summary, in states, patches and updates", async (t) => {
+  const entry = (n) => ({ id: `e${n}`, kind: "message", text: `Entry ${n}` });
+  const { project, client } = await fixture(t, {
+    createSession(_provider, options) {
+      return {
+        closed: false,
+        async startTurn() {
+          // An archived child that runs again: archiving only hides it.
+          options.emit({ type: "turn-started", turnId: "turn-1" });
+          options.emit({
+            type: "subagent-update",
+            agent: { id: "child", title: "Review", status: "running", startedAt: 1, updatedAt: Date.now(), latestActivity: "Writing", transcript: [entry(21)] },
+          });
+          return { turnId: "turn-1" };
+        },
+        async close() {
+          this.closed = true;
+        },
+      };
+    },
+  });
+  await fs.mkdir(path.join(project, ".milagre"));
+  const transcript = Array.from({ length: 20 }, (_, index) => entry(index + 1));
+  const child = {
+    id: "child",
+    title: "Review",
+    status: "completed",
+    startedAt: 1,
+    updatedAt: 2,
+    endedAt: 2,
+    archived: true,
+    prompt: "Check the auth flow",
+    latestActivity: "Reading auth.ts",
+    communications: [{ id: "c1", fromId: null, toId: "child", text: "Look at the tests too", at: 1 }],
+    transcript,
+  };
+  const live = { id: "live", title: "Tests", status: "completed", startedAt: 1, updatedAt: 2, latestActivity: "Finished", transcript: [entry(1)] };
+  await writeState(project, {
+    next_id: 3,
+    projects: { 1: { id: 1, name: "project" } },
+    worktrees: { 1: { id: 1, project_id: 1, path: project, name: "main" } },
+    sessions: { 2: { id: 2, worktree_id: 1, agent_name: "main", status: "Created", subagents: [child, live] } },
+    messages: [],
+    tasks: {},
+  });
+  const desktop = await client();
+  const tails = await client();
+  const events = [];
+  const tailEvents = [];
+  desktop.on("event", (event) => events.push(event));
+  tails.on("event", (event) => tailEvents.push(event));
+  assert.ok((await desktop.call("daemon:status")).capabilities.includes("archived-subagent-summaries-v1"));
+  await desktop.call("daemon:state-patches", [{ messages: false, transcripts: false, archivedSubagents: false }]);
+  await tails.call("daemon:state-patches", [{ messages: false, transcripts: false }]);
+  const opened = await desktop.call("project:open", [project]);
+  const [summary, kept] = opened.state.sessions[2].subagents;
+  assert.deepEqual(summary, {
+    id: "child",
+    title: "Review",
+    status: "completed",
+    startedAt: 1,
+    updatedAt: 2,
+    endedAt: 2,
+    archived: true,
+    transcript: [],
+    detailsOnDemand: true,
+  });
+  // A subagent on the track goes as before.
+  assert.deepEqual(kept, live);
+  assert.equal((await desktop.call("state:read", [project])).state.sessions[2].subagents[0].detailsOnDemand, true);
+  // Replies that carry their Project nested (worktree:create, the Linear link and unlink) take the same form.
+  const unlinked = await desktop.call("worktree:unlink-issue", [{ projectPath: project, worktreeId: 1 }]);
+  assert.equal(unlinked.project.state.sessions[2].subagents[0].detailsOnDemand, true);
+  assert.deepEqual([unlinked.project.state.messages, unlinked.project.state.messagesInChats], [[], true]);
+  // A client that only takes tails still gets the archived subagent's details.
+  const tailed = (await tails.call("state:read", [project])).state.sessions[2].subagents[0];
+  assert.equal(tailed.latestActivity, "Reading auth.ts");
+  assert.equal(tailed.transcriptLength, 20);
+  // Opening it reads the rest.
+  const read = await desktop.call("chat:subagent", [project, 2, "child"]);
+  assert.equal(read.prompt, "Check the auth flow");
+  assert.equal(read.latestActivity, "Reading auth.ts");
+  assert.deepEqual(read.communications, child.communications);
+  assert.deepEqual(read.transcript, transcript);
+
+  // Restoring it sends its details as a patch on the summary; archiving it again takes them back out.
+  let held = await desktop.call("state:read", [project]);
+  const patchAfter = async (version) => {
+    const event = await waitFor(() => events.find((item) => item.channel === "project:state" && item.payload.version > version));
+    assert.equal(event.payload.base, held.version);
+    held = { ...held, version: event.payload.version, state: applyStatePatch(held.state, event.payload.patch) };
+    return held.state.sessions[2].subagents[0];
+  };
+  await desktop.call("chat:archive-subagent", [project, 2, "child", false]);
+  const restored = await patchAfter(held.version);
+  assert.equal(restored.detailsOnDemand, undefined);
+  assert.equal(restored.latestActivity, "Reading auth.ts");
+  assert.equal(restored.transcriptLength, 20);
+  await desktop.call("chat:archive-subagent", [project, 2, "child", true]);
+  const archivedAgain = await patchAfter(held.version);
+  assert.equal(archivedAgain.detailsOnDemand, true);
+  assert.equal("latestActivity" in archivedAgain, false);
+
+  // A running archived child's update goes to this client as a summary, and to the other with its tail.
+  await desktop.call("chat:send", [{ projectPath: project, sessionId: 2, body: "Go", provider: "codex", model: "test", permissionMode: "ask" }]);
+  const isUpdate = (event) => event.channel === "agent:event" && event.payload.event.type === "subagent-update";
+  const update = (await waitFor(() => events.find(isUpdate))).payload.event.agent;
+  assert.equal(update.detailsOnDemand, true);
+  assert.deepEqual(update.transcript, []);
+  assert.equal("latestActivity" in update, false);
+  const tailUpdate = (await waitFor(() => tailEvents.find(isUpdate))).payload.event.agent;
+  assert.equal(tailUpdate.latestActivity, "Writing");
+  assert.equal(tailUpdate.transcriptLength, 21);
+  assert.equal((await desktop.call("chat:subagent", [project, 2, "child"])).latestActivity, "Writing");
+});
+
 test("a client that reads messages by Chat gets states without them, and each change's messages beside its patch", async (t) => {
   const { project, client } = await fixture(t);
   const desktop = await client();

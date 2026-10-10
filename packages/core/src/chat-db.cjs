@@ -75,8 +75,9 @@ function readMessages(projectPath) {
  * Writes the rows of the messages that changed since `saved` (message id -> { message, position } as last written) and
  * deletes the ones `messages` no longer has, in one transaction. Returns the map to pass next time. Without `saved`
  * (the first save of a run, or a Project moving from coordination.json) every row is written and any other removed.
+ * `stats`, when given, gets how many rows were written and removed.
  */
-function writeMessages(projectPath, messages, saved, { durable = false } = {}) {
+function writeMessages(projectPath, messages, saved, { durable = false, stats = { written: 0, removed: 0 } } = {}) {
   return withDatabase(
     projectPath,
     (db) => {
@@ -91,13 +92,22 @@ function writeMessages(projectPath, messages, saved, { durable = false } = {}) {
       db.exec("BEGIN");
       try {
         if (!saved) db.exec("DELETE FROM messages");
+        stats.written = 0;
+        stats.removed = 0;
         messages.forEach((message, position) => {
           const last = saved?.get(message.id);
-          if (!last || last.message !== message || last.position !== position)
+          if (!last || last.message !== message || last.position !== position) {
             upsert.run(message.id, message.session_id ?? null, position, message.clientMessageId ?? null, message.operationId ?? null, JSON.stringify(message));
+            stats.written++;
+          }
           next.set(message.id, { message, position });
         });
-        if (saved) for (const id of saved.keys()) if (!next.has(id)) remove.run(id);
+        if (saved)
+          for (const id of saved.keys())
+            if (!next.has(id)) {
+              remove.run(id);
+              stats.removed++;
+            }
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");

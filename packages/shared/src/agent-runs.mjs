@@ -250,9 +250,12 @@ export function applyAgentEvent(state, runs, projectPath, chatId, event) {
                 ? event.agent.transcript
                 : [...new Map([...previous.transcript, ...event.agent.transcript].map((entry) => [entry.id, entry])).values()].slice(-100),
             transcriptLength: event.agent.transcriptLength,
+            // An archived subagent's summary stays one only while updates come as summaries (subagent-transcript.mjs).
+            detailsOnDemand: event.agent.detailsOnDemand,
           }
         : event.agent;
       if (agent.transcriptLength === undefined) delete agent.transcriptLength;
+      if (agent.detailsOnDemand === undefined) delete agent.detailsOnDemand;
       const subagents = previous ? children.map((child) => (child.id === agent.id ? agent : child)) : [...children, agent];
       return { state: { ...state, sessions: { ...state.sessions, [sessionId]: { ...session, subagents } } }, runs, changed: true };
     }

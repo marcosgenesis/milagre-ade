@@ -229,7 +229,7 @@ test("mobile archives finished subagents through the shared owner and restores t
   assert.equal(restored.transcript[0].text, "Preserved output");
 });
 
-test("the phone shows the end of a long subagent transcript from a bridge that holds only its tail", async (t) => {
+test("the phone shows the end of a long subagent transcript, and archived subagents as summaries, from a bridge that holds only those", async (t) => {
   const { project, rpc, request } = await fixture(t);
   const transcript = Array.from({ length: 30 }, (_, index) => ({ id: `e${index + 1}`, kind: "message", text: `Entry ${index + 1}` }));
   await fs.mkdir(path.join(project, ".milagre"));
@@ -245,7 +245,10 @@ test("the phone shows the end of a long subagent transcript from a bridge that h
           worktree_id: 1,
           agent_name: "main",
           status: "Created",
-          subagents: [{ id: "child", title: "Review", status: "completed", startedAt: 1, updatedAt: 2, transcript }],
+          subagents: [
+            { id: "child", title: "Review", status: "completed", startedAt: 1, updatedAt: 2, transcript },
+            { id: "old", title: "Old", status: "completed", startedAt: 1, updatedAt: 2, archived: true, latestActivity: "Finished", transcript },
+          ],
         },
       },
       messages: [],
@@ -258,6 +261,9 @@ test("the phone shows the end of a long subagent transcript from a bridge that h
     phone.project.state.sessions[2].subagents[0].transcript.map((item) => item.id),
     ["e27", "e28", "e29", "e30"],
   );
+  // The phone never shows an archived subagent, so the bridge holds it as a summary.
+  const archived = phone.project.state.sessions[2].subagents[1];
+  assert.deepEqual([archived.title, archived.detailsOnDemand, archived.transcript, archived.latestActivity], ["Old", true, [], undefined]);
 });
 
 test("the phone can load the real skill catalog for its project", async (t) => {

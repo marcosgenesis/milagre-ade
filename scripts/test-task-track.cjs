@@ -115,7 +115,7 @@ async function browserChecks() {
       await waitFor('!!document.querySelector("[data-context-card]")');
       assert.equal(await evaluate(`document.querySelector("${ring}").getAttribute("aria-expanded")`), "true");
       // A Claude chat's card offers Compact now, held while the turn runs.
-      assert.equal(await evaluate('document.querySelector("[data-context-card]").textContent'), "Context37% used366k of 1M tokens634k leftCompact now");
+      assert.equal(await evaluate('document.querySelector("[data-context-card]").textContent'), "Context37% used366k of 1M tokensCompact now");
       assert.equal(await evaluate('document.querySelector("[data-compact-now]").getAttribute("aria-disabled")'), "true");
       await evaluate('document.querySelector("[data-compact-now]").click()');
       assert.equal(await evaluate("window.compacted.length"), 0);
@@ -142,7 +142,10 @@ async function browserChecks() {
     assert.equal(await evaluate('document.querySelector("[data-context-attention]").getAttribute("data-tone")'), "warning");
     await evaluate(`document.querySelector("${ring}").click()`);
     await waitFor('!!document.querySelector("[data-context-card]")');
-    assert.match(await evaluate('document.querySelector("[data-context-card]").textContent'), /200k left\. Context is filling up\.Compact now$/);
+    assert.match(
+      await evaluate('document.querySelector("[data-context-card]").textContent'),
+      /Context above 75% may reduce response quality and slow replies\.Compact now$/,
+    );
     await delay(220);
     await screenshot("context-card-warning");
     await evaluate('document.querySelector("[data-compact-now]").parentElement.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }))');
@@ -161,7 +164,10 @@ async function browserChecks() {
     await evaluate(`document.querySelector("${ring}").click()`);
     await waitFor('!!document.querySelector("[data-context-card]")');
     await waitFor('document.querySelector("[data-compact-now]") && document.querySelector("[data-compact-now]").getAttribute("aria-disabled") === "false"');
-    assert.match(await evaluate('document.querySelector("[data-context-card]").textContent'), /103k left\. Context is nearly full\.Compact now$/);
+    assert.match(
+      await evaluate('document.querySelector("[data-context-card]").textContent'),
+      /Context above 75% may reduce response quality and slow replies\.Compact now$/,
+    );
     await delay(220);
     await screenshot("context-card-critical");
     await evaluate('document.querySelector("[data-compact-now]").click()');

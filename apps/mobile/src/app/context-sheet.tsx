@@ -29,7 +29,7 @@ export default function ContextSheet() {
     if (missing) router.back();
   }, [missing]);
   if (missing) return null;
-  const { percent, tokens, left } = contextSummary(usage);
+  const { percent, tokens } = contextSummary(usage);
   const hint = contextHint(percent);
   const canCompact = Boolean(chat) && (chat?.provider ?? "claude") === "claude";
   const blocked = run ? "Wait for the agent to finish." : null;
@@ -57,7 +57,7 @@ export default function ContextSheet() {
           </Text>
         </View>
       </View>
-      <Text style={styles.muted}>{hint ? `${left}. ${hint}` : left}</Text>
+      {hint && <Text style={styles.muted}>{hint}</Text>}
       {canCompact && chatId && (
         <View style={{ gap: 8 }}>
           <PillButton

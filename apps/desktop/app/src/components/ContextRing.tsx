@@ -23,7 +23,7 @@ const STROKE = { normal: "var(--ink-2)", warning: "var(--accent-ink)", critical:
  * card offers Compact now (`onCompact`), which sends `/compact`; `compactBlocked` says why it can't right now.
  */
 export function ContextRing({ onCompact, compactBlocked = null, ...usage }: ContextUsage & { onCompact?: () => void; compactBlocked?: string | null }) {
-  const { ratio, percent, tokens, left } = contextSummary(usage);
+  const { ratio, percent, tokens } = contextSummary(usage);
   const tone = contextTone(percent);
   const hint = contextHint(percent);
   const attention = Boolean(onCompact) && tone !== "normal";
@@ -152,27 +152,29 @@ export function ContextRing({ onCompact, compactBlocked = null, ...usage }: Cont
                 <span>{tokens}</span>
               </div>
             </div>
-            <div className="flex flex-col gap-2.5 border-t border-line px-4 py-3 text-[12px] leading-[1.45] text-ink-2">
-              <p>{hint ? `${left}. ${hint}` : left}</p>
-              {onCompact && (
-                <Tooltip label={compactBlocked || "Summarize this Chat to free up context."} className="w-full" wrap>
-                  <button
-                    type="button"
-                    data-compact-now
-                    aria-disabled={Boolean(compactBlocked)}
-                    aria-description={compactBlocked || undefined}
-                    onClick={() => {
-                      if (compactBlocked) return;
-                      hide();
-                      onCompact();
-                    }}
-                    className={`inline-flex h-8 w-full items-center justify-center rounded-control bg-ink px-2.5 text-[12px] font-medium text-surface transition-opacity ${compactBlocked ? "cursor-default opacity-40" : "hover:opacity-85"}`}
-                  >
-                    Compact now
-                  </button>
-                </Tooltip>
-              )}
-            </div>
+            {(hint || onCompact) && (
+              <div className="flex flex-col gap-2.5 border-t border-line px-4 py-3 text-[12px] leading-[1.45] text-ink-2">
+                {hint && <p>{hint}</p>}
+                {onCompact && (
+                  <Tooltip label={compactBlocked || "Summarize this Chat to free up context."} className="w-full" wrap>
+                    <button
+                      type="button"
+                      data-compact-now
+                      aria-disabled={Boolean(compactBlocked)}
+                      aria-description={compactBlocked || undefined}
+                      onClick={() => {
+                        if (compactBlocked) return;
+                        hide();
+                        onCompact();
+                      }}
+                      className={`inline-flex h-8 w-full items-center justify-center rounded-control bg-ink px-2.5 text-[12px] font-medium text-surface transition-opacity ${compactBlocked ? "cursor-default opacity-40" : "hover:opacity-85"}`}
+                    >
+                      Compact now
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+            )}
           </div>,
           document.body,
         )}

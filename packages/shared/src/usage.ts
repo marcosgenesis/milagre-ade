@@ -114,10 +114,7 @@ export function contextTone(percent: number): "normal" | "warning" | "critical" 
   return "normal";
 }
 
-/** A short explanation beside the remaining tokens; the button supplies the action. */
+/** Explain the warning threshold; the button supplies the action. */
 export function contextHint(percent: number): string | null {
-  const tone = contextTone(percent);
-  if (tone === "critical") return "Context is nearly full.";
-  if (tone === "warning") return "Context is filling up.";
-  return null;
+  return percent >= CONTEXT_WARN_PERCENT ? `Context above ${CONTEXT_WARN_PERCENT}% may reduce response quality and slow replies.` : null;
 }

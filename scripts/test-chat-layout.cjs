@@ -215,6 +215,13 @@ async function browserChecks() {
         .then((image) => require("node:fs").writeFileSync(path.join(process.env.MILAGRE_SCREENSHOT_DIR, "desktop-50-images-at-bottom.png"), image.toPNG()));
     await evaluate("window.resizeLastImage(2000)");
     await waitFor(`${distanceFromBottom} <= 1 && document.querySelector("article:last-child img").naturalHeight === 2000`);
+    await evaluate(`document.querySelector('[aria-label="Conversation"]').style.width = 'calc(100% - 1px)'`);
+    await delay(200);
+    await evaluate(`document.querySelector('article').scrollIntoView({ block: 'center', behavior: 'instant' })`);
+    await waitFor(`${distanceFromBottom} > 1000`);
+    await evaluate("window.resizeLastImage(2200)");
+    await delay(800);
+    assert.ok(await evaluate(`${distanceFromBottom} > 1000`), "Find navigation preserves the reading position after an already-settled resize correction");
     await evaluate(readEarlier);
     await waitFor(`!!(${jumpButton})`);
     await evaluate("window.resizeLastImage(2400)");

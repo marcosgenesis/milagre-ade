@@ -94,6 +94,7 @@ export function MessageScroller({
   const followingRef = useRef(followOutput);
   const programmaticScrollRef = useRef(false);
   const scrollTimerRef = useRef<number | undefined>(undefined);
+  const scrollSettleFrameRef = useRef<number | undefined>(undefined);
   const railFrameRef = useRef<number | undefined>(undefined);
   const railRefreshTimerRef = useRef<number | undefined>(undefined);
   const activeFrameRef = useRef<number | undefined>(undefined);
@@ -271,6 +272,13 @@ export function MessageScroller({
     viewport.scrollTo({ top: viewport.scrollHeight, behavior });
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
     scrollTimerRef.current = undefined;
+    if (scrollSettleFrameRef.current) cancelAnimationFrame(scrollSettleFrameRef.current);
+    // A correction at the end may produce no scroll event. Check after queued
+    // layout and scroll events so later Find navigation can leave the live edge.
+    scrollSettleFrameRef.current = requestAnimationFrame(() => {
+      scrollSettleFrameRef.current = undefined;
+      if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1) programmaticScrollRef.current = false;
+    });
   }, []);
 
   const updateJumpToBottom = useCallback(() => {
@@ -386,6 +394,7 @@ export function MessageScroller({
   useEffect(
     () => () => {
       if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
+      if (scrollSettleFrameRef.current) cancelAnimationFrame(scrollSettleFrameRef.current);
       if (railFrameRef.current) cancelAnimationFrame(railFrameRef.current);
       if (activeFrameRef.current) cancelAnimationFrame(activeFrameRef.current);
       if (railRefreshTimerRef.current) window.clearTimeout(railRefreshTimerRef.current);

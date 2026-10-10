@@ -27,7 +27,7 @@ function subscribe(listener: () => void) {
  * Reads the computer's Links again. A Mac older than Links on the phone rejects the call: the Link UI hides rather than
  * show an error. Any other failure keeps what was read before, so a dropped request doesn't make icons blink away.
  */
-export function refreshLinks(client: Client) {
+function refreshLinks(client: Client) {
   const running = reading.get(client);
   if (running) return running;
   const work = read(client).finally(() => {

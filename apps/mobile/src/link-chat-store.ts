@@ -1,7 +1,7 @@
 import type { LinkChat, LinkChoice } from "./chat-links";
 
 /** The "Create Link" confirmation waiting for its sheet; `choose` runs once, with the choice or null when dismissed. */
-export type LinkQuestion = { source: LinkChat; target: LinkChat; choose: (choice: LinkChoice | null) => void };
+type LinkQuestion = { source: LinkChat; target: LinkChat; choose: (choice: LinkChoice | null) => void };
 
 let current: LinkQuestion | null = null;
 let present: (() => void) | null = null;

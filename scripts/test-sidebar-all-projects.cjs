@@ -20,6 +20,7 @@ const chat = (id, body) => ({
   messages: [{ id, session_id: id, role: "user", body }],
 });
 const listeners = [];
+let namedLinks = [{ id: "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7", name: "Checkout", projectIds: ["p-shop", "p-api"] }];
 // The restart check sets the recent list's order in sessionStorage (it survives a reload) before it reloads the page.
 const restartRecent = JSON.parse(sessionStorage.getItem("restartRecent") ?? "null");
 let recent = restartRecent
@@ -37,7 +38,12 @@ window.milagre = {
     return recent;
   },
   listProjects: async () => [{ id: "p-shop", path: "/work/shop", name: "shop" }, { id: "p-api", path: "/work/api", name: "api" }],
-  listNamedLinks: async () => [{ id: "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7", name: "Checkout", projectIds: ["p-shop", "p-api"] }],
+  listNamedLinks: async () => namedLinks,
+  updateNamedLink: async (request) => {
+    window.linkHiddenCalls = [...(window.linkHiddenCalls ?? []), request];
+    namedLinks = namedLinks.map((link) => link.id === request.id ? { ...link, ...request } : link);
+    return namedLinks.find((link) => link.id === request.id);
+  },
   getProjectImage: async () => null,
   listEditors: async () => [],
   readProject: async (path) => ({ path, name: path, state: chat(7, "Shop chat") }),
@@ -221,6 +227,19 @@ async function browserChecks() {
       "Every Project by name, the hidden one unchecked",
     );
     await screenshot("project-chooser");
+    const linkKey = "milagre-link:6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7";
+    await evaluate(`document.querySelector('[data-project-choice="${linkKey}"]').click()`);
+    await waitFor(`!document.querySelector('[data-sidebar-scope="${linkKey}"]')`);
+    assert.equal(await evaluate(`document.querySelector('[data-project-choice="${linkKey}"]').getAttribute("aria-checked")`), "false");
+    await screenshot("link-filter-hidden");
+    await evaluate(`document.querySelector('[data-project-choice="${linkKey}"]').click()`);
+    await waitFor(`!!document.querySelector('[data-sidebar-scope="${linkKey}"] [data-chat-id]')`);
+    assert.equal(await evaluate(`document.querySelector('[data-project-choice="${linkKey}"]').getAttribute("aria-checked")`), "true");
+    assert.deepEqual(await evaluate("window.linkHiddenCalls"), [
+      { id: "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7", name: "Checkout", projectIds: ["p-shop", "p-api"], hidden: true },
+      { id: "6f1d2c3a-4b5e-4f60-8a71-92b3c4d5e6f7", name: "Checkout", projectIds: ["p-shop", "p-api"], hidden: false },
+    ]);
+    await screenshot("link-filter-shown");
     await evaluate(`document.querySelector('[data-project-choice="/work/api"]').click()`);
     await waitFor(`!!document.querySelector('[data-sidebar-scope="/work/api"]')`);
     assert.equal(await evaluate(`document.querySelector('[data-project-choice="/work/api"]').getAttribute("aria-checked")`), "true", "The panel stays open");

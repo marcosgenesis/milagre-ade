@@ -59,6 +59,18 @@ test("named Links reject invalid and repeated membership", async (t) => {
   assert.equal((await registry.listProjectGroups()).length, 1);
 });
 
+test("Link visibility survives a registry reload and a rename, then can be restored", async (t) => {
+  const { file, registry, projects } = await fixture(t);
+  const group = await registry.createProjectGroup({ name: "Checkout", projectIds: projects.map((project) => project.id) });
+  await registry.updateProjectGroup({ ...group, hidden: true });
+  const reopened = createProjectRegistry(file, { roots: [] });
+  assert.equal((await reopened.listProjectGroups())[0].hidden, true);
+  const renamed = await reopened.updateProjectGroup({ id: group.id, name: "Checkout renamed", projectIds: group.projectIds });
+  assert.equal(renamed.hidden, true);
+  await reopened.updateProjectGroup({ ...renamed, hidden: false });
+  assert.equal((await createProjectRegistry(file, { roots: [] }).listProjectGroups())[0].hidden, undefined);
+});
+
 test("another checkout of one repository is not a second Link member", async (t) => {
   const { root, registry, projects } = await fixture(t);
   const linked = path.join(root, "checkout");

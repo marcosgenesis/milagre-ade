@@ -130,6 +130,25 @@ test("positions on disk stay 0..n-1 in the Project's order, as releases before t
   assert.equal(stats.written, 0);
 });
 
+test("a Chat loaded after the store forgot its saved rows (50 other Projects saved) still goes back in place", async (t) => {
+  const { resetStore } = require("./message-store.cjs");
+  const projectPath = await tempProject(t);
+  const all = await seed(projectPath);
+  const { states, advance, onDisk } = harness(projectPath);
+  await states.get(projectPath);
+  advance(2000);
+  await states.load(projectPath, [1]);
+  await states.unloadIdle();
+  // What project-store does to the oldest Project once 50 others were saved this run.
+  resetStore(projectPath);
+  const back = await states.load(projectPath, [2, 3]);
+  assert.deepEqual(back.messages, all);
+  assert.deepEqual(ids(await states.allMessages(projectPath)), ids(all));
+  await states.update(projectPath, (state) => ({ ...state, messages: [...state.messages, reply(100, 2)] }), { chats: [2] });
+  await states.flush(projectPath);
+  assert.deepEqual(ids(await onDisk()), [...ids(all), 100]);
+});
+
 test("a loaded Chat goes back to its place in the Project's order", async (t) => {
   const projectPath = await tempProject(t);
   const all = await seed(projectPath);

@@ -168,6 +168,20 @@ function readChatRowsContaining(projectPath, chats, needles) {
   );
 }
 
+/** id -> { position, chat } of the saved rows of messages `ids`. Synchronous. */
+function readPositions(projectPath, ids) {
+  return withDatabaseSync(projectPath, (db) =>
+    db
+      ? new Map(
+          db
+            .prepare("SELECT id, session_id, position FROM messages WHERE id IN (SELECT value FROM json_each(?))")
+            .all(JSON.stringify([...ids]))
+            .map((row) => [row.id, { position: row.position, chat: row.session_id }]),
+        )
+      : new Map(),
+  );
+}
+
 const LOOKUPS = { id: "id", operationId: "operation_id", clientMessageId: "client_message_id" };
 /** The first saved message (in the Project's order) of a Chat in `chats` whose `field` (id, operationId or clientMessageId) is `value`. */
 function findRow(projectPath, chats, field, value) {
@@ -317,6 +331,7 @@ module.exports = {
   readChatBodies,
   readChatRowsContaining,
   readChatMarks,
+  readPositions,
   findRow,
   readDetailRefs,
   writeMessages,

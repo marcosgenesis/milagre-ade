@@ -78,6 +78,10 @@
       "types": "./src/project-edits.d.mts",
       "default": "./src/project-edits.mjs"
     },
+    "./chat-links": {
+      "types": "./src/chat-links.d.mts",
+      "default": "./src/chat-links.mjs"
+    },
     "./chats": {
       "types": "./src/chats.d.mts",
       "default": "./src/chats.mjs"

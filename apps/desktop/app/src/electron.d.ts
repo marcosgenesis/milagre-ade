@@ -333,6 +333,12 @@ export type MilagreBridge = {
   getCanvas: () => Promise<CanvasSnapshot>;
   addLink: (a: LinkEndpoint, b: LinkEndpoint) => Promise<ProjectLink[]>;
   removeLink: (id: string) => Promise<ProjectLink[]>;
+  /** The canvas Links alone, without every Project's state; a Mac that predates it rejects. */
+  getLinks?: () => Promise<ProjectLink[]>;
+  /** Every Link change, from the canvas, the sidebar or the phone. */
+  onLinksChanged?: (callback: (links: ProjectLink[]) => void) => () => void;
+  /** "Always allow for this Link in this chat", set before the Chat's agent asks for a Delegation. */
+  grantDelegations?: (chatId: string, linkId: string) => Promise<void>;
   /** Delegations and Negotiations still open across Links, and the Codex Chats that only receive. */
   getLinkedWork: () => Promise<LinkedWork>;
   onLinkedWork: (callback: (work: LinkedWork) => void) => () => void;

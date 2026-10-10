@@ -81,6 +81,11 @@ const PATHS = Object.freeze({
   "project:recent": none,
   // Named Links span Projects. The single-folder demo must never expose them.
   "project:registry": denied,
+  // Canvas Links reach other Projects too, so the demo has none.
+  "canvas:links": denied,
+  "canvas:link-add": denied,
+  "canvas:link-remove": denied,
+  "linked:grant": denied,
   "link:list": denied,
   "link:create": denied,
   "link:update": denied,

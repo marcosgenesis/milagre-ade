@@ -1,0 +1,63 @@
+// Canvas Links (spec 003) as a chat list shows them: which Links reach a Chat's Worktree, whether two Chats are
+// already linked, the endpoints a new Link between two Chats gets, and the message "Link and ask" sends. Shared by
+// the desktop sidebar and the phone. Types: chat-links.d.mts.
+
+/** Whether one end of a Link stands for this Worktree: the Worktree itself, or its whole Project. */
+export function endpointCovers(endpoint, worktree) {
+  if (!endpoint || !worktree || endpoint.project_id !== worktree.project_id) return false;
+  return endpoint.worktree_path === undefined || endpoint.worktree_path === worktree.worktree_path;
+}
+
+/** The Link that already joins the two Worktrees, either way round, or undefined. */
+export function linkBetween(links, a, b) {
+  return links.find((link) => (endpointCovers(link.a, a) && endpointCovers(link.b, b)) || (endpointCovers(link.a, b) && endpointCovers(link.b, a)));
+}
+
+/**
+ * Every Link that reaches the Worktree, each with its other end: a Worktree, or a whole Project (no `worktree_path`).
+ * The order is the Links' own (the order they were made).
+ */
+export function linkedEnds(links, worktree) {
+  const ends = [];
+  for (const link of links) {
+    if (endpointCovers(link.a, worktree)) ends.push({ link, other: link.b });
+    else if (endpointCovers(link.b, worktree)) ends.push({ link, other: link.a });
+  }
+  return ends;
+}
+
+/** A Project↔Project Link only joins two different Projects; within one Project a Link joins two Worktrees. */
+export function canLinkProjects(a, b) {
+  return Boolean(a?.project_id && b?.project_id && a.project_id !== b.project_id);
+}
+
+/**
+ * The two endpoints of a new Link between two Chats' Worktrees. `scope` "projects" links their whole Projects, and
+ * falls back to the Worktrees when both are in the same Project.
+ */
+export function linkEndpoints(a, b, scope = "worktrees") {
+  if (scope === "projects" && canLinkProjects(a, b)) return [{ project_id: a.project_id }, { project_id: b.project_id }];
+  return [
+    { project_id: a.project_id, worktree_path: a.worktree_path },
+    { project_id: b.project_id, worktree_path: b.worktree_path },
+  ];
+}
+
+const same = (x, y) => x.project_id === y.project_id && x.worktree_path === y.worktree_path;
+
+/** The Link just made between two endpoints, found in the list the host answers with. */
+export function findLink(links, a, b) {
+  return links.find((link) => (same(link.a, a) && same(link.b, b)) || (same(link.a, b) && same(link.b, a)));
+}
+
+/**
+ * "Link and ask A…": what goes to Chat A as a plain user message. The body is what the user typed plus the
+ * destination, as the Chat shows it; the prompt adds the Chat ref and Worktree the agent's Link tools take. The agent
+ * decides whether to make a Delegation; the user never sends one directly.
+ */
+export function linkAskMessage(text, target) {
+  const where = [target.projectName, target.branch].filter(Boolean).join(" / ");
+  const body = `${text.trim()}\n\nDestination: “${target.label}”${where ? ` (${where})` : ""}, in a linked Worktree.`;
+  const prompt = `${body}\n\nThat Chat is ${target.chatRef} in the linked Worktree ${target.worktreePath}. If this needs changes there, make a Delegation to it with your Link tools (a Negotiation if the two sides must agree first); otherwise answer here.`;
+  return { body, prompt };
+}

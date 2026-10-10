@@ -402,7 +402,7 @@ test("linked Worktrees resolve to one registered Project without losing saved Ch
 });
 
 test("canvas Links survive runtime restart and worktree:remove clears their endpoints", async (t) => {
-  const { project, make } = await fixture(t);
+  const { project, make, events, dataDir } = await fixture(t);
   const commit = (folder) =>
     execFileSync("git", ["-C", folder, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "Initial"], {
       stdio: "ignore",
@@ -424,10 +424,18 @@ test("canvas Links survive runtime restart and worktree:remove clears their endp
   assert.ok(before.states.find((entry) => entry.path === project).state.worktrees);
   const a = before.projects.find((entry) => entry.path === project).id;
   const b = before.projects.find((entry) => entry.path === other).id;
-  await first.invoke("canvas:link-add", [{ project_id: a, worktree_path: linked }, { project_id: b }]);
+  const added = await first.invoke("canvas:link-add", [{ project_id: a, worktree_path: linked }, { project_id: b }]);
   assert.equal((await first.invoke("canvas:snapshot")).links.length, 1);
+  // The sidebar reads the Links alone and follows each change.
+  assert.deepEqual(await first.invoke("canvas:links"), added);
+  assert.deepEqual(events.findLast((event) => event.channel === "canvas:links-changed")?.payload, { links: added });
   // A saved edit writes the Project's state to disk.
   const anySession = Object.values(before.states.find((entry) => entry.path === project).state.sessions)[0];
+  // "Always allow Delegations" from the sidebar: a grant for a Link that exists, refused for one that doesn't.
+  await first.invoke("linked:grant", [`${project}#${anySession.id}`, added[0].id]);
+  const grants = JSON.parse(await fs.readFile(path.join(dataDir, "delegations.json"), "utf8")).grants;
+  assert.deepEqual(grants, [`${project}#${anySession.id}\0${added[0].id}`]);
+  await assert.rejects(first.invoke("linked:grant", [`${project}#${anySession.id}`, "gone"]), /no longer exists/);
   await first.invoke("chat:patch", [project, anySession.id, { title: "Saved" }]);
   await first.close();
   // Milagre records the base of a worktree it made; this one was added by git, so the test records it.

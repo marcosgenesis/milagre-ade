@@ -294,6 +294,19 @@ class Delegations {
     return decision === "allow-for-chat" ? "allow" : decision;
   }
 
+  /**
+   * "Always allow for this Link in this chat", set before the agent asks: the sidebar's Link popover offers it for
+   * the Chat that was dropped. The same grant the approval card saves.
+   */
+  async grant(chatKey, linkId) {
+    await this.ready;
+    if (typeof chatKey !== "string" || typeof linkId !== "string" || !chatKey || !linkId) throw new Error("Choose a Chat and a Link.");
+    const grant = `${chatKey}\0${linkId}`;
+    if (this.data.grants.includes(grant)) return;
+    this.data.grants.push(grant);
+    await this.persist();
+  }
+
   record(fields) {
     const delegation = { id: this.id(), ...fields, status: "queued", created_at: this.now().toISOString() };
     this.data.delegations.push(delegation);

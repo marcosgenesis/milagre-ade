@@ -664,3 +664,21 @@ test("runtime shutdown waits for a Delegation completion save before releasing i
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 });
+
+test("a grant set before the agent asks covers that Link in that Chat, as Always allow on the card does", async () => {
+  const { delegations, ports, saved } = desk();
+  ports.permissionMode = () => "ask";
+  let asked = 0;
+  ports.approve = async () => {
+    asked++;
+    return "deny";
+  };
+  await delegations.grant("/api#1", "link-1");
+  await delegations.grant("/api#1", "link-1");
+  assert.deepEqual(saved.at(-1).grants, ["/api#1\0link-1"], "saved once");
+  assert.equal(await delegations.approval("/api#1", "link-1", { target: "web", message: "x" }), "allow");
+  assert.equal(asked, 0, "no card for the granted Link");
+  assert.equal(await delegations.approval("/api#1", "link-2", { target: "web", message: "x" }), "deny", "another Link still asks");
+  assert.equal(await delegations.approval("/api#2", "link-1", { target: "web", message: "x" }), "deny", "another Chat still asks");
+  await assert.rejects(delegations.grant("", "link-1"), /Choose a Chat/);
+});

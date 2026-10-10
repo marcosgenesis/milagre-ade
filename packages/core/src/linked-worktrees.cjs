@@ -217,6 +217,13 @@ function createLinkedWorktrees({
     context: (chatId) => reads.summary(chatId).catch(() => ""),
     observe: (chatId, event) => delegations.observe(chatId, event),
     linkRemoved: (id) => delegations.linkRemoved(id),
+    /** "Always allow Delegations" from the sidebar's Link popover: the grant the approval card saves, set ahead. */
+    async grant(chatId, linkId) {
+      if (typeof chatId !== "string" || !chatId.includes("#")) throw new Error("Choose a Chat and a Link.");
+      if (!(await registry().snapshot()).links.some((link) => link.id === linkId)) throw new Error("That Link no longer exists.");
+      if (isLinkScopeKey(projectOfKey(chatId))) throw new Error("A shared Link Chat makes no Delegations.");
+      await delegations.grant(chatId, linkId);
+    },
     stop: (target) => delegations.stop(target),
     snapshot,
     close: () => mcp.close(),
